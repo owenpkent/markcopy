@@ -1,0 +1,133 @@
+/* ---- Base ---------------------------------------------------------------- */
+html, body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+.markdown-body {
+  box-sizing: border-box;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 28px 40px 120px;
+  font-size: 15px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+/* ---- GitHub style profile ------------------------------------------------ */
+body[data-style="github"] .markdown-body {
+  color: #1f2328;
+  background: #ffffff;
+}
+body[data-style="github"] { background: #ffffff; }
+
+/* ---- VS Code theme profile ---------------------------------------------- */
+body[data-style="vscode"] .markdown-body {
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+}
+
+.markdown-body h1, .markdown-body h2 {
+  border-bottom: 1px solid #d1d9e0;
+  padding-bottom: .3em;
+  margin-top: 24px;
+  margin-bottom: 16px;
+}
+.markdown-body h1 { font-size: 2em; }
+.markdown-body h2 { font-size: 1.5em; }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 85%;
+  background: rgba(129, 139, 152, .18);
+  padding: .2em .4em;
+  border-radius: 6px;
+}
+.markdown-body pre {
+  background: #f6f8fa;
+  padding: 14px 16px;
+  border-radius: 8px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.5;
+}
+body[data-style="vscode"] .markdown-body pre {
+  background: var(--vscode-textCodeBlock-background, #1e1e1e);
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 100%;
+}
+.markdown-body blockquote {
+  color: #59636e;
+  border-left: .25em solid #d1d9e0;
+  padding: 0 1em;
+  margin: 0 0 16px 0;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0 0 16px 0;
+  display: block;
+  overflow: auto;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid #d1d9e0;
+  padding: 6px 13px;
+}
+.markdown-body th { background: #f6f8fa; font-weight: 600; }
+.markdown-body img { max-width: 100%; }
+.markdown-body a { color: #0969da; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.mc-mermaid { margin: 0 0 16px 0; text-align: center; }
+.mc-error { color: #d1242f; background: #ffebe9; }
+
+/* highlight.js (github light) minimal token colors */
+.hljs-comment, .hljs-quote { color: #6a737d; }
+.hljs-keyword, .hljs-selector-tag, .hljs-type { color: #d73a49; }
+.hljs-string, .hljs-doctag { color: #032f62; }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: #6f42c1; }
+.hljs-number, .hljs-literal { color: #005cc5; }
+.hljs-attr, .hljs-attribute, .hljs-variable { color: #e36209; }
+
+/* ---- Context menu -------------------------------------------------------- */
+.mc-menu {
+  position: absolute;
+  z-index: 1000;
+  min-width: 220px;
+  background: var(--vscode-menu-background, #fff);
+  color: var(--vscode-menu-foreground, #1f2328);
+  border: 1px solid var(--vscode-menu-border, #d1d9e0);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+  font-size: 13px;
+  user-select: none;
+}
+.mc-menu-item {
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mc-menu-item:hover, .mc-menu-item:focus {
+  background: var(--vscode-menu-selectionBackground, #0969da);
+  color: var(--vscode-menu-selectionForeground, #fff);
+  outline: none;
+}
+
+/* ---- Toast --------------------------------------------------------------- */
+.mc-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(31, 35, 40, .92);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  z-index: 1100;
+}

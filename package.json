@@ -1,0 +1,116 @@
+{
+  "name": "markcopy",
+  "displayName": "MarkCopy — Rich Markdown Preview",
+  "description": "Next-level Markdown preview with right-click copy as rich text, per-element copy (code / table / diagram), copy as raw Markdown, and copy as PNG.",
+  "version": "0.0.1",
+  "publisher": "okstudio",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "markdown",
+    "preview",
+    "copy",
+    "rich text",
+    "clipboard",
+    "html",
+    "mermaid"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "markcopy.openPreview",
+        "title": "MarkCopy: Open Rich Preview to the Side",
+        "category": "MarkCopy",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "markcopy.copyDocumentAsRichText",
+        "title": "MarkCopy: Copy Whole Document as Rich Text",
+        "category": "MarkCopy"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "markcopy.openPreview",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "markcopy.openPreview",
+          "when": "editorLangId == markdown",
+          "group": "1_markcopy"
+        },
+        {
+          "command": "markcopy.copyDocumentAsRichText",
+          "when": "editorLangId == markdown",
+          "group": "1_markcopy"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "markcopy.openPreview",
+          "when": "resourceLangId == markdown",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MarkCopy",
+      "properties": {
+        "markcopy.styleProfile": {
+          "type": "string",
+          "enum": [
+            "github",
+            "vscode"
+          ],
+          "default": "github",
+          "description": "Rendering style. 'github' matches GitHub markdown (best for pasting into docs/email); 'vscode' follows the editor theme."
+        },
+        "markcopy.syncScroll": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the preview scroll position in sync with the editor."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "build:ext": "node esbuild.js",
+    "build:web": "node esbuild.web.js",
+    "compile": "npm run check-types && npm run build:ext && npm run build:web",
+    "watch:ext": "node esbuild.js --watch",
+    "watch:web": "node esbuild.web.js --watch",
+    "watch": "npm-run-all -p watch:*",
+    "package": "npm run check-types && node esbuild.js --production && node esbuild.web.js --production",
+    "vscode:prepublish": "npm run package",
+    "vsix": "vsce package"
+  },
+  "dependencies": {
+    "highlight.js": "^11.10.0",
+    "markdown-it": "^14.1.0",
+    "markdown-it-anchor": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "html-to-image": "^1.11.11",
+    "mermaid": "^11.4.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.6.0"
+  }
+}
