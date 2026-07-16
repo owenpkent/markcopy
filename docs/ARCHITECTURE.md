@@ -1,6 +1,6 @@
 # Architecture
 
-MarkCopy is a custom-webview VS Code extension. Rendering happens in the Node extension host; all interaction (context menu, clipboard, Mermaid, PNG capture) happens in the webview. This split is deliberate: the webview is a browser context, and the clipboard operations we need (writing `text/html`, capturing PNGs) only exist there.
+MarkCopy is a custom-webview VS Code extension with two previews: Markdown and PDF. For Markdown, the Node extension host renders to HTML and the webview displays it; for PDF, the host only supplies bytes and pdf.js renders in the webview. In both, all interaction (context menu, clipboard, Mermaid, PNG capture) happens in the webview. This split is deliberate: the webview is a browser context, and the clipboard operations we need (writing `text/html`, capturing PNGs) only exist there.
 
 ## Big picture
 
@@ -17,10 +17,24 @@ MarkCopy is a custom-webview VS Code extension. Rendering happens in the Node ex
         (esbuild.js, node)                                   (esbuild.web.js, browser)
 ```
 
-Two esbuild bundles are produced from one TypeScript source tree:
+The PDF preview uses the same host/webview split with its own custom editor and bundle:
+
+```
+ ┌──────────────────────────┐        load (bytes,        ┌───────────────────────────┐
+ │  Extension host (Node)    │        workerSrc)          │  PDF webview (browser)    │
+ │  src/pdfEditor.ts         │  ───────────────────────► │  src/webview/pdf.ts       │
+ │  workspace.fs.readFile    │  ◄─────────────────────── │  pdf.js + module worker   │
+ │  (CustomReadonlyEditor)   │        ready / toast       │  canvas render, copy      │
+ └──────────────────────────┘                           └───────────────────────────┘
+        dist/extension.js                          media/pdf.js + media/pdf.worker.js
+```
+
+Four bundles are produced from one TypeScript source tree by two esbuild scripts:
 
 - `esbuild.js` bundles `src/extension.ts` to `dist/extension.js` for Node (`vscode` left external).
-- `esbuild.web.js` bundles `src/webview/main.ts` to `media/webview.js` for the browser, pulling in Mermaid and html-to-image.
+- `esbuild.web.js` bundles the browser code: `src/webview/main.ts` to `media/webview.js` (iife, with Mermaid and html-to-image), and `src/webview/pdf.ts` plus the pdf.js worker to `media/pdf.js` and `media/pdf.worker.js` (esm).
+
+See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 `tsc --noEmit` type-checks the whole tree; esbuild does the actual transpiling and bundling. `tsconfig.json` uses `module: ESNext` and `moduleResolution: Bundler` so the ESM-only dependencies (Mermaid, markdown-it-anchor) type-check cleanly.
 
@@ -67,6 +81,8 @@ Webview to host:
 | `revealLine` | `line`  | Reveal that line at the top of the editor. |
 | `toast`      | `text`  | Show a status-bar message.                 |
 | `ready`      | none    | Signals the webview script has loaded.     |
+
+The PDF preview uses its own two-message handshake: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes, `workerSrc`: the pdf.js worker URI). All copy actions there run entirely in the webview, so there is no further host round-trip.
 
 ## Clipboard
 

@@ -16,8 +16,8 @@ npm install
 ## Build
 
 ```bash
-npm run compile     # type-check, then build both bundles
-npm run watch       # rebuild the extension and webview on change
+npm run compile     # type-check, then build all bundles
+npm run watch       # rebuild the extension host and webviews on change
 ```
 
 `compile` runs three steps:
@@ -52,14 +52,16 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Project layout
 
-| Path                           | What lives here                                            |
-| ------------------------------ | ---------------------------------------------------------- |
-| `src/extension.ts`             | Host: activation, commands, panel lifecycle, scroll sync.  |
-| `src/render.ts`                | markdown-it setup and source-line mapping.                 |
-| `src/webview/main.ts`          | Webview: rendering, context menu, clipboard, PNG, Mermaid. |
-| `media/preview.css`            | Style profiles, menu, toast.                               |
-| `docs/`                        | Architecture and copy-matrix reference.                    |
-| `esbuild.js`, `esbuild.web.js` | The two bundlers.                                          |
+| Path                           | What lives here                                                     |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `src/extension.ts`             | Host: activation, commands, panel lifecycle, scroll sync.           |
+| `src/render.ts`                | markdown-it setup and source-line mapping.                          |
+| `src/webview/main.ts`          | Markdown webview: rendering, context menu, clipboard, PNG, Mermaid. |
+| `src/pdfEditor.ts`             | Host: read-only custom editor for `.pdf` files.                     |
+| `src/webview/pdf.ts`           | PDF webview: pdf.js rendering and page/text copy actions.           |
+| `media/preview.css`            | Style profiles, PDF layout, menu, toast.                            |
+| `docs/`                        | Architecture and copy-matrix reference.                             |
+| `esbuild.js`, `esbuild.web.js` | The bundlers.                                                       |
 
 ## Coding conventions
 

@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown Preview",
-  "description": "Next-level Markdown preview with right-click copy as rich text, per-element copy (code / table / diagram), copy as raw Markdown, and copy as PNG.",
+  "displayName": "MarkCopy: Rich Markdown & PDF Preview",
+  "description": "One-stop Markdown and PDF preview with right-click copy: rich text, per-element (code / table / diagram), raw Markdown, CSV/TSV, and PNG.",
   "version": "0.0.1",
   "publisher": "okstudio",
   "license": "MIT",
@@ -24,6 +24,8 @@
   ],
   "keywords": [
     "markdown",
+    "pdf",
+    "pdf viewer",
     "preview",
     "copy",
     "rich text",
