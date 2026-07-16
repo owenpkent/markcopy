@@ -20,7 +20,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Copy as Rich Text**, for the whole document or just a selection. Pastes formatted into Word, Outlook, Gmail, Google Docs, Slack and OneNote.
 - **Per-element right-click copy**, with the menu adapting to what you clicked:
   - Code block: **Copy Code** as plain text.
-  - Table: **Rich Text**, **TSV** (pastes as real cells in Excel and Google Sheets), or **PNG**.
+  - Table: **Rich Text**, **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), or **PNG**.
   - Mermaid diagram: **PNG** or **SVG**.
   - Any block: **Rich Text**, **Markdown source**, or **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block.
@@ -75,7 +75,7 @@ code --install-extension markcopy-0.0.1.vsix
 | --- | :---: | :---: | :---: |
 | Rich-text copy from the rendered preview | No | No | **Yes** |
 | Per-code-block copy | No | Requested, open | **Yes** |
-| Table as TSV / cells | No | Partial | **Yes** |
+| Table as CSV / TSV / cells | No | Partial | **Yes** |
 | Diagram as PNG to clipboard | No | Export to file | **Yes** |
 | Copy block as Markdown source | No | No | **Yes** |
 | Live preview + scroll sync | Yes | Yes | **Yes** |

@@ -24,6 +24,7 @@ The plain-text code is copied verbatim, without the syntax-highlight markup, so 
 | Action | Clipboard flavor | Pastes well into |
 | --- | --- | --- |
 | Copy Table (Rich Text) | `text/html` + `text/plain` | Word, Google Docs, Outlook |
+| Copy Table as CSV | `text/plain` (comma-separated, RFC 4180) | Excel, Google Sheets, any CSV importer |
 | Copy Table as TSV | `text/plain` (tab-separated) | Excel, Google Sheets (as real cells) |
 | Copy Table as PNG | `image/png` | Slides, chat, anywhere an image works |
 
@@ -54,5 +55,5 @@ The same whole-document action is available without the preview focused, via the
 
 - **Rich text always includes a plain-text fallback.** Every `text/html` write also sets `text/plain`, so a target that cannot take HTML still gets readable content.
 - **Rich text is inline-styled.** Styles are baked into `style` attributes so formatting survives Gmail and Outlook, which discard `<style>` blocks and external CSS.
-- **TSV, not CSV, for tables.** Tab-separated values paste as individual cells in Excel and Google Sheets more reliably than comma-separated values, which get confused by commas inside cells.
+- **CSV and TSV both offered.** TSV pastes as individual cells in Excel and Google Sheets most reliably (nothing to confuse it, since cell text rarely contains tabs). CSV is there for importers and tools that expect commas; it follows RFC 4180, quoting any field that contains a comma, quote, or newline.
 - **PNG copy needs clipboard image support.** It uses the async Clipboard API with a `ClipboardItem`. If the host blocks image writes you get a toast saying so, never a silent failure.

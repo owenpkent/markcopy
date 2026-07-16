@@ -4,6 +4,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- **Copy Table as CSV** in the table right-click menu (RFC 4180 quoting), alongside the existing TSV option.
+
 ### Planned
 - KaTeX / LaTeX math rendering, and copy-as-image for equations.
 - PlantUML support.

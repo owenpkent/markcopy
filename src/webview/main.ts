@@ -153,7 +153,8 @@ function buildMenu(target: HTMLElement): MenuItem[] {
 
   if (table) {
     items.push({ label: 'Copy Table (Rich Text)', run: () => copyRichText(table) });
-    items.push({ label: 'Copy Table as TSV', run: () => copyText(tableToTsv(table)) });
+    items.push({ label: 'Copy Table as CSV', run: () => copyText(tableToDelimited(table, ',')) });
+    items.push({ label: 'Copy Table as TSV', run: () => copyText(tableToDelimited(table, '\t')) });
     items.push({ label: 'Copy Table as PNG', run: () => copyPng(table) });
   }
 
@@ -346,14 +347,27 @@ function applyInline(src: HTMLElement, dst: HTMLElement): void {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-function tableToTsv(table: HTMLElement): string {
+// Serialize a table to delimiter-separated values. Pass ',' for CSV or '\t' for
+// TSV. CSV fields follow RFC 4180 quoting; TSV flattens tabs/newlines to spaces.
+function tableToDelimited(table: HTMLElement, delimiter: string): string {
   return Array.from(table.querySelectorAll('tr'))
     .map((tr) =>
       Array.from(tr.querySelectorAll('th,td'))
-        .map((c) => (c.textContent ?? '').replace(/\t/g, ' ').trim())
-        .join('\t')
+        .map((c) => escapeField((c.textContent ?? '').trim(), delimiter))
+        .join(delimiter)
     )
-    .join('\n');
+    .join('\r\n');
+}
+
+function escapeField(value: string, delimiter: string): string {
+  if (delimiter === '\t') {
+    return value.replace(/[\t\r\n]+/g, ' ');
+  }
+  // RFC 4180: quote the field if it contains the delimiter, a quote, or a newline.
+  if (value.includes(delimiter) || value.includes('"') || /[\r\n]/.test(value)) {
+    return '"' + value.replace(/"/g, '""') + '"';
+  }
+  return value;
 }
 
 function escapeHtml(s: string): string {

@@ -36,7 +36,7 @@ body:
         - Copy as Rich Text (document or block)
         - Copy Selection as Rich Text
         - Copy Code
-        - Copy Table (Rich Text / TSV / PNG)
+        - Copy Table (Rich Text / CSV / TSV / PNG)
         - Copy Diagram (PNG / SVG)
         - Copy as Markdown
         - Preview rendering or scroll sync
