@@ -1,0 +1,74 @@
+name: Bug report
+description: Report something that is not working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug. Please fill in the details below.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug.
+      placeholder: When I copy a table as rich text and paste into Outlook, the borders are lost.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal Markdown snippet if you can.
+      placeholder: |
+        1. Open this .md ...
+        2. Right-click the table ...
+        3. Choose "Copy Table as Rich Text"
+        4. Paste into ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: action
+    attributes:
+      label: Which copy action
+      options:
+        - Copy as Rich Text (document or block)
+        - Copy Selection as Rich Text
+        - Copy Code
+        - Copy Table (Rich Text / TSV / PNG)
+        - Copy Diagram (PNG / SVG)
+        - Copy as Markdown
+        - Preview rendering or scroll sync
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: paste-target
+    attributes:
+      label: Paste target
+      description: The app you pasted into, if relevant.
+      placeholder: Outlook, Gmail, Word, Google Docs, Excel, ...
+
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version
+      placeholder: 1.90.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 14, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, or notes.

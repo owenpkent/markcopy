@@ -30,5 +30,5 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://example.com/markcopy/compare/v0.0.1...HEAD
-[0.0.1]: https://example.com/markcopy/releases/tag/v0.0.1
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/owenpkent/markcopy/releases/tag/v0.0.1

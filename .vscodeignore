@@ -10,4 +10,9 @@ tsconfig.json
 sample.md
 *.vsix
 .github/**
+docs/**
+.editorconfig
+.gitattributes
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
 # Keep: dist/**, media/**, README.md, LICENSE, package.json

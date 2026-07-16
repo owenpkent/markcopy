@@ -1,5 +1,10 @@
 # MarkCopy: Rich Markdown Preview
 
+[![CI](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![VS Code ^1.90](https://img.shields.io/badge/VS%20Code-%5E1.90-007ACC.svg)](https://code.visualstudio.com/)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 > The Markdown preview built for getting content *out*. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
@@ -80,6 +85,7 @@ code --install-extension markcopy-0.0.1.vsix
 - [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
 - [Architecture](docs/ARCHITECTURE.md): how rendering, the webview, and the clipboard fit together.
 - [Contributing](CONTRIBUTING.md): build, debug, and release.
+- [Code of Conduct](CODE_OF_CONDUCT.md).
 - [Security](SECURITY.md): CSP, sandboxing, and reporting.
 - [Changelog](CHANGELOG.md).
 

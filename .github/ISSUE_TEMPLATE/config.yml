@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/owenpkent/markcopy/discussions
+    about: Ask questions or discuss ideas in Discussions instead of opening an issue.
+  - name: Security report
+    url: https://github.com/owenpkent/markcopy/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately per the security policy.

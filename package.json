@@ -5,6 +5,16 @@
   "version": "0.0.1",
   "publisher": "okstudio",
   "license": "MIT",
+  "author": "OK Studio",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owenpkent/markcopy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/owenpkent/markcopy/issues"
+  },
+  "homepage": "https://github.com/owenpkent/markcopy#readme",
+  "qna": "https://github.com/owenpkent/markcopy/discussions",
   "engines": {
     "vscode": "^1.90.0"
   },
