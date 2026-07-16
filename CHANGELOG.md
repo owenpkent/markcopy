@@ -9,11 +9,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Copy Table as CSV** in the table right-click menu (RFC 4180 quoting), alongside the existing TSV option.
 - Project tooling adopted from folio: ESLint 9 (flat config), Prettier, gitleaks/pinact pre-commit hooks, `.editorconfig`, and `npm run lint` / `format` scripts. CI now lints and checks formatting.
 
+### Changed
+- **Copy Selection as Markdown** now copies exactly the selected content, including partial paragraphs and selections that span multiple blocks (the selected HTML is converted with Turndown), instead of the whole block the selection started in.
+
 ### Planned
 - KaTeX / LaTeX math rendering, and copy-as-image for equations.
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
-- Copy a selection spanning multiple blocks as clean Markdown.
 - A marketplace icon.
 
 ## [0.0.1] - 2026-07-16

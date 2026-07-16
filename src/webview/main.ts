@@ -1,5 +1,19 @@
 import mermaid from 'mermaid';
 import { toBlob } from 'html-to-image';
+import TurndownService from 'turndown';
+import { gfm } from 'turndown-plugin-gfm';
+
+// Converts rendered preview HTML back to Markdown for "copy selection as
+// Markdown". Configured to match the flavor the source is typically written in.
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '*',
+  strongDelimiter: '**',
+  linkStyle: 'inlined',
+});
+turndown.use(gfm);
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -235,16 +249,22 @@ function blockMarkdown(block: HTMLElement): string {
 }
 
 function selectionMarkdown(): string {
-  // Best-effort: map the selection's start block to its Markdown source.
+  // Exact: serialize just the selected fragment back to Markdown. Verbatim
+  // source slicing is not possible (we only have block-level line mapping), so
+  // the selected rendered HTML is converted with Turndown. This handles partial
+  // paragraphs and selections spanning multiple blocks.
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) {
     return '';
   }
-  const node = sel.anchorNode as HTMLElement | null;
-  const block = (
-    node?.nodeType === 1 ? (node as HTMLElement) : node?.parentElement
-  )?.closest<HTMLElement>('[data-source-line]');
-  return block ? blockMarkdown(block) : sel.toString();
+  const wrapper = document.createElement('div');
+  for (let i = 0; i < sel.rangeCount; i++) {
+    wrapper.appendChild(sel.getRangeAt(i).cloneContents());
+  }
+  // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
+  wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
+  const md = turndown.turndown(wrapper.innerHTML).trim();
+  return md || sel.toString();
 }
 
 // ---------------------------------------------------------------------------

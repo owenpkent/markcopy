@@ -119,7 +119,6 @@ Full details in [CONTRIBUTING.md](CONTRIBUTING.md).
 - KaTeX / LaTeX math (render, and copy as image).
 - PlantUML support.
 - An "email-safe" export profile (table-based layout, fully inlined).
-- Copy a selection spanning multiple blocks as clean Markdown.
 - A marketplace icon.
 
 ## License
