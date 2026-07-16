@@ -25,7 +25,7 @@ export function createMarkdownIt(): MarkdownIt {
         }
       }
       return `<pre class="hljs"><code>${escapeHtml(code)}</code></pre>`;
-    }
+    },
   });
 
   md.use(anchor, { permalink: false, tabIndex: false });
@@ -37,7 +37,17 @@ export function createMarkdownIt(): MarkdownIt {
 // Tag top-level block tokens with data-source-line so the webview can sync scroll
 // to the editor and copy the underlying Markdown for a given element.
 function addSourceLineMapping(md: MarkdownIt): void {
-  const rules = ['paragraph_open', 'heading_open', 'blockquote_open', 'table_open', 'bullet_list_open', 'ordered_list_open', 'fence', 'code_block', 'hr'];
+  const rules = [
+    'paragraph_open',
+    'heading_open',
+    'blockquote_open',
+    'table_open',
+    'bullet_list_open',
+    'ordered_list_open',
+    'fence',
+    'code_block',
+    'hr',
+  ];
   for (const name of rules) {
     const original = md.renderer.rules[name];
     md.renderer.rules[name] = (tokens, idx, options, env, self) => {

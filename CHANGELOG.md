@@ -5,7 +5,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- **PDF preview**: MarkCopy now opens `.pdf` files in a built-in read-only viewer (pdf.js), with right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. One extension previews both Markdown and PDF.
 - **Copy Table as CSV** in the table right-click menu (RFC 4180 quoting), alongside the existing TSV option.
+- Project tooling adopted from folio: ESLint 9 (flat config), Prettier, gitleaks/pinact pre-commit hooks, `.editorconfig`, and `npm run lint` / `format` scripts. CI now lints and checks formatting.
 
 ### Planned
 - KaTeX / LaTeX math rendering, and copy-as-image for equations.

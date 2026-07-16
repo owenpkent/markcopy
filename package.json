@@ -47,6 +47,18 @@
         "category": "MarkCopy"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "markcopy.pdfPreview",
+        "displayName": "MarkCopy PDF Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "menus": {
       "editor/title": [
         {
@@ -97,6 +109,11 @@
   },
   "scripts": {
     "check-types": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build:ext": "node esbuild.js",
     "build:web": "node esbuild.web.js",
     "compile": "npm run check-types && npm run build:ext && npm run build:web",
@@ -110,17 +127,23 @@
   "dependencies": {
     "highlight.js": "^11.10.0",
     "markdown-it": "^14.1.0",
-    "markdown-it-anchor": "^9.2.0"
+    "markdown-it-anchor": "^9.2.0",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.24.0",
+    "eslint": "^9.39.5",
+    "globals": "^15.15.0",
     "html-to-image": "^1.11.11",
     "mermaid": "^11.4.0",
     "npm-run-all": "^4.1.5",
-    "typescript": "^5.6.0"
+    "prettier": "^3.9.5",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.64.0"
   }
 }

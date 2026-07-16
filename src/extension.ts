@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createMarkdownIt } from './render';
+import { PdfEditorProvider } from './pdfEditor';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -13,6 +14,16 @@ const md = createMarkdownIt();
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
+    // PDF files open in the MarkCopy PDF preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      PdfEditorProvider.viewType,
+      new PdfEditorProvider(context),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
     vscode.commands.registerCommand('markcopy.openPreview', (uri?: vscode.Uri) => {
       const doc = pickDocument(uri);
       if (doc) {
@@ -27,7 +38,9 @@ export function activate(context: vscode.ExtensionContext): void {
         current.panel.reveal(vscode.ViewColumn.Beside, true);
         current.panel.webview.postMessage({ type: 'copyAll' });
       } else {
-        vscode.window.showInformationMessage('MarkCopy: open the preview first (MarkCopy: Open Rich Preview).');
+        vscode.window.showInformationMessage(
+          'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
+        );
       }
     }),
 
@@ -48,7 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const line = e.visibleRanges[0]?.start.line ?? 0;
         current.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
-    })
+    }),
   );
 }
 
@@ -82,8 +95,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
     {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')]
-    }
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')],
+    },
   );
 
   const state: PreviewState = { panel, docUri: doc.uri };
@@ -91,26 +104,34 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
 
   panel.webview.html = htmlShell(context, panel.webview);
 
-  panel.webview.onDidReceiveMessage((msg) => {
-    if (msg?.type === 'revealLine') {
-      revealEditorLine(state.docUri, msg.line);
-    } else if (msg?.type === 'toast') {
-      vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
-    }
-  }, undefined, context.subscriptions);
+  panel.webview.onDidReceiveMessage(
+    (msg) => {
+      if (msg?.type === 'revealLine') {
+        revealEditorLine(state.docUri, msg.line);
+      } else if (msg?.type === 'toast') {
+        vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
+      }
+    },
+    undefined,
+    context.subscriptions,
+  );
 
-  panel.onDidDispose(() => {
-    if (current === state) {
-      current = undefined;
-    }
-  }, undefined, context.subscriptions);
+  panel.onDidDispose(
+    () => {
+      if (current === state) {
+        current = undefined;
+      }
+    },
+    undefined,
+    context.subscriptions,
+  );
 
   update(state);
 }
 
 function update(state: PreviewState): void {
   const doc = vscode.workspace.textDocuments.find(
-    (d) => d.uri.toString() === state.docUri.toString()
+    (d) => d.uri.toString() === state.docUri.toString(),
   );
   if (!doc) {
     return;
@@ -123,13 +144,13 @@ function update(state: PreviewState): void {
     type: 'render',
     html,
     source,
-    styleProfile: cfg.get<string>('styleProfile', 'github')
+    styleProfile: cfg.get<string>('styleProfile', 'github'),
   });
 }
 
 function revealEditorLine(docUri: vscode.Uri, line: number): void {
   const editor = vscode.window.visibleTextEditors.find(
-    (e) => e.document.uri.toString() === docUri.toString()
+    (e) => e.document.uri.toString() === docUri.toString(),
   );
   if (!editor) {
     return;
@@ -141,17 +162,17 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
 function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): string {
   const nonce = getNonce();
   const scriptUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js')
+    vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js'),
   );
   const styleUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'media', 'preview.css')
+    vscode.Uri.joinPath(context.extensionUri, 'media', 'preview.css'),
   );
   const csp = [
     `default-src 'none'`,
     `img-src ${webview.cspSource} https: data: blob:`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
-    `script-src 'nonce-${nonce}'`
+    `script-src 'nonce-${nonce}'`,
   ].join('; ');
 
   return `<!DOCTYPE html>

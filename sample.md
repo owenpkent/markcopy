@@ -4,7 +4,7 @@ A quick file to exercise every copy path. Right-click things in the preview.
 
 ## Text
 
-This paragraph has **bold**, *italic*, `inline code`, and a [link](https://example.com).
+This paragraph has **bold**, _italic_, `inline code`, and a [link](https://example.com).
 
 > A blockquote to copy as rich text.
 
@@ -12,9 +12,9 @@ This paragraph has **bold**, *italic*, `inline code`, and a [link](https://examp
 
 | Feature        | Built-in | MarkCopy |
 | -------------- | :------: | :------: |
-| Rich-text copy |    ❌     |    ✅     |
-| Table as TSV   |    ❌     |    ✅     |
-| Diagram as PNG |    ❌     |    ✅     |
+| Rich-text copy |    ❌    |    ✅    |
+| Table as TSV   |    ❌    |    ✅    |
+| Diagram as PNG |    ❌    |    ✅    |
 
 ## Code
 

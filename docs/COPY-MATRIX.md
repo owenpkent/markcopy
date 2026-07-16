@@ -6,47 +6,58 @@ Every action the preview's right-click menu can offer, the clipboard flavor it w
 
 ### Text selection (any highlighted text)
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
-| Copy Selection as Rich Text | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs, Slack |
-| Copy Selection as Markdown | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
+| Action                      | Clipboard flavor               | Pastes well into                         |
+| --------------------------- | ------------------------------ | ---------------------------------------- |
+| Copy Selection as Rich Text | `text/html` + `text/plain`     | Word, Outlook, Gmail, Google Docs, Slack |
+| Copy Selection as Markdown  | `text/plain` (Markdown source) | Any editor, chat, another `.md` file     |
 
 ### Code block
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
+| Action    | Clipboard flavor          | Pastes well into       |
+| --------- | ------------------------- | ---------------------- |
 | Copy Code | `text/plain` (no styling) | Any editor or terminal |
 
 The plain-text code is copied verbatim, without the syntax-highlight markup, so it drops straight into an editor.
 
 ### Table
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
-| Copy Table (Rich Text) | `text/html` + `text/plain` | Word, Google Docs, Outlook |
-| Copy Table as CSV | `text/plain` (comma-separated, RFC 4180) | Excel, Google Sheets, any CSV importer |
-| Copy Table as TSV | `text/plain` (tab-separated) | Excel, Google Sheets (as real cells) |
-| Copy Table as PNG | `image/png` | Slides, chat, anywhere an image works |
+| Action                 | Clipboard flavor                         | Pastes well into                       |
+| ---------------------- | ---------------------------------------- | -------------------------------------- |
+| Copy Table (Rich Text) | `text/html` + `text/plain`               | Word, Google Docs, Outlook             |
+| Copy Table as CSV      | `text/plain` (comma-separated, RFC 4180) | Excel, Google Sheets, any CSV importer |
+| Copy Table as TSV      | `text/plain` (tab-separated)             | Excel, Google Sheets (as real cells)   |
+| Copy Table as PNG      | `image/png`                              | Slides, chat, anywhere an image works  |
 
 ### Mermaid diagram
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
-| Copy Diagram as PNG | `image/png` | Slides, docs, chat |
+| Action              | Clipboard flavor          | Pastes well into             |
+| ------------------- | ------------------------- | ---------------------------- |
+| Copy Diagram as PNG | `image/png`               | Slides, docs, chat           |
 | Copy Diagram as SVG | `text/plain` (SVG markup) | A file, vector editors, HTML |
 
 ### Any other block (paragraph, heading, list, blockquote)
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
-| Copy Block as Rich Text | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
-| Copy Block as Markdown | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
-| Copy Block as PNG | `image/png` | Slides, chat, docs |
+| Action                  | Clipboard flavor               | Pastes well into                     |
+| ----------------------- | ------------------------------ | ------------------------------------ |
+| Copy Block as Rich Text | `text/html` + `text/plain`     | Word, Outlook, Gmail, Google Docs    |
+| Copy Block as Markdown  | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
+| Copy Block as PNG       | `image/png`                    | Slides, chat, docs                   |
+
+### A page in the PDF preview
+
+Opening a `.pdf` uses the MarkCopy PDF preview. Right-click a page for:
+
+| Action             | Clipboard flavor         | Pastes well into       |
+| ------------------ | ------------------------ | ---------------------- |
+| Copy Page N as PNG | `image/png`              | Slides, chat, docs     |
+| Copy Page N Text   | `text/plain`             | Any editor or document |
+| Copy All Text      | `text/plain` (all pages) | Any editor or document |
+| Copy Selected Text | `text/plain`             | Any editor or document |
 
 ### Always available
 
-| Action | Clipboard flavor | Pastes well into |
-| --- | --- | --- |
+| Action                           | Clipboard flavor           | Pastes well into                  |
+| -------------------------------- | -------------------------- | --------------------------------- |
 | Copy Whole Document as Rich Text | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
 
 The same whole-document action is available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**.

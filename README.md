@@ -5,7 +5,7 @@
 [![VS Code ^1.90](https://img.shields.io/badge/VS%20Code-%5E1.90-007ACC.svg)](https://code.visualstudio.com/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-> The Markdown preview built for getting content *out*. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram.
+> The Markdown preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -27,6 +27,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
 - **Mermaid diagrams** and syntax-highlighted code out of the box.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with right-click **Copy Page as PNG**, **Copy Page Text**, and **Copy All Text**. One extension previews both Markdown and PDF.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
@@ -41,17 +42,17 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
 ## Commands
 
-| Command | ID | What it does |
-| --- | --- | --- |
-| MarkCopy: Open Rich Preview to the Side | `markcopy.openPreview` | Opens (or focuses) the preview beside the editor. |
+| Command                                    | ID                                | What it does                                      |
+| ------------------------------------------ | --------------------------------- | ------------------------------------------------- |
+| MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor. |
 | MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text. |
 
 ## Settings
 
-| Setting | Type | Default | Description |
-| --- | --- | --- | --- |
+| Setting                 | Type                 | Default  | Description                                                                                                 |
+| ----------------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
 | `markcopy.styleProfile` | `github` \| `vscode` | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme. |
-| `markcopy.syncScroll` | boolean | `true` | Keep the preview scroll position in sync with the editor. |
+| `markcopy.syncScroll`   | boolean              | `true`   | Keep the preview scroll position in sync with the editor.                                                   |
 
 ## Install
 
@@ -69,16 +70,26 @@ code --install-extension markcopy-0.0.1.vsix
 
 `vscode.env.clipboard` is text-only, so rich copy happens **inside the webview**. MarkCopy writes both `text/html` and `text/plain` through a synchronous `copy`-event handler, which is more reliable than the async Clipboard API (that one can be permission-blocked inside the webview iframe). PNG copy uses `html-to-image` plus a `ClipboardItem`. The full rationale, including the Gmail/Outlook inline-styling requirement, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#clipboard).
 
+## PDF preview
+
+MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it inline (VS Code has no built-in PDF viewer). Rendering uses Mozilla's pdf.js, the same engine behind [folio](https://github.com/owenpkent/folio). Right-click a page for:
+
+- **Copy Page as PNG**: the rendered page as an image, for slides and chat.
+- **Copy Page Text** / **Copy All Text**: the selectable text, extracted per page.
+
+The file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network. To open a PDF as raw bytes instead, use **Reopen Editor With...** from the editor title menu.
+
 ## Compared to the alternatives
 
-| | Built-in | Markdown Preview Enhanced | MarkCopy |
-| --- | :---: | :---: | :---: |
-| Rich-text copy from the rendered preview | No | No | **Yes** |
-| Per-code-block copy | No | Requested, open | **Yes** |
-| Table as CSV / TSV / cells | No | Partial | **Yes** |
-| Diagram as PNG to clipboard | No | Export to file | **Yes** |
-| Copy block as Markdown source | No | No | **Yes** |
-| Live preview + scroll sync | Yes | Yes | **Yes** |
+|                                          | Built-in | Markdown Preview Enhanced | MarkCopy |
+| ---------------------------------------- | :------: | :-----------------------: | :------: |
+| Rich-text copy from the rendered preview |    No    |            No             | **Yes**  |
+| Per-code-block copy                      |    No    |      Requested, open      | **Yes**  |
+| Table as CSV / TSV / cells               |    No    |          Partial          | **Yes**  |
+| Diagram as PNG to clipboard              |    No    |      Export to file       | **Yes**  |
+| Copy block as Markdown source            |    No    |            No             | **Yes**  |
+| Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
+| PDF preview built in                     |    No    |            No             | **Yes**  |
 
 ## Documentation
 

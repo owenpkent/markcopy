@@ -24,9 +24,22 @@ npm run watch       # rebuild the extension and webview on change
 
 1. `check-types` (`tsc --noEmit`) type-checks the whole tree without emitting.
 2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js`.
-3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`.
+3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why there are two bundles.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why there are separate bundles.
+
+## Lint and format
+
+```bash
+npm run lint          # eslint (flat config, typescript-eslint)
+npm run lint:fix      # eslint --fix
+npm run format        # prettier --write .
+npm run format:check  # prettier --check . (what CI runs)
+```
+
+CI runs `lint`, `format:check`, type-check, build, and package on every push and PR. Run `npm run format` before committing so `format:check` stays green.
+
+Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 
 ## Debug
 
@@ -39,14 +52,14 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Project layout
 
-| Path | What lives here |
-| --- | --- |
-| `src/extension.ts` | Host: activation, commands, panel lifecycle, scroll sync. |
-| `src/render.ts` | markdown-it setup and source-line mapping. |
-| `src/webview/main.ts` | Webview: rendering, context menu, clipboard, PNG, Mermaid. |
-| `media/preview.css` | Style profiles, menu, toast. |
-| `docs/` | Architecture and copy-matrix reference. |
-| `esbuild.js`, `esbuild.web.js` | The two bundlers. |
+| Path                           | What lives here                                            |
+| ------------------------------ | ---------------------------------------------------------- |
+| `src/extension.ts`             | Host: activation, commands, panel lifecycle, scroll sync.  |
+| `src/render.ts`                | markdown-it setup and source-line mapping.                 |
+| `src/webview/main.ts`          | Webview: rendering, context menu, clipboard, PNG, Mermaid. |
+| `media/preview.css`            | Style profiles, menu, toast.                               |
+| `docs/`                        | Architecture and copy-matrix reference.                    |
+| `esbuild.js`, `esbuild.web.js` | The two bundlers.                                          |
 
 ## Coding conventions
 

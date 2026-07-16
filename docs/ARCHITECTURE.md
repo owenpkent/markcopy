@@ -26,13 +26,15 @@ Two esbuild bundles are produced from one TypeScript source tree:
 
 ## File map
 
-| File | Role |
-| --- | --- |
-| `src/extension.ts` | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol. |
-| `src/render.ts` | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping. |
-| `src/webview/main.ts` | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, scroll sync. |
-| `media/preview.css` | GitHub and VS Code style profiles, context menu, toast, highlight.js token colors. |
-| `esbuild.js` / `esbuild.web.js` | The two bundlers. |
+| File                            | Role                                                                                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extension.ts`              | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                       |
+| `src/render.ts`                 | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                        |
+| `src/webview/main.ts`           | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, scroll sync. |
+| `src/pdfEditor.ts`              | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                       |
+| `src/webview/pdf.ts`            | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                     |
+| `media/preview.css`             | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                     |
+| `esbuild.js` / `esbuild.web.js` | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                         |
 
 ## Rendering pipeline
 
@@ -52,19 +54,19 @@ Two esbuild bundles are produced from one TypeScript source tree:
 
 Host to webview:
 
-| Type | Payload | Effect |
-| --- | --- | --- |
-| `render` | `html`, `source`, `styleProfile` | Replace preview content and re-render Mermaid. |
-| `scrollToLine` | `line` | Scroll the preview to the element for that source line. |
-| `copyAll` | none | Copy the whole document as rich text. |
+| Type           | Payload                          | Effect                                                  |
+| -------------- | -------------------------------- | ------------------------------------------------------- |
+| `render`       | `html`, `source`, `styleProfile` | Replace preview content and re-render Mermaid.          |
+| `scrollToLine` | `line`                           | Scroll the preview to the element for that source line. |
+| `copyAll`      | none                             | Copy the whole document as rich text.                   |
 
 Webview to host:
 
-| Type | Payload | Effect |
-| --- | --- | --- |
-| `revealLine` | `line` | Reveal that line at the top of the editor. |
-| `toast` | `text` | Show a status-bar message. |
-| `ready` | none | Signals the webview script has loaded. |
+| Type         | Payload | Effect                                     |
+| ------------ | ------- | ------------------------------------------ |
+| `revealLine` | `line`  | Reveal that line at the top of the editor. |
+| `toast`      | `text`  | Show a status-bar message.                 |
+| `ready`      | none    | Signals the webview script has loaded.     |
 
 ## Clipboard
 
@@ -101,6 +103,12 @@ Gmail and Outlook strip `<style>` blocks and external CSS, honoring only inline 
 ### PNG copy
 
 `copyPng()` uses `html-to-image`'s `toBlob()` at 2x pixel ratio, then writes an `image/png` `ClipboardItem`. This is the one place the async Clipboard API is used, because image writes are not expressible through the `copy`-event path. If the environment blocks it, the user sees a toast rather than a silent failure.
+
+## PDF preview
+
+`.pdf` files are handled by `PdfEditorProvider`, a `CustomReadonlyEditorProvider` registered for the `markcopy.pdfPreview` view type (contributed with `priority: default`, since VS Code has no built-in PDF viewer). On open, the provider reads the file with `workspace.fs.readFile` and, once the webview posts `ready`, sends the bytes plus the worker URI in a `load` message. Nothing is fetched over the network.
+
+In the webview, `src/webview/pdf.ts` points pdf.js at a module worker created from the bundled `media/pdf.worker.js` (via `GlobalWorkerOptions.workerPort`), renders each page to a canvas, and extracts per-page text with `getTextContent` for the copy actions. The PDF webview's CSP adds `worker-src ${cspSource} blob:` for the pdf.js worker.
 
 ## Content Security Policy
 

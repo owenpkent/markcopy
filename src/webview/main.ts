@@ -98,18 +98,22 @@ function nearestElementForLine(line: number): HTMLElement | null {
   return best ?? marked[0] ?? null;
 }
 
-window.addEventListener('scroll', () => {
-  if (programmaticScroll) {
-    return;
-  }
-  const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
-  for (const el of marked) {
-    if (el.getBoundingClientRect().top >= 0) {
-      vscode.postMessage({ type: 'revealLine', line: Number(el.dataset.sourceLine) });
-      break;
+window.addEventListener(
+  'scroll',
+  () => {
+    if (programmaticScroll) {
+      return;
     }
-  }
-}, { passive: true });
+    const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
+    for (const el of marked) {
+      if (el.getBoundingClientRect().top >= 0) {
+        vscode.postMessage({ type: 'revealLine', line: Number(el.dataset.sourceLine) });
+        break;
+      }
+    }
+  },
+  { passive: true },
+);
 
 // ---------------------------------------------------------------------------
 // Context menu
@@ -237,7 +241,9 @@ function selectionMarkdown(): string {
     return '';
   }
   const node = sel.anchorNode as HTMLElement | null;
-  const block = (node?.nodeType === 1 ? (node as HTMLElement) : node?.parentElement)?.closest<HTMLElement>('[data-source-line]');
+  const block = (
+    node?.nodeType === 1 ? (node as HTMLElement) : node?.parentElement
+  )?.closest<HTMLElement>('[data-source-line]');
   return block ? blockMarkdown(block) : sel.toString();
 }
 
@@ -300,7 +306,7 @@ async function copyPng(el: HTMLElement): Promise<void> {
     } else {
       toast('PNG copy not supported here');
     }
-  } catch (err) {
+  } catch {
     toast('PNG copy failed');
   }
 }
@@ -310,12 +316,32 @@ async function copyPng(el: HTMLElement): Promise<void> {
 // and external CSS, honoring only inline styles).
 // ---------------------------------------------------------------------------
 const INLINE_PROPS = [
-  'font-family', 'font-size', 'font-weight', 'font-style', 'color',
-  'background-color', 'text-align', 'text-decoration-line', 'line-height',
-  'padding', 'padding-left', 'padding-top', 'padding-right', 'padding-bottom',
-  'margin', 'margin-left', 'margin-top', 'margin-right', 'margin-bottom',
-  'border', 'border-collapse', 'border-color', 'border-style', 'border-width',
-  'list-style-type', 'white-space'
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'color',
+  'background-color',
+  'text-align',
+  'text-decoration-line',
+  'line-height',
+  'padding',
+  'padding-left',
+  'padding-top',
+  'padding-right',
+  'padding-bottom',
+  'margin',
+  'margin-left',
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'border',
+  'border-collapse',
+  'border-color',
+  'border-style',
+  'border-width',
+  'list-style-type',
+  'white-space',
 ];
 
 function inlineStyledHtml(source: HTMLElement): string {
@@ -354,7 +380,7 @@ function tableToDelimited(table: HTMLElement, delimiter: string): string {
     .map((tr) =>
       Array.from(tr.querySelectorAll('th,td'))
         .map((c) => escapeField((c.textContent ?? '').trim(), delimiter))
-        .join(delimiter)
+        .join(delimiter),
     )
     .join('\r\n');
 }

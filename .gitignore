@@ -2,5 +2,9 @@ node_modules/
 dist/
 media/webview.js
 media/webview.js.map
+media/pdf.js
+media/pdf.js.map
+media/pdf.worker.js
+media/pdf.worker.js.map
 *.vsix
 .DS_Store

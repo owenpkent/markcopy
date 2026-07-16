@@ -15,7 +15,7 @@ async function main() {
     sourcemap: !production,
     sourcesContent: false,
     outfile: 'dist/extension.js',
-    external: ['vscode'] // provided by VS Code at runtime; never bundle
+    external: ['vscode'], // provided by VS Code at runtime; never bundle
   });
   if (watch) {
     await ctx.watch();
