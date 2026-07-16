@@ -1,50 +1,107 @@
-# MarkCopy — Rich Markdown Preview
+# MarkCopy: Rich Markdown Preview
 
-A next-level Markdown preview for VS Code built around **copying content out**. Right-click anywhere in the rendered preview to copy it in the format you actually need — rich text that pastes *with formatting* into Word, Outlook, Gmail and Google Docs, per-element copies, raw Markdown, or a PNG image.
+> The Markdown preview built for getting content *out*. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram.
 
-The built-in preview and the big incumbents (Markdown Preview Enhanced, Markdown All-in-One) don't do first-class "copy the rendered output as rich text." MarkCopy does.
+VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
+
+<!-- Add screenshots/GIFs here before publishing: docs/media/context-menu.png, docs/media/paste-into-word.gif -->
+
+## Why it exists
+
+When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*`. Word, Outlook, Gmail and Google Docs are rich-text editors: they render formatting only when it arrives on the clipboard as `text/html`. MarkCopy renders your Markdown, then writes **both** `text/html` and `text/plain` to the clipboard so the receiving app keeps your headings, bold, lists, tables, links and code. Styles are inlined so the formatting even survives Gmail and Outlook, which strip `<style>` blocks and external CSS.
 
 ## Features
 
-- **Copy as Rich Text** — whole document or selection. Styles are inlined so formatting survives Gmail/Outlook (which strip `<style>` and external CSS).
-- **Per-element right-click copy**:
-  - Code block → **Copy Code** (plain text)
-  - Table → **Rich Text**, **TSV** (pastes as real cells in Excel/Sheets), or **PNG**
-  - Mermaid diagram → **PNG** or **SVG**
-  - Any block → **Rich Text**, **Markdown source**, or **PNG**
-- **Copy as raw Markdown** for a selection or a single block.
-- **Live preview** that updates as you type, with editor ⇄ preview scroll sync.
-- **GitHub-accurate styling** (default) or a VS Code theme profile.
-- Mermaid diagrams and syntax-highlighted code out of the box.
+- **Copy as Rich Text**, for the whole document or just a selection. Pastes formatted into Word, Outlook, Gmail, Google Docs, Slack and OneNote.
+- **Per-element right-click copy**, with the menu adapting to what you clicked:
+  - Code block: **Copy Code** as plain text.
+  - Table: **Rich Text**, **TSV** (pastes as real cells in Excel and Google Sheets), or **PNG**.
+  - Mermaid diagram: **PNG** or **SVG**.
+  - Any block: **Rich Text**, **Markdown source**, or **PNG**.
+- **Copy as raw Markdown**, for a selection or a single block.
+- **Live preview** that updates as you type, with editor and preview scroll kept in sync.
+- **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
+- **Mermaid diagrams** and syntax-highlighted code out of the box.
 
-## Usage
+See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
-- Open a `.md` file and run **MarkCopy: Open Rich Preview to the Side** (command palette, editor title bar icon, or right-click in the editor / explorer).
-- **Right-click** inside the preview for the context menu; the options adapt to what you clicked (code, table, diagram, block, or selection).
-- **MarkCopy: Copy Whole Document as Rich Text** copies everything in one shot.
+## Getting started
 
-## How copying works (the technical bit)
+1. Install the extension (see [Install](#install)).
+2. Open any `.md` file.
+3. Run **MarkCopy: Open Rich Preview to the Side** from the Command Palette, the editor title-bar icon, or the right-click menu in the editor or Explorer.
+4. **Right-click inside the preview.** The menu options change based on whether you clicked a code block, table, diagram, plain block, or a text selection.
 
-`vscode.env.clipboard` is text-only, so rich copy happens **inside the webview**. MarkCopy writes both `text/html` and `text/plain` clipboard flavors via a synchronous `copy`-event handler (more reliable than the async Clipboard API, which can be permission-blocked in the webview iframe). PNG copy uses `html-to-image` + `ClipboardItem`.
+To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
+
+## Commands
+
+| Command | ID | What it does |
+| --- | --- | --- |
+| MarkCopy: Open Rich Preview to the Side | `markcopy.openPreview` | Opens (or focuses) the preview beside the editor. |
+| MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text. |
+
+## Settings
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `markcopy.styleProfile` | `github` \| `vscode` | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme. |
+| `markcopy.syncScroll` | boolean | `true` | Keep the preview scroll position in sync with the editor. |
+
+## Install
+
+**From the packaged VSIX** (local install):
+
+```bash
+npm install
+npm run vsix                                   # produces markcopy-0.0.1.vsix
+code --install-extension markcopy-0.0.1.vsix
+```
+
+**From the Marketplace:** not yet published. See [CONTRIBUTING](CONTRIBUTING.md#releasing) for the release flow.
+
+## How the copy works
+
+`vscode.env.clipboard` is text-only, so rich copy happens **inside the webview**. MarkCopy writes both `text/html` and `text/plain` through a synchronous `copy`-event handler, which is more reliable than the async Clipboard API (that one can be permission-blocked inside the webview iframe). PNG copy uses `html-to-image` plus a `ClipboardItem`. The full rationale, including the Gmail/Outlook inline-styling requirement, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#clipboard).
+
+## Compared to the alternatives
+
+| | Built-in | Markdown Preview Enhanced | MarkCopy |
+| --- | :---: | :---: | :---: |
+| Rich-text copy from the rendered preview | No | No | **Yes** |
+| Per-code-block copy | No | Requested, open | **Yes** |
+| Table as TSV / cells | No | Partial | **Yes** |
+| Diagram as PNG to clipboard | No | Export to file | **Yes** |
+| Copy block as Markdown source | No | No | **Yes** |
+| Live preview + scroll sync | Yes | Yes | **Yes** |
+
+## Documentation
+
+- [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
+- [Architecture](docs/ARCHITECTURE.md): how rendering, the webview, and the clipboard fit together.
+- [Contributing](CONTRIBUTING.md): build, debug, and release.
+- [Security](SECURITY.md): CSP, sandboxing, and reporting.
+- [Changelog](CHANGELOG.md).
 
 ## Develop
 
 ```bash
 npm install
-npm run compile        # type-check + build extension and webview bundles
-npm run watch          # rebuild on change
-# then press F5 in VS Code to launch the Extension Development Host
-npm run vsix           # produce markcopy-0.0.1.vsix
-code --install-extension markcopy-0.0.1.vsix
+npm run compile     # type-check + build the extension and webview bundles
+npm run watch       # rebuild on change
+# press F5 in VS Code to launch the Extension Development Host, then open sample.md
 ```
+
+Full details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
-- KaTeX / LaTeX math (render + copy as image)
-- PlantUML support
-- "Email-safe" export profile (table-based layout, fully inlined)
-- Copy selection spanning multiple blocks as clean Markdown
+- KaTeX / LaTeX math (render, and copy as image).
+- PlantUML support.
+- An "email-safe" export profile (table-based layout, fully inlined).
+- Copy a selection spanning multiple blocks as clean Markdown.
+- A marketplace icon.
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -1,6 +1,6 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy — Rich Markdown Preview",
+  "displayName": "MarkCopy: Rich Markdown Preview",
   "description": "Next-level Markdown preview with right-click copy as rich text, per-element copy (code / table / diagram), copy as raw Markdown, and copy as PNG.",
   "version": "0.0.1",
   "publisher": "okstudio",
