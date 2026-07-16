@@ -7,6 +7,57 @@ body {
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
 }
+
+/* Palette variables, GitHub-light defaults. */
+body {
+  --mc-fg: #1f2328;
+  --mc-bg: #ffffff;
+  --mc-border: #d1d9e0;
+  --mc-code-bg: rgba(129, 139, 152, 0.18);
+  --mc-pre-bg: #f6f8fa;
+  --mc-quote-fg: #59636e;
+  --mc-th-bg: #f6f8fa;
+  --mc-link: #0969da;
+  --mc-error-fg: #d1242f;
+  --mc-error-bg: #ffebe9;
+  --mc-pdf-bg: #525659;
+  --hljs-comment: #6a737d;
+  --hljs-keyword: #d73a49;
+  --hljs-string: #032f62;
+  --hljs-title: #6f42c1;
+  --hljs-number: #005cc5;
+  --hljs-attr: #e36209;
+}
+
+/* Dark palette (GitHub dark). Applies when the theme is forced dark, or (in
+   auto mode, i.e. no explicit override) when VS Code is in a dark or
+   high-contrast theme. The `markcopy.theme` setting drives `data-mc-theme`. */
+body[data-mc-theme='dark'],
+body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']),
+body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark']) {
+  --mc-fg: #e6edf3;
+  --mc-bg: #0d1117;
+  --mc-border: #30363d;
+  --mc-code-bg: rgba(110, 118, 129, 0.4);
+  --mc-pre-bg: #161b22;
+  --mc-quote-fg: #8b949e;
+  --mc-th-bg: #161b22;
+  --mc-link: #4493f8;
+  --mc-error-fg: #ff7b72;
+  --mc-error-bg: #2d1214;
+  --mc-pdf-bg: #2a2a2b;
+  --hljs-comment: #8b949e;
+  --hljs-keyword: #ff7b72;
+  --hljs-string: #a5d6ff;
+  --hljs-title: #d2a8ff;
+  --hljs-number: #79c0ff;
+  --hljs-attr: #ffa657;
+}
+
+body {
+  background: var(--mc-bg);
+}
+
 .markdown-body {
   box-sizing: border-box;
   max-width: 900px;
@@ -15,26 +66,25 @@ body {
   font-size: 15px;
   line-height: 1.6;
   word-wrap: break-word;
+  color: var(--mc-fg);
+  background: var(--mc-bg);
 }
 
-/* ---- GitHub style profile ------------------------------------------------ */
-body[data-style='github'] .markdown-body {
-  color: #1f2328;
-  background: #ffffff;
+/* VS Code style profile: follow the editor foreground/background. */
+body[data-style='vscode'] {
+  background: var(--vscode-editor-background, var(--mc-bg));
 }
-body[data-style='github'] {
-  background: #ffffff;
-}
-
-/* ---- VS Code theme profile ---------------------------------------------- */
 body[data-style='vscode'] .markdown-body {
-  color: var(--vscode-editor-foreground);
-  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground, var(--mc-fg));
+  background: var(--vscode-editor-background, var(--mc-bg));
+}
+body[data-style='vscode'] .markdown-body pre {
+  background: var(--vscode-textCodeBlock-background, var(--mc-pre-bg));
 }
 
 .markdown-body h1,
 .markdown-body h2 {
-  border-bottom: 1px solid #d1d9e0;
+  border-bottom: 1px solid var(--mc-border);
   padding-bottom: 0.3em;
   margin-top: 24px;
   margin-bottom: 16px;
@@ -51,20 +101,17 @@ body[data-style='vscode'] .markdown-body {
 .markdown-body code {
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 85%;
-  background: rgba(129, 139, 152, 0.18);
+  background: var(--mc-code-bg);
   padding: 0.2em 0.4em;
   border-radius: 6px;
 }
 .markdown-body pre {
-  background: #f6f8fa;
+  background: var(--mc-pre-bg);
   padding: 14px 16px;
   border-radius: 8px;
   overflow: auto;
   font-size: 85%;
   line-height: 1.5;
-}
-body[data-style='vscode'] .markdown-body pre {
-  background: var(--vscode-textCodeBlock-background, #1e1e1e);
 }
 .markdown-body pre code {
   background: transparent;
@@ -72,8 +119,8 @@ body[data-style='vscode'] .markdown-body pre {
   font-size: 100%;
 }
 .markdown-body blockquote {
-  color: #59636e;
-  border-left: 0.25em solid #d1d9e0;
+  color: var(--mc-quote-fg);
+  border-left: 0.25em solid var(--mc-border);
   padding: 0 1em;
   margin: 0 0 16px 0;
 }
@@ -85,18 +132,18 @@ body[data-style='vscode'] .markdown-body pre {
 }
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid #d1d9e0;
+  border: 1px solid var(--mc-border);
   padding: 6px 13px;
 }
 .markdown-body th {
-  background: #f6f8fa;
+  background: var(--mc-th-bg);
   font-weight: 600;
 }
 .markdown-body img {
   max-width: 100%;
 }
 .markdown-body a {
-  color: #0969da;
+  color: var(--mc-link);
   text-decoration: none;
 }
 .markdown-body a:hover {
@@ -107,128 +154,44 @@ body[data-style='vscode'] .markdown-body pre {
   text-align: center;
 }
 .mc-error {
-  color: #d1242f;
-  background: #ffebe9;
+  color: var(--mc-error-fg);
+  background: var(--mc-error-bg);
 }
 
-/* highlight.js (github light) minimal token colors */
+/* highlight.js token colors (via palette variables). */
 .hljs-comment,
 .hljs-quote {
-  color: #6a737d;
+  color: var(--hljs-comment);
 }
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-type {
-  color: #d73a49;
+  color: var(--hljs-keyword);
 }
 .hljs-string,
 .hljs-doctag {
-  color: #032f62;
+  color: var(--hljs-string);
 }
 .hljs-title,
 .hljs-section,
 .hljs-function .hljs-title {
-  color: #6f42c1;
+  color: var(--hljs-title);
 }
 .hljs-number,
 .hljs-literal {
-  color: #005cc5;
+  color: var(--hljs-number);
 }
 .hljs-attr,
 .hljs-attribute,
 .hljs-variable {
-  color: #e36209;
-}
-
-/* ---- Dark theme ---------------------------------------------------------- */
-/* VS Code adds `vscode-dark` / `vscode-high-contrast` to the webview body.
-   In those themes we render a GitHub-dark palette regardless of style profile.
-   Copies stay light: see `.mc-force-light` below, applied during serialization. */
-body.vscode-dark,
-body.vscode-high-contrast {
-  background: #0d1117;
-}
-body.vscode-dark .markdown-body,
-body.vscode-high-contrast .markdown-body {
-  color: #e6edf3;
-  background: #0d1117;
-}
-body.vscode-dark .markdown-body h1,
-body.vscode-dark .markdown-body h2,
-body.vscode-high-contrast .markdown-body h1,
-body.vscode-high-contrast .markdown-body h2 {
-  border-bottom-color: #21262d;
-}
-body.vscode-dark .markdown-body code,
-body.vscode-high-contrast .markdown-body code {
-  background: rgba(110, 118, 129, 0.4);
-}
-body.vscode-dark .markdown-body pre,
-body.vscode-high-contrast .markdown-body pre {
-  background: #161b22;
-}
-body.vscode-dark .markdown-body pre code,
-body.vscode-high-contrast .markdown-body pre code {
-  background: transparent;
-}
-body.vscode-dark .markdown-body blockquote,
-body.vscode-high-contrast .markdown-body blockquote {
-  color: #8b949e;
-  border-left-color: #30363d;
-}
-body.vscode-dark .markdown-body th,
-body.vscode-dark .markdown-body td,
-body.vscode-high-contrast .markdown-body th,
-body.vscode-high-contrast .markdown-body td {
-  border-color: #30363d;
-}
-body.vscode-dark .markdown-body th,
-body.vscode-high-contrast .markdown-body th {
-  background: #161b22;
-}
-body.vscode-dark .markdown-body a,
-body.vscode-high-contrast .markdown-body a {
-  color: #4493f8;
-}
-body.vscode-dark .mc-error,
-body.vscode-high-contrast .mc-error {
-  color: #ff7b72;
-  background: #2d1214;
-}
-
-/* highlight.js (github dark) token colors */
-body.vscode-dark .hljs-comment,
-body.vscode-dark .hljs-quote {
-  color: #8b949e;
-}
-body.vscode-dark .hljs-keyword,
-body.vscode-dark .hljs-selector-tag,
-body.vscode-dark .hljs-type {
-  color: #ff7b72;
-}
-body.vscode-dark .hljs-string,
-body.vscode-dark .hljs-doctag {
-  color: #a5d6ff;
-}
-body.vscode-dark .hljs-title,
-body.vscode-dark .hljs-section,
-body.vscode-dark .hljs-function .hljs-title {
-  color: #d2a8ff;
-}
-body.vscode-dark .hljs-number,
-body.vscode-dark .hljs-literal {
-  color: #79c0ff;
-}
-body.vscode-dark .hljs-attr,
-body.vscode-dark .hljs-attribute,
-body.vscode-dark .hljs-variable {
-  color: #ffa657;
+  color: var(--hljs-attr);
 }
 
 /* ---- Force-light (copy safety) ------------------------------------------- */
 /* Added to a subtree only while its inline styles are computed for a rich-text
    copy, so the clipboard HTML is always dark-on-light and pastes cleanly into
    Word / Gmail / Docs even when the preview is displayed in a dark theme.
+   Uses !important so it wins over both the palette and the VS Code profile.
    Removed synchronously, so the preview itself never repaints. */
 .mc-force-light,
 .mc-force-light * {
@@ -276,11 +239,8 @@ body.vscode-dark .hljs-variable {
 
 /* ---- PDF preview --------------------------------------------------------- */
 body.mc-pdf {
-  background: #525659;
+  background: var(--mc-pdf-bg);
   margin: 0;
-}
-body.mc-pdf.vscode-dark {
-  background: #2a2a2b;
 }
 #pdf-root {
   display: flex;

@@ -27,7 +27,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const workerUri = asUri('pdf.worker.js');
     const styleUri = asUri('preview.css');
     const nonce = getNonce();
-    webview.html = this.html(webview, scriptUri, styleUri, nonce);
+    const theme = vscode.workspace.getConfiguration('markcopy').get<string>('theme', 'auto');
+    webview.html = this.html(webview, scriptUri, styleUri, nonce, theme);
 
     // Send the file bytes once the webview signals it is ready.
     webview.onDidReceiveMessage(async (msg) => {
@@ -43,6 +44,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     scriptUri: vscode.Uri,
     styleUri: vscode.Uri,
     nonce: string,
+    theme: string,
   ): string {
     const csp = [
       `default-src 'none'`,
@@ -63,7 +65,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 <link href="${styleUri}" rel="stylesheet" />
 <title>MarkCopy PDF Preview</title>
 </head>
-<body class="mc-pdf" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
+<body class="mc-pdf" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="pdf-root"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>

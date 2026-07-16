@@ -105,6 +105,21 @@
           "type": "boolean",
           "default": true,
           "description": "Keep the preview scroll position in sync with the editor."
+        },
+        "markcopy.theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "enumDescriptions": [
+            "Follow the VS Code color theme.",
+            "Always use the light (GitHub) palette.",
+            "Always use the dark (GitHub) palette."
+          ],
+          "default": "auto",
+          "description": "Preview color palette. 'auto' follows your VS Code theme; 'light' and 'dark' force a palette. Copied rich text stays light either way."
         }
       }
     }

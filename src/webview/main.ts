@@ -40,7 +40,12 @@ window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   switch (msg?.type) {
     case 'render':
-      render(msg.html as string, msg.source as string, msg.styleProfile as string);
+      render(
+        msg.html as string,
+        msg.source as string,
+        msg.styleProfile as string,
+        msg.theme as string,
+      );
       break;
     case 'scrollToLine':
       scrollToLine(msg.line as number);
@@ -61,9 +66,17 @@ function toast(text: string): void {
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
-async function render(html: string, source: string, styleProfile: string): Promise<void> {
+async function render(
+  html: string,
+  source: string,
+  styleProfile: string,
+  theme: string,
+): Promise<void> {
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.style = styleProfile;
+  // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
+  // 'dark' force the palette. See preview.css for how data-mc-theme is used.
+  document.body.dataset.mcTheme = theme || 'auto';
   content.innerHTML = html;
   await renderMermaid();
 }

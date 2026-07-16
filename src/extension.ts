@@ -51,6 +51,13 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Re-render when a MarkCopy setting (style profile, theme, sync) changes.
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (current && e.affectsConfiguration('markcopy')) {
+        update(current);
+      }
+    }),
+
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
       const cfg = vscode.workspace.getConfiguration('markcopy');
@@ -145,6 +152,7 @@ function update(state: PreviewState): void {
     html,
     source,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
+    theme: cfg.get<string>('theme', 'auto'),
   });
 }
 

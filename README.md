@@ -56,10 +56,11 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
 ## Settings
 
-| Setting                 | Type                 | Default  | Description                                                                                                 |
-| ----------------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile` | `github` \| `vscode` | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme. |
-| `markcopy.syncScroll`   | boolean              | `true`   | Keep the preview scroll position in sync with the editor.                                                   |
+| Setting                 | Type                        | Default  | Description                                                                                                         |
+| ----------------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| `markcopy.styleProfile` | `github` \| `vscode`        | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme.         |
+| `markcopy.syncScroll`   | boolean                     | `true`   | Keep the preview scroll position in sync with the editor.                                                           |
+| `markcopy.theme`        | `auto` \| `light` \| `dark` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light` and `dark` force it. Copies stay light-safe either way. |
 
 ## Install
 
