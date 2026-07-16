@@ -32,7 +32,7 @@ The PDF preview uses the same host/webview split with its own custom editor and 
 Four bundles are produced from one TypeScript source tree by two esbuild scripts:
 
 - `esbuild.js` bundles `src/extension.ts` to `dist/extension.js` for Node (`vscode` left external).
-- `esbuild.web.js` bundles the browser code: `src/webview/main.ts` to `media/webview.js` (iife, with Mermaid and html-to-image), and `src/webview/pdf.ts` plus the pdf.js worker to `media/pdf.js` and `media/pdf.worker.js` (esm).
+- `esbuild.web.js` bundles the browser code: `src/webview/main.ts` to `media/webview.js` (iife, with Mermaid, html-to-image, and Turndown), and `src/webview/pdf.ts` plus the pdf.js worker to `media/pdf.js` and `media/pdf.worker.js` (esm).
 
 See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
@@ -40,21 +40,21 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 ## File map
 
-| File                            | Role                                                                                                                                               |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/extension.ts`              | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                       |
-| `src/render.ts`                 | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                        |
-| `src/webview/main.ts`           | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, scroll sync. |
-| `src/pdfEditor.ts`              | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                       |
-| `src/webview/pdf.ts`            | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                     |
-| `media/preview.css`             | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                     |
-| `esbuild.js` / `esbuild.web.js` | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                         |
+| File                            | Role                                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extension.ts`              | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                    |
+| `src/render.ts`                 | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                                                     |
+| `src/webview/main.ts`           | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync. |
+| `src/pdfEditor.ts`              | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                                                    |
+| `src/webview/pdf.ts`            | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                                                  |
+| `media/preview.css`             | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                  |
+| `esbuild.js` / `esbuild.web.js` | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                      |
 
 ## Rendering pipeline
 
 1. The user opens the preview. `openPreview` creates a `WebviewPanel` (beside the editor, `retainContextWhenHidden: true`) and sets its HTML shell.
-2. `update()` reads the document text, calls `md.render(source)`, and posts a `render` message carrying the HTML, the raw source, and the active style profile.
-3. In the webview, `render()` sets `#content.innerHTML`, splits the source into `sourceLines` (used later for "copy as Markdown"), then upgrades every Mermaid placeholder into an SVG.
+2. `update()` reads the document text, calls `md.render(source)`, and posts a `render` message carrying the HTML, the raw source, the active style profile, and the theme (`markcopy.theme`).
+3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), then upgrades every Mermaid placeholder into an SVG.
 4. On each edit, `onDidChangeTextDocument` re-runs `update()`, so the preview is live.
 
 ### Source-line mapping
@@ -62,17 +62,17 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 `render.ts` tags top-level block tokens with `data-source-line` (the token's starting line). This attribute powers two features:
 
 - **Scroll sync:** the webview reports the first fully-visible block's line; the host reveals that line in the editor, and vice versa. A `programmaticScroll` flag breaks the feedback loop.
-- **Copy as Markdown:** for a clicked block, the webview finds its `data-source-line`, finds the next block's line, and slices `sourceLines` between them.
+- **Copy Block as Markdown:** for a clicked block, the webview finds its `data-source-line`, finds the next block's line, and slices `sourceLines` between them (verbatim source). "Copy Selection as Markdown" is different: it converts just the selected HTML to Markdown with Turndown (`turndown` + `turndown-plugin-gfm`), so partial and multi-block selections come through exactly.
 
 ## Message protocol
 
 Host to webview:
 
-| Type           | Payload                          | Effect                                                  |
-| -------------- | -------------------------------- | ------------------------------------------------------- |
-| `render`       | `html`, `source`, `styleProfile` | Replace preview content and re-render Mermaid.          |
-| `scrollToLine` | `line`                           | Scroll the preview to the element for that source line. |
-| `copyAll`      | none                             | Copy the whole document as rich text.                   |
+| Type           | Payload                                   | Effect                                                       |
+| -------------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `render`       | `html`, `source`, `styleProfile`, `theme` | Replace preview content, apply the theme, re-render Mermaid. |
+| `scrollToLine` | `line`                                    | Scroll the preview to the element for that source line.      |
+| `copyAll`      | none                                      | Copy the whole document as rich text.                        |
 
 Webview to host:
 
@@ -127,6 +127,19 @@ Before reading computed styles, the source is briefly tagged with an `mc-force-l
 `.pdf` files are handled by `PdfEditorProvider`, a `CustomReadonlyEditorProvider` registered for the `markcopy.pdfPreview` view type (contributed with `priority: default`, since VS Code has no built-in PDF viewer). On open, the provider reads the file with `workspace.fs.readFile` and, once the webview posts `ready`, sends the bytes plus the worker URI in a `load` message. Nothing is fetched over the network.
 
 In the webview, `src/webview/pdf.ts` points pdf.js at a module worker created from the bundled `media/pdf.worker.js` (via `GlobalWorkerOptions.workerPort`), renders each page to a canvas, and extracts per-page text with `getTextContent` for the copy actions. The PDF webview's CSP adds `worker-src ${cspSource} blob:` for the pdf.js worker.
+
+## Theming
+
+`media/preview.css` defines the palette as CSS custom properties (`--mc-fg`, `--mc-bg`, `--mc-border`, code/table/link colors, and the highlight.js tokens), with GitHub-light values as the default. A single selector block overrides them with GitHub-dark values, so the rest of the stylesheet references variables and never repeats a color.
+
+The `markcopy.theme` setting (`auto` / `light` / `dark`) is passed to the webview in the `render` message and applied as a `data-mc-theme` attribute on `body`. The dark override fires when:
+
+- `body[data-mc-theme='dark']` (forced dark), or
+- `body.vscode-dark` / `body.vscode-high-contrast` and `data-mc-theme` is not `light` and not `dark` (auto mode following the VS Code theme).
+
+Because auto mode keys off VS Code's own `vscode-dark` body class, switching the editor theme updates the preview live with no extra messaging. Changing `markcopy.theme` triggers a re-render (via `onDidChangeConfiguration`) for the Markdown preview; the PDF editor reads the setting when it opens.
+
+Copies stay light regardless of the displayed theme: see `.mc-force-light` under [Clipboard](#clipboard).
 
 ## Content Security Policy
 

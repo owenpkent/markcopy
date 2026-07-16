@@ -61,7 +61,8 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/webview/main.ts`          | Markdown webview: rendering, context menu, clipboard, PNG, Mermaid. |
 | `src/pdfEditor.ts`             | Host: read-only custom editor for `.pdf` files.                     |
 | `src/webview/pdf.ts`           | PDF webview: pdf.js rendering and page/text copy actions.           |
-| `media/preview.css`            | Style profiles, PDF layout, menu, toast.                            |
+| `media/preview.css`            | Style profiles (light/dark palette), PDF layout, menu, toast.       |
+| `scripts/make-screenshot.js`   | Regenerates the README screenshots (`npm run screenshot`).          |
 | `docs/`                        | Architecture and copy-matrix reference.                             |
 | `esbuild.js`, `esbuild.web.js` | The bundlers.                                                       |
 
