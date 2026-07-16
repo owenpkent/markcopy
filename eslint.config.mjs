@@ -45,7 +45,7 @@ export default tseslint.config(
   },
   {
     // Build and config scripts are CommonJS run directly by Node.
-    files: ['*.js'],
+    files: ['*.js', 'scripts/**/*.js'],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

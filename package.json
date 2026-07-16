@@ -116,6 +116,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "screenshot": "node scripts/make-screenshot.js",
     "build:ext": "node esbuild.js",
     "build:web": "node esbuild.web.js",
     "compile": "npm run check-types && npm run build:ext && npm run build:web",

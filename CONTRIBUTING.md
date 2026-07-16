@@ -41,6 +41,8 @@ CI runs `lint`, `format:check`, type-check, build, and package on every push and
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 
+`npm run screenshot` regenerates the README hero image (`docs/media/context-menu.png`) by rendering the real preview with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`).
+
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).

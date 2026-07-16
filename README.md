@@ -9,7 +9,9 @@
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
-<!-- Add screenshots/GIFs here before publishing: docs/media/context-menu.png, docs/media/paste-into-word.gif -->
+![Right-click a table in the MarkCopy preview to copy it as rich text, CSV, TSV, or PNG](docs/media/context-menu.png)
+
+<!-- The image above is generated from the real preview + media/preview.css via `npm run screenshot`. A screen-recorded GIF of pasting into Word or Gmail would be a welcome contribution. -->
 
 ## Why it exists
 
