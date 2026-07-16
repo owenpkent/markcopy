@@ -365,13 +365,19 @@ const INLINE_PROPS = [
 ];
 
 function inlineStyledHtml(source: HTMLElement): string {
+  // Force a light palette while reading computed styles, so the clipboard HTML
+  // is dark-on-light regardless of the preview's display theme. This is applied
+  // and removed synchronously here, so the on-screen preview never repaints.
+  source.classList.add('mc-force-light');
   const clone = source.cloneNode(true) as HTMLElement;
+  clone.classList.remove('mc-force-light');
   const srcAll = source.querySelectorAll<HTMLElement>('*');
   const dstAll = clone.querySelectorAll<HTMLElement>('*');
   applyInline(source, clone);
   for (let i = 0; i < srcAll.length; i++) {
     applyInline(srcAll[i], dstAll[i]);
   }
+  source.classList.remove('mc-force-light');
   return `<div>${clone.outerHTML}</div>`;
 }
 

@@ -116,6 +116,8 @@ Every rich or text copy writes `text/plain` as well, so targets that cannot take
 
 Gmail and Outlook strip `<style>` blocks and external CSS, honoring only inline `style` attributes. `inlineStyledHtml()` clones the target node, walks every element, and copies a whitelist of computed properties (font, color, background, borders, padding, margin, alignment, list style, white-space) onto inline styles. That is what makes a pasted table or heading keep its look in an email.
 
+Before reading computed styles, the source is briefly tagged with an `mc-force-light` class that overrides the palette to light values. This keeps copies dark-on-light even when the preview is displayed in a dark theme (a dark preview would otherwise inline light text that pastes invisibly into a white document). The class is added and removed synchronously within the copy call, so the on-screen preview never repaints.
+
 ### PNG copy
 
 `copyPng()` uses `html-to-image`'s `toBlob()` at 2x pixel ratio, then writes an `image/png` `ClipboardItem`. This is the one place the async Clipboard API is used, because image writes are not expressible through the `copy`-event path. If the environment blocks it, the user sees a toast rather than a silent failure.

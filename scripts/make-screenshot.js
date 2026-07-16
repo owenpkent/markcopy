@@ -55,22 +55,31 @@ const menu = `
   <div class="mc-menu-item">Copy Whole Document as Rich Text</div>
 </div>`;
 
-const html = `<!doctype html>
+// dark = true simulates VS Code's dark theme (it adds `vscode-dark` to body).
+function buildHtml(dark) {
+  const pageBg = dark ? '#010409' : '#f6f8fa';
+  const cardBorder = dark ? '#30363d' : '#d1d9e0';
+  // Stand in for the VS Code menu theme variables so the context menu renders
+  // as it would in the real editor (dark menu in a dark theme).
+  const menuVars = dark
+    ? `--vscode-menu-background:#252526; --vscode-menu-foreground:#cccccc;
+       --vscode-menu-border:#454545; --vscode-menu-selectionBackground:#04395e;
+       --vscode-menu-selectionForeground:#ffffff;`
+    : '';
+  return `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 ${css}
-body[data-style="github"] { background: #f6f8fa; }
+body { background: ${pageBg}; ${menuVars} }
 .frame { max-width: 820px; margin: 0 auto; }
-.markdown-body { background:#fff; border:1px solid #d1d9e0; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,.08); }
+.markdown-body { border:1px solid ${cardBorder}; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,.14); }
 </style></head>
-<body data-style="github">
+<body class="${dark ? 'vscode-dark' : 'vscode-light'}" data-style="github">
   <div class="frame">
     <div class="markdown-body">${body}</div>
   </div>
   ${menu}
 </body></html>`;
-
-const htmlPath = path.join(outDir, '_shot.html');
-fs.writeFileSync(htmlPath, html);
+}
 
 const browsers = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -82,16 +91,22 @@ if (!browser) {
   process.exit(1);
 }
 
-const outPng = path.join(outDir, 'context-menu.png');
-execFileSync(browser, [
-  '--headless',
-  '--disable-gpu',
-  '--hide-scrollbars',
-  '--force-device-scale-factor=2',
-  '--window-size=880,470',
-  `--screenshot=${outPng}`,
-  `file:///${htmlPath.replace(/\\/g, '/')}`,
-]);
-
-fs.unlinkSync(htmlPath);
-console.log('Wrote', path.relative(root, outPng));
+for (const [name, dark] of [
+  ['context-menu.png', false],
+  ['context-menu-dark.png', true],
+]) {
+  const htmlPath = path.join(outDir, '_shot.html');
+  fs.writeFileSync(htmlPath, buildHtml(dark));
+  const outPng = path.join(outDir, name);
+  execFileSync(browser, [
+    '--headless',
+    '--disable-gpu',
+    '--hide-scrollbars',
+    '--force-device-scale-factor=2',
+    '--window-size=880,470',
+    `--screenshot=${outPng}`,
+    `file:///${htmlPath.replace(/\\/g, '/')}`,
+  ]);
+  fs.unlinkSync(htmlPath);
+  console.log('Wrote', path.relative(root, outPng));
+}

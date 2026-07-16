@@ -11,7 +11,11 @@ VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanc
 
 ![Right-click a table in the MarkCopy preview to copy it as rich text, CSV, TSV, or PNG](docs/media/context-menu.png)
 
-<!-- The image above is generated from the real preview + media/preview.css via `npm run screenshot`. A screen-recorded GIF of pasting into Word or Gmail would be a welcome contribution. -->
+<!-- The images are generated from the real preview + media/preview.css via `npm run screenshot`. A screen-recorded GIF of pasting into Word or Gmail would be a welcome contribution. -->
+
+MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark palette:
+
+![The MarkCopy preview and copy menu in a dark VS Code theme](docs/media/context-menu-dark.png)
 
 ## Why it exists
 
@@ -28,6 +32,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Copy as raw Markdown**, for a selection or a single block.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
+- **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview.
 - **Mermaid diagrams** and syntax-highlighted code out of the box.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with right-click **Copy Page as PNG**, **Copy Page Text**, and **Copy All Text**. One extension previews both Markdown and PDF.
 

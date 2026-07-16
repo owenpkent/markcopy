@@ -140,10 +140,147 @@ body[data-style='vscode'] .markdown-body pre {
   color: #e36209;
 }
 
+/* ---- Dark theme ---------------------------------------------------------- */
+/* VS Code adds `vscode-dark` / `vscode-high-contrast` to the webview body.
+   In those themes we render a GitHub-dark palette regardless of style profile.
+   Copies stay light: see `.mc-force-light` below, applied during serialization. */
+body.vscode-dark,
+body.vscode-high-contrast {
+  background: #0d1117;
+}
+body.vscode-dark .markdown-body,
+body.vscode-high-contrast .markdown-body {
+  color: #e6edf3;
+  background: #0d1117;
+}
+body.vscode-dark .markdown-body h1,
+body.vscode-dark .markdown-body h2,
+body.vscode-high-contrast .markdown-body h1,
+body.vscode-high-contrast .markdown-body h2 {
+  border-bottom-color: #21262d;
+}
+body.vscode-dark .markdown-body code,
+body.vscode-high-contrast .markdown-body code {
+  background: rgba(110, 118, 129, 0.4);
+}
+body.vscode-dark .markdown-body pre,
+body.vscode-high-contrast .markdown-body pre {
+  background: #161b22;
+}
+body.vscode-dark .markdown-body pre code,
+body.vscode-high-contrast .markdown-body pre code {
+  background: transparent;
+}
+body.vscode-dark .markdown-body blockquote,
+body.vscode-high-contrast .markdown-body blockquote {
+  color: #8b949e;
+  border-left-color: #30363d;
+}
+body.vscode-dark .markdown-body th,
+body.vscode-dark .markdown-body td,
+body.vscode-high-contrast .markdown-body th,
+body.vscode-high-contrast .markdown-body td {
+  border-color: #30363d;
+}
+body.vscode-dark .markdown-body th,
+body.vscode-high-contrast .markdown-body th {
+  background: #161b22;
+}
+body.vscode-dark .markdown-body a,
+body.vscode-high-contrast .markdown-body a {
+  color: #4493f8;
+}
+body.vscode-dark .mc-error,
+body.vscode-high-contrast .mc-error {
+  color: #ff7b72;
+  background: #2d1214;
+}
+
+/* highlight.js (github dark) token colors */
+body.vscode-dark .hljs-comment,
+body.vscode-dark .hljs-quote {
+  color: #8b949e;
+}
+body.vscode-dark .hljs-keyword,
+body.vscode-dark .hljs-selector-tag,
+body.vscode-dark .hljs-type {
+  color: #ff7b72;
+}
+body.vscode-dark .hljs-string,
+body.vscode-dark .hljs-doctag {
+  color: #a5d6ff;
+}
+body.vscode-dark .hljs-title,
+body.vscode-dark .hljs-section,
+body.vscode-dark .hljs-function .hljs-title {
+  color: #d2a8ff;
+}
+body.vscode-dark .hljs-number,
+body.vscode-dark .hljs-literal {
+  color: #79c0ff;
+}
+body.vscode-dark .hljs-attr,
+body.vscode-dark .hljs-attribute,
+body.vscode-dark .hljs-variable {
+  color: #ffa657;
+}
+
+/* ---- Force-light (copy safety) ------------------------------------------- */
+/* Added to a subtree only while its inline styles are computed for a rich-text
+   copy, so the clipboard HTML is always dark-on-light and pastes cleanly into
+   Word / Gmail / Docs even when the preview is displayed in a dark theme.
+   Removed synchronously, so the preview itself never repaints. */
+.mc-force-light,
+.mc-force-light * {
+  color: #1f2328 !important;
+  border-color: #d1d9e0 !important;
+  background-color: transparent !important;
+}
+.mc-force-light pre,
+.mc-force-light code,
+.mc-force-light th {
+  background-color: #f6f8fa !important;
+}
+.mc-force-light a {
+  color: #0969da !important;
+}
+.mc-force-light blockquote {
+  color: #59636e !important;
+}
+.mc-force-light .hljs-comment,
+.mc-force-light .hljs-quote {
+  color: #6a737d !important;
+}
+.mc-force-light .hljs-keyword,
+.mc-force-light .hljs-selector-tag,
+.mc-force-light .hljs-type {
+  color: #d73a49 !important;
+}
+.mc-force-light .hljs-string,
+.mc-force-light .hljs-doctag {
+  color: #032f62 !important;
+}
+.mc-force-light .hljs-title,
+.mc-force-light .hljs-section {
+  color: #6f42c1 !important;
+}
+.mc-force-light .hljs-number,
+.mc-force-light .hljs-literal {
+  color: #005cc5 !important;
+}
+.mc-force-light .hljs-attr,
+.mc-force-light .hljs-attribute,
+.mc-force-light .hljs-variable {
+  color: #e36209 !important;
+}
+
 /* ---- PDF preview --------------------------------------------------------- */
 body.mc-pdf {
   background: #525659;
   margin: 0;
+}
+body.mc-pdf.vscode-dark {
+  background: #2a2a2b;
 }
 #pdf-root {
   display: flex;
