@@ -32,6 +32,9 @@ jobs:
       - name: Type-check
         run: npm run check-types
 
+      - name: Test
+        run: npm test
+
       - name: Build bundles
         run: npm run compile
 

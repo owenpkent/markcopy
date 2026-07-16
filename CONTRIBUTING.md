@@ -43,6 +43,15 @@ Optional local secret scanning (matches folio): `pip install pre-commit && pre-c
 
 `npm run screenshot` regenerates the README hero image (`docs/media/context-menu.png`) by rendering the real preview with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`).
 
+## Tests
+
+```bash
+npm test          # vitest run (what CI runs)
+npm run test:watch
+```
+
+Tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`). DOM-coupled or VS Code-host code is not unit-tested here; exercise it in the Extension Development Host (F5).
+
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).
@@ -54,17 +63,20 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Project layout
 
-| Path                           | What lives here                                                     |
-| ------------------------------ | ------------------------------------------------------------------- |
-| `src/extension.ts`             | Host: activation, commands, panel lifecycle, scroll sync.           |
-| `src/render.ts`                | markdown-it setup and source-line mapping.                          |
-| `src/webview/main.ts`          | Markdown webview: rendering, context menu, clipboard, PNG, Mermaid. |
-| `src/pdfEditor.ts`             | Host: read-only custom editor for `.pdf` files.                     |
-| `src/webview/pdf.ts`           | PDF webview: pdf.js rendering and page/text copy actions.           |
-| `media/preview.css`            | Style profiles (light/dark palette), PDF layout, menu, toast.       |
-| `scripts/make-screenshot.js`   | Regenerates the README screenshots (`npm run screenshot`).          |
-| `docs/`                        | Architecture and copy-matrix reference.                             |
-| `esbuild.js`, `esbuild.web.js` | The bundlers.                                                       |
+| Path                             | What lives here                                                     |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync.           |
+| `src/render.ts`                  | markdown-it setup and source-line mapping.                          |
+| `src/webview/main.ts`            | Markdown webview: rendering, context menu, clipboard, PNG, Mermaid. |
+| `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                     |
+| `src/webview/pdf.ts`             | PDF webview: pdf.js rendering and page/text copy actions.           |
+| `src/webview/table.ts`           | CSV/TSV table serialization (pure, unit-tested).                    |
+| `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                  |
+| `tests/`                         | Vitest unit tests.                                                  |
+| `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.       |
+| `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).          |
+| `docs/`                          | Architecture and copy-matrix reference.                             |
+| `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                       |
 
 ## Coding conventions
 

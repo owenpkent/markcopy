@@ -44,6 +44,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // Tests run under vitest + jsdom (Node globals plus a DOM).
+    files: ['tests/**/*.ts'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     // Build and config scripts are CommonJS run directly by Node.
     files: ['*.js', 'scripts/**/*.js'],
     languageOptions: { globals: { ...globals.node } },

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+coverage/
 media/webview.js
 media/webview.js.map
 media/pdf.js

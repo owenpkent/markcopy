@@ -15,4 +15,13 @@ docs/**
 .gitattributes
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
+tests/**
+vitest.config.ts
+scripts/**
+eslint.config.mjs
+.prettierrc.json
+.prettierignore
+.pre-commit-config.yaml
+.gitleaksignore
+coverage/**
 # Keep: dist/**, media/**, README.md, LICENSE, package.json

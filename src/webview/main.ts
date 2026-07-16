@@ -1,19 +1,7 @@
 import mermaid from 'mermaid';
 import { toBlob } from 'html-to-image';
-import TurndownService from 'turndown';
-import { gfm } from 'turndown-plugin-gfm';
-
-// Converts rendered preview HTML back to Markdown for "copy selection as
-// Markdown". Configured to match the flavor the source is typically written in.
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-  bulletListMarker: '-',
-  emDelimiter: '*',
-  strongDelimiter: '**',
-  linkStyle: 'inlined',
-});
-turndown.use(gfm);
+import { htmlToMarkdown } from './markdownConvert';
+import { tableToDelimited } from './table';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -276,7 +264,7 @@ function selectionMarkdown(): string {
   }
   // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
-  const md = turndown.turndown(wrapper.innerHTML).trim();
+  const md = htmlToMarkdown(wrapper.innerHTML).trim();
   return md || sel.toString();
 }
 
@@ -412,29 +400,6 @@ function applyInline(src: HTMLElement, dst: HTMLElement): void {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-// Serialize a table to delimiter-separated values. Pass ',' for CSV or '\t' for
-// TSV. CSV fields follow RFC 4180 quoting; TSV flattens tabs/newlines to spaces.
-function tableToDelimited(table: HTMLElement, delimiter: string): string {
-  return Array.from(table.querySelectorAll('tr'))
-    .map((tr) =>
-      Array.from(tr.querySelectorAll('th,td'))
-        .map((c) => escapeField((c.textContent ?? '').trim(), delimiter))
-        .join(delimiter),
-    )
-    .join('\r\n');
-}
-
-function escapeField(value: string, delimiter: string): string {
-  if (delimiter === '\t') {
-    return value.replace(/[\t\r\n]+/g, ' ');
-  }
-  // RFC 4180: quote the field if it contains the delimiter, a quote, or a newline.
-  if (value.includes(delimiter) || value.includes('"') || /[\r\n]/.test(value)) {
-    return '"' + value.replace(/"/g, '""') + '"';
-  }
-  return value;
-}
-
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
