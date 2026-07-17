@@ -6,6 +6,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
+      'out',
+      '.vscode-test',
       'node_modules',
       'media/webview.js',
       'media/pdf.js',
@@ -47,6 +49,11 @@ export default tseslint.config(
     // Tests run under vitest + jsdom (Node globals plus a DOM).
     files: ['tests/**/*.ts'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
+    // Integration tests run in VS Code under Mocha (tdd interface).
+    files: ['test-integration/**/*.ts'],
+    languageOptions: { globals: { ...globals.node, ...globals.mocha } },
   },
   {
     // Build and config scripts are CommonJS run directly by Node.

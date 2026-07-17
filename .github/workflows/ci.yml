@@ -47,3 +47,23 @@ jobs:
           name: markcopy-vsix
           path: '*.vsix'
           if-no-files-found: error
+
+  integration:
+    name: Integration tests (VS Code)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # VS Code needs a display on Linux; xvfb provides a virtual one.
+      - name: Run integration tests
+        run: xvfb-run -a npm run test:integration

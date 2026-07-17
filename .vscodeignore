@@ -16,7 +16,12 @@ docs/**
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 tests/**
+test-integration/**
+out/**
+.vscode-test/**
+.vscode-test.mjs
 vitest.config.ts
+tsconfig.integration.json
 scripts/**
 eslint.config.mjs
 .prettierrc.json

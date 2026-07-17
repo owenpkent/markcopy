@@ -45,12 +45,22 @@ Optional local secret scanning (matches folio): `pip install pre-commit && pre-c
 
 ## Tests
 
+### Unit tests (vitest)
+
 ```bash
 npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
-Tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`). DOM-coupled or VS Code-host code is not unit-tested here; exercise it in the Extension Development Host (F5).
+Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`).
+
+### Integration tests (VS Code)
+
+```bash
+npm run test:integration   # downloads VS Code and runs the extension inside it
+```
+
+Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, and that the preview panel opens. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
 
 ## Debug
 
@@ -73,6 +83,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/webview/table.ts`           | CSV/TSV table serialization (pure, unit-tested).                    |
 | `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                  |
 | `tests/`                         | Vitest unit tests.                                                  |
+| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).          |
 | `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.       |
 | `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).          |
 | `docs/`                          | Architecture and copy-matrix reference.                             |

@@ -9,6 +9,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Copy Table as CSV** in the table right-click menu (RFC 4180 quoting), alongside the existing TSV option.
 - Project tooling adopted from folio: ESLint 9 (flat config), Prettier, gitleaks/pinact pre-commit hooks, `.editorconfig`, and `npm run lint` / `format` scripts. CI now lints and checks formatting.
 - Unit tests (vitest + jsdom) covering markdown-it rendering and source-line mapping, CSV/TSV table serialization (RFC 4180), and HTML-to-Markdown conversion. Run with `npm test`; CI runs them on every push and PR.
+- Integration tests (Mocha + `@vscode/test-electron`) that run the extension in a real VS Code instance: activation, command registration, configuration defaults, and preview-panel opening. Run with `npm run test:integration`; CI runs them on Linux under `xvfb`.
 
 - **Dark mode**: the preview renders a polished GitHub-dark palette (text, code, tables, blockquotes, links, and syntax highlighting) in dark and high-contrast VS Code themes, for both style profiles. Rich-text copies force a light palette during serialization, so pasted content stays dark-on-light and readable in white documents even from a dark preview.
 - **`markcopy.theme` setting** (`auto` / `light` / `dark`) to follow the VS Code theme or force a preview palette. The Markdown preview updates live when the setting changes; open PDFs pick it up when reopened.

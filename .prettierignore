@@ -1,4 +1,7 @@
 dist
+out
+.vscode-test
+coverage
 media/webview.js
 media/pdf.js
 media/pdf.worker.js
