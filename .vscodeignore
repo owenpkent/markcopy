@@ -15,6 +15,7 @@ docs/**
 .gitattributes
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
+RELEASING.md
 tests/**
 test-integration/**
 out/**

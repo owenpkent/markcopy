@@ -105,19 +105,16 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Releasing
 
-```bash
-npm run package     # production build (minified, no source maps)
-npm run vsix        # @vscode/vsce package -> markcopy-<version>.vsix
-```
-
-To publish to the Marketplace (once a publisher and token exist):
+Full steps (publisher setup, both registries, verified-publisher badge) are in [RELEASING.md](RELEASING.md). In short:
 
 ```bash
-npx vsce login <publisher-id>
-npx vsce publish            # or: npx vsce publish minor
+npm version patch                # bump version + tag
+npm run vsix                     # build + package -> markcopy-<version>.vsix
+npm run publish:vsce             # VS Code Marketplace (needs vsce login okstudio)
+npm run publish:ovsx             # Open VSX (needs an Open VSX token)
 ```
 
-Bump the version in `package.json` and add a section to [CHANGELOG.md](CHANGELOG.md) before releasing.
+Move the `[Unreleased]` entries in [CHANGELOG.md](CHANGELOG.md) under the new version before releasing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
 
 ## Filing issues
 
