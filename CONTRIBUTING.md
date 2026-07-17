@@ -37,7 +37,7 @@ npm run format        # prettier --write .
 npm run format:check  # prettier --check . (what CI runs)
 ```
 
-CI runs `lint`, `format:check`, type-check, build, and package on every push and PR. Run `npm run format` before committing so `format:check` stays green.
+CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type-check, unit tests, build, package) and an integration-test job (VS Code under xvfb). Run `npm run format` before committing so `format:check` stays green.
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 

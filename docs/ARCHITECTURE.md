@@ -40,15 +40,19 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 ## File map
 
-| File                            | Role                                                                                                                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/extension.ts`              | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                    |
-| `src/render.ts`                 | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                                                     |
-| `src/webview/main.ts`           | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync. |
-| `src/pdfEditor.ts`              | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                                                    |
-| `src/webview/pdf.ts`            | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                                                  |
-| `media/preview.css`             | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                  |
-| `esbuild.js` / `esbuild.web.js` | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                      |
+| File                             | Role                                                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extension.ts`               | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                    |
+| `src/render.ts`                  | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                                                     |
+| `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync. |
+| `src/pdfEditor.ts`               | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                                                    |
+| `src/webview/pdf.ts`             | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                                                  |
+| `src/webview/table.ts`           | CSV/TSV table serialization (RFC 4180). Pure, unit-tested.                                                                                                                      |
+| `src/webview/markdownConvert.ts` | HTML-to-Markdown conversion via Turndown. Pure, unit-tested.                                                                                                                    |
+| `tests/`                         | Vitest unit tests over the pure logic.                                                                                                                                          |
+| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                                                                      |
+| `media/preview.css`              | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                  |
+| `esbuild.js` / `esbuild.web.js`  | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                      |
 
 ## Rendering pipeline
 
@@ -156,3 +160,12 @@ script-src 'nonce-${nonce}';
 Only the nonce-tagged bundle can execute. `blob:` and `data:` image sources are allowed so Mermaid SVGs and html-to-image output render. All local assets are referenced through `webview.asWebviewUri`.
 
 See [SECURITY.md](../SECURITY.md) for the threat model.
+
+## Testing
+
+Two layers, matching the two runtimes:
+
+- **Unit (`tests/`, vitest + jsdom).** Covers the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV serialization (`src/webview/table.ts`), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`). The two `webview/` helpers were extracted from `main.ts` specifically so they import without a DOM or the VS Code API. Run with `npm test`.
+- **Integration (`test-integration/`, Mocha + `@vscode/test-electron`).** Runs the built extension in a downloaded VS Code instance (`.vscode-test.mjs` config, compiled via `tsconfig.integration.json` to `out/`) and asserts activation, command registration, configuration defaults, and that the preview panel opens. Run with `npm run test:integration`; on Linux and CI it needs a display (`xvfb-run`).
+
+Webview-internal behavior (the actual clipboard writes, the context menu) is not asserted automatically, since it runs sandboxed inside the webview; exercise it by hand in the Extension Development Host (F5). Both layers run in CI (see [CONTRIBUTING](../CONTRIBUTING.md#tests)).

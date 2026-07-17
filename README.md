@@ -115,6 +115,7 @@ The file is read by the extension host and handed to the webview as bytes, so no
 npm install
 npm run compile     # type-check + build the extension and webview bundles
 npm run watch       # rebuild on change
+npm test            # vitest unit tests
 # press F5 in VS Code to launch the Extension Development Host, then open sample.md
 ```
 
