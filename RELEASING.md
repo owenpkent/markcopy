@@ -4,17 +4,17 @@ How to cut a release and publish to both the VS Code Marketplace and Open VSX.
 
 ## One-time setup
 
-### VS Code Marketplace (publisher `okstudio`)
+### VS Code Marketplace (publisher `OwenPKent`)
 
 1. Create an Azure DevOps organization at <https://dev.azure.com>.
 2. Create a Personal Access Token (PAT): avatar → **Personal access tokens** → **New Token**, Organization = **All accessible organizations**, Scope = **Marketplace → Manage**. Copy it.
-3. Create the publisher at <https://marketplace.visualstudio.com/manage>. The publisher **ID must equal** `package.json` → `publisher` (`okstudio`).
-4. Authenticate `vsce` once: `npx vsce login okstudio` (paste the PAT).
+3. Create the publisher at <https://marketplace.visualstudio.com/manage>. The publisher **ID must equal** `package.json` → `publisher` (`OwenPKent`).
+4. Authenticate `vsce` once: `npx vsce login OwenPKent` (paste the PAT).
 
 ### Open VSX (for Cursor / VSCodium / Windsurf)
 
 1. Sign in at <https://open-vsx.org> with GitHub and create an access token (user settings).
-2. Create the namespace once (must match the publisher): `npx ovsx create-namespace okstudio -p <OVSX_TOKEN>`.
+2. Create the namespace once (must match the publisher): `npx ovsx create-namespace OwenPKent -p <OVSX_TOKEN>`.
 
 ### Verified publisher badge (optional)
 

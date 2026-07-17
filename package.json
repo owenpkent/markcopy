@@ -3,7 +3,7 @@
   "displayName": "MarkCopy: Rich Markdown & PDF Preview",
   "description": "One-stop Markdown and PDF preview with right-click copy: rich text, per-element (code / table / diagram), raw Markdown, CSV/TSV, and PNG.",
   "version": "0.0.1",
-  "publisher": "okstudio",
+  "publisher": "OwenPKent",
   "license": "MIT",
   "author": "OK Studio",
   "repository": {

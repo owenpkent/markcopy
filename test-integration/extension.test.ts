@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-const EXT_ID = 'okstudio.markcopy';
+const EXT_ID = 'OwenPKent.markcopy';
 
 suite('MarkCopy integration', () => {
   suiteSetup(async () => {

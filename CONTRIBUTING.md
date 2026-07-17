@@ -110,7 +110,7 @@ Full steps (publisher setup, both registries, verified-publisher badge) are in [
 ```bash
 npm version patch                # bump version + tag
 npm run vsix                     # build + package -> markcopy-<version>.vsix
-npm run publish:vsce             # VS Code Marketplace (needs vsce login okstudio)
+npm run publish:vsce             # VS Code Marketplace (needs vsce login OwenPKent)
 npm run publish:ovsx             # Open VSX (needs an Open VSX token)
 ```
 
