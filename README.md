@@ -33,7 +33,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview.
-- **Mermaid diagrams** and syntax-highlighted code out of the box.
+- **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with right-click **Copy Page as PNG**, **Copy Page Text**, and **Copy All Text**. One extension previews both Markdown and PDF.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
@@ -56,11 +56,12 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
 ## Settings
 
-| Setting                 | Type                        | Default  | Description                                                                                                         |
-| ----------------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile` | `github` \| `vscode`        | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme.         |
-| `markcopy.syncScroll`   | boolean                     | `true`   | Keep the preview scroll position in sync with the editor.                                                           |
-| `markcopy.theme`        | `auto` \| `light` \| `dark` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light` and `dark` force it. Copies stay light-safe either way. |
+| Setting                 | Type                        | Default  | Description                                                                                                                                                            |
+| ----------------------- | --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markcopy.styleProfile` | `github` \| `vscode`        | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme.                                                            |
+| `markcopy.syncScroll`   | boolean                     | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                              |
+| `markcopy.theme`        | `auto` \| `light` \| `dark` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light` and `dark` force it. Copies stay light-safe either way.                                                    |
+| `markcopy.mermaid`      | object                      | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default. |
 
 ## Install
 

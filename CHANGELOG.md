@@ -13,6 +13,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **Dark mode**: the preview renders a polished GitHub-dark palette (text, code, tables, blockquotes, links, and syntax highlighting) in dark and high-contrast VS Code themes, for both style profiles. Rich-text copies force a light palette during serialization, so pasted content stays dark-on-light and readable in white documents even from a dark preview.
 - **`markcopy.theme` setting** (`auto` / `light` / `dark`) to follow the VS Code theme or force a preview palette. The Markdown preview updates live when the setting changes; open PDFs pick it up when reopened.
+- **Theme-aware Mermaid diagrams**: diagrams now render with Mermaid's dark theme in dark/high-contrast VS Code themes (and re-render when the color theme changes), instead of always using the light theme. New **`markcopy.mermaid`** setting merges custom Mermaid config into `mermaid.initialize`.
 
 ### Changed
 - **Copy Selection as Markdown** now copies exactly the selected content, including partial paragraphs and selections that span multiple blocks (the selected HTML is converted with Turndown), instead of the whole block the selection started in.

@@ -58,6 +58,14 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Re-render when the VS Code color theme changes so Mermaid diagrams
+    // re-theme in auto mode (the CSS palette already updates live).
+    vscode.window.onDidChangeActiveColorTheme(() => {
+      if (current) {
+        update(current);
+      }
+    }),
+
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
       const cfg = vscode.workspace.getConfiguration('markcopy');
@@ -153,6 +161,7 @@ function update(state: PreviewState): void {
     source,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
     theme: cfg.get<string>('theme', 'auto'),
+    mermaidConfig: cfg.get<object>('mermaid', {}),
   });
 }
 

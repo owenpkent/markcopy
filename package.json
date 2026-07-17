@@ -120,6 +120,12 @@
           ],
           "default": "auto",
           "description": "Preview color palette. 'auto' follows your VS Code theme; 'light' and 'dark' force a palette. Copied rich text stays light either way."
+        },
+        "markcopy.mermaid": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "markdownDescription": "Extra [Mermaid configuration](https://mermaid.js.org/config/schema-docs/config.html) merged into `mermaid.initialize` (for example `flowchart`, `fontFamily`, `themeVariables`, or a fixed `theme`). Diagrams already follow the light/dark palette by default; set `theme` here to override."
         }
       }
     }

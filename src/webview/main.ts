@@ -18,8 +18,30 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 let sourceLines: string[] = [];
 let programmaticScroll = false;
+let mermaidConfig: Record<string, unknown> = {};
 
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+// The preview is dark when the theme is forced dark, or (in auto mode) when VS
+// Code is in a dark/high-contrast theme. Mirrors the CSS in preview.css.
+function isDark(): boolean {
+  const forced = document.body.dataset.mcTheme;
+  if (forced === 'dark') return true;
+  if (forced === 'light') return false;
+  return (
+    document.body.classList.contains('vscode-dark') ||
+    document.body.classList.contains('vscode-high-contrast')
+  );
+}
+
+// (Re)initialize Mermaid so diagrams match the current theme, merging any
+// user-supplied `markcopy.mermaid` config on top.
+function initMermaid(): void {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: isDark() ? 'dark' : 'default',
+    ...mermaidConfig,
+  } as Parameters<typeof mermaid.initialize>[0]);
+}
 
 // ---------------------------------------------------------------------------
 // Messaging
@@ -33,6 +55,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         msg.source as string,
         msg.styleProfile as string,
         msg.theme as string,
+        (msg.mermaidConfig as Record<string, unknown>) ?? {},
       );
       break;
     case 'scrollToLine':
@@ -59,13 +82,17 @@ async function render(
   source: string,
   styleProfile: string,
   theme: string,
+  config: Record<string, unknown>,
 ): Promise<void> {
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.style = styleProfile;
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
+  mermaidConfig = config;
   content.innerHTML = html;
+  // Initialize after data-mc-theme is set so the diagram theme matches.
+  initMermaid();
   await renderMermaid();
 }
 

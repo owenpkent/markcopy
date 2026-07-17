@@ -57,8 +57,8 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 ## Rendering pipeline
 
 1. The user opens the preview. `openPreview` creates a `WebviewPanel` (beside the editor, `retainContextWhenHidden: true`) and sets its HTML shell.
-2. `update()` reads the document text, calls `md.render(source)`, and posts a `render` message carrying the HTML, the raw source, the active style profile, and the theme (`markcopy.theme`).
-3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), then upgrades every Mermaid placeholder into an SVG.
+2. `update()` reads the document text, calls `md.render(source)`, and posts a `render` message carrying the HTML, the raw source, the active style profile, the theme (`markcopy.theme`), and any `markcopy.mermaid` config.
+3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), (re)initializes Mermaid with the theme and any `markcopy.mermaid` config, then upgrades every Mermaid placeholder into an SVG.
 4. On each edit, `onDidChangeTextDocument` re-runs `update()`, so the preview is live.
 
 ### Source-line mapping
@@ -72,11 +72,11 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 Host to webview:
 
-| Type           | Payload                                   | Effect                                                       |
-| -------------- | ----------------------------------------- | ------------------------------------------------------------ |
-| `render`       | `html`, `source`, `styleProfile`, `theme` | Replace preview content, apply the theme, re-render Mermaid. |
-| `scrollToLine` | `line`                                    | Scroll the preview to the element for that source line.      |
-| `copyAll`      | none                                      | Copy the whole document as rich text.                        |
+| Type           | Payload                                                    | Effect                                                                       |
+| -------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `render`       | `html`, `source`, `styleProfile`, `theme`, `mermaidConfig` | Replace preview content, apply the theme, (re)initialize and render Mermaid. |
+| `scrollToLine` | `line`                                                     | Scroll the preview to the element for that source line.                      |
+| `copyAll`      | none                                                       | Copy the whole document as rich text.                                        |
 
 Webview to host:
 
@@ -141,7 +141,7 @@ The `markcopy.theme` setting (`auto` / `light` / `dark`) is passed to the webvie
 - `body[data-mc-theme='dark']` (forced dark), or
 - `body.vscode-dark` / `body.vscode-high-contrast` and `data-mc-theme` is not `light` and not `dark` (auto mode following the VS Code theme).
 
-Because auto mode keys off VS Code's own `vscode-dark` body class, switching the editor theme updates the preview live with no extra messaging. Changing `markcopy.theme` triggers a re-render (via `onDidChangeConfiguration`) for the Markdown preview; the PDF editor reads the setting when it opens.
+Because auto mode keys off VS Code's own `vscode-dark` body class, the CSS palette updates live when the editor theme switches. Mermaid diagrams are pre-rendered SVGs with baked-in colors, so to re-theme them the host also re-renders on `onDidChangeActiveColorTheme`, and on `onDidChangeConfiguration` for `markcopy.theme` / `markcopy.mermaid`. The PDF editor reads the theme setting when it opens.
 
 Copies stay light regardless of the displayed theme: see `.mc-force-light` under [Clipboard](#clipboard).
 
