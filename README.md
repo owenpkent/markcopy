@@ -65,7 +65,14 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
 ## Install
 
-**From the packaged VSIX** (local install):
+**From the Marketplace** (once published, as `OwenPKent.markcopy`):
+
+- In VS Code: open the Extensions view, search **MarkCopy**, and click Install.
+- Or from a terminal: `code --install-extension OwenPKent.markcopy`
+
+It will also be available on [Open VSX](https://open-vsx.org) for Cursor, VSCodium, and Windsurf.
+
+**From the packaged VSIX** (local build):
 
 ```bash
 npm install
@@ -73,7 +80,7 @@ npm run vsix                                   # produces markcopy-0.0.1.vsix
 code --install-extension markcopy-0.0.1.vsix
 ```
 
-**From the Marketplace:** not yet published. See [CONTRIBUTING](CONTRIBUTING.md#releasing) for the release flow.
+See [RELEASING.md](RELEASING.md) for how releases are cut and published.
 
 ## How the copy works
 
