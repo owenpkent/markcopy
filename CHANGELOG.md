@@ -5,6 +5,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- **Local images in the preview**: relative and absolute image paths (e.g. `![](media/x.png)`) now resolve correctly. Image `src` is rewritten to a webview-safe URI and the preview is granted read access to the document's workspace folder, fixing broken-image icons.
+- **Auto-open preview** (`markcopy.autoPreview`, on by default): the preview opens to the side automatically when you focus a Markdown file, and retargets as you switch files, keeping your cursor in the editor. A preview you close stays closed for that file so it never springs back.
+- **In-preview settings menu**: the right-click menu now has a settings section to switch **theme** (auto/light/dark) and **style** (GitHub/VS Code), toggle **sync scroll** and **auto-open preview**, and jump to the full MarkCopy settings. A **gear** button in the preview title bar opens the settings too.
 - **PDF preview**: MarkCopy now opens `.pdf` files in a built-in read-only viewer (pdf.js), with right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. One extension previews both Markdown and PDF.
 - **Copy Table as CSV** in the table right-click menu (RFC 4180 quoting), alongside the existing TSV option.
 - Project tooling adopted from folio: ESLint 9 (flat config), Prettier, gitleaks/pinact pre-commit hooks, `.editorconfig`, and `npm run lint` / `format` scripts. CI now lints and checks formatting.

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { createMarkdownIt } from './render';
 import { PdfEditorProvider } from './pdfEditor';
+import { localImageRef, shouldAutoPreview } from './preview-utils';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -11,6 +12,10 @@ interface PreviewState {
 
 let current: PreviewState | undefined;
 const md = createMarkdownIt();
+
+// Documents whose preview the user closed this session. Auto-preview skips these
+// so a dismissed preview does not spring back open on the next focus change.
+const dismissedPreviews = new Set<string>();
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -27,10 +32,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('markcopy.openPreview', (uri?: vscode.Uri) => {
       const doc = pickDocument(uri);
       if (doc) {
+        // An explicit open clears any earlier dismissal for this document.
+        dismissedPreviews.delete(doc.uri.toString());
         openPreview(context, doc);
       } else {
         vscode.window.showInformationMessage('MarkCopy: open a Markdown file first.');
       }
+    }),
+
+    // Open the MarkCopy settings (also reachable from the preview's title-bar gear
+    // and the in-preview right-click menu).
+    vscode.commands.registerCommand('markcopy.openSettings', () => {
+      vscode.commands.executeCommand('workbench.action.openSettings', '@ext:OwenPKent.markcopy');
     }),
 
     vscode.commands.registerCommand('markcopy.copyDocumentAsRichText', () => {
@@ -66,6 +79,28 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // Auto-open (or retarget) the preview when a Markdown editor gains focus,
+    // when enabled. Opens beside with focus preserved so the cursor stays put.
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (!editor) {
+        return;
+      }
+      const doc = editor.document;
+      const enabled = vscode.workspace
+        .getConfiguration('markcopy')
+        .get<boolean>('autoPreview', true);
+      const eligible = shouldAutoPreview({
+        enabled,
+        languageId: doc.languageId,
+        scheme: doc.uri.scheme,
+        docKey: doc.uri.toString(),
+        dismissed: dismissedPreviews,
+      });
+      if (eligible) {
+        openPreview(context, doc);
+      }
+    }),
+
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
       const cfg = vscode.workspace.getConfiguration('markcopy');
@@ -97,7 +132,15 @@ function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
 
 function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument): void {
   if (current) {
-    current.docUri = doc.uri;
+    if (current.docUri.toString() !== doc.uri.toString()) {
+      current.docUri = doc.uri;
+      // Grant the webview read access to the newly-targeted document's folder so
+      // its relative images resolve (localResourceRoots is fixed at creation).
+      current.panel.webview.options = {
+        enableScripts: true,
+        localResourceRoots: resourceRoots(context, doc.uri),
+      };
+    }
     current.panel.reveal(vscode.ViewColumn.Beside, true);
     update(current);
     return;
@@ -110,7 +153,7 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
     {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')],
+      localResourceRoots: resourceRoots(context, doc.uri),
     },
   );
 
@@ -125,6 +168,10 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         revealEditorLine(state.docUri, msg.line);
       } else if (msg?.type === 'toast') {
         vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
+      } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
+        applySetting(msg.key, msg.value);
+      } else if (msg?.type === 'openSettings') {
+        vscode.commands.executeCommand('markcopy.openSettings');
       }
     },
     undefined,
@@ -134,6 +181,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
   panel.onDidDispose(
     () => {
       if (current === state) {
+        // Remember the dismissal so auto-preview does not immediately reopen it.
+        dismissedPreviews.add(state.docUri.toString());
         current = undefined;
       }
     },
@@ -144,6 +193,24 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
   update(state);
 }
 
+// The folders the preview webview may load local resources (images) from: the
+// extension's own media, plus the document's workspace folder or, failing that,
+// the document's own directory.
+function resourceRoots(context: vscode.ExtensionContext, docUri: vscode.Uri): vscode.Uri[] {
+  const roots = [vscode.Uri.joinPath(context.extensionUri, 'media')];
+  const folder = vscode.workspace.getWorkspaceFolder(docUri);
+  roots.push(folder ? folder.uri : vscode.Uri.joinPath(docUri, '..'));
+  return roots;
+}
+
+// Persist a setting changed from the in-preview menu. User (Global) scope is the
+// safe default; onDidChangeConfiguration then re-renders and refreshes the menu.
+function applySetting(key: string, value: unknown): void {
+  vscode.workspace
+    .getConfiguration('markcopy')
+    .update(key, value, vscode.ConfigurationTarget.Global);
+}
+
 function update(state: PreviewState): void {
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
@@ -152,17 +219,35 @@ function update(state: PreviewState): void {
     return;
   }
   const source = doc.getText();
-  const html = md.render(source);
+  const webview = state.panel.webview;
+  const html = md.render(source, {
+    resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
+  });
   const cfg = vscode.workspace.getConfiguration('markcopy');
   state.panel.title = `Preview ${basename(state.docUri)}`;
-  state.panel.webview.postMessage({
+  webview.postMessage({
     type: 'render',
     html,
     source,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
     theme: cfg.get<string>('theme', 'auto'),
     mermaidConfig: cfg.get<object>('mermaid', {}),
+    syncScroll: cfg.get<boolean>('syncScroll', true),
+    autoPreview: cfg.get<boolean>('autoPreview', true),
   });
+}
+
+// Rewrite a relative/local markdown image src to a webview-safe URI so it loads
+// inside the sandboxed preview. Remote/data URIs are returned untouched.
+function resolveImageSrc(src: string, docUri: vscode.Uri, webview: vscode.Webview): string {
+  const ref = localImageRef(src);
+  if (!ref) {
+    return src;
+  }
+  const target = ref.absolute
+    ? vscode.Uri.file(ref.path)
+    : vscode.Uri.joinPath(docUri, '..', ref.path);
+  return webview.asWebviewUri(target).toString() + ref.suffix;
 }
 
 function revealEditorLine(docUri: vscode.Uri, line: number): void {

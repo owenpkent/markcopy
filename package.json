@@ -52,6 +52,12 @@
         "command": "markcopy.copyDocumentAsRichText",
         "title": "MarkCopy: Copy Whole Document as Rich Text",
         "category": "MarkCopy"
+      },
+      {
+        "command": "markcopy.openSettings",
+        "title": "MarkCopy: Settings",
+        "category": "MarkCopy",
+        "icon": "$(gear)"
       }
     ],
     "customEditors": [
@@ -71,6 +77,11 @@
         {
           "command": "markcopy.openPreview",
           "when": "editorLangId == markdown",
+          "group": "navigation"
+        },
+        {
+          "command": "markcopy.openSettings",
+          "when": "activeWebviewPanelId == markcopy.preview",
           "group": "navigation"
         }
       ],
@@ -110,6 +121,11 @@
           "type": "boolean",
           "default": true,
           "description": "Keep the preview scroll position in sync with the editor."
+        },
+        "markcopy.autoPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the MarkCopy preview to the side when you open a Markdown file. The preview follows the focused editor and keeps your cursor in place. Turn off to open previews manually."
         },
         "markcopy.theme": {
           "type": "string",
@@ -158,6 +174,7 @@
     "vsix": "vsce package",
     "icon": "node scripts/make-icon.js",
     "publish:vsce": "vsce publish",
+    "publish:vsce:azure": "vsce publish --azure-credential",
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {

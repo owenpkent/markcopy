@@ -28,6 +28,18 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('<table data-source-line="0"');
     expect(html).toContain('<th>A</th>');
   });
+
+  it('routes image src through env.resolveImage when provided', () => {
+    const html = md.render('![alt](media/x.png)', {
+      resolveImage: (src: string) => `webview:${src}`,
+    });
+    expect(html).toContain('src="webview:media/x.png"');
+  });
+
+  it('leaves image src unchanged when no resolver is supplied', () => {
+    const html = md.render('![alt](media/x.png)');
+    expect(html).toContain('src="media/x.png"');
+  });
 });
 
 describe('escape helpers', () => {

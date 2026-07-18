@@ -31,10 +31,13 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Any block: **Rich Text**, **Markdown source**, or **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
+- **Auto-open preview**, on by default (`markcopy.autoPreview`). Focus a Markdown file and the preview opens beside it, or retargets if one is already open, without moving your cursor. Close a preview and it stays closed for that file until you reopen it.
 - **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview.
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
+- **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with right-click **Copy Page as PNG**, **Copy Page Text**, and **Copy All Text**. One extension previews both Markdown and PDF.
+- **Settings without leaving the preview.** Right-click for a **Theme**, **Style**, and **Sync scroll** / **Auto-open preview** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
@@ -47,6 +50,8 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
+Local images in the document render automatically, and the right-click menu's settings section (or the gear icon in the preview's title bar) lets you change theme, style, sync scroll, and auto-preview without leaving the preview.
+
 ## Commands
 
 | Command                                    | ID                                | What it does                                      |
@@ -56,10 +61,13 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**.
 
 ## Settings
 
+`markcopy.styleProfile`, `markcopy.syncScroll`, `markcopy.autoPreview`, and `markcopy.theme` can also be changed live from the preview's right-click settings section or the gear icon in its title bar, not just here.
+
 | Setting                 | Type                        | Default  | Description                                                                                                                                                            |
 | ----------------------- | --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `markcopy.styleProfile` | `github` \| `vscode`        | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme.                                                            |
 | `markcopy.syncScroll`   | boolean                     | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                              |
+| `markcopy.autoPreview`  | boolean                     | `true`   | Automatically open the preview beside the editor when you focus a Markdown file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
 | `markcopy.theme`        | `auto` \| `light` \| `dark` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light` and `dark` force it. Copies stay light-safe either way.                                                    |
 | `markcopy.mermaid`      | object                      | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default. |
 

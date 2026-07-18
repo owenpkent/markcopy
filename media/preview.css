@@ -285,6 +285,31 @@ body.mc-pdf {
   color: var(--vscode-menu-selectionForeground, #fff);
   outline: none;
 }
+.mc-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--vscode-menu-separatorBackground, #d1d9e0);
+}
+.mc-menu-group-label {
+  padding: 4px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--vscode-descriptionForeground, #59636e);
+  cursor: default;
+}
+.mc-menu-item--check {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.mc-menu-check {
+  display: inline-block;
+  width: 1.4em;
+  flex: none;
+  text-align: center;
+}
 
 /* ---- Toast --------------------------------------------------------------- */
 .mc-toast {

@@ -20,6 +20,13 @@ let sourceLines: string[] = [];
 let programmaticScroll = false;
 let mermaidConfig: Record<string, unknown> = {};
 
+// Current setting values, refreshed on every `render` message. Read by the
+// context menu's SETTINGS section so it always reflects the host's state.
+let currentStyleProfile = 'github';
+let currentTheme = 'auto';
+let currentSyncScroll = true;
+let currentAutoPreview = true;
+
 // The preview is dark when the theme is forced dark, or (in auto mode) when VS
 // Code is in a dark/high-contrast theme. Mirrors the CSS in preview.css.
 function isDark(): boolean {
@@ -56,6 +63,8 @@ window.addEventListener('message', (e: MessageEvent) => {
         msg.styleProfile as string,
         msg.theme as string,
         (msg.mermaidConfig as Record<string, unknown>) ?? {},
+        Boolean(msg.syncScroll),
+        Boolean(msg.autoPreview),
       );
       break;
     case 'scrollToLine':
@@ -83,6 +92,8 @@ async function render(
   styleProfile: string,
   theme: string,
   config: Record<string, unknown>,
+  syncScroll: boolean,
+  autoPreview: boolean,
 ): Promise<void> {
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.style = styleProfile;
@@ -90,6 +101,10 @@ async function render(
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
   mermaidConfig = config;
+  currentStyleProfile = styleProfile;
+  currentTheme = theme || 'auto';
+  currentSyncScroll = syncScroll;
+  currentAutoPreview = autoPreview;
   content.innerHTML = html;
   // Initialize after data-mc-theme is set so the diagram theme matches.
   initMermaid();
@@ -160,16 +175,24 @@ window.addEventListener(
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
-interface MenuItem {
-  label: string;
-  run: () => void | Promise<void>;
-}
+// A plain clickable action ('item'), a group heading ('label', not
+// interactive), a horizontal rule ('divider'), or a radio/checkbox setting
+// toggle that renders a leading checkmark when active.
+type MenuEntry =
+  | { kind: 'item'; label: string; run: () => void | Promise<void> }
+  | { kind: 'label'; label: string }
+  | { kind: 'divider' }
+  | { kind: 'radio' | 'checkbox'; label: string; checked: boolean; run: () => void };
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const target = e.target as HTMLElement;
-  const items = buildMenu(target);
-  showMenu(e.pageX, e.pageY, items);
+  const entries: MenuEntry[] = [
+    ...buildMenu(target),
+    { kind: 'divider' },
+    ...buildSettingsEntries(),
+  ];
+  showMenu(e.pageX, e.pageY, entries);
 });
 
 document.addEventListener('click', () => hideMenu());
@@ -179,8 +202,8 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-function buildMenu(target: HTMLElement): MenuItem[] {
-  const items: MenuItem[] = [];
+function buildMenu(target: HTMLElement): MenuEntry[] {
+  const items: MenuEntry[] = [];
   const selection = window.getSelection();
   const hasSelection = !!selection && selection.toString().trim().length > 0;
   const block = target.closest<HTMLElement>('[data-source-line]');
@@ -189,52 +212,152 @@ function buildMenu(target: HTMLElement): MenuItem[] {
   const mermaidEl = target.closest<HTMLElement>('.mc-mermaid');
 
   if (hasSelection) {
-    items.push({ label: 'Copy Selection as Rich Text', run: () => copyRichFromSelection() });
-    items.push({ label: 'Copy Selection as Markdown', run: () => copyText(selectionMarkdown()) });
+    items.push({
+      kind: 'item',
+      label: 'Copy Selection as Rich Text',
+      run: () => copyRichFromSelection(),
+    });
+    items.push({
+      kind: 'item',
+      label: 'Copy Selection as Markdown',
+      run: () => copyText(selectionMarkdown()),
+    });
   }
 
   if (code) {
-    items.push({ label: 'Copy Code', run: () => copyText(code.textContent ?? '') });
+    items.push({ kind: 'item', label: 'Copy Code', run: () => copyText(code.textContent ?? '') });
   }
 
   if (table) {
-    items.push({ label: 'Copy Table (Rich Text)', run: () => copyRichText(table) });
-    items.push({ label: 'Copy Table as CSV', run: () => copyText(tableToDelimited(table, ',')) });
-    items.push({ label: 'Copy Table as TSV', run: () => copyText(tableToDelimited(table, '\t')) });
-    items.push({ label: 'Copy Table as PNG', run: () => copyPng(table) });
+    items.push({ kind: 'item', label: 'Copy Table (Rich Text)', run: () => copyRichText(table) });
+    items.push({
+      kind: 'item',
+      label: 'Copy Table as CSV',
+      run: () => copyText(tableToDelimited(table, ',')),
+    });
+    items.push({
+      kind: 'item',
+      label: 'Copy Table as TSV',
+      run: () => copyText(tableToDelimited(table, '\t')),
+    });
+    items.push({ kind: 'item', label: 'Copy Table as PNG', run: () => copyPng(table) });
   }
 
   if (mermaidEl) {
-    items.push({ label: 'Copy Diagram as PNG', run: () => copyPng(mermaidEl) });
+    items.push({ kind: 'item', label: 'Copy Diagram as PNG', run: () => copyPng(mermaidEl) });
     const svg = mermaidEl.querySelector('svg');
     if (svg) {
-      items.push({ label: 'Copy Diagram as SVG', run: () => copyText(svg.outerHTML) });
+      items.push({
+        kind: 'item',
+        label: 'Copy Diagram as SVG',
+        run: () => copyText(svg.outerHTML),
+      });
     }
   }
 
   if (block && !code && !table && !mermaidEl) {
-    items.push({ label: 'Copy Block as Rich Text', run: () => copyRichText(block) });
-    items.push({ label: 'Copy Block as Markdown', run: () => copyText(blockMarkdown(block)) });
-    items.push({ label: 'Copy Block as PNG', run: () => copyPng(block) });
+    items.push({ kind: 'item', label: 'Copy Block as Rich Text', run: () => copyRichText(block) });
+    items.push({
+      kind: 'item',
+      label: 'Copy Block as Markdown',
+      run: () => copyText(blockMarkdown(block)),
+    });
+    items.push({ kind: 'item', label: 'Copy Block as PNG', run: () => copyPng(block) });
   }
 
   // Always-available document-level actions.
-  items.push({ label: 'Copy Whole Document as Rich Text', run: () => copyRichText(content) });
+  items.push({
+    kind: 'item',
+    label: 'Copy Whole Document as Rich Text',
+    run: () => copyRichText(content),
+  });
   return items;
 }
 
-function showMenu(x: number, y: number, items: MenuItem[]): void {
+// A radio-style setting entry (Theme / Style groups): posts `updateSetting`
+// with the fixed `value` for this option, regardless of current state.
+function radioEntry(label: string, checked: boolean, key: string, value: string): MenuEntry {
+  return {
+    kind: 'radio',
+    label,
+    checked,
+    run: () => vscode.postMessage({ type: 'updateSetting', key, value }),
+  };
+}
+
+// A checkbox-style setting entry (Sync scroll / Auto-open preview): posts the
+// toggled value, since the host re-renders with the new state afterwards.
+function checkboxEntry(label: string, checked: boolean, key: string): MenuEntry {
+  return {
+    kind: 'checkbox',
+    label,
+    checked,
+    run: () => vscode.postMessage({ type: 'updateSetting', key, value: !checked }),
+  };
+}
+
+// The persistent SETTINGS section, shown on every right-click below a divider
+// from the contextual copy actions. Reflects the last values seen in `render`.
+function buildSettingsEntries(): MenuEntry[] {
+  return [
+    { kind: 'label', label: 'Theme' },
+    radioEntry('Auto', currentTheme === 'auto', 'theme', 'auto'),
+    radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
+    radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
+    { kind: 'label', label: 'Style' },
+    radioEntry('GitHub', currentStyleProfile === 'github', 'styleProfile', 'github'),
+    radioEntry('VS Code', currentStyleProfile === 'vscode', 'styleProfile', 'vscode'),
+    { kind: 'divider' },
+    checkboxEntry('Sync scroll', currentSyncScroll, 'syncScroll'),
+    checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
+    { kind: 'divider' },
+    {
+      kind: 'item',
+      label: 'MarkCopy Settings…',
+      run: () => vscode.postMessage({ type: 'openSettings' }),
+    },
+  ];
+}
+
+function showMenu(x: number, y: number, entries: MenuEntry[]): void {
   menu.innerHTML = '';
-  for (const item of items) {
+  for (const entry of entries) {
+    if (entry.kind === 'divider') {
+      const el = document.createElement('div');
+      el.className = 'mc-menu-divider';
+      el.setAttribute('role', 'separator');
+      menu.appendChild(el);
+      continue;
+    }
+    if (entry.kind === 'label') {
+      const el = document.createElement('div');
+      el.className = 'mc-menu-group-label';
+      el.textContent = entry.label;
+      menu.appendChild(el);
+      continue;
+    }
     const el = document.createElement('div');
-    el.className = 'mc-menu-item';
-    el.setAttribute('role', 'menuitem');
     el.tabIndex = 0;
-    el.textContent = item.label;
+    if (entry.kind === 'radio' || entry.kind === 'checkbox') {
+      el.className = 'mc-menu-item mc-menu-item--check';
+      el.setAttribute('role', entry.kind === 'radio' ? 'menuitemradio' : 'menuitemcheckbox');
+      el.setAttribute('aria-checked', String(entry.checked));
+      const check = document.createElement('span');
+      check.className = 'mc-menu-check';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = entry.checked ? '✓' : '';
+      const text = document.createElement('span');
+      text.textContent = entry.label;
+      el.append(check, text);
+    } else {
+      el.className = 'mc-menu-item';
+      el.setAttribute('role', 'menuitem');
+      el.textContent = entry.label;
+    }
     el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       hideMenu();
-      void item.run();
+      void entry.run();
     });
     menu.appendChild(el);
   }

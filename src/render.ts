@@ -31,7 +31,28 @@ export function createMarkdownIt(): MarkdownIt {
   md.use(anchor, { permalink: false, tabIndex: false });
 
   addSourceLineMapping(md);
+  rewriteImageSrc(md);
   return md;
+}
+
+// Route every image `src` through an optional `env.resolveImage` hook so the
+// extension host can rewrite relative/local paths to webview-safe URIs. When no
+// hook is provided (e.g. plain unit tests) the src is emitted unchanged.
+function rewriteImageSrc(md: MarkdownIt): void {
+  const original = md.renderer.rules.image;
+  md.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const resolve = env?.resolveImage as ((src: string) => string) | undefined;
+    if (resolve) {
+      const token = tokens[idx];
+      const i = token.attrIndex('src');
+      if (i >= 0 && token.attrs) {
+        token.attrs[i][1] = resolve(token.attrs[i][1]);
+      }
+    }
+    return original
+      ? original(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  };
 }
 
 // Tag top-level block tokens with data-source-line so the webview can sync scroll

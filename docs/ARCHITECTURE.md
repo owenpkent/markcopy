@@ -40,24 +40,25 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 ## File map
 
-| File                             | Role                                                                                                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/extension.ts`               | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                    |
-| `src/render.ts`                  | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, and source-line mapping.                                                     |
-| `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu, all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync. |
-| `src/pdfEditor.ts`               | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                                                    |
-| `src/webview/pdf.ts`             | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                                                  |
-| `src/webview/table.ts`           | CSV/TSV table serialization (RFC 4180). Pure, unit-tested.                                                                                                                      |
-| `src/webview/markdownConvert.ts` | HTML-to-Markdown conversion via Turndown. Pure, unit-tested.                                                                                                                    |
-| `tests/`                         | Vitest unit tests over the pure logic.                                                                                                                                          |
-| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                                                                      |
-| `media/preview.css`              | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                  |
-| `esbuild.js` / `esbuild.web.js`  | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                      |
+| File                             | Role                                                                                                                                                                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extension.ts`               | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                                                                                                           |
+| `src/render.ts`                  | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, source-line mapping, and the `env.resolveImage` image-src hook.                                                                                                     |
+| `src/preview-utils.ts`           | Pure, VS Code-independent helpers: `localImageRef` (classifies an image `src` so the host knows whether/how to rewrite it) and `shouldAutoPreview` (the auto-open/retarget decision). Kept out of `extension.ts` so they're unit-testable without the `vscode` module. |
+| `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu (including the settings section), all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync.                                                       |
+| `src/pdfEditor.ts`               | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview.                                                                                                                                                           |
+| `src/webview/pdf.ts`             | The PDF preview: pdf.js rendering to canvases, per-page text extraction, and the copy actions (page PNG, page text, all text).                                                                                                                                         |
+| `src/webview/table.ts`           | CSV/TSV table serialization (RFC 4180). Pure, unit-tested.                                                                                                                                                                                                             |
+| `src/webview/markdownConvert.ts` | HTML-to-Markdown conversion via Turndown. Pure, unit-tested.                                                                                                                                                                                                           |
+| `tests/`                         | Vitest unit tests over the pure logic.                                                                                                                                                                                                                                 |
+| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                                                                                                                                                             |
+| `media/preview.css`              | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                                                                                                         |
+| `esbuild.js` / `esbuild.web.js`  | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                                                                                                             |
 
 ## Rendering pipeline
 
 1. The user opens the preview. `openPreview` creates a `WebviewPanel` (beside the editor, `retainContextWhenHidden: true`) and sets its HTML shell.
-2. `update()` reads the document text, calls `md.render(source)`, and posts a `render` message carrying the HTML, the raw source, the active style profile, the theme (`markcopy.theme`), and any `markcopy.mermaid` config.
+2. `update()` reads the document text, calls `md.render(source, { resolveImage })` (see [Local images](#local-images) below), and posts a `render` message carrying the HTML, the raw source, the active style profile, the theme (`markcopy.theme`), any `markcopy.mermaid` config, and the current `syncScroll` / `autoPreview` settings.
 3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), (re)initializes Mermaid with the theme and any `markcopy.mermaid` config, then upgrades every Mermaid placeholder into an SVG.
 4. On each edit, `onDidChangeTextDocument` re-runs `update()`, so the preview is live.
 
@@ -68,23 +69,33 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 - **Scroll sync:** the webview reports the first fully-visible block's line; the host reveals that line in the editor, and vice versa. A `programmaticScroll` flag breaks the feedback loop.
 - **Copy Block as Markdown:** for a clicked block, the webview finds its `data-source-line`, finds the next block's line, and slices `sourceLines` between them (verbatim source). "Copy Selection as Markdown" is different: it converts just the selected HTML to Markdown with Turndown (`turndown` + `turndown-plugin-gfm`), so partial and multi-block selections come through exactly.
 
+### Local images
+
+`render.ts`'s `rewriteImageSrc` routes every rendered `<img>` through an optional `env.resolveImage(src)` hook; when no hook is supplied (plain unit tests, for instance) the `src` passes through unchanged. In the running extension, `extension.ts` supplies that hook: `preview-utils.ts`'s `localImageRef` classifies the `src` first, so remote (`http(s):`), `data:`, `blob:`, and already-resolved URIs are left alone while relative and absolute paths are flagged for resolution. `resolveImageSrc` then resolves a flagged path against the document's URI and turns it into a webview-safe URI with `webview.asWebviewUri`. For that URI to actually load, the webview's `localResourceRoots` must cover the target folder, so `resourceRoots()` widens it to the document's workspace folder (or its own directory, if it isn't inside a workspace), and `openPreview` re-applies `panel.webview.options` whenever the previewed document changes.
+
+### Auto-open preview
+
+`extension.ts` listens on `vscode.window.onDidChangeActiveTextEditor` and asks `shouldAutoPreview` (in `preview-utils.ts`) whether to open or retarget the preview. It requires the `markcopy.autoPreview` setting to be on, the focused document to be Markdown on an on-disk file (`scheme === 'file'`, so untitled buffers never trigger it), and the document to be absent from `dismissedPreviews`, a `Set` the extension keeps for documents whose preview the user closed this session. The preview opens with `preserveFocus: true` so the cursor stays in the editor. `panel.onDidDispose` adds the current document back to `dismissedPreviews` so a closed preview does not spring back open on the next focus change; an explicit `markcopy.openPreview` clears the dismissal for that document.
+
 ## Message protocol
 
 Host to webview:
 
-| Type           | Payload                                                    | Effect                                                                       |
-| -------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `render`       | `html`, `source`, `styleProfile`, `theme`, `mermaidConfig` | Replace preview content, apply the theme, (re)initialize and render Mermaid. |
-| `scrollToLine` | `line`                                                     | Scroll the preview to the element for that source line.                      |
-| `copyAll`      | none                                                       | Copy the whole document as rich text.                                        |
+| Type           | Payload                                                                                 | Effect                                                                                                              |
+| -------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `render`       | `html`, `source`, `styleProfile`, `theme`, `mermaidConfig`, `syncScroll`, `autoPreview` | Replace preview content, apply the theme, (re)initialize and render Mermaid, and refresh the settings menu's state. |
+| `scrollToLine` | `line`                                                                                  | Scroll the preview to the element for that source line.                                                             |
+| `copyAll`      | none                                                                                    | Copy the whole document as rich text.                                                                               |
 
 Webview to host:
 
-| Type         | Payload | Effect                                     |
-| ------------ | ------- | ------------------------------------------ |
-| `revealLine` | `line`  | Reveal that line at the top of the editor. |
-| `toast`      | `text`  | Show a status-bar message.                 |
-| `ready`      | none    | Signals the webview script has loaded.     |
+| Type            | Payload        | Effect                                                                                                              |
+| --------------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `revealLine`    | `line`         | Reveal that line at the top of the editor.                                                                          |
+| `toast`         | `text`         | Show a status-bar message.                                                                                          |
+| `ready`         | none           | Signals the webview script has loaded.                                                                              |
+| `updateSetting` | `key`, `value` | Persist a `markcopy.*` setting from the in-preview menu (Global scope); the config-change listener then re-renders. |
+| `openSettings`  | none           | Run `markcopy.openSettings`, opening the native Settings UI scoped to the extension.                                |
 
 The PDF preview uses its own two-message handshake: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes, `workerSrc`: the pdf.js worker URI). All copy actions there run entirely in the webview, so there is no further host round-trip.
 
@@ -165,7 +176,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 
 Two layers, matching the two runtimes:
 
-- **Unit (`tests/`, vitest + jsdom).** Covers the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV serialization (`src/webview/table.ts`), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`). The two `webview/` helpers were extracted from `main.ts` specifically so they import without a DOM or the VS Code API. Run with `npm test`.
-- **Integration (`test-integration/`, Mocha + `@vscode/test-electron`).** Runs the built extension in a downloaded VS Code instance (`.vscode-test.mjs` config, compiled via `tsconfig.integration.json` to `out/`) and asserts activation, command registration, configuration defaults, and that the preview panel opens. Run with `npm run test:integration`; on Linux and CI it needs a display (`xvfb-run`).
+- **Unit (`tests/`, vitest + jsdom).** Covers the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV serialization (`src/webview/table.ts`), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), and image-src classification plus the auto-preview decision (`src/preview-utils.ts`, `tests/preview-utils.test.ts`). These were extracted from `main.ts` / `extension.ts` specifically so they import without a DOM or the VS Code API. Run with `npm test`.
+- **Integration (`test-integration/`, Mocha + `@vscode/test-electron`).** Runs the built extension in a downloaded VS Code instance (`.vscode-test.mjs` config, compiled via `tsconfig.integration.json` to `out/`) and asserts activation, command registration (including `markcopy.openSettings`), configuration defaults (including the `autoPreview` default), that the preview panel opens, and that focusing an on-disk Markdown file auto-opens a preview for it. Run with `npm run test:integration`; on Linux and CI it needs a display (`xvfb-run`).
 
 Webview-internal behavior (the actual clipboard writes, the context menu) is not asserted automatically, since it runs sandboxed inside the webview; exercise it by hand in the Extension Development Host (F5). Both layers run in CI (see [CONTRIBUTING](../CONTRIBUTING.md#tests)).
