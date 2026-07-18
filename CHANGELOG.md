@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+- KaTeX / LaTeX math rendering, and copy-as-image for equations.
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.1.0] - 2026-07-18
+
 ### Added
 - **Local images in the preview**: relative and absolute image paths (e.g. `![](media/x.png)`) now resolve correctly. Image `src` is rewritten to a webview-safe URI and the preview is granted read access to the document's workspace folder, fixing broken-image icons.
 - **Auto-open preview** (`markcopy.autoPreview`, on by default): the preview opens to the side automatically when you focus a Markdown file, and retargets as you switch files, keeping your cursor in the editor. A preview you close stays closed for that file so it never springs back.
@@ -22,12 +29,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Changed
 - **Copy Selection as Markdown** now copies exactly the selected content, including partial paragraphs and selections that span multiple blocks (the selected HTML is converted with Turndown), instead of the whole block the selection started in.
-
-### Planned
-- KaTeX / LaTeX math rendering, and copy-as-image for equations.
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
-- A marketplace icon.
 
 ## [0.0.1] - 2026-07-16
 
@@ -48,5 +49,6 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/owenpkent/markcopy/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/owenpkent/markcopy/releases/tag/v0.0.1
