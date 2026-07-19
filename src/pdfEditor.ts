@@ -34,7 +34,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
         const bytes = await vscode.workspace.fs.readFile(document.uri);
-        webview.postMessage({ type: 'load', data: bytes, workerSrc: workerUri.toString() });
+        // Send as base64: webview.postMessage serialises a Uint8Array into a
+        // plain {0:…,1:…} object (no length), which pdf.js rejects. A string
+        // round-trips cleanly; the webview decodes it back to bytes.
+        webview.postMessage({
+          type: 'load',
+          data: Buffer.from(bytes).toString('base64'),
+          workerSrc: workerUri.toString(),
+        });
       }
     });
   }
@@ -57,7 +64,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     ].join('; ');
 
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="mc-pdf-root">
 <head>
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />

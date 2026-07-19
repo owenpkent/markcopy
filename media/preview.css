@@ -241,6 +241,44 @@ body[data-style='vscode'] .markdown-body pre {
 body.mc-pdf {
   background: var(--mc-pdf-bg);
   margin: 0;
+  /* Hand tool: grab cursor while idle, grabbing while dragging to scroll. */
+  cursor: grab;
+}
+body.mc-pdf.mc-grabbing,
+body.mc-pdf.mc-grabbing * {
+  cursor: grabbing !important;
+}
+.mc-menu,
+.mc-menu-item {
+  cursor: default;
+}
+
+/* Always-visible, styled scrollbars for the PDF view. Scoped to the PDF page's
+   <html class="mc-pdf-root"> so it never affects the Markdown preview, which
+   shares this stylesheet. The root element is the actual scroll container. */
+html.mc-pdf-root {
+  scrollbar-gutter: stable;
+}
+html.mc-pdf-root::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+html.mc-pdf-root::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 140, 0.55);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+html.mc-pdf-root::-webkit-scrollbar-thumb:hover {
+  background: rgba(160, 160, 160, 0.85);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+html.mc-pdf-root::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.mc-pdf-root::-webkit-scrollbar-corner {
+  background: transparent;
 }
 #pdf-root {
   display: flex;
@@ -257,6 +295,30 @@ body.mc-pdf {
   display: block;
   max-width: 100%;
   height: auto;
+  /* Keep the OS (e.g. Windows High Contrast) from recolouring rendered pages;
+     our own dark-mode inversion below handles legibility. */
+  forced-color-adjust: none;
+}
+
+/* Dark-mode pages: invert the rendered canvas so page content is dark instead
+   of glaring white. invert(1) hue-rotate(180deg) flips black<->white while
+   keeping hues roughly intact (the standard pdf.js dark-mode trick). Follows the
+   active theme, exactly like the Markdown preview palette above. */
+body[data-mc-theme='dark'] .mc-page canvas,
+body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']) .mc-page canvas,
+body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark'])
+  .mc-page
+  canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Per-session override from the right-click "Dark pages / Light pages" toggle.
+   These win over the theme default regardless of theme specificity. */
+body.mc-pages-inverted .mc-page canvas {
+  filter: invert(1) hue-rotate(180deg) !important;
+}
+body.mc-pages-normal .mc-page canvas {
+  filter: none !important;
 }
 
 /* ---- Context menu -------------------------------------------------------- */

@@ -20,9 +20,29 @@ const pageText = new Map<number, string>();
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type === 'load') {
-    void load(msg.data as Uint8Array, msg.workerSrc as string);
+    load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
   }
 });
+
+// The host sends the PDF as base64 (a Uint8Array does not survive postMessage
+// serialisation intact). Decode it back to bytes for pdf.js.
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// Never fail silently: surface any uncaught error/rejection in the panel so a
+// blank page always carries an explanation.
+window.addEventListener('error', (e) => showFatal(e.error ?? e.message));
+window.addEventListener('unhandledrejection', (e) => showFatal(e.reason));
+
+function showFatal(err: unknown): void {
+  root.innerHTML = `<pre class="mc-error">PDF preview error: ${escapeHtml(String(err))}</pre>`;
+}
 
 function toast(text: string): void {
   toastEl.textContent = text;
@@ -31,12 +51,24 @@ function toast(text: string): void {
 }
 
 async function load(data: Uint8Array, workerSrc: string): Promise<void> {
-  // Run pdf.js parsing/rasterising off the main thread via a module worker
-  // created from the bundled worker URI (CSP allows same-origin workers).
-  const worker = new Worker(workerSrc, { type: 'module' });
-  pdfjsLib.GlobalWorkerOptions.workerPort = worker;
-
   root.textContent = '';
+
+  // Run pdf.js parsing/rasterising off the main thread. The worker script is a
+  // webview-resource URI (https://…vscode-cdn.net) which is cross-origin to the
+  // webview document (vscode-webview://…), so `new Worker(workerSrc)` would throw
+  // a SecurityError. Fetch it and start the worker from a same-origin blob URL
+  // instead (CSP allows `blob:` in worker-src and the fetch via connect-src).
+  try {
+    const res = await fetch(workerSrc);
+    const code = await res.text();
+    const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    const worker = new Worker(blobUrl, { type: 'module' });
+    pdfjsLib.GlobalWorkerOptions.workerPort = worker;
+  } catch (err) {
+    root.innerHTML = `<pre class="mc-error">Failed to start PDF worker: ${escapeHtml(String(err))}</pre>`;
+    return;
+  }
+
   let doc: PDFDocumentProxy;
   try {
     doc = await pdfjsLib.getDocument({ data }).promise;
@@ -107,13 +139,106 @@ document.addEventListener('contextmenu', (e) => {
 
   items.push({ label: 'Copy All Text', run: () => copyText(allText()) });
 
+  // View: flip page inversion for this session (defaults to following the theme).
+  items.push({
+    label: pagesInverted() ? 'Light Pages' : 'Dark Pages',
+    run: () => togglePages(),
+  });
+
   showMenu(e.pageX, e.pageY, items);
 });
+
+// ---------------------------------------------------------------------------
+// Dark-mode pages
+// ---------------------------------------------------------------------------
+// 'auto' follows the active theme (via CSS); the toggle pins an explicit choice
+// for the session by adding an override class the stylesheet honours.
+type PageMode = 'auto' | 'normal' | 'inverted';
+let pageMode: PageMode = 'auto';
+
+function isDarkTheme(): boolean {
+  const t = document.body.getAttribute('data-mc-theme');
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return (
+    document.body.classList.contains('vscode-dark') ||
+    document.body.classList.contains('vscode-high-contrast')
+  );
+}
+
+// Whether pages are currently shown inverted (dark), accounting for the theme
+// default and any per-session override.
+function pagesInverted(): boolean {
+  if (pageMode === 'inverted') return true;
+  if (pageMode === 'normal') return false;
+  return isDarkTheme();
+}
+
+function togglePages(): void {
+  pageMode = pagesInverted() ? 'normal' : 'inverted';
+  document.body.classList.toggle('mc-pages-inverted', pageMode === 'inverted');
+  document.body.classList.toggle('mc-pages-normal', pageMode === 'normal');
+}
 
 document.addEventListener('click', () => (menu.hidden = true));
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') menu.hidden = true;
 });
+
+// ---------------------------------------------------------------------------
+// Hand tool (drag to scroll)
+// ---------------------------------------------------------------------------
+// Left-drag anywhere on the page area pans the view. Always on: the pages are
+// canvas-only (no selectable text layer), so a drag is never a text selection.
+let panning = false;
+let panPointer = -1;
+let startX = 0;
+let startY = 0;
+let startScrollX = 0;
+let startScrollY = 0;
+
+function scroller(): HTMLElement {
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  // Left button only, and never start a pan from the context menu.
+  if (e.button !== 0 || (e.target as HTMLElement).closest('#mc-menu')) {
+    return;
+  }
+  panning = true;
+  panPointer = e.pointerId;
+  startX = e.clientX;
+  startY = e.clientY;
+  const s = scroller();
+  startScrollX = s.scrollLeft;
+  startScrollY = s.scrollTop;
+  document.body.classList.add('mc-grabbing');
+  // Capture so a drag that leaves the webview still delivers move/up and never
+  // leaves the pan stuck on.
+  try {
+    s.setPointerCapture(e.pointerId);
+  } catch {
+    /* capture is best-effort */
+  }
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!panning || e.pointerId !== panPointer) {
+    return;
+  }
+  const s = scroller();
+  s.scrollLeft = startScrollX - (e.clientX - startX);
+  s.scrollTop = startScrollY - (e.clientY - startY);
+});
+
+function endPan(): void {
+  panning = false;
+  panPointer = -1;
+  document.body.classList.remove('mc-grabbing');
+}
+document.addEventListener('pointerup', endPan);
+document.addEventListener('pointercancel', endPan);
 
 function showMenu(x: number, y: number, items: MenuItem[]): void {
   menu.innerHTML = '';
