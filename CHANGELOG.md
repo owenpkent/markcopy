@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+- KaTeX / LaTeX math rendering, and copy-as-image for equations.
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.2.0] - 2026-07-19
+
 ### Fixed
 - **Auto-preview reliably opens now.** Added the `onLanguage:markdown` activation event (the extension previously had no activation events at all, so it could fail to activate in time); the auto-preview check also now runs once at activation for the already-active editor, since `onDidChangeActiveTextEditor` never fires for the file that triggered activation.
 - **Retargeting the preview to a different Markdown file no longer opens a third editor column.** The preview now reveals in its existing column instead of "Beside", and if VS Code opened the newly-focused file into the preview's own column, it's moved back to the first column.
@@ -22,11 +29,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **PDF comments.** Right-click a page and choose **Add Comment Here** to drop a pin with an editable note; click a pin to edit or delete it. Comments persist to a sidecar JSON file next to the PDF (`<filename>.pdf.mccomments.json`), so the PDF itself stays read-only, and reload when the PDF is reopened.
 - **Crisp, virtualised PDF rendering.** Only pages near the viewport are rasterised (via an `IntersectionObserver`) and offscreen pages are torn down, so large PDFs don't exhaust memory. Each page renders above display resolution (at least 2x, or the device pixel ratio if higher) clamped to a canvas pixel budget, so text is sharp without oversized-canvas blur.
 - **Always-visible, styled scrollbars** in the PDF preview, scoped so the Markdown preview is unaffected.
-
-### Planned
-- KaTeX / LaTeX math rendering, and copy-as-image for equations.
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.1.0] - 2026-07-18
 
@@ -68,6 +70,7 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/owenpkent/markcopy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/owenpkent/markcopy/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/owenpkent/markcopy/releases/tag/v0.0.1
