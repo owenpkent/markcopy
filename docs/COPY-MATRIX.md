@@ -1,6 +1,6 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action.
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. "Copy Selection ..." and "Copy Block ..." are mutually exclusive: Selection appears only when you have text highlighted, Block appears only when you don't.
 
 ## When you right-click a...
 
@@ -10,6 +10,8 @@ Every action the preview's right-click menu can offer, the clipboard flavor it w
 | --------------------------- | ------------------------------ | ---------------------------------------- |
 | Copy Selection as Rich Text | `text/html` + `text/plain`     | Word, Outlook, Gmail, Google Docs, Slack |
 | Copy Selection as Markdown  | `text/plain` (Markdown source) | Any editor, chat, another `.md` file     |
+
+These replace the "Copy Block ..." actions below whenever there's an active selection.
 
 ### Code block
 
@@ -35,13 +37,15 @@ The plain-text code is copied verbatim, without the syntax-highlight markup, so 
 | Copy Diagram as PNG | `image/png`               | Slides, docs, chat           |
 | Copy Diagram as SVG | `text/plain` (SVG markup) | A file, vector editors, HTML |
 
-### Any other block (paragraph, heading, list, blockquote)
+### Any other block (paragraph, heading, list, blockquote), with no text selected
 
 | Action                  | Clipboard flavor               | Pastes well into                     |
 | ----------------------- | ------------------------------ | ------------------------------------ |
 | Copy Block as Rich Text | `text/html` + `text/plain`     | Word, Outlook, Gmail, Google Docs    |
 | Copy Block as Markdown  | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
 | Copy Block as PNG       | `image/png`                    | Slides, chat, docs                   |
+
+If text is selected, right-clicking gets you "Copy Selection as Rich Text" / "Copy Selection as Markdown" instead (see above), not these.
 
 ### A page in the PDF preview
 

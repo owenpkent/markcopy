@@ -77,6 +77,10 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 `extension.ts` listens on `vscode.window.onDidChangeActiveTextEditor` and asks `shouldAutoPreview` (in `preview-utils.ts`) whether to open or retarget the preview. It requires the `markcopy.autoPreview` setting to be on, the focused document to be Markdown on an on-disk file (`scheme === 'file'`, so untitled buffers never trigger it), and the document to be absent from `dismissedPreviews`, a `Set` the extension keeps for documents whose preview the user closed this session. The preview opens with `preserveFocus: true` so the cursor stays in the editor. `panel.onDidDispose` adds the current document back to `dismissedPreviews` so a closed preview does not spring back open on the next focus change; an explicit `markcopy.openPreview` clears the dismissal for that document.
 
+Because the extension activates on `onLanguage:markdown` (its only activation event), a Markdown editor that's already active when the extension activates never fires `onDidChangeActiveTextEditor`, since that event only fires on a *change* of focus. `activate()` runs the same auto-preview check once more directly, against `vscode.window.activeTextEditor`, so the file that triggered activation gets a preview too, not just the next file you switch to.
+
+Retargeting an existing preview to a different document is careful not to grow a third editor column. If VS Code opened the newly-focused Markdown file as a tab in the preview panel's own column (which it does when that column was the active group), `openPreview` moves that editor back to `ViewColumn.One` before retargeting. And revealing the retargeted preview always uses the panel's own existing `viewColumn`, never `ViewColumn.Beside`, so retargeting can't itself spawn a new column.
+
 ## Message protocol
 
 Host to webview:
@@ -97,7 +101,7 @@ Webview to host:
 | `updateSetting` | `key`, `value` | Persist a `markcopy.*` setting from the in-preview menu (Global scope); the config-change listener then re-renders. |
 | `openSettings`  | none           | Run `markcopy.openSettings`, opening the native Settings UI scoped to the extension.                                |
 
-The PDF preview uses its own two-message handshake: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes, `workerSrc`: the pdf.js worker URI). All copy actions there run entirely in the webview, so there is no further host round-trip.
+The PDF preview uses its own two-message handshake: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes as a base64 string, `workerSrc`: the pdf.js worker URI). The bytes are base64-encoded because a `Uint8Array` does not survive `postMessage` serialization to the webview; `pdf.ts` decodes it back to a `Uint8Array` before handing it to pdf.js. All copy actions there run entirely in the webview, so there is no further host round-trip.
 
 ## Clipboard
 
@@ -141,7 +145,15 @@ Before reading computed styles, the source is briefly tagged with an `mc-force-l
 
 `.pdf` files are handled by `PdfEditorProvider`, a `CustomReadonlyEditorProvider` registered for the `markcopy.pdfPreview` view type (contributed with `priority: default`, since VS Code has no built-in PDF viewer). On open, the provider reads the file with `workspace.fs.readFile` and, once the webview posts `ready`, sends the bytes plus the worker URI in a `load` message. Nothing is fetched over the network.
 
-In the webview, `src/webview/pdf.ts` points pdf.js at a module worker created from the bundled `media/pdf.worker.js` (via `GlobalWorkerOptions.workerPort`), renders each page to a canvas, and extracts per-page text with `getTextContent` for the copy actions. The PDF webview's CSP adds `worker-src ${cspSource} blob:` for the pdf.js worker.
+In the webview, `src/webview/pdf.ts` renders each page to a canvas and extracts per-page text with `getTextContent` for the copy actions. Starting the pdf.js worker takes an extra step: the worker script can't be constructed directly from its `webview-resource:` URI, since that origin differs from the webview document's `vscode-webview://` origin and `new Worker(workerSrc)` throws a `SecurityError`. Instead, `pdf.ts` `fetch`es the worker script and wraps it in a same-origin `Blob`, then starts `new Worker(blobUrl, { type: 'module' })` from that. The PDF webview's CSP adds `worker-src ${cspSource} blob:` and `connect-src ${cspSource} blob: data:` to allow the fetch and the blob worker. Any load failure (bad bytes, worker error) is caught by `error` / `unhandledrejection` handlers and shown as a visible message in the panel instead of a silent blank page.
+
+### PDF theming, hand tool, and scrollbars
+
+Dark mode for PDF pages is a CSS filter, not a pdf.js rendering mode: `body.mc-pages-inverted .mc-page canvas` gets `filter: invert(1) hue-rotate(180deg)` (`media/preview.css`), which flips black and white while keeping hues roughly intact, the same trick used by [Folio](https://github.com/owenpkent/folio) (see [Future ideas](#future-ideas)). It follows `markcopy.theme` (auto/light/dark) like the Markdown preview, with a right-click **Dark Pages** / **Light Pages** item that overrides it for the session (`pageMode` in `pdf.ts`, one of `auto` / `normal` / `inverted`). A `forced-color-adjust: none` rule on the page root keeps Windows High Contrast from recoloring page content.
+
+Because the rendered pages are canvas-only with no text layer, a left-click-drag can never be a text selection, so `pdf.ts` always treats a left-drag anywhere on the page area as a pan/scroll (pointer events, with pointer capture so a drag that leaves the webview still delivers `move`/`up`). The cursor switches between `grab` and `grabbing` via the `mc-grabbing` body class.
+
+The PDF view also gets always-visible, styled scrollbars, scoped to the PDF page's root element (`html.mc-pdf-root`) so the Markdown preview's scrollbars are unaffected.
 
 ## Theming
 
@@ -180,3 +192,13 @@ Two layers, matching the two runtimes:
 - **Integration (`test-integration/`, Mocha + `@vscode/test-electron`).** Runs the built extension in a downloaded VS Code instance (`.vscode-test.mjs` config, compiled via `tsconfig.integration.json` to `out/`) and asserts activation, command registration (including `markcopy.openSettings`), configuration defaults (including the `autoPreview` default), that the preview panel opens, and that focusing an on-disk Markdown file auto-opens a preview for it. Run with `npm run test:integration`; on Linux and CI it needs a display (`xvfb-run`).
 
 Webview-internal behavior (the actual clipboard writes, the context menu) is not asserted automatically, since it runs sandboxed inside the webview; exercise it by hand in the Extension Development Host (F5). Both layers run in CI (see [CONTRIBUTING](../CONTRIBUTING.md#tests)).
+
+## Future ideas
+
+- **Shared `pdf-core` with Folio.** The PDF preview shares techniques with [Folio](https://github.com/owenpkent/folio) (a Tauri + React desktop PDF viewer), most visibly the dark-mode page filter `invert(1) hue-rotate(180deg)`, which was ported by hand. If the overlap grows (text extraction, page-to-PNG, reading-mode filters, outline/nav), consider extracting a small **framework-agnostic** TypeScript core both projects import, keeping each UI separate. Deliberately not done yet: today the shared surface is thin and the runtimes differ (Tauri desktop vs. sandboxed VS Code webview), so copying the one technique beat taking on a shared dependency. Extract only once the duplication is actually felt.
+- **PDF comments/annotations.** Let the user view and add comments (pin/sticky notes, region highlights) on a PDF. The open design question is persistence, and it drives everything else:
+  - _Sidecar JSON_ (e.g. `mydoc.pdf.mccomments.json` beside the file) keeps the PDF read-only and is git-friendly, but comments are only visible in MarkCopy.
+  - _Embed into the PDF_ (real `/Annots` via a writer like `pdf-lib`) makes them portable to any viewer, but requires switching the read-only custom editor to a writable one with a save flow, plus a new dependency.
+  - _In-memory only_ is fine for prototyping the interaction before committing to storage.
+
+  A canvas-only render (no text layer) means highlights would be region-based, not word-based; adding a pdf.js text layer is a prerequisite for word-level selection/highlighting.

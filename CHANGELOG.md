@@ -4,6 +4,21 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- **Auto-preview reliably opens now.** Added the `onLanguage:markdown` activation event (the extension previously had no activation events at all, so it could fail to activate in time); the auto-preview check also now runs once at activation for the already-active editor, since `onDidChangeActiveTextEditor` never fires for the file that triggered activation.
+- **Retargeting the preview to a different Markdown file no longer opens a third editor column.** The preview now reveals in its existing column instead of "Beside", and if VS Code opened the newly-focused file into the preview's own column, it's moved back to the first column.
+- **PDF preview no longer renders a blank page.** The pdf.js worker is now started from a same-origin blob URL (fetched and wrapped in a `Blob`) instead of its cross-origin `webview-resource:` URI, which threw a `SecurityError`; and the PDF bytes are now sent to the webview as base64 and decoded back to a `Uint8Array`, since a `Uint8Array` doesn't survive webview `postMessage`. Load failures now show a visible error in the panel instead of a silent blank.
+
+### Changed
+- **"Copy Block ..." vs "Copy Selection ..." no longer overlap.** The in-preview right-click menu now shows "Copy Block as Rich Text / Markdown / PNG" only when there's no text selection, and "Copy Selection as Rich Text / Markdown" only when there is one.
+- Removed `markcopy.copyDocumentAsRichText` from the editor right-click menu (still available from the Command Palette and the in-preview right-click menu).
+- Removed the `markcopy.openPreview` button from the Markdown editor's title bar (still available from the Command Palette and the Explorer right-click menu); its icon changed to `$(book)`.
+
+### Added
+- **PDF dark mode.** Pages follow `markcopy.theme` (auto/light/dark) like the Markdown preview, inverted with `invert(1) hue-rotate(180deg)` so they stay legible in a dark theme; a right-click **Dark Pages** / **Light Pages** item overrides it for the session. A `forced-color-adjust: none` rule keeps Windows High Contrast from recoloring pages.
+- **Hand tool in the PDF preview.** Left-click-drag anywhere on the pages pans the view (always on, since the canvas-only pages have no text layer to select). Cursor switches between grab and grabbing.
+- **Always-visible, styled scrollbars** in the PDF preview, scoped so the Markdown preview is unaffected.
+
 ### Planned
 - KaTeX / LaTeX math rendering, and copy-as-image for equations.
 - PlantUML support.
