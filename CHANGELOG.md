@@ -9,6 +9,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.2.1] - 2026-07-19
+
+### Security
+- **Preview HTML is now sanitized before it's inserted into the webview.** The rendered Markdown (which allows raw HTML) is passed through DOMPurify, which strips `<script>`, inline event handlers, and `javascript:` URIs while keeping formatting, source-line mapping, and Mermaid placeholders intact. The webview CSP (`script-src 'nonce-...'`, no `unsafe-inline`) already blocked script execution, so this is defense in depth: an XSS is no longer one CSP change away from firing. Remote `https:` images still render as before.
+- **Local publishing tokens can no longer leak into a packaged `.vsix`.** `.env` and `.env.*` are now listed in `.vscodeignore`, so a `vsce package` cannot bundle the `VSCE_PAT` / `OVSX_PAT` files (they were already gitignored).
+- **CI GitHub Actions are pinned to commit SHAs** instead of floating major tags, closing the unpinned-action supply-chain vector.
+
 ## [0.2.0] - 2026-07-19
 
 ### Fixed
@@ -70,7 +77,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/owenpkent/markcopy/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/owenpkent/markcopy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/owenpkent/markcopy/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/owenpkent/markcopy/releases/tag/v0.0.1
