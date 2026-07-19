@@ -11,3 +11,8 @@ media/pdf.worker.js
 media/pdf.worker.js.map
 *.vsix
 .DS_Store
+
+# Local secrets (publishing tokens). Never commit real values; see .env.example.
+.env
+.env.local
+.env.*.local
