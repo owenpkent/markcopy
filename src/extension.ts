@@ -82,23 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Auto-open (or retarget) the preview when a Markdown editor gains focus,
     // when enabled. Opens beside with focus preserved so the cursor stays put.
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (!editor) {
-        return;
-      }
-      const doc = editor.document;
-      const enabled = vscode.workspace
-        .getConfiguration('markcopy')
-        .get<boolean>('autoPreview', true);
-      const eligible = shouldAutoPreview({
-        enabled,
-        languageId: doc.languageId,
-        scheme: doc.uri.scheme,
-        docKey: doc.uri.toString(),
-        dismissed: dismissedPreviews,
-      });
-      if (eligible) {
-        openPreview(context, doc);
-      }
+      maybeAutoPreview(context, editor);
     }),
 
     // Editor -> preview scroll sync.
@@ -113,6 +97,34 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  // The extension activates on `onLanguage:markdown`, i.e. a Markdown editor is
+  // already active. onDidChangeActiveTextEditor won't fire for that first editor,
+  // so run the auto-preview check for it once on activation.
+  maybeAutoPreview(context, vscode.window.activeTextEditor);
+}
+
+// Auto-open (or retarget) the preview for a Markdown editor when enabled. Opens
+// beside with focus preserved so the cursor stays put.
+function maybeAutoPreview(
+  context: vscode.ExtensionContext,
+  editor: vscode.TextEditor | undefined,
+): void {
+  if (!editor) {
+    return;
+  }
+  const doc = editor.document;
+  const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
+  const eligible = shouldAutoPreview({
+    enabled,
+    languageId: doc.languageId,
+    scheme: doc.uri.scheme,
+    docKey: doc.uri.toString(),
+    dismissed: dismissedPreviews,
+  });
+  if (eligible) {
+    openPreview(context, doc);
+  }
 }
 
 export function deactivate(): void {
@@ -133,6 +145,21 @@ function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
 function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument): void {
   if (current) {
     if (current.docUri.toString() !== doc.uri.toString()) {
+      // When the preview panel's own column was the active group, VS Code opens
+      // the newly-focused Markdown file as a tab *in that column*. Move it back to
+      // the first column so the preview beside it stays a clean two-column layout
+      // instead of getting pushed out to a third.
+      const editor = vscode.window.activeTextEditor;
+      if (
+        editor &&
+        editor.document.uri.toString() === doc.uri.toString() &&
+        editor.viewColumn === current.panel.viewColumn
+      ) {
+        void vscode.window.showTextDocument(editor.document, {
+          viewColumn: vscode.ViewColumn.One,
+          preserveFocus: false,
+        });
+      }
       current.docUri = doc.uri;
       // Grant the webview read access to the newly-targeted document's folder so
       // its relative images resolve (localResourceRoots is fixed at creation).
@@ -141,7 +168,9 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         localResourceRoots: resourceRoots(context, doc.uri),
       };
     }
-    current.panel.reveal(vscode.ViewColumn.Beside, true);
+    // Reveal in the panel's existing column (never "Beside") so retargeting to a
+    // new document never migrates the preview into an additional column.
+    current.panel.reveal(current.panel.viewColumn ?? vscode.ViewColumn.Beside, true);
     update(current);
     return;
   }

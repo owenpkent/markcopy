@@ -39,14 +39,16 @@
     "theme": "dark"
   },
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "contributes": {
     "commands": [
       {
         "command": "markcopy.openPreview",
         "title": "MarkCopy: Open Rich Preview to the Side",
         "category": "MarkCopy",
-        "icon": "$(open-preview)"
+        "icon": "$(book)"
       },
       {
         "command": "markcopy.copyDocumentAsRichText",
@@ -75,11 +77,6 @@
     "menus": {
       "editor/title": [
         {
-          "command": "markcopy.openPreview",
-          "when": "editorLangId == markdown",
-          "group": "navigation"
-        },
-        {
           "command": "markcopy.openSettings",
           "when": "activeWebviewPanelId == markcopy.preview",
           "group": "navigation"
@@ -88,11 +85,6 @@
       "editor/context": [
         {
           "command": "markcopy.openPreview",
-          "when": "editorLangId == markdown",
-          "group": "1_markcopy"
-        },
-        {
-          "command": "markcopy.copyDocumentAsRichText",
           "when": "editorLangId == markdown",
           "group": "1_markcopy"
         }

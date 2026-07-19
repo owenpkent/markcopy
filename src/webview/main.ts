@@ -255,7 +255,10 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     }
   }
 
-  if (block && !code && !table && !mermaidEl) {
+  // "Copy Block" grabs the whole element you clicked in. It's the no-selection
+  // convenience, so hide it once there's a selection to avoid overlapping the
+  // "Copy Selection" actions above.
+  if (block && !hasSelection && !code && !table && !mermaidEl) {
     items.push({ kind: 'item', label: 'Copy Block as Rich Text', run: () => copyRichText(block) });
     items.push({
       kind: 'item',
