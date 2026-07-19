@@ -36,7 +36,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview.
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with right-click **Copy Page as PNG**, **Copy Page Text**, and **Copy All Text**. It follows your theme in light or dark, with a right-click **Dark Pages** / **Light Pages** toggle to override it for the session; a hand tool lets you left-click-drag anywhere to pan; and the view has always-visible styled scrollbars. One extension previews both Markdown and PDF.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating zoom toolbar (50 to 400 percent) keeps pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. It follows your theme in light or dark, with a right-click **Dark Pages** / **Light Pages** toggle to override it for the session. One extension previews both Markdown and PDF.
 - **Settings without leaving the preview.** Right-click for a **Theme**, **Style**, and **Sync scroll** / **Auto-open preview** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
@@ -96,14 +96,16 @@ See [RELEASING.md](RELEASING.md) for how releases are cut and published.
 
 ## PDF preview
 
-MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it inline (VS Code has no built-in PDF viewer). Rendering uses Mozilla's pdf.js, the same engine behind [folio](https://github.com/owenpkent/folio). Right-click a page for:
+MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it inline (VS Code has no built-in PDF viewer). Rendering uses Mozilla's pdf.js, the same engine behind [folio](https://github.com/owenpkent/folio). Each page has a real, selectable text layer over the canvas, so you can highlight text directly on the page. Right-click a page for:
 
 - **Copy Page as PNG**: the rendered page as an image, for slides and chat.
 - **Copy Page Text** / **Copy All Text**: the selectable text, extracted per page.
 - **Copy Selected Text**: just the text you highlight.
+- **Add Comment Here**: drop a pin with an editable note; click a pin to edit or delete it. Comments are saved to a `<filename>.pdf.mccomments.json` file next to the PDF (the PDF itself stays read-only) and reload when you reopen it.
+- **Hand Tool (Drag to Scroll)** / **Pointer Tool (Select Text)**: right-click to toggle between panning by drag and selecting text.
 - **Dark Pages** / **Light Pages**: override the page palette for the session (it otherwise follows `markcopy.theme`, like the Markdown preview).
 
-Left-click-drag anywhere on a page pans the view (a hand tool that's always on, since the pages are canvas-only with no selectable text layer, so a drag is never a text selection), and the view has always-visible styled scrollbars.
+A floating zoom toolbar in the bottom-right corner steps through preset levels (50 to 400 percent) with minus/plus buttons, Ctrl and plus / Ctrl and minus / Ctrl and 0, or Ctrl plus the mouse wheel; clicking the percentage resets to 100 percent. Pages re-rasterise at each level, and only pages near the viewport stay rendered, so large PDFs stay sharp and memory-bounded. The view also has always-visible styled scrollbars.
 
 The file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network. To open a PDF as raw bytes instead, use **Reopen Editor With...** from the editor title menu.
 

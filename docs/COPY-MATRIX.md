@@ -58,6 +58,8 @@ Opening a `.pdf` uses the MarkCopy PDF preview. Right-click a page for:
 | Copy All Text      | `text/plain` (all pages) | Any editor or document |
 | Copy Selected Text | `text/plain`             | Any editor or document |
 
+Each page now has a real pdf.js text layer (transparent, selectable spans over the canvas), so **Copy Selected Text** copies whatever you highlight directly on the page; earlier builds had no selectable text on the canvas, so this action had nothing to select.
+
 ### Always available
 
 | Action                           | Clipboard flavor           | Pastes well into                  |
