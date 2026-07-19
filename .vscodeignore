@@ -6,6 +6,8 @@ esbuild.js
 esbuild.web.js
 tsconfig.json
 .gitignore
+.env
+.env.*
 **/*.map
 sample.md
 *.vsix

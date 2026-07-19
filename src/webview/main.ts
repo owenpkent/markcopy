@@ -1,4 +1,5 @@
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 import { toBlob } from 'html-to-image';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited } from './table';
@@ -105,7 +106,16 @@ async function render(
   currentTheme = theme || 'auto';
   currentSyncScroll = syncScroll;
   currentAutoPreview = autoPreview;
-  content.innerHTML = html;
+  // Defense in depth. The host renders Markdown with `html: true`, so raw HTML
+  // in the document reaches us untrusted. The webview CSP already blocks script
+  // execution (script-src 'nonce-...', no unsafe-inline), but sanitizing here
+  // means an XSS is not one CSP change away from firing. DOMPurify's defaults
+  // strip <script>, inline event handlers, and javascript: URIs while keeping
+  // formatting HTML, data-source-line attributes, and the mermaid placeholder
+  // (<pre class="mermaid-src">) intact. Remote https images are left alone so
+  // they still render; to also close the preview-open beacon vector, forbid
+  // external image loads here (FORBID_ATTR / a uponSanitizeAttribute hook).
+  content.innerHTML = DOMPurify.sanitize(html);
   // Initialize after data-mc-theme is set so the diagram theme matches.
   initMermaid();
   await renderMermaid();

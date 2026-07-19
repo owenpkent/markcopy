@@ -170,6 +170,7 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
+    "dompurify": "^3.4.12",
     "highlight.js": "^11.10.0",
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
