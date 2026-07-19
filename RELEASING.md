@@ -29,7 +29,9 @@ Then authenticate `vsce` with a **Personal Access Token (PAT)**. This publisher 
 
 ### Verified publisher badge (optional)
 
-On <https://marketplace.visualstudio.com/manage>, open the publisher and start **domain verification**: add the DNS TXT record it shows to a domain you control. Once verified, the listing gets the blue verified checkmark.
+**VS Code Marketplace**: on <https://marketplace.visualstudio.com/manage>, open the publisher and start **domain verification**: add the DNS TXT record it shows to a domain you control. Once verified, the listing gets the blue verified checkmark.
+
+**Open VSX**: verification means claiming ownership of the namespace. File a public issue on [EclipseFdn/open-vsx.org](https://github.com/EclipseFdn/open-vsx.org/issues) using the **"Claim namespace ownership"** template. The strongest evidence tier (Option 1) applies here: the namespace is also a VS Code Marketplace publisher, and the published extension's `package.json` repo is owned by the requesting GitHub account. An Eclipse Foundation admin reviews the issue and tags it `granted`, after which the verified checkmark appears on the listing and namespace members can be managed from the open-vsx.org profile. The claim for `OwenPKent` was filed 2026-07-19 as [EclipseFdn/open-vsx.org#11947](https://github.com/EclipseFdn/open-vsx.org/issues/11947).
 
 ## Release steps
 

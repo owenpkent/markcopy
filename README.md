@@ -73,19 +73,19 @@ Local images in the document render automatically, and the right-click menu's se
 
 ## Install
 
-**From the Marketplace** (once published, as `OwenPKent.markcopy`):
+**From the Marketplace** (published as [`OwenPKent.markcopy`](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)):
 
 - In VS Code: open the Extensions view, search **MarkCopy**, and click Install.
 - Or from a terminal: `code --install-extension OwenPKent.markcopy`
 
-It will also be available on [Open VSX](https://open-vsx.org) for Cursor, VSCodium, and Windsurf.
+It is also available on [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) for Cursor, VSCodium, and Windsurf.
 
 **From the packaged VSIX** (local build):
 
 ```bash
 npm install
-npm run vsix                                   # produces markcopy-0.1.0.vsix
-code --install-extension markcopy-0.1.0.vsix
+npm run vsix                                   # produces markcopy-<version>.vsix
+code --install-extension markcopy-<version>.vsix
 ```
 
 See [RELEASING.md](RELEASING.md) for how releases are cut and published.
