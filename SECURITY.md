@@ -40,4 +40,4 @@ Copy actions only ever write to the clipboard, and only in response to a user ac
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing `.md` or `.pdf`, and the observed behavior. You will get an acknowledgement and a fix timeline.
+Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing `.md` or `.pdf`, and the observed behavior. You will get an acknowledgement and a fix timeline.

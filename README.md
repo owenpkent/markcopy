@@ -58,6 +58,7 @@ Local images in the document render automatically, and the right-click menu's se
 | ------------------------------------------ | --------------------------------- | ------------------------------------------------- |
 | MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor. |
 | MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text. |
+| MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                      |
 
 ## Settings
 
@@ -84,8 +85,8 @@ It will also be available on [Open VSX](https://open-vsx.org) for Cursor, VSCodi
 
 ```bash
 npm install
-npm run vsix                                   # produces markcopy-0.0.1.vsix
-code --install-extension markcopy-0.0.1.vsix
+npm run vsix                                   # produces markcopy-0.1.0.vsix
+code --install-extension markcopy-0.1.0.vsix
 ```
 
 See [RELEASING.md](RELEASING.md) for how releases are cut and published.
@@ -142,7 +143,6 @@ Full details in [CONTRIBUTING.md](CONTRIBUTING.md).
 - KaTeX / LaTeX math (render, and copy as image).
 - PlantUML support.
 - An "email-safe" export profile (table-based layout, fully inlined).
-- A marketplace icon.
 
 ## License
 

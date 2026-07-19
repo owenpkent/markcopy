@@ -4,7 +4,7 @@ Thanks for helping improve MarkCopy. This guide covers the local setup, the buil
 
 ## Prerequisites
 
-- Node.js 18 or newer.
+- Node.js 20 or newer (matches the version CI builds and tests on).
 - VS Code 1.90 or newer (matches `engines.vscode`).
 
 ## Setup
