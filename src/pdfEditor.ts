@@ -22,15 +22,23 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       localResourceRoots: [mediaRoot],
     };
 
-    const asUri = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, file));
-    const scriptUri = asUri('pdf.js');
-    const workerUri = asUri('pdf.worker.js');
-    const styleUri = asUri('preview.css');
     const nonce = getNonce();
+    // Cache-bust the script/style so a rebuilt bundle always loads fresh: the
+    // webview otherwise caches these by their (unchanged) resource URL.
+    const asUri = (file: string, bust = false) => {
+      const uri = webview.asWebviewUri(vscode.Uri.joinPath(mediaRoot, file));
+      return bust ? uri.with({ query: `v=${nonce}` }) : uri;
+    };
+    const scriptUri = asUri('pdf.js', true);
+    const workerUri = asUri('pdf.worker.js');
+    const styleUri = asUri('preview.css', true);
     const theme = vscode.workspace.getConfiguration('markcopy').get<string>('theme', 'auto');
     webview.html = this.html(webview, scriptUri, styleUri, nonce, theme);
 
-    // Send the file bytes once the webview signals it is ready.
+    // Comments persist to a sidecar JSON file next to the PDF, so the PDF itself
+    // stays untouched (this is a read-only editor).
+    const commentsUri = document.uri.with({ path: document.uri.path + '.mccomments.json' });
+
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
         const bytes = await vscode.workspace.fs.readFile(document.uri);
@@ -41,7 +49,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           type: 'load',
           data: Buffer.from(bytes).toString('base64'),
           workerSrc: workerUri.toString(),
+          comments: await readComments(commentsUri),
         });
+      } else if (msg?.type === 'saveComments') {
+        await writeComments(commentsUri, msg.comments);
       }
     });
   }
@@ -79,6 +90,32 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+  }
+}
+
+// Read the sidecar comments file, returning [] when it is absent or unreadable.
+async function readComments(uri: vscode.Uri): Promise<unknown[]> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// Write the sidecar comments file, or delete it when there are no comments left
+// so we do not leave an empty artifact beside the PDF.
+async function writeComments(uri: vscode.Uri, comments: unknown): Promise<void> {
+  try {
+    if (Array.isArray(comments) && comments.length > 0) {
+      const json = JSON.stringify(comments, null, 2);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf8'));
+    } else {
+      await vscode.workspace.fs.delete(uri).then(undefined, () => undefined);
+    }
+  } catch {
+    /* best-effort persistence; a failed write should not crash the editor */
   }
 }
 

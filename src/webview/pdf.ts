@@ -1,5 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -14,12 +14,53 @@ const root = document.getElementById('pdf-root') as HTMLDivElement;
 const menu = document.getElementById('mc-menu') as HTMLDivElement;
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
-// Cache of extracted page text, keyed by 1-based page number.
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let doc: PDFDocumentProxy | null = null;
+const pages: PDFPageProxy[] = []; // 1-based via index+1
+const baseSize: { w: number; h: number }[] = []; // page size at scale 1 (CSS px)
+const wrappers: HTMLDivElement[] = [];
+const renderTasks = new Map<number, RenderTask>();
+const renderedScale = new Map<number, number>(); // scale a page's canvas was rasterised at
+const inFlight = new Set<number>();
+const visible = new Set<number>(); // pages currently near the viewport
 const pageText = new Map<number, string>();
 
+// Zoom is stepped through fixed levels so the label reads cleanly (100 %, 125 %…)
+// and never runs away.
+const ZOOM_LEVELS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+let zoomIndex = ZOOM_LEVELS.indexOf(1);
+let scale = ZOOM_LEVELS[zoomIndex];
+
+// Cap the rasterised canvas so it never exceeds the browser's limit (past which
+// it gets downscaled -> blurry) or exhausts memory. Roughly 4096x4096.
+const MAX_CANVAS_PIXELS = 16_777_216;
+
+let observer: IntersectionObserver | null = null;
+let zoomTimer = 0;
+
+type Mode = 'hand' | 'pointer';
+let mode: Mode = 'hand';
+
+interface Comment {
+  id: string;
+  page: number;
+  xPct: number; // fraction of page width/height, so pins survive zoom
+  yPct: number;
+  text: string;
+}
+let comments: Comment[] = [];
+let commentSeq = 0;
+
+// ---------------------------------------------------------------------------
+// Messaging
+// ---------------------------------------------------------------------------
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type === 'load') {
+    comments = Array.isArray(msg.comments) ? (msg.comments as Comment[]) : [];
+    commentSeq = comments.length;
     load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
   }
 });
@@ -35,41 +76,48 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-// Never fail silently: surface any uncaught error/rejection in the panel so a
-// blank page always carries an explanation.
+function saveComments(): void {
+  vscode.postMessage({ type: 'saveComments', comments });
+}
+
+// Never fail silently: surface any uncaught error/rejection in the panel.
 window.addEventListener('error', (e) => showFatal(e.error ?? e.message));
 window.addEventListener('unhandledrejection', (e) => showFatal(e.reason));
 
 function showFatal(err: unknown): void {
+  if (String(err).includes('Rendering cancelled')) {
+    return; // expected when zooming/scrolling supersedes a render
+  }
   root.innerHTML = `<pre class="mc-error">PDF preview error: ${escapeHtml(String(err))}</pre>`;
 }
 
-function toast(text: string): void {
+let toastTimer = 0;
+function toast(text: string, ms = 1600): void {
   toastEl.textContent = text;
   toastEl.hidden = false;
-  window.setTimeout(() => (toastEl.hidden = true), 1600);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (toastEl.hidden = true), ms);
 }
 
+// ---------------------------------------------------------------------------
+// Load
+// ---------------------------------------------------------------------------
 async function load(data: Uint8Array, workerSrc: string): Promise<void> {
   root.textContent = '';
 
-  // Run pdf.js parsing/rasterising off the main thread. The worker script is a
-  // webview-resource URI (https://…vscode-cdn.net) which is cross-origin to the
-  // webview document (vscode-webview://…), so `new Worker(workerSrc)` would throw
-  // a SecurityError. Fetch it and start the worker from a same-origin blob URL
-  // instead (CSP allows `blob:` in worker-src and the fetch via connect-src).
+  // Run pdf.js off the main thread. The worker script is a webview-resource URI
+  // (cross-origin to the vscode-webview:// document), so `new Worker(workerSrc)`
+  // would throw a SecurityError; fetch it and start from a same-origin blob URL.
   try {
     const res = await fetch(workerSrc);
     const code = await res.text();
     const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-    const worker = new Worker(blobUrl, { type: 'module' });
-    pdfjsLib.GlobalWorkerOptions.workerPort = worker;
+    pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(blobUrl, { type: 'module' });
   } catch (err) {
     root.innerHTML = `<pre class="mc-error">Failed to start PDF worker: ${escapeHtml(String(err))}</pre>`;
     return;
   }
 
-  let doc: PDFDocumentProxy;
   try {
     doc = await pdfjsLib.getDocument({ data }).promise;
   } catch (err) {
@@ -77,36 +125,355 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
     return;
   }
 
+  // Build a placeholder per page, sized to the page, but do NOT rasterise yet.
+  // The IntersectionObserver rasterises pages as they approach the viewport.
+  observer = new IntersectionObserver(onIntersect, { root: null, rootMargin: '150% 0px' });
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
-    const scale = 1.5;
-    const viewport = page.getViewport({ scale });
+    pages.push(page);
+    const vp = page.getViewport({ scale: 1 });
+    baseSize.push({ w: vp.width, h: vp.height });
 
     const wrap = document.createElement('div');
     wrap.className = 'mc-page';
     wrap.dataset.page = String(n);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
-    wrap.appendChild(canvas);
+    wrap.innerHTML =
+      '<canvas class="mc-canvas"></canvas><div class="textLayer"></div>' +
+      '<div class="mc-annot-layer"></div>';
     root.appendChild(wrap);
-
-    if (ctx) {
-      await page.render({ canvasContext: ctx, viewport }).promise;
-    }
-
-    // Extract text once, for the copy actions.
-    const content = await page.getTextContent();
-    const text = content.items
-      .map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : ''))
-      .join('')
-      .trim();
-    pageText.set(n, text);
+    wrappers.push(wrap);
+    layoutPage(n);
+    observer.observe(wrap);
   }
 
+  updateZoomLabel();
   toast(`Loaded ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`);
+}
+
+// ---------------------------------------------------------------------------
+// Virtualised rendering
+// ---------------------------------------------------------------------------
+// Size a page's placeholder (and its layers) for the current scale, without
+// rasterising. Cheap enough to run for every page on each zoom step.
+function layoutPage(n: number): void {
+  const { w, h } = baseSize[n - 1];
+  const wrap = wrappers[n - 1];
+  wrap.style.width = `${Math.floor(w * scale)}px`;
+  wrap.style.height = `${Math.floor(h * scale)}px`;
+  wrap.style.setProperty('--scale-factor', String(scale));
+}
+
+function onIntersect(entries: IntersectionObserverEntry[]): void {
+  for (const entry of entries) {
+    const n = Number((entry.target as HTMLElement).dataset.page);
+    if (entry.isIntersecting) {
+      visible.add(n);
+    } else {
+      visible.delete(n);
+    }
+  }
+  refresh();
+}
+
+// Rasterise every visible page at the current scale and free canvases that have
+// scrolled away, so memory stays bounded no matter how many pages the PDF has.
+function refresh(): void {
+  for (const n of visible) {
+    void ensureRendered(n);
+  }
+  for (const n of Array.from(renderedScale.keys())) {
+    if (!visible.has(n)) {
+      teardown(n);
+    }
+  }
+}
+
+async function ensureRendered(n: number): Promise<void> {
+  if (inFlight.has(n) || renderedScale.get(n) === scale) {
+    return;
+  }
+  inFlight.add(n);
+  try {
+    await renderPage(n);
+    renderedScale.set(n, scale);
+  } catch {
+    renderedScale.delete(n); // cancelled or failed; a later pass will retry
+  } finally {
+    inFlight.delete(n);
+  }
+}
+
+async function renderPage(n: number): Promise<void> {
+  const page = pages[n - 1];
+  const wrap = wrappers[n - 1];
+  const viewport = page.getViewport({ scale });
+
+  // Render ABOVE the display resolution and let the browser downsample: this
+  // supersamples the text so it stays sharp even where the webview under-reports
+  // devicePixelRatio. Use at least 2x, or the real device ratio when higher,
+  // clamped so the canvas never exceeds MAX_CANVAS_PIXELS (past which the browser
+  // itself downscales the page -> the fuzziness we are fixing).
+  const dpr = window.devicePixelRatio || 1;
+  const cap = Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height));
+  const outputScale = Math.min(cap, Math.max(dpr, 2));
+
+  const canvas = wrap.querySelector('canvas') as HTMLCanvasElement;
+  canvas.width = Math.floor(viewport.width * outputScale);
+  canvas.height = Math.floor(viewport.height * outputScale);
+  canvas.style.width = `${Math.floor(viewport.width)}px`;
+  canvas.style.height = `${Math.floor(viewport.height)}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return;
+  }
+
+  renderTasks.get(n)?.cancel();
+  const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
+  const task = page.render({ canvasContext: ctx, viewport, transform });
+  renderTasks.set(n, task);
+  await task.promise;
+
+  // Dark mode: invert the rasterised pixels here rather than with a CSS filter.
+  // A CSS filter forces the browser to re-rasterise the layer at CSS resolution
+  // (blurry on HiDPI); inverting the bitmap keeps it crisp. `difference` against
+  // white is an exact colour inversion.
+  if (pagesInverted()) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  // Text layer: transparent, selectable spans over the canvas.
+  const textContent = await page.getTextContent();
+  if (!pageText.has(n)) {
+    pageText.set(
+      n,
+      textContent.items
+        .map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : ''))
+        .join('')
+        .trim(),
+    );
+  }
+  const textLayerDiv = wrap.querySelector('.textLayer') as HTMLElement;
+  textLayerDiv.innerHTML = '';
+  await new pdfjsLib.TextLayer({
+    textContentSource: textContent,
+    container: textLayerDiv,
+    viewport,
+  }).render();
+
+  placePins(n);
+}
+
+// Free a page's raster + text layer when it scrolls out of view.
+function teardown(n: number): void {
+  renderTasks.get(n)?.cancel();
+  renderTasks.delete(n);
+  renderedScale.delete(n);
+  const wrap = wrappers[n - 1];
+  const canvas = wrap.querySelector('canvas') as HTMLCanvasElement;
+  canvas.width = 0;
+  canvas.height = 0;
+  (wrap.querySelector('.textLayer') as HTMLElement).innerHTML = '';
+}
+
+// ---------------------------------------------------------------------------
+// Zoom
+// ---------------------------------------------------------------------------
+function setZoomIndex(i: number): void {
+  const clamped = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, i));
+  if (clamped === zoomIndex) {
+    return;
+  }
+  zoomIndex = clamped;
+  scale = ZOOM_LEVELS[zoomIndex];
+  updateZoomLabel();
+
+  // Resize placeholders immediately (keeps scroll layout correct), then
+  // re-rasterise the visible pages once zooming settles.
+  for (let n = 1; n <= (doc?.numPages ?? 0); n++) {
+    renderTasks.get(n)?.cancel();
+    layoutPage(n);
+  }
+  renderedScale.clear();
+  inFlight.clear();
+  window.clearTimeout(zoomTimer);
+  zoomTimer = window.setTimeout(refresh, 120);
+}
+
+function zoomIn(): void {
+  setZoomIndex(zoomIndex + 1);
+}
+function zoomOut(): void {
+  setZoomIndex(zoomIndex - 1);
+}
+function zoomReset(): void {
+  setZoomIndex(ZOOM_LEVELS.indexOf(1));
+}
+
+function updateZoomLabel(): void {
+  const label = document.getElementById('mc-zoom-label');
+  if (label) {
+    label.textContent = `${Math.round(scale * 100)}%`;
+  }
+}
+
+// Ctrl/Cmd + wheel zooms one level per notch. preventDefault stops the browser's
+// own page zoom; the debounce in setZoomIndex keeps rapid notches cheap.
+document.addEventListener(
+  'wheel',
+  (e) => {
+    if (!(e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      zoomIn();
+    } else if (e.deltaY > 0) {
+      zoomOut();
+    }
+  },
+  { passive: false },
+);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    menu.hidden = true;
+    closeNote();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === '=' || e.key === '+') {
+      e.preventDefault();
+      zoomIn();
+    } else if (e.key === '-') {
+      e.preventDefault();
+      zoomOut();
+    } else if (e.key === '0') {
+      e.preventDefault();
+      zoomReset();
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Interaction mode (hand vs pointer)
+// ---------------------------------------------------------------------------
+function setMode(next: Mode): void {
+  mode = next;
+  document.body.classList.toggle('mc-mode-hand', mode === 'hand');
+  document.body.classList.toggle('mc-mode-pointer', mode === 'pointer');
+}
+setMode('hand');
+
+// ---------------------------------------------------------------------------
+// Comments (pin notes)
+// ---------------------------------------------------------------------------
+function placePins(n: number): void {
+  const layer = wrappers[n - 1].querySelector('.mc-annot-layer') as HTMLElement;
+  layer.innerHTML = '';
+  comments
+    .filter((c) => c.page === n)
+    .forEach((c) => {
+      const pin = document.createElement('button');
+      pin.className = 'mc-pin';
+      pin.type = 'button';
+      pin.dataset.id = c.id;
+      pin.style.left = `${c.xPct * 100}%`;
+      pin.style.top = `${c.yPct * 100}%`;
+      pin.title = c.text || 'Comment';
+      pin.setAttribute('aria-label', 'Comment');
+      pin.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      pin.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openNote(c, pin);
+      });
+      layer.appendChild(pin);
+    });
+}
+
+function addCommentAt(pageEl: HTMLElement, clientX: number, clientY: number): void {
+  const n = Number(pageEl.dataset.page);
+  const rect = pageEl.getBoundingClientRect();
+  const xPct = clamp01((clientX - rect.left) / rect.width);
+  const yPct = clamp01((clientY - rect.top) / rect.height);
+  const c: Comment = { id: `c${Date.now()}_${++commentSeq}`, page: n, xPct, yPct, text: '' };
+  comments.push(c);
+  placePins(n);
+  const pin = pageEl.querySelector(`.mc-pin[data-id="${c.id}"]`) as HTMLElement | null;
+  openNote(c, pin ?? pageEl, true);
+}
+
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
+let noteEl: HTMLDivElement | null = null;
+let noteComment: Comment | null = null;
+
+function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
+  closeNote();
+  noteComment = c;
+  const el = document.createElement('div');
+  el.className = 'mc-note';
+  el.innerHTML =
+    '<textarea class="mc-note-text" placeholder="Add a comment…"></textarea>' +
+    '<div class="mc-note-actions">' +
+    '<button type="button" class="mc-note-delete">Delete</button>' +
+    '<button type="button" class="mc-note-save">Save</button>' +
+    '</div>';
+  document.body.appendChild(el);
+  noteEl = el;
+
+  const textarea = el.querySelector('.mc-note-text') as HTMLTextAreaElement;
+  textarea.value = c.text;
+
+  const rect = anchor.getBoundingClientRect();
+  el.style.left = `${Math.min(window.innerWidth - 280, Math.max(8, rect.left))}px`;
+  el.style.top = `${Math.min(window.innerHeight - 170, rect.bottom + 6)}px`;
+
+  const save = () => {
+    c.text = textarea.value.trim();
+    if (!c.text) {
+      remove();
+      return;
+    }
+    saveComments();
+    placePins(c.page);
+    closeNote();
+  };
+  const remove = () => {
+    comments = comments.filter((x) => x.id !== c.id);
+    saveComments();
+    placePins(c.page);
+    closeNote();
+  };
+
+  (el.querySelector('.mc-note-save') as HTMLButtonElement).addEventListener('click', save);
+  (el.querySelector('.mc-note-delete') as HTMLButtonElement).addEventListener('click', remove);
+  el.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  textarea.focus();
+  if (isNew) {
+    // Discard a brand-new empty pin unless the user types and saves.
+    textarea.addEventListener(
+      'blur',
+      () => {
+        if (!textarea.value.trim() && noteComment === c) {
+          remove();
+        }
+      },
+      { once: true },
+    );
+  }
+}
+
+function closeNote(): void {
+  noteEl?.remove();
+  noteEl = null;
+  noteComment = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,15 +498,20 @@ document.addEventListener('contextmenu', (e) => {
   if (pageEl) {
     const n = Number(pageEl.dataset.page);
     const canvas = pageEl.querySelector('canvas');
-    if (canvas) {
+    if (canvas && canvas.width > 0) {
       items.push({ label: `Copy Page ${n} as PNG`, run: () => copyCanvasPng(canvas) });
     }
     items.push({ label: `Copy Page ${n} Text`, run: () => copyText(pageText.get(n) ?? '') });
+    const cx = e.clientX;
+    const cy = e.clientY;
+    items.push({ label: 'Add Comment Here', run: () => addCommentAt(pageEl, cx, cy) });
   }
 
   items.push({ label: 'Copy All Text', run: () => copyText(allText()) });
-
-  // View: flip page inversion for this session (defaults to following the theme).
+  items.push({
+    label: mode === 'hand' ? 'Pointer Tool (Select Text)' : 'Hand Tool (Drag to Scroll)',
+    run: () => setMode(mode === 'hand' ? 'pointer' : 'hand'),
+  });
   items.push({
     label: pagesInverted() ? 'Light Pages' : 'Dark Pages',
     run: () => togglePages(),
@@ -151,8 +523,6 @@ document.addEventListener('contextmenu', (e) => {
 // ---------------------------------------------------------------------------
 // Dark-mode pages
 // ---------------------------------------------------------------------------
-// 'auto' follows the active theme (via CSS); the toggle pins an explicit choice
-// for the session by adding an override class the stylesheet honours.
 type PageMode = 'auto' | 'normal' | 'inverted';
 let pageMode: PageMode = 'auto';
 
@@ -166,8 +536,6 @@ function isDarkTheme(): boolean {
   );
 }
 
-// Whether pages are currently shown inverted (dark), accounting for the theme
-// default and any per-session override.
 function pagesInverted(): boolean {
   if (pageMode === 'inverted') return true;
   if (pageMode === 'normal') return false;
@@ -178,18 +546,21 @@ function togglePages(): void {
   pageMode = pagesInverted() ? 'normal' : 'inverted';
   document.body.classList.toggle('mc-pages-inverted', pageMode === 'inverted');
   document.body.classList.toggle('mc-pages-normal', pageMode === 'normal');
+  // Inversion is baked into the bitmap now, so re-rasterise the visible pages.
+  for (const t of renderTasks.values()) {
+    t.cancel();
+  }
+  renderTasks.clear();
+  renderedScale.clear();
+  inFlight.clear();
+  refresh();
 }
 
 document.addEventListener('click', () => (menu.hidden = true));
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') menu.hidden = true;
-});
 
 // ---------------------------------------------------------------------------
-// Hand tool (drag to scroll)
+// Hand tool (drag to scroll) — active only in hand mode
 // ---------------------------------------------------------------------------
-// Left-drag anywhere on the page area pans the view. Always on: the pages are
-// canvas-only (no selectable text layer), so a drag is never a text selection.
 let panning = false;
 let panPointer = -1;
 let startX = 0;
@@ -202,8 +573,11 @@ function scroller(): HTMLElement {
 }
 
 document.addEventListener('pointerdown', (e) => {
-  // Left button only, and never start a pan from the context menu.
-  if (e.button !== 0 || (e.target as HTMLElement).closest('#mc-menu')) {
+  if (
+    e.button !== 0 ||
+    mode !== 'hand' ||
+    (e.target as HTMLElement).closest('#mc-menu, .mc-pin, .mc-note, #mc-toolbar')
+  ) {
     return;
   }
   panning = true;
@@ -214,12 +588,10 @@ document.addEventListener('pointerdown', (e) => {
   startScrollX = s.scrollLeft;
   startScrollY = s.scrollTop;
   document.body.classList.add('mc-grabbing');
-  // Capture so a drag that leaves the webview still delivers move/up and never
-  // leaves the pan stuck on.
   try {
     s.setPointerCapture(e.pointerId);
   } catch {
-    /* capture is best-effort */
+    /* best-effort */
   }
 });
 
@@ -239,6 +611,31 @@ function endPan(): void {
 }
 document.addEventListener('pointerup', endPan);
 document.addEventListener('pointercancel', endPan);
+
+// ---------------------------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------------------------
+function buildToolbar(): void {
+  const bar = document.createElement('div');
+  bar.id = 'mc-toolbar';
+  bar.innerHTML =
+    '<button type="button" data-act="out" title="Zoom out (Ctrl -)">−</button>' +
+    '<span id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</span>' +
+    '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>';
+  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+  bar.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.id === 'mc-zoom-label') {
+      zoomReset();
+      return;
+    }
+    const act = target.closest('button')?.dataset.act;
+    if (act === 'in') zoomIn();
+    else if (act === 'out') zoomOut();
+  });
+  document.body.appendChild(bar);
+}
+buildToolbar();
 
 function showMenu(x: number, y: number, items: MenuItem[]): void {
   menu.innerHTML = '';
@@ -292,7 +689,23 @@ function copyText(text: string): void {
 
 async function copyCanvasPng(canvas: HTMLCanvasElement): Promise<void> {
   try {
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    // In dark mode the on-screen canvas is colour-inverted; copy the true page
+    // by inverting a throwaway copy back to its original colours.
+    let source = canvas;
+    if (pagesInverted()) {
+      const off = document.createElement('canvas');
+      off.width = canvas.width;
+      off.height = canvas.height;
+      const octx = off.getContext('2d');
+      if (octx) {
+        octx.drawImage(canvas, 0, 0);
+        octx.globalCompositeOperation = 'difference';
+        octx.fillStyle = '#fff';
+        octx.fillRect(0, 0, off.width, off.height);
+        source = off;
+      }
+    }
+    const blob: Blob | null = await new Promise((resolve) => source.toBlob(resolve, 'image/png'));
     if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       toast('Copied page as PNG');

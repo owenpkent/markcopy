@@ -241,12 +241,25 @@ body[data-style='vscode'] .markdown-body pre {
 body.mc-pdf {
   background: var(--mc-pdf-bg);
   margin: 0;
-  /* Hand tool: grab cursor while idle, grabbing while dragging to scroll. */
+}
+/* Hand tool: grab cursor while idle, grabbing while dragging. The pointer tool
+   uses default cursors so text is selectable. */
+body.mc-pdf.mc-mode-hand {
   cursor: grab;
 }
 body.mc-pdf.mc-grabbing,
 body.mc-pdf.mc-grabbing * {
   cursor: grabbing !important;
+}
+/* In hand mode the text layer must not swallow the drag; in pointer mode it is
+   interactive so text can be selected. */
+body.mc-mode-hand .textLayer {
+  pointer-events: none;
+  user-select: none;
+}
+body.mc-mode-pointer .textLayer {
+  pointer-events: auto;
+  user-select: text;
 }
 .mc-menu,
 .mc-menu-item {
@@ -286,40 +299,195 @@ html.mc-pdf-root::-webkit-scrollbar-corner {
   align-items: center;
   gap: 16px;
   padding: 20px 0 80px;
+  /* Grow to the widest page so zoomed-in pages stay centered and fully
+     scrollable (not clipped on the left), yet fill the viewport when narrow. */
+  width: max-content;
+  min-width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 .mc-page {
+  position: relative;
+  flex: 0 0 auto;
   background: #fff;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
+/* Placeholder colour for not-yet-rasterised pages. In dark mode the canvas
+   filter darkens rendered pages, so match the placeholder to avoid a white
+   flash while scrolling. */
+body[data-mc-theme='dark'] .mc-page,
+body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']) .mc-page,
+body.mc-pages-inverted .mc-page {
+  background: #1c1c1c;
+}
+body.mc-pages-normal .mc-page {
+  background: #fff;
+}
 .mc-page canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
   /* Keep the OS (e.g. Windows High Contrast) from recolouring rendered pages;
      our own dark-mode inversion below handles legibility. */
   forced-color-adjust: none;
 }
 
-/* Dark-mode pages: invert the rendered canvas so page content is dark instead
-   of glaring white. invert(1) hue-rotate(180deg) flips black<->white while
-   keeping hues roughly intact (the standard pdf.js dark-mode trick). Follows the
-   active theme, exactly like the Markdown preview palette above. */
-body[data-mc-theme='dark'] .mc-page canvas,
-body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']) .mc-page canvas,
-body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark'])
-  .mc-page
-  canvas {
-  filter: invert(1) hue-rotate(180deg);
+/* pdf.js text layer: transparent, absolutely-positioned selectable spans laid
+   over the canvas. Trimmed from pdfjs-dist/web/pdf_viewer.css; the --scale-factor
+   custom property is set per page in pdf.ts. */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+.textLayer ::selection {
+  background: rgba(59, 130, 246, 0.35);
+}
+.textLayer br::selection {
+  background: transparent;
 }
 
-/* Per-session override from the right-click "Dark pages / Light pages" toggle.
-   These win over the theme default regardless of theme specificity. */
-body.mc-pages-inverted .mc-page canvas {
-  filter: invert(1) hue-rotate(180deg) !important;
+/* Comment pins and their annotation overlay. The overlay ignores pointer events
+   so it never blocks the page; only the pins themselves are interactive. */
+.mc-annot-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
 }
-body.mc-pages-normal .mc-page canvas {
-  filter: none !important;
+.mc-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: #f5a623;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  pointer-events: auto;
 }
+.mc-pin:hover {
+  background: #ffb840;
+}
+
+/* Note editor popover (shared, positioned in JS). */
+.mc-note {
+  position: fixed;
+  z-index: 1100;
+  width: 260px;
+  background: var(--vscode-editorWidget-background, #fff);
+  color: var(--vscode-editorWidget-foreground, #1f2328);
+  border: 1px solid var(--vscode-editorWidget-border, #d1d9e0);
+  border-radius: 6px;
+  padding: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+}
+.mc-note-text {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  box-sizing: border-box;
+  background: var(--vscode-input-background, #fff);
+  color: var(--vscode-input-foreground, #1f2328);
+  border: 1px solid var(--vscode-input-border, #d1d9e0);
+  border-radius: 4px;
+  padding: 6px;
+  font: inherit;
+}
+.mc-note-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.mc-note-actions button {
+  font: inherit;
+  padding: 3px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  cursor: pointer;
+}
+.mc-note-save {
+  background: var(--vscode-button-background, #0969da);
+  color: var(--vscode-button-foreground, #fff);
+}
+.mc-note-delete {
+  background: var(--vscode-button-secondaryBackground, #e6e6e6);
+  color: var(--vscode-button-secondaryForeground, #1f2328);
+}
+
+/* Floating zoom / tool bar. */
+#mc-toolbar {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, #24292f);
+  color: var(--vscode-editorWidget-foreground, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+#mc-toolbar button {
+  font: inherit;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+#mc-toolbar button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
+}
+#mc-zoom-label {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dark-mode page inversion is applied to the canvas bitmap in pdf.ts (see
+   renderPage), NOT via a CSS filter: a CSS filter re-rasterises the layer at CSS
+   resolution and blurs the page on HiDPI displays. The placeholder colours above
+   keep un-rendered pages dark to match. */
 
 /* ---- Context menu -------------------------------------------------------- */
 .mc-menu {
