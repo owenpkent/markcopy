@@ -1,13 +1,16 @@
 import * as vscode from 'vscode';
 import { createMarkdownIt } from './render';
 import { PdfEditorProvider } from './pdfEditor';
-import { localImageRef, shouldAutoPreview } from './preview-utils';
+import { classifyLink, localImageRef, shouldAutoPreview } from './preview-utils';
 
 const VIEW_TYPE = 'markcopy.preview';
 
 interface PreviewState {
   panel: vscode.WebviewPanel;
   docUri: vscode.Uri;
+  // A heading id to scroll to on the next render, set when a link navigates to a
+  // new document with a `#fragment`. Consumed (and cleared) by the next update().
+  pendingReveal?: string;
 }
 
 let current: PreviewState | undefined;
@@ -201,6 +204,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         applySetting(msg.key, msg.value);
       } else if (msg?.type === 'openSettings') {
         vscode.commands.executeCommand('markcopy.openSettings');
+      } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
+        void openLink(context, state, msg.href);
       }
     },
     undefined,
@@ -254,10 +259,16 @@ function update(state: PreviewState): void {
   });
   const cfg = vscode.workspace.getConfiguration('markcopy');
   state.panel.title = `Preview ${basename(state.docUri)}`;
+  // A one-shot heading reveal, set when a link navigated here. The webview also
+  // scrolls a newly-targeted document to the top on its own (docKey change).
+  const revealFragment = state.pendingReveal || undefined;
+  state.pendingReveal = undefined;
   webview.postMessage({
     type: 'render',
     html,
     source,
+    docKey: state.docUri.toString(),
+    revealFragment,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
     theme: cfg.get<string>('theme', 'auto'),
     mermaidConfig: cfg.get<object>('mermaid', {}),
@@ -277,6 +288,62 @@ function resolveImageSrc(src: string, docUri: vscode.Uri, webview: vscode.Webvie
     ? vscode.Uri.file(ref.path)
     : vscode.Uri.joinPath(docUri, '..', ref.path);
   return webview.asWebviewUri(target).toString() + ref.suffix;
+}
+
+// Follow a link clicked in the preview. In-page `#fragment` links are handled
+// entirely in the webview and never reach here; this deals with external URLs
+// (opened in the browser) and local files resolved relative to the document:
+// Markdown targets retarget the preview, everything else opens in VS Code.
+async function openLink(
+  context: vscode.ExtensionContext,
+  state: PreviewState,
+  href: string,
+): Promise<void> {
+  const target = classifyLink(href);
+  if (!target || target.kind === 'fragment') {
+    return;
+  }
+  if (target.kind === 'external') {
+    // Only hand real web/mail schemes to the OS. markdown-it + DOMPurify already
+    // strip javascript:/vbscript: hrefs upstream, so this just bounds the blast
+    // radius (and drops degenerate `?query`-only hrefs that carry no scheme).
+    let parsed: vscode.Uri | undefined;
+    try {
+      parsed = vscode.Uri.parse(target.href, true);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed && /^(https?|mailto)$/i.test(parsed.scheme)) {
+      void vscode.env.openExternal(parsed);
+    }
+    return;
+  }
+  const targetUri = target.absolute
+    ? vscode.Uri.file(target.path)
+    : vscode.Uri.joinPath(state.docUri, '..', target.path);
+  if (!target.markdown) {
+    // Images, PDFs, source files, etc. VS Code picks the right editor (a .pdf
+    // opens in the MarkCopy PDF preview).
+    await vscode.commands.executeCommand('vscode.open', targetUri);
+    return;
+  }
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(targetUri);
+  } catch {
+    void vscode.window.showWarningMessage(`MarkCopy: could not open ${basename(targetUri)}.`);
+    return;
+  }
+  // Land at the linked heading, or the top of the new document. Set before the
+  // editor swap so whichever path retargets the preview first sends it.
+  state.pendingReveal = target.fragment || '';
+  // Keep the source in the first column so editor + preview stay two-column,
+  // then (re)target the preview at it.
+  await vscode.window.showTextDocument(doc, {
+    viewColumn: vscode.ViewColumn.One,
+    preserveFocus: true,
+  });
+  openPreview(context, doc);
 }
 
 function revealEditorLine(docUri: vscode.Uri, line: number): void {

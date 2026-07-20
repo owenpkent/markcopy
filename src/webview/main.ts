@@ -20,6 +20,10 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 let sourceLines: string[] = [];
 let programmaticScroll = false;
 let mermaidConfig: Record<string, unknown> = {};
+// Identity of the document currently shown, so a render that swaps to a new
+// document can reset scroll to the top (or a linked heading) instead of keeping
+// the previous document's position. Empty until the first render.
+let currentDocKey = '';
 
 // Current setting values, refreshed on every `render` message. Read by the
 // context menu's SETTINGS section so it always reflects the host's state.
@@ -66,6 +70,8 @@ window.addEventListener('message', (e: MessageEvent) => {
         (msg.mermaidConfig as Record<string, unknown>) ?? {},
         Boolean(msg.syncScroll),
         Boolean(msg.autoPreview),
+        (msg.docKey as string) ?? '',
+        msg.revealFragment as string | undefined,
       );
       break;
     case 'scrollToLine':
@@ -95,7 +101,11 @@ async function render(
   config: Record<string, unknown>,
   syncScroll: boolean,
   autoPreview: boolean,
+  docKey: string,
+  revealFragment: string | undefined,
 ): Promise<void> {
+  const docChanged = docKey !== currentDocKey;
+  currentDocKey = docKey;
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.style = styleProfile;
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
@@ -119,6 +129,15 @@ async function render(
   // Initialize after data-mc-theme is set so the diagram theme matches.
   initMermaid();
   await renderMermaid();
+  // On a live edit (same document) keep the reader's scroll position, unless the
+  // navigation asked for a heading (e.g. a `file.md#sec` link back into the doc
+  // already shown). When the preview swaps to a new document, land at the linked
+  // heading or the top.
+  if (revealFragment) {
+    scrollToAnchor(revealFragment);
+  } else if (docChanged) {
+    scrollToTop();
+  }
 }
 
 async function renderMermaid(): Promise<void> {
@@ -150,6 +169,55 @@ function scrollToLine(line: number): void {
     window.setTimeout(() => (programmaticScroll = false), 60);
   }
 }
+
+function scrollToTop(): void {
+  programmaticScroll = true;
+  window.scrollTo(0, 0);
+  window.setTimeout(() => (programmaticScroll = false), 60);
+}
+
+// Scroll to a heading (or named anchor) by its id/name. markdown-it-anchor gives
+// every heading a slug id, so `[x](#slug)` links resolve here.
+function scrollToAnchor(rawId: string): void {
+  let id = rawId;
+  try {
+    id = decodeURIComponent(rawId);
+  } catch {
+    /* keep the raw id */
+  }
+  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id;
+  const el =
+    document.getElementById(id) ??
+    document.getElementById(rawId) ??
+    content.querySelector<HTMLElement>(`a[name="${escaped}"]`);
+  if (el) {
+    programmaticScroll = true;
+    el.scrollIntoView({ block: 'start' });
+    window.setTimeout(() => (programmaticScroll = false), 60);
+  }
+}
+
+// Follow links clicked in the rendered content. In-page `#fragment` links scroll
+// the preview locally; every other link is handed to the host, which opens it in
+// the browser or retargets the preview to a linked local document. The default
+// action is broken inside the webview (relative hrefs resolve against the
+// vscode-webview:// base), so we always intercept.
+content.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0) {
+    return;
+  }
+  const anchor = (e.target as HTMLElement).closest?.('a');
+  const href = anchor?.getAttribute('href');
+  if (!anchor || !href) {
+    return;
+  }
+  e.preventDefault();
+  if (href.startsWith('#')) {
+    scrollToAnchor(href.slice(1));
+  } else {
+    vscode.postMessage({ type: 'openLink', href });
+  }
+});
 
 function nearestElementForLine(line: number): HTMLElement | null {
   const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));

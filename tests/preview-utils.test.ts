@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { localImageRef, shouldAutoPreview } from '../src/preview-utils';
+import { classifyLink, localImageRef, shouldAutoPreview } from '../src/preview-utils';
 
 describe('localImageRef', () => {
   it('leaves remote and inline URIs untouched', () => {
@@ -46,6 +46,58 @@ describe('localImageRef', () => {
 
   it('trims surrounding whitespace', () => {
     expect(localImageRef('  x.png  ')).toMatchObject({ path: 'x.png' });
+  });
+});
+
+describe('classifyLink', () => {
+  it('returns null for an empty href', () => {
+    expect(classifyLink('')).toBeNull();
+    expect(classifyLink('   ')).toBeNull();
+  });
+
+  it('classifies pure in-page anchors as fragments', () => {
+    expect(classifyLink('#features')).toEqual({ kind: 'fragment', fragment: 'features' });
+    expect(classifyLink('#a%20b')).toEqual({ kind: 'fragment', fragment: 'a b' });
+  });
+
+  it('treats remote, mailto, and protocol-relative links as external', () => {
+    expect(classifyLink('https://example.com/x')).toEqual({
+      kind: 'external',
+      href: 'https://example.com/x',
+    });
+    expect(classifyLink('mailto:me@example.com')).toMatchObject({ kind: 'external' });
+    expect(classifyLink('//cdn.example.com/x')).toEqual({
+      kind: 'external',
+      href: 'https://cdn.example.com/x',
+    });
+  });
+
+  it('resolves relative Markdown links, splitting off the fragment', () => {
+    expect(classifyLink('docs/COPY-MATRIX.md')).toEqual({
+      kind: 'local',
+      path: 'docs/COPY-MATRIX.md',
+      absolute: false,
+      fragment: '',
+      markdown: true,
+    });
+    expect(classifyLink('other.md#section')).toMatchObject({
+      kind: 'local',
+      path: 'other.md',
+      fragment: 'section',
+      markdown: true,
+    });
+    expect(classifyLink('../guide.markdown')).toMatchObject({ kind: 'local', markdown: true });
+  });
+
+  it('flags non-Markdown local targets so the host opens them in VS Code', () => {
+    expect(classifyLink('report.pdf')).toMatchObject({ kind: 'local', markdown: false });
+    expect(classifyLink('diagram.png')).toMatchObject({ kind: 'local', markdown: false });
+  });
+
+  it('recognizes absolute local paths and percent-decodes the path', () => {
+    expect(classifyLink('/abs/notes.md')).toMatchObject({ absolute: true, path: '/abs/notes.md' });
+    expect(classifyLink('C:/Users/me/notes.md')).toMatchObject({ absolute: true, markdown: true });
+    expect(classifyLink('my%20notes.md')).toMatchObject({ path: 'my notes.md', markdown: true });
   });
 });
 
