@@ -1,6 +1,6 @@
 # Releasing MarkCopy
 
-How to cut a release and publish to both the VS Code Marketplace and Open VSX.
+How to cut a release and publish to both the VS Code Marketplace and Open VSX. This happens in **two separate phases**: cutting the release in git, and publishing to the registries. They are not the same step (see [Release steps](#release-steps)).
 
 ## One-time setup
 
@@ -76,26 +76,48 @@ With `.env` loaded, the publish steps below are just `npm run publish:vsce` and 
 
 ## Release steps
 
+Releasing has **two phases**, and it is easy to think you are done after the first. **Phase 1 puts the release in git; Phase 2 is what actually ships it to users.** Pushing a commit or tag does **not** publish anything: there is no CI automation for publishing (`.github/workflows/ci.yml` only builds and tests), so the extension stays at whatever version is currently live on the Marketplace / Open VSX until you run the Phase 2 `publish:` commands by hand. Confirm what is actually live at any time with:
+
+```bash
+npx vsce show OwenPKent.markcopy                       # Marketplace
+curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
+```
+
+### Phase 1: cut the release in git
+
 1. Start from a clean `main` with green CI.
-2. Bump the version: `npm version patch` (or `minor` / `major`). This updates `package.json` and creates a git tag.
+2. Bump the version: `npm version patch` (or `minor` / `major`). This updates `package.json` and `package-lock.json`; it also creates a git tag unless you pass `--no-git-tag-version` (useful when you want to tag by hand after the changelog edit).
 3. Update [CHANGELOG.md](CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
-4. Sanity checks: `npm run lint && npm test && npm run compile`. (CI covers this, but it is fast locally.)
+4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
 5. If visuals changed, regenerate assets: `npm run icon` and `npm run screenshot`.
-6. Package and smoke-test:
+6. Commit, tag, and push:
+   ```bash
+   git add -A && git commit -m "chore: release x.y.z"
+   git tag -a vx.y.z -m vx.y.z   # skip if `npm version` already created the tag
+   git push --follow-tags
+   ```
+   The release now exists in git, but **it is not published**. Nothing is live to users yet.
+
+### Phase 2: publish to the registries
+
+7. Package and smoke-test:
    ```bash
    npm run vsix
    code --install-extension markcopy-<version>.vsix
    ```
    Open a Markdown file and a PDF; confirm the preview, a couple of copy actions, and light/dark.
-7. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a`.
-8. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
-9. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).
-10. Push the tag and cut a GitHub release:
-
-```bash
-git push --follow-tags
-gh release create v<version> --notes-from-tag
-```
+8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
+9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
+10. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).
+11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
+    ```bash
+    gh release create v<version> markcopy-<version>.vsix --notes-from-tag
+    ```
+12. Verify both registries show the new version (Phase 2 is done only when both report it):
+    ```bash
+    npx vsce show OwenPKent.markcopy
+    curl -s https://open-vsx.org/api/OwenPKent/markcopy
+    ```
 
 ## Notes
 
