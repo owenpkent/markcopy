@@ -9,6 +9,11 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.2.2] - 2026-07-19
+
+### Fixed
+- **Links in the rendered preview now work.** They were inert: the webview had no click handler, and relative hrefs resolved against the `vscode-webview://` base, so clicking did nothing. Now in-page `[x](#heading)` anchors scroll the preview to the heading; cross-document `other.md` links retarget the preview and land at the top of the new document (or the linked heading if the link carried a `#fragment`), while live edits to the same document keep the reader's scroll position; external links open in the browser and other local files (images, `.pdf`) open via VS Code, so a linked `.pdf` lands in MarkCopy's own PDF preview. Link classification is a pure, unit-tested `classifyLink` helper, and `openExternal` is restricted to `http`/`https`/`mailto` schemes.
+
 ## [0.2.1] - 2026-07-19
 
 ### Security
