@@ -304,7 +304,18 @@ async function openLink(
     return;
   }
   if (target.kind === 'external') {
-    void vscode.env.openExternal(vscode.Uri.parse(target.href));
+    // Only hand real web/mail schemes to the OS. markdown-it + DOMPurify already
+    // strip javascript:/vbscript: hrefs upstream, so this just bounds the blast
+    // radius (and drops degenerate `?query`-only hrefs that carry no scheme).
+    let parsed: vscode.Uri | undefined;
+    try {
+      parsed = vscode.Uri.parse(target.href, true);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed && /^(https?|mailto)$/i.test(parsed.scheme)) {
+      void vscode.env.openExternal(parsed);
+    }
     return;
   }
   const targetUri = target.absolute

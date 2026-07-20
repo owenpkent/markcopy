@@ -129,14 +129,14 @@ async function render(
   // Initialize after data-mc-theme is set so the diagram theme matches.
   initMermaid();
   await renderMermaid();
-  // On a live edit (same document) keep the reader's scroll position. When the
-  // preview swaps to a new document, land at the linked heading or the top.
-  if (docChanged) {
-    if (revealFragment) {
-      scrollToAnchor(revealFragment);
-    } else {
-      scrollToTop();
-    }
+  // On a live edit (same document) keep the reader's scroll position, unless the
+  // navigation asked for a heading (e.g. a `file.md#sec` link back into the doc
+  // already shown). When the preview swaps to a new document, land at the linked
+  // heading or the top.
+  if (revealFragment) {
+    scrollToAnchor(revealFragment);
+  } else if (docChanged) {
+    scrollToTop();
   }
 }
 
