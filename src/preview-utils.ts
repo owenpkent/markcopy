@@ -42,6 +42,60 @@ export function localImageRef(src: string): LocalImageRef | null {
   return { path, suffix, absolute };
 }
 
+export interface LocalLink {
+  kind: 'local';
+  /** File path, percent-decoded, with any ?query / #fragment stripped off. */
+  path: string;
+  /** True when the path is filesystem-absolute (POSIX `/…` or Windows `C:\…`). */
+  absolute: boolean;
+  /** The `#fragment` without its leading '#', percent-decoded, or '' if none. */
+  fragment: string;
+  /** True when the path looks like a Markdown document (.md / .markdown / .mdx). */
+  markdown: boolean;
+}
+
+export type LinkTarget =
+  { kind: 'fragment'; fragment: string } | { kind: 'external'; href: string } | LocalLink;
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+// Classify a rendered link's `href` so the webview and host know how to follow
+// it: a pure in-page `#fragment`, an external URL (opened in the browser), or a
+// local file resolved relative to the document. Reuses localImageRef's scheme /
+// drive-letter logic so image and link handling agree on what "local" means.
+// Returns null for an empty href.
+export function classifyLink(href: string): LinkTarget | null {
+  const trimmed = (href ?? '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith('#')) {
+    return { kind: 'fragment', fragment: safeDecode(trimmed.slice(1)) };
+  }
+  const ref = localImageRef(trimmed);
+  if (!ref) {
+    // Remote URL, mailto:, an already-resolved scheme, or a protocol-relative
+    // //host (which we normalize to https so Uri.parse accepts it).
+    return { kind: 'external', href: trimmed.startsWith('//') ? `https:${trimmed}` : trimmed };
+  }
+  const hashIdx = ref.suffix.indexOf('#');
+  const fragment = hashIdx >= 0 ? safeDecode(ref.suffix.slice(hashIdx + 1)) : '';
+  const path = safeDecode(ref.path);
+  return {
+    kind: 'local',
+    path,
+    absolute: ref.absolute,
+    fragment,
+    markdown: /\.(md|markdown|mdx)$/i.test(path),
+  };
+}
+
 export interface AutoPreviewInput {
   /** Value of the `markcopy.autoPreview` setting. */
   enabled: boolean;
