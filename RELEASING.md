@@ -38,17 +38,21 @@ Then authenticate `vsce` with a **Personal Access Token (PAT)**. This publisher 
 Both registries need a token (see [One-time setup](#one-time-setup) for how to mint them). The simplest, repeatable way to hold them is a local `.env` file: `vsce` reads `VSCE_PAT` and `ovsx` reads `OVSX_PAT` from the environment automatically, so once `.env` is loaded the publish commands take no extra flags.
 
 1. Create your `.env` once from the template and paste in the two tokens:
+
    ```bash
    cp .env.example .env
    # then edit .env and set VSCE_PAT= and OVSX_PAT=
    ```
+
    `.env` is gitignored (`.env.example` is the committed template). Real tokens never get committed, and `.vscodeignore` keeps `.env*` out of the packaged `.vsix`.
 
 2. Load `.env` into the shell you will publish from. This has to be re-run in each new shell:
+
    ```bash
    # Git Bash / macOS / Linux
    set -a; source .env; set +a
    ```
+
    ```powershell
    # PowerShell
    Get-Content .env | ForEach-Object {
@@ -87,10 +91,11 @@ With `.env` loaded, the publish steps below are just `npm run publish:vsce` and 
 8. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
 9. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).
 10. Push the tag and cut a GitHub release:
-   ```bash
-   git push --follow-tags
-   gh release create v<version> --notes-from-tag
-   ```
+
+```bash
+git push --follow-tags
+gh release create v<version> --notes-from-tag
+```
 
 ## Notes
 
