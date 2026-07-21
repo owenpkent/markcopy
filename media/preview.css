@@ -97,18 +97,6 @@ body {
   background: var(--mc-bg);
 }
 
-/* VS Code style profile: follow the editor foreground/background. */
-body[data-style='vscode'] {
-  background: var(--vscode-editor-background, var(--mc-bg));
-}
-body[data-style='vscode'] .markdown-body {
-  color: var(--vscode-editor-foreground, var(--mc-fg));
-  background: var(--vscode-editor-background, var(--mc-bg));
-}
-body[data-style='vscode'] .markdown-body pre {
-  background: var(--vscode-textCodeBlock-background, var(--mc-pre-bg));
-}
-
 .markdown-body h1,
 .markdown-body h2 {
   border-bottom: 1px solid var(--mc-border);

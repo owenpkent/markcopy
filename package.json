@@ -119,11 +119,10 @@
         "markcopy.styleProfile": {
           "type": "string",
           "enum": [
-            "github",
-            "vscode"
+            "github"
           ],
           "default": "github",
-          "description": "Rendering style. 'github' matches GitHub markdown (best for pasting into docs/email); 'vscode' follows the editor theme."
+          "description": "Rendering style. 'github' matches GitHub markdown (best for pasting into docs/email)."
         },
         "markcopy.syncScroll": {
           "type": "boolean",

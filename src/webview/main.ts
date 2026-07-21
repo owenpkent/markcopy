@@ -28,7 +28,6 @@ let currentDocKey = '';
 
 // Current setting values, refreshed on every `render` message. Read by the
 // context menu's SETTINGS section so it always reflects the host's state.
-let currentStyleProfile = 'github';
 let currentTheme = 'auto';
 let currentSyncScroll = true;
 let currentAutoPreview = true;
@@ -119,7 +118,6 @@ async function render(
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
   mermaidConfig = config;
-  currentStyleProfile = styleProfile;
   currentTheme = theme || 'auto';
   currentSyncScroll = syncScroll;
   currentAutoPreview = autoPreview;
@@ -433,9 +431,6 @@ function buildSettingsEntries(): MenuEntry[] {
     radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
     radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
     radioEntry('Green on black', currentTheme === 'green', 'theme', 'green'),
-    { kind: 'label', label: 'Style' },
-    radioEntry('GitHub', currentStyleProfile === 'github', 'styleProfile', 'github'),
-    radioEntry('VS Code', currentStyleProfile === 'vscode', 'styleProfile', 'vscode'),
     { kind: 'divider' },
     checkboxEntry('Sync scroll', currentSyncScroll, 'syncScroll'),
     checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
