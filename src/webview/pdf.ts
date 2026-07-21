@@ -158,9 +158,18 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
 function layoutPage(n: number): void {
   const { w, h } = baseSize[n - 1];
   const wrap = wrappers[n - 1];
-  wrap.style.width = `${Math.floor(w * scale)}px`;
-  wrap.style.height = `${Math.floor(h * scale)}px`;
+  const pw = Math.floor(w * scale);
+  const ph = Math.floor(h * scale);
+  wrap.style.width = `${pw}px`;
+  wrap.style.height = `${ph}px`;
   wrap.style.setProperty('--scale-factor', String(scale));
+  // Keep the canvas's CSS box in lockstep with the wrapper on every zoom, so a
+  // not-yet-re-rasterised (or torn-down) canvas can't sit at a stale, larger
+  // size than its page. The clip on .mc-page is the backstop; this keeps the
+  // transient correct instead of merely hidden.
+  const canvas = wrap.querySelector('canvas') as HTMLCanvasElement;
+  canvas.style.width = `${pw}px`;
+  canvas.style.height = `${ph}px`;
 }
 
 function onIntersect(entries: IntersectionObserverEntry[]): void {
