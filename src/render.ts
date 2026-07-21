@@ -1,11 +1,18 @@
 import MarkdownIt from 'markdown-it';
 import anchor from 'markdown-it-anchor';
+import texmath from 'markdown-it-texmath';
 import hljs from 'highlight.js';
+
+export interface MarkdownItOptions {
+  // Parse `$...$` / `$$...$$` as math. On by default; the `markcopy.math` setting
+  // can turn it off for documents that use literal dollar signs.
+  math?: boolean;
+}
 
 // A single shared markdown-it instance configured for GitHub-flavored output.
 // Rendering happens in the extension host; the resulting HTML is shipped to the
-// webview, which handles interaction (context menu, clipboard, mermaid, PNG).
-export function createMarkdownIt(): MarkdownIt {
+// webview, which handles interaction (context menu, clipboard, mermaid, math, PNG).
+export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownIt {
   const md = new MarkdownIt({
     html: true,
     linkify: true,
@@ -30,9 +37,40 @@ export function createMarkdownIt(): MarkdownIt {
 
   md.use(anchor, { permalink: false, tabIndex: false });
 
+  if (opts.math !== false) {
+    addMath(md);
+  }
   addSourceLineMapping(md);
   rewriteImageSrc(md);
   return md;
+}
+
+// texmath requires an `engine` with a `renderToString` method, but we render
+// KaTeX client-side (like Mermaid) so the webview can theme it, keep the raw
+// LaTeX for copy, and offer copy-as-image. So we borrow only texmath's delimiter
+// parsing and a no-op engine, then override its render rules to emit inert
+// placeholders carrying the escaped TeX. The webview upgrades them after
+// DOMPurify runs, matching how the `mermaid-src` placeholder is handled.
+const NO_RENDER_ENGINE = { renderToString: (): string => '' };
+
+function addMath(md: MarkdownIt): void {
+  md.use(texmath, { engine: NO_RENDER_ENGINE, delimiters: 'dollars' });
+
+  // Inline: `$...$` (and single-line `$$...$$`, which texmath tags as display).
+  md.renderer.rules['math_inline'] = (tokens, idx) =>
+    `<span class="mc-math" data-display="0">${escapeHtml(tokens[idx].content)}</span>`;
+  md.renderer.rules['math_inline_double'] = (tokens, idx) =>
+    `<span class="mc-math" data-display="1">${escapeHtml(tokens[idx].content)}</span>`;
+
+  // Block: `$$...$$` spanning a block. Carry the source line for scroll sync and
+  // per-block copy, mirroring addSourceLineMapping. Equation numbers (`$$..$$ (1)`)
+  // render as plain display math for now.
+  md.renderer.rules['math_block'] = (tokens, idx) => {
+    const token = tokens[idx];
+    const line = token.map ? ` data-source-line="${token.map[0]}"` : '';
+    return `<div class="mc-math" data-display="1"${line}>${escapeHtml(token.content)}</div>\n`;
+  };
+  md.renderer.rules['math_block_eqno'] = md.renderer.rules['math_block'];
 }
 
 // Route every image `src` through an optional `env.resolveImage` hook so the

@@ -43,9 +43,9 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 | File                             | Role                                                                                                                                                                                                                                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/extension.ts`               | Activation, command registration, webview panel lifecycle, editor-to-preview scroll sync, host side of the message protocol.                                                                                                                                           |
-| `src/render.ts`                  | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, source-line mapping, and the `env.resolveImage` image-src hook.                                                                                                     |
+| `src/render.ts`                  | The shared `markdown-it` instance: GFM options, highlight.js, anchors, Mermaid fence placeholders, `markdown-it-texmath` math placeholders, source-line mapping, and the `env.resolveImage` image-src hook.                                                            |
 | `src/preview-utils.ts`           | Pure, VS Code-independent helpers: `localImageRef` (classifies an image `src` so the host knows whether/how to rewrite it) and `shouldAutoPreview` (the auto-open/retarget decision). Kept out of `extension.ts` so they're unit-testable without the `vscode` module. |
-| `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, the adaptive context menu (including the settings section), all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync.                                                       |
+| `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, KaTeX (`renderKatex`), the adaptive context menu (including the settings section), all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync.                                |
 | `src/pdfEditor.ts`               | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview, and reads/writes the sidecar comments JSON file.                                                                                                          |
 | `src/webview/pdf.ts`             | The PDF preview: virtualised pdf.js rendering (canvas + text layer, zoom, dark-mode bitmap inversion), per-page text extraction, comment pins, and the copy actions (page PNG, page text, all text, selected text).                                                    |
 | `src/webview/table.ts`           | CSV/TSV table serialization (RFC 4180). Pure, unit-tested.                                                                                                                                                                                                             |
@@ -53,13 +53,13 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 | `tests/`                         | Vitest unit tests over the pure logic.                                                                                                                                                                                                                                 |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                                                                                                                                                             |
 | `media/preview.css`              | GitHub and VS Code style profiles, PDF layout, context menu, toast, highlight.js token colors.                                                                                                                                                                         |
-| `esbuild.js` / `esbuild.web.js`  | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm).                                                                                                                                                             |
+| `esbuild.js` / `esbuild.web.js`  | The bundlers. `esbuild.web.js` emits three files: `webview.js` (iife), `pdf.js` and `pdf.worker.js` (esm), and copies the KaTeX stylesheet and fonts into `media/katex/` (generated, gitignored).                                                                      |
 
 ## Rendering pipeline
 
 1. The user opens the preview. `openPreview` creates a `WebviewPanel` (beside the editor, `retainContextWhenHidden: true`) and sets its HTML shell.
 2. `update()` reads the document text, calls `md.render(source, { resolveImage })` (see [Local images](#local-images) below), and posts a `render` message carrying the HTML, the raw source, the active style profile, the theme (`markcopy.theme`), any `markcopy.mermaid` config, and the current `syncScroll` / `autoPreview` settings.
-3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), (re)initializes Mermaid with the theme and any `markcopy.mermaid` config, then upgrades every Mermaid placeholder into an SVG.
+3. In the webview, `render()` sets `#content.innerHTML`, applies the style profile and theme to `body` (`dataset.style`, `dataset.mcTheme`), splits the source into `sourceLines` (used later for block "copy as Markdown"), (re)initializes Mermaid with the theme and any `markcopy.mermaid` config, then upgrades every Mermaid placeholder into an SVG and every math placeholder into a KaTeX render (see [Math (KaTeX)](#math-katex) below).
 4. On each edit, `onDidChangeTextDocument` re-runs `update()`, so the preview is live.
 
 ### Source-line mapping
@@ -72,6 +72,12 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 ### Local images
 
 `render.ts`'s `rewriteImageSrc` routes every rendered `<img>` through an optional `env.resolveImage(src)` hook; when no hook is supplied (plain unit tests, for instance) the `src` passes through unchanged. In the running extension, `extension.ts` supplies that hook: `preview-utils.ts`'s `localImageRef` classifies the `src` first, so remote (`http(s):`), `data:`, `blob:`, and already-resolved URIs are left alone while relative and absolute paths are flagged for resolution. `resolveImageSrc` then resolves a flagged path against the document's URI and turns it into a webview-safe URI with `webview.asWebviewUri`. For that URI to actually load, the webview's `localResourceRoots` must cover the target folder, so `resourceRoots()` widens it to the document's workspace folder (or its own directory, if it isn't inside a workspace), and `openPreview` re-applies `panel.webview.options` whenever the previewed document changes.
+
+### Math (KaTeX)
+
+Math rendering mirrors how Mermaid diagrams are handled, so the same DOMPurify-adjacent path is reused rather than adding a second one. `render.ts` parses `$...$` and `$$...$$` with `markdown-it-texmath` (dollars delimiters, gated on `markcopy.math`) and emits inert placeholders instead of rendering KaTeX on the host: `<span class="mc-math" data-display="0">TeX</span>` for inline math and `<div class="mc-math" data-display="1" data-source-line="N">TeX</div>` for display math, with the raw TeX also stashed in `data-tex` for the copy actions. The webview's `renderKatex()` (in `src/webview/main.ts`) finds every `.mc-math` placeholder **after** DOMPurify has already sanitized the rendered HTML and calls `katex.render()` on its stored TeX, exactly mirroring the Mermaid placeholder-then-upgrade pattern. Keeping KaTeX's own markup out of the sanitizer path avoids DOMPurify stripping or fighting KaTeX's generated `<span>` soup.
+
+Right-clicking an equation offers **Copy Equation as PNG** (via `html-to-image`, reusing the existing `copyPng` path) and **Copy Equation as LaTeX** (rewraps the `data-tex` value in `$...$` or `$$...$$` depending on `data-display`). "Copy as Markdown" and "Copy Block as Markdown" also restore the original LaTeX for any equation in scope via a Turndown rule, instead of serializing the rendered KaTeX markup.
 
 ### Auto-open preview
 
@@ -139,7 +145,7 @@ Before reading computed styles, the source is briefly tagged with an `mc-force-l
 
 ### PNG copy
 
-`copyPng()` uses `html-to-image`'s `toBlob()` at 2x pixel ratio, then writes an `image/png` `ClipboardItem`. This is the one place the async Clipboard API is used, because image writes are not expressible through the `copy`-event path. If the environment blocks it, the user sees a toast rather than a silent failure.
+`copyPng()` uses `html-to-image`'s `toBlob()` at 2x pixel ratio, then writes an `image/png` `ClipboardItem`. This is the one place the async Clipboard API is used, because image writes are not expressible through the `copy`-event path. If the environment blocks it, the user sees a toast rather than a silent failure. The same path handles **Copy Equation as PNG**; rasterizing a KaTeX equation additionally requires `html-to-image` to fetch KaTeX's web fonts, which is why the CSP has a same-origin `connect-src` (see [Content Security Policy](#content-security-policy)).
 
 ## PDF preview
 
@@ -183,10 +189,11 @@ default-src 'none';
 img-src ${cspSource} https: data: blob:;
 style-src ${cspSource} 'unsafe-inline';
 font-src  ${cspSource} data:;
+connect-src ${cspSource};
 script-src 'nonce-${nonce}';
 ```
 
-Only the nonce-tagged bundle can execute. `blob:` and `data:` image sources are allowed so Mermaid SVGs and html-to-image output render. All local assets are referenced through `webview.asWebviewUri`.
+Only the nonce-tagged bundle can execute. `blob:` and `data:` image sources are allowed so Mermaid SVGs and html-to-image output render. All local assets are referenced through `webview.asWebviewUri`. `connect-src ${cspSource}` was added for math: rasterizing an equation to PNG (`copyPng`, see [PNG copy](#png-copy)) needs `html-to-image` to `fetch` and inline KaTeX's web fonts, which requires a `connect-src` grant; Mermaid never needed one because it renders with system fonts. The directive is scoped to the webview's own origin, so it cannot reach any external host.
 
 See [SECURITY.md](../SECURITY.md) for the threat model.
 

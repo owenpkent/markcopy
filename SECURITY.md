@@ -13,11 +13,13 @@ default-src 'none';
 img-src ${cspSource} https: data: blob:;
 style-src ${cspSource} 'unsafe-inline';
 font-src  ${cspSource} data:;
+connect-src ${cspSource};
 script-src 'nonce-${nonce}';
 ```
 
 - Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute.
 - `img-src` allows `https:`, `data:`, and `blob:` so remote images, embedded images, Mermaid SVGs, and html-to-image output display.
+- `connect-src ${cspSource}` is scoped to the webview's own origin only. It exists so `html-to-image` can fetch and embed KaTeX's web fonts when rasterizing a math equation to PNG (**Copy Equation as PNG**); Mermaid never needed this directive because it renders with system fonts. Being same-origin, it cannot be used to reach any external host.
 - All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`, and `localResourceRoots` is limited to the extension's `media` folder.
 
 The PDF preview uses the same policy plus `worker-src ${cspSource} blob:` (for the pdf.js worker) and `connect-src ${cspSource} blob: data:`. It does not add `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.

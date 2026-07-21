@@ -139,6 +139,11 @@
           "default": {},
           "additionalProperties": true,
           "markdownDescription": "Extra [Mermaid configuration](https://mermaid.js.org/config/schema-docs/config.html) merged into `mermaid.initialize` (for example `flowchart`, `fontFamily`, `themeVariables`, or a fixed `theme`). Diagrams already follow the light/dark palette by default; set `theme` here to override."
+        },
+        "markcopy.math": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Render LaTeX math with [KaTeX](https://katex.org). Inline `$...$` and display `$$...$$` become equations you can right-click to copy as an image or as LaTeX. Turn off for documents that use literal dollar signs."
         }
       }
     }
@@ -172,14 +177,17 @@
   "dependencies": {
     "dompurify": "^3.4.12",
     "highlight.js": "^11.10.0",
+    "katex": "^0.18.1",
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
+    "markdown-it-texmath": "^1.0.0",
     "pdfjs-dist": "^4.10.38",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@types/katex": "^0.16.8",
     "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",

@@ -1,4 +1,5 @@
 import mermaid from 'mermaid';
+import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { toBlob } from 'html-to-image';
 import { htmlToMarkdown } from './markdownConvert';
@@ -31,6 +32,7 @@ let currentStyleProfile = 'github';
 let currentTheme = 'auto';
 let currentSyncScroll = true;
 let currentAutoPreview = true;
+let currentMath = true;
 
 // The preview is dark when the theme is forced dark, or (in auto mode) when VS
 // Code is in a dark/high-contrast theme. Mirrors the CSS in preview.css.
@@ -70,6 +72,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         (msg.mermaidConfig as Record<string, unknown>) ?? {},
         Boolean(msg.syncScroll),
         Boolean(msg.autoPreview),
+        msg.math === undefined ? true : Boolean(msg.math),
         (msg.docKey as string) ?? '',
         msg.revealFragment as string | undefined,
       );
@@ -101,6 +104,7 @@ async function render(
   config: Record<string, unknown>,
   syncScroll: boolean,
   autoPreview: boolean,
+  math: boolean,
   docKey: string,
   revealFragment: string | undefined,
 ): Promise<void> {
@@ -116,6 +120,7 @@ async function render(
   currentTheme = theme || 'auto';
   currentSyncScroll = syncScroll;
   currentAutoPreview = autoPreview;
+  currentMath = math;
   // Defense in depth. The host renders Markdown with `html: true`, so raw HTML
   // in the document reaches us untrusted. The webview CSP already blocks script
   // execution (script-src 'nonce-...', no unsafe-inline), but sanitizing here
@@ -126,6 +131,9 @@ async function render(
   // they still render; to also close the preview-open beacon vector, forbid
   // external image loads here (FORBID_ATTR / a uponSanitizeAttribute hook).
   content.innerHTML = DOMPurify.sanitize(html);
+  // Render math synchronously, before any await below can yield a paint, so the
+  // raw `$...$` placeholder text is never shown. katex.render is synchronous.
+  renderKatex();
   // Initialize after data-mc-theme is set so the diagram theme matches.
   initMermaid();
   await renderMermaid();
@@ -156,6 +164,25 @@ async function renderMermaid(): Promise<void> {
       host.innerHTML = `<pre class="mc-error">Mermaid error: ${escapeHtml(String(err))}</pre>`;
     }
   }
+}
+
+// Upgrade the inert math placeholders emitted by render.ts into rendered KaTeX.
+// Runs after DOMPurify (like renderMermaid) so the sanitizer never sees KaTeX's
+// markup. The original LaTeX is stashed on `data-tex` before katex.render()
+// overwrites the element, so the context menu can still copy it back out.
+function renderKatex(): void {
+  const nodes = content.querySelectorAll<HTMLElement>('.mc-math');
+  nodes.forEach((el) => {
+    const tex = el.textContent ?? '';
+    el.dataset.tex = tex;
+    const displayMode = el.dataset.display === '1';
+    try {
+      katex.render(tex, el, { displayMode, throwOnError: false, output: 'htmlAndMathml' });
+    } catch (err) {
+      el.classList.add('mc-error');
+      el.textContent = `Math error: ${String(err)}`;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +315,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   const code = target.closest<HTMLElement>('pre.hljs, pre code');
   const table = target.closest<HTMLElement>('table');
   const mermaidEl = target.closest<HTMLElement>('.mc-mermaid');
+  const mathEl = target.closest<HTMLElement>('.mc-math');
 
   if (hasSelection) {
     items.push({
@@ -333,10 +361,21 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     }
   }
 
+  if (mathEl) {
+    const tex = mathEl.dataset.tex ?? mathEl.textContent ?? '';
+    const display = mathEl.dataset.display === '1';
+    items.push({ kind: 'item', label: 'Copy Equation as PNG', run: () => copyPng(mathEl) });
+    items.push({
+      kind: 'item',
+      label: 'Copy Equation as LaTeX',
+      run: () => copyText(display ? `$$${tex}$$` : `$${tex}$`),
+    });
+  }
+
   // "Copy Block" grabs the whole element you clicked in. It's the no-selection
   // convenience, so hide it once there's a selection to avoid overlapping the
   // "Copy Selection" actions above.
-  if (block && !hasSelection && !code && !table && !mermaidEl) {
+  if (block && !hasSelection && !code && !table && !mermaidEl && !mathEl) {
     items.push({ kind: 'item', label: 'Copy Block as Rich Text', run: () => copyRichText(block) });
     items.push({
       kind: 'item',
@@ -391,6 +430,7 @@ function buildSettingsEntries(): MenuEntry[] {
     { kind: 'divider' },
     checkboxEntry('Sync scroll', currentSyncScroll, 'syncScroll'),
     checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
+    checkboxEntry('Math ($ LaTeX)', currentMath, 'math'),
     { kind: 'divider' },
     {
       kind: 'item',
@@ -548,8 +588,12 @@ function writeClipboard(html: string | null, plain: string): void {
   }
 }
 
-// PNG copy via html-to-image + async Clipboard image write.
+// PNG copy via html-to-image + async Clipboard image write. Force the light
+// palette during capture so the image is dark-on-white regardless of the
+// preview theme (KaTeX and text inherit their color, so a dark theme would
+// otherwise render invisibly on the white background).
 async function copyPng(el: HTMLElement): Promise<void> {
+  el.classList.add('mc-force-light');
   try {
     const blob = await toBlob(el, { pixelRatio: 2, backgroundColor: '#ffffff' });
     if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
@@ -560,6 +604,8 @@ async function copyPng(el: HTMLElement): Promise<void> {
     }
   } catch {
     toast('PNG copy failed');
+  } finally {
+    el.classList.remove('mc-force-light');
   }
 }
 
