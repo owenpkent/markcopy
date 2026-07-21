@@ -1,9 +1,21 @@
-import mermaid from 'mermaid';
-import katex from 'katex';
+import type MermaidApi from 'mermaid';
+import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
-import { toBlob } from 'html-to-image';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited } from './table';
+
+// Heavy libraries are loaded lazily on first use so the initial webview bundle
+// stays small. Each getter caches the module's default export after the first
+// dynamic import, so later renders reuse it without re-importing.
+let _mermaid: typeof MermaidApi | undefined;
+async function getMermaid(): Promise<typeof MermaidApi> {
+  return (_mermaid ??= (await import('mermaid')).default);
+}
+
+let _katex: typeof KatexApi | undefined;
+async function getKatex(): Promise<typeof KatexApi> {
+  return (_katex ??= (await import('katex')).default);
+}
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -47,7 +59,8 @@ function isDark(): boolean {
 
 // (Re)initialize Mermaid so diagrams match the current theme, merging any
 // user-supplied `markcopy.mermaid` config on top.
-function initMermaid(): void {
+async function initMermaid(): Promise<void> {
+  const mermaid = await getMermaid();
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
@@ -132,11 +145,10 @@ async function render(
   // they still render; to also close the preview-open beacon vector, forbid
   // external image loads here (FORBID_ATTR / a uponSanitizeAttribute hook).
   content.innerHTML = DOMPurify.sanitize(html);
-  // Render math synchronously, before any await below can yield a paint, so the
-  // raw `$...$` placeholder text is never shown. katex.render is synchronous.
-  renderKatex();
-  // Initialize after data-mc-theme is set so the diagram theme matches.
-  initMermaid();
+  // Upgrade the math and diagram placeholders. KaTeX and Mermaid are now loaded
+  // lazily on first use, so the very first math/diagram document may briefly show
+  // its raw `$...$` / source text before the library finishes importing.
+  await renderKatex();
   await renderMermaid();
   // On a live edit (same document) keep the reader's scroll position, unless the
   // navigation asked for a heading (e.g. a `file.md#sec` link back into the doc
@@ -151,6 +163,13 @@ async function render(
 
 async function renderMermaid(): Promise<void> {
   const nodes = Array.from(content.querySelectorAll('pre.mermaid-src'));
+  if (nodes.length === 0) {
+    return;
+  }
+  // Initialize right before the first render (after data-mc-theme is set) so the
+  // diagram theme matches, and so Mermaid is only imported when a diagram exists.
+  await initMermaid();
+  const mermaid = await getMermaid();
   for (let i = 0; i < nodes.length; i++) {
     const pre = nodes[i] as HTMLElement;
     const code = pre.textContent ?? '';
@@ -175,8 +194,12 @@ async function renderMermaid(): Promise<void> {
 // Runs after DOMPurify (like renderMermaid) so the sanitizer never sees KaTeX's
 // markup. The original LaTeX is stashed on `data-tex` before katex.render()
 // overwrites the element, so the context menu can still copy it back out.
-function renderKatex(): void {
+async function renderKatex(): Promise<void> {
   const nodes = content.querySelectorAll<HTMLElement>('.mc-math');
+  if (nodes.length === 0) {
+    return;
+  }
+  const katex = await getKatex();
   nodes.forEach((el) => {
     const tex = el.textContent ?? '';
     el.dataset.tex = tex;
@@ -331,7 +354,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     items.push({
       kind: 'item',
       label: 'Copy Selection as Markdown',
-      run: () => copyText(selectionMarkdown()),
+      run: async () => copyText(await selectionMarkdown()),
     });
   }
 
@@ -524,7 +547,7 @@ function blockMarkdown(block: HTMLElement): string {
   return sourceLines.slice(start, end).join('\n').trim();
 }
 
-function selectionMarkdown(): string {
+async function selectionMarkdown(): Promise<string> {
   // Exact: serialize just the selected fragment back to Markdown. Verbatim
   // source slicing is not possible (we only have block-level line mapping), so
   // the selected rendered HTML is converted with Turndown. This handles partial
@@ -539,7 +562,7 @@ function selectionMarkdown(): string {
   }
   // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
-  const md = htmlToMarkdown(wrapper.innerHTML).trim();
+  const md = (await htmlToMarkdown(wrapper.innerHTML)).trim();
   return md || sel.toString();
 }
 
@@ -599,6 +622,7 @@ function writeClipboard(html: string | null, plain: string): void {
 async function copyPng(el: HTMLElement): Promise<void> {
   el.classList.add('mc-force-light');
   try {
+    const { toBlob } = await import('html-to-image');
     const blob = await toBlob(el, { pixelRatio: 2, backgroundColor: '#ffffff' });
     if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -645,6 +669,7 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
   if (hosts.length === 0) {
     return;
   }
+  const mermaid = await getMermaid();
   // `theme` last so it wins over any user `markcopy.mermaid` theme for the print.
   mermaid.initialize({
     startOnLoad: false,
@@ -666,7 +691,7 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
       }
     }
   } finally {
-    initMermaid();
+    await initMermaid();
   }
 }
 

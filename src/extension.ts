@@ -416,7 +416,9 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
     // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
     // copying an equation as an image (see SECURITY.md).
     `connect-src ${webview.cspSource}`,
-    `script-src 'nonce-${nonce}'`,
+    // 'strict-dynamic' lets the nonce'd entry module import its code-split
+    // sibling chunks (media/chunk-*.js) without each needing its own nonce.
+    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
   ].join('; ');
 
   return `<!DOCTYPE html>
@@ -433,7 +435,7 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
   <div id="content" class="markdown-body"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
 }

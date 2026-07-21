@@ -1,5 +1,5 @@
 // Bundles the browser-side webview code. Three outputs:
-//   media/webview.js     markdown preview (iife, classic <script>)
+//   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
 const esbuild = require('esbuild');
@@ -43,12 +43,16 @@ async function run(options) {
 async function main() {
   copyKatexAssets();
   await Promise.all([
-    // Markdown preview: classic script, bundles mermaid + html-to-image.
+    // Markdown preview: ES module with code splitting so mermaid, katex,
+    // html-to-image, and turndown load lazily as separate media/chunk-*.js files
+    // instead of bloating the initial media/webview.js.
     run({
       ...shared,
-      entryPoints: ['src/webview/main.ts'],
-      format: 'iife',
-      outfile: 'media/webview.js',
+      entryPoints: [{ in: 'src/webview/main.ts', out: 'webview' }],
+      format: 'esm',
+      splitting: true,
+      outdir: 'media',
+      chunkNames: 'chunk-[name]-[hash]',
       loader: { '.css': 'text' },
     }),
     // PDF preview + pdf.js worker: ES modules.
