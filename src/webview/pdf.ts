@@ -238,7 +238,7 @@ async function renderPage(n: number): Promise<void> {
 
   renderTasks.get(n)?.cancel();
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
-  const task = page.render({ canvasContext: ctx, viewport, transform });
+  const task = page.render({ canvas, canvasContext: ctx, viewport, transform });
   renderTasks.set(n, task);
   await task.promise;
 
