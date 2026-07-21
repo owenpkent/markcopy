@@ -490,7 +490,10 @@ function closeNote(): void {
 // ---------------------------------------------------------------------------
 interface MenuItem {
   label: string;
-  run: () => void | Promise<void>;
+  run?: () => void | Promise<void>;
+  checked?: boolean; // renders as a radio row with a check
+  header?: boolean; // non-interactive group label
+  divider?: boolean;
 }
 
 document.addEventListener('contextmenu', (e) => {
@@ -525,15 +528,40 @@ document.addEventListener('contextmenu', (e) => {
     label: pageAppearance() === 'normal' ? 'Dark Pages' : 'Light Pages',
     run: () => togglePages(),
   });
+  // Theme section, matching the Markdown preview's Theme menu. Picking one
+  // persists markcopy.theme (shared by both surfaces) and re-tints the pages.
+  items.push({ label: '', divider: true });
+  items.push(...themeItems());
 
   showMenu(e.pageX, e.pageY, items);
 });
+
+// The Auto/Light/Dark/Green radio group, identical in labels and behavior to the
+// Markdown preview's Theme menu (buildSettingsEntries in main.ts).
+function themeItems(): MenuItem[] {
+  const entry = (label: string, value: string): MenuItem => ({
+    label,
+    checked: currentTheme === value,
+    run: () => setTheme(value),
+  });
+  return [
+    { label: 'Theme', header: true },
+    entry('Auto', 'auto'),
+    entry('Light', 'light'),
+    entry('Dark', 'dark'),
+    entry('Green on black', 'green'),
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Dark / green pages
 // ---------------------------------------------------------------------------
 type PageMode = 'auto' | 'normal' | 'inverted';
 let pageMode: PageMode = 'auto';
+
+// The active markcopy.theme, seeded from the host's data-mc-theme attribute and
+// changed via the Theme menu.
+let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
 
 // How a page's pixels are recoloured: true colours, inverted (dark), or the
 // green-theme phosphor variant of the inverted look.
@@ -589,13 +617,31 @@ function tintCanvas(
   ctx.restore();
 }
 
+// Session-only quick invert (does not touch the persisted theme): flips between
+// true colours and dark inversion for the current view. The Theme menu is the
+// persistent, cross-surface control; this stays for a one-off "invert this PDF".
 function togglePages(): void {
-  // The toggle only ever flips between true colours and dark inversion; green is
-  // reached through the theme setting, not this menu item.
   pageMode = pageAppearance() === 'normal' ? 'inverted' : 'normal';
   document.body.classList.toggle('mc-pages-inverted', pageMode === 'inverted');
   document.body.classList.toggle('mc-pages-normal', pageMode === 'normal');
-  // The recolour is baked into the bitmap now, so re-rasterise the visible pages.
+  rerenderPages();
+}
+
+// Apply a theme picked from the Theme menu: update the attribute the appearance
+// logic keys off, clear any session Dark/Light override so the theme drives the
+// look, persist markcopy.theme (shared with the Markdown preview), and re-tint.
+function setTheme(value: string): void {
+  currentTheme = value;
+  document.body.setAttribute('data-mc-theme', value);
+  pageMode = 'auto';
+  document.body.classList.remove('mc-pages-inverted', 'mc-pages-normal');
+  vscode.postMessage({ type: 'updateSetting', key: 'theme', value });
+  rerenderPages();
+}
+
+// Drop every rendered page and re-rasterise the visible ones. Used whenever the
+// page recolour changes (the tint is baked into the bitmap, not a live filter).
+function rerenderPages(): void {
   for (const t of renderTasks.values()) {
     t.cancel();
   }
@@ -689,15 +735,42 @@ buildToolbar();
 function showMenu(x: number, y: number, items: MenuItem[]): void {
   menu.innerHTML = '';
   for (const item of items) {
+    if (item.divider) {
+      const el = document.createElement('div');
+      el.className = 'mc-menu-divider';
+      el.setAttribute('role', 'separator');
+      menu.appendChild(el);
+      continue;
+    }
+    if (item.header) {
+      const el = document.createElement('div');
+      el.className = 'mc-menu-group-label';
+      el.textContent = item.label;
+      menu.appendChild(el);
+      continue;
+    }
     const el = document.createElement('div');
-    el.className = 'mc-menu-item';
-    el.setAttribute('role', 'menuitem');
     el.tabIndex = 0;
-    el.textContent = item.label;
+    if (item.checked !== undefined) {
+      el.className = 'mc-menu-item mc-menu-item--check';
+      el.setAttribute('role', 'menuitemradio');
+      el.setAttribute('aria-checked', String(item.checked));
+      const check = document.createElement('span');
+      check.className = 'mc-menu-check';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = item.checked ? '✓' : '';
+      const text = document.createElement('span');
+      text.textContent = item.label;
+      el.append(check, text);
+    } else {
+      el.className = 'mc-menu-item';
+      el.setAttribute('role', 'menuitem');
+      el.textContent = item.label;
+    }
     el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       menu.hidden = true;
-      void item.run();
+      void item.run?.();
     });
     menu.appendChild(el);
   }
