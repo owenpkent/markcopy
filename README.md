@@ -43,7 +43,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating zoom toolbar (50 to 400 percent) keeps pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. It follows your theme in light or dark, with a right-click **Dark Pages** / **Light Pages** toggle to override it for the session. One extension previews both Markdown and PDF.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating zoom toolbar (50 to 400 percent) keeps pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's right-click **Theme** menu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle. One extension previews both Markdown and PDF.
 - **Settings without leaving the preview.** Right-click for **Theme** and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
@@ -56,7 +56,7 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a printable PDF via your browser.
 
-Local images in the document render automatically, and the right-click menu's settings section (or the gear icon in the preview's title bar) lets you change theme, style, sync scroll, and auto-preview without leaving the preview.
+Local images in the document render automatically, and the right-click menu's settings section (or the gear icon in the preview's title bar) lets you change theme, sync scroll, math, and auto-preview without leaving the preview.
 
 ## Commands
 
@@ -73,7 +73,7 @@ Local images in the document render automatically, and the right-click menu's se
 
 | Setting                 | Type                                   | Default  | Description                                                                                                                                                            |
 | ----------------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile` | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                             |
+| `markcopy.styleProfile` | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                              |
 | `markcopy.syncScroll`   | boolean                                | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                              |
 | `markcopy.autoPreview`  | boolean                                | `true`   | Automatically open the preview beside the editor when you focus a Markdown file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
 | `markcopy.theme`        | `auto` \| `light` \| `dark` \| `green` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.          |
@@ -112,7 +112,8 @@ MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it i
 - **Copy Selected Text**: just the text you highlight.
 - **Add Comment Here**: drop a pin with an editable note; click a pin to edit or delete it. Comments are saved to a `<filename>.pdf.mccomments.json` file next to the PDF (the PDF itself stays read-only) and reload when you reopen it.
 - **Hand Tool (Drag to Scroll)** / **Pointer Tool (Select Text)**: right-click to toggle between panning by drag and selecting text.
-- **Dark Pages** / **Light Pages**: override the page palette for the session (it otherwise follows `markcopy.theme`, like the Markdown preview).
+- **Theme**: the same menu as the Markdown preview (Auto, Light, Dark, or Green on black). Picking one persists `markcopy.theme` (shared with the Markdown preview) and re-tints the pages; Green on black renders them as green-on-black phosphor.
+- **Dark Pages** / **Light Pages**: a session-only override of the page palette that does not change the saved theme (it otherwise follows `markcopy.theme`, like the Markdown preview).
 
 A floating zoom toolbar in the bottom-right corner steps through preset levels (50 to 400 percent) with minus/plus buttons, Ctrl and plus / Ctrl and minus / Ctrl and 0, or Ctrl plus the mouse wheel; clicking the percentage resets to 100 percent. Pages re-rasterise at each level, and only pages near the viewport stay rendered, so large PDFs stay sharp and memory-bounded. The view also has always-visible styled scrollbars.
 
