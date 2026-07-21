@@ -14,7 +14,10 @@ interface PreviewState {
 }
 
 let current: PreviewState | undefined;
-const md = createMarkdownIt();
+// Rebuilt in update() only when the `markcopy.math` setting flips, so toggling
+// math on/off takes effect without reloading the window.
+let md = createMarkdownIt();
+let mdMath = true;
 
 // Documents whose preview the user closed this session. Auto-preview skips these
 // so a dismissed preview does not spring back open on the next focus change.
@@ -254,10 +257,15 @@ function update(state: PreviewState): void {
   }
   const source = doc.getText();
   const webview = state.panel.webview;
+  const cfg = vscode.workspace.getConfiguration('markcopy');
+  const math = cfg.get<boolean>('math', true);
+  if (math !== mdMath) {
+    md = createMarkdownIt({ math });
+    mdMath = math;
+  }
   const html = md.render(source, {
     resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
   });
-  const cfg = vscode.workspace.getConfiguration('markcopy');
   state.panel.title = `Preview ${basename(state.docUri)}`;
   // A one-shot heading reveal, set when a link navigated here. The webview also
   // scrolls a newly-targeted document to the top on its own (docKey change).
@@ -274,6 +282,7 @@ function update(state: PreviewState): void {
     mermaidConfig: cfg.get<object>('mermaid', {}),
     syncScroll: cfg.get<boolean>('syncScroll', true),
     autoPreview: cfg.get<boolean>('autoPreview', true),
+    math,
   });
 }
 
@@ -365,11 +374,17 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
   const styleUri = webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, 'media', 'preview.css'),
   );
+  const katexStyleUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, 'media', 'katex', 'katex.min.css'),
+  );
   const csp = [
     `default-src 'none'`,
     `img-src ${webview.cspSource} https: data: blob:`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
+    // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
+    // copying an equation as an image (see SECURITY.md).
+    `connect-src ${webview.cspSource}`,
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
 
@@ -380,6 +395,7 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
 <meta http-equiv="Content-Security-Policy" content="${csp}" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link href="${styleUri}" rel="stylesheet" />
+<link href="${katexStyleUri}" rel="stylesheet" />
 <title>MarkCopy Preview</title>
 </head>
 <body data-vscode-context='{"webviewId":"markcopy.preview","preventDefaultContextMenuItems":true}'>

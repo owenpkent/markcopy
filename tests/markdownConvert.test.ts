@@ -12,6 +12,20 @@ describe('htmlToMarkdown', () => {
     expect(htmlToMarkdown('<h2>Notes</h2>')).toBe('## Notes');
   });
 
+  it('restores inline LaTeX from a rendered KaTeX element', () => {
+    const md = htmlToMarkdown(
+      'sum <span class="mc-math" data-display="0" data-tex="a^2+b^2"><span class="katex">x</span></span> here',
+    );
+    expect(md).toBe('sum $a^2+b^2$ here');
+  });
+
+  it('restores display LaTeX as a $$ block', () => {
+    const md = htmlToMarkdown(
+      '<div class="mc-math" data-display="1" data-tex="\\int_0^1 x^2 dx"><span class="katex">x</span></div>',
+    );
+    expect(md).toContain('$$\n\\int_0^1 x^2 dx\n$$');
+  });
+
   it('converts a GFM table', () => {
     const md = htmlToMarkdown(
       '<table><thead><tr><th>A</th><th>B</th></tr></thead>' +

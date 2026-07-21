@@ -4,8 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- **KaTeX / LaTeX math rendering.** Inline `$...$` and display `$$...$$` now render as equations. Like Mermaid, the extension host emits an inert placeholder and the webview upgrades it with KaTeX after DOMPurify runs, so no math markup passes through the sanitizer. Right-click an equation to **Copy Equation as PNG** (fonts are embedded so it pastes cleanly into docs and email) or **Copy Equation as LaTeX**; "Copy as Markdown" also restores the original `$...$` source. Toggle with the `markcopy.math` setting (on by default; turn off for documents that use literal dollar signs).
+
 ### Planned
-- KaTeX / LaTeX math rendering, and copy-as-image for equations.
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 

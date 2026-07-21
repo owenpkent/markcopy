@@ -13,6 +13,17 @@ const turndown = new TurndownService({
 });
 turndown.use(gfm);
 
+// Restore LaTeX from a rendered KaTeX element instead of serializing its spans.
+// The original source is stashed on `data-tex` by renderKatex().
+turndown.addRule('mcMath', {
+  filter: (node) => node.nodeType === 1 && node.classList.contains('mc-math'),
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const tex = (el.getAttribute('data-tex') ?? '').trim();
+    return el.getAttribute('data-display') === '1' ? `\n\n$$\n${tex}\n$$\n\n` : `$${tex}$`;
+  },
+});
+
 export function htmlToMarkdown(html: string): string {
   return turndown.turndown(html);
 }

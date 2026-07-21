@@ -29,6 +29,34 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('<th>A</th>');
   });
 
+  it('turns inline $...$ into a non-display math placeholder', () => {
+    const html = md.render('Euler: $e^{i\\pi}+1=0$ done.\n');
+    expect(html).toContain('<span class="mc-math" data-display="0">');
+    expect(html).toContain('e^{i\\pi}+1=0');
+    // The webview renders KaTeX client-side; the host only emits the placeholder.
+    expect(html).not.toContain('class="katex"');
+  });
+
+  it('turns a $$...$$ block into a display math placeholder with a source line', () => {
+    const html = md.render('$$\n\\int_0^1 x^2 dx\n$$\n');
+    expect(html).toContain('<div class="mc-math" data-display="1"');
+    expect(html).toContain('data-source-line="0"');
+    expect(html).toContain('\\int_0^1 x^2 dx');
+  });
+
+  it('escapes HTML metacharacters inside math', () => {
+    const html = md.render('$a < b & c$\n');
+    expect(html).toContain('a &lt; b &amp; c');
+    expect(html).not.toContain('a < b & c');
+  });
+
+  it('leaves dollar signs untouched when math is disabled', () => {
+    const off = createMarkdownIt({ math: false });
+    const html = off.render('Euler: $e^{i\\pi}+1=0$ done.\n');
+    expect(html).not.toContain('mc-math');
+    expect(html).toContain('$e^{i\\pi}+1=0$');
+  });
+
   it('routes image src through env.resolveImage when provided', () => {
     const html = md.render('![alt](media/x.png)', {
       resolveImage: (src: string) => `webview:${src}`,

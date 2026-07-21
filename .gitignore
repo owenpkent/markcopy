@@ -5,6 +5,7 @@ coverage/
 .vscode-test/
 media/webview.js
 media/webview.js.map
+media/katex/
 media/pdf.js
 media/pdf.js.map
 media/pdf.worker.js

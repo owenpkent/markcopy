@@ -3,9 +3,23 @@
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
 const esbuild = require('esbuild');
+const fs = require('fs');
+const path = require('path');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+
+// KaTeX renders client-side in the webview, so its stylesheet and fonts must be
+// served from `media/`. The CSS references fonts by relative `fonts/...` URLs, so
+// keep the same layout (media/katex/katex.min.css + media/katex/fonts/*).
+function copyKatexAssets() {
+  const src = path.join(__dirname, 'node_modules', 'katex', 'dist');
+  const dest = path.join(__dirname, 'media', 'katex');
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dest, 'fonts'), { recursive: true });
+  fs.copyFileSync(path.join(src, 'katex.min.css'), path.join(dest, 'katex.min.css'));
+  fs.cpSync(path.join(src, 'fonts'), path.join(dest, 'fonts'), { recursive: true });
+}
 
 const shared = {
   bundle: true,
@@ -27,6 +41,7 @@ async function run(options) {
 }
 
 async function main() {
+  copyKatexAssets();
   await Promise.all([
     // Markdown preview: classic script, bundles mermaid + html-to-image.
     run({

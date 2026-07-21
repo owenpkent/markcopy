@@ -32,6 +32,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Code block: **Copy Code** as plain text.
   - Table: **Rich Text**, **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), or **PNG**.
   - Mermaid diagram: **PNG** or **SVG**.
+  - Equation (KaTeX): **Copy Equation as PNG** or **Copy Equation as LaTeX**.
   - Any block: **Rich Text**, **Markdown source**, or **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
@@ -39,9 +40,10 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview.
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
+- **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating zoom toolbar (50 to 400 percent) keeps pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. It follows your theme in light or dark, with a right-click **Dark Pages** / **Light Pages** toggle to override it for the session. One extension previews both Markdown and PDF.
-- **Settings without leaving the preview.** Right-click for a **Theme**, **Style**, and **Sync scroll** / **Auto-open preview** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
+- **Settings without leaving the preview.** Right-click for **Theme**, **Style**, and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
@@ -74,6 +76,7 @@ Local images in the document render automatically, and the right-click menu's se
 | `markcopy.autoPreview`  | boolean                     | `true`   | Automatically open the preview beside the editor when you focus a Markdown file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
 | `markcopy.theme`        | `auto` \| `light` \| `dark` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light` and `dark` force it. Copies stay light-safe either way.                                                    |
 | `markcopy.mermaid`      | object                      | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default. |
+| `markcopy.math`         | boolean                     | `true`   | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                   |
 
 ## Install
 
@@ -148,7 +151,6 @@ Full details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
 
-- KaTeX / LaTeX math (render, and copy as image).
 - PlantUML support.
 - An "email-safe" export profile (table-based layout, fully inlined).
 
