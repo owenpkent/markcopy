@@ -56,6 +56,12 @@
         "category": "MarkCopy"
       },
       {
+        "command": "markcopy.saveAsPdf",
+        "title": "MarkCopy: Save as PDF",
+        "category": "MarkCopy",
+        "icon": "$(file-pdf)"
+      },
+      {
         "command": "markcopy.openSettings",
         "title": "MarkCopy: Settings",
         "category": "MarkCopy",
@@ -77,14 +83,24 @@
     "menus": {
       "editor/title": [
         {
+          "command": "markcopy.saveAsPdf",
+          "when": "activeWebviewPanelId == markcopy.preview",
+          "group": "navigation@1"
+        },
+        {
           "command": "markcopy.openSettings",
           "when": "activeWebviewPanelId == markcopy.preview",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
         {
           "command": "markcopy.openPreview",
+          "when": "editorLangId == markdown",
+          "group": "1_markcopy"
+        },
+        {
+          "command": "markcopy.saveAsPdf",
           "when": "editorLangId == markdown",
           "group": "1_markcopy"
         }
@@ -124,15 +140,17 @@
           "enum": [
             "auto",
             "light",
-            "dark"
+            "dark",
+            "green"
           ],
           "enumDescriptions": [
             "Follow the VS Code color theme.",
             "Always use the light (GitHub) palette.",
-            "Always use the dark (GitHub) palette."
+            "Always use the dark (GitHub) palette.",
+            "Green text on a black background (terminal style)."
           ],
           "default": "auto",
-          "description": "Preview color palette. 'auto' follows your VS Code theme; 'light' and 'dark' force a palette. Copied rich text stays light either way."
+          "description": "Preview color palette. 'auto' follows your VS Code theme; 'light', 'dark', and 'green' force a palette. Copied rich text stays light either way."
         },
         "markcopy.mermaid": {
           "type": "object",

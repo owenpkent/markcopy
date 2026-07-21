@@ -83,6 +83,9 @@ window.addEventListener('message', (e: MessageEvent) => {
     case 'copyAll':
       void copyRichText(content);
       break;
+    case 'exportPdf':
+      void exportPdf();
+      break;
   }
 });
 
@@ -391,6 +394,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     label: 'Copy Whole Document as Rich Text',
     run: () => copyRichText(content),
   });
+  items.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   return items;
 }
 
@@ -424,6 +428,7 @@ function buildSettingsEntries(): MenuEntry[] {
     radioEntry('Auto', currentTheme === 'auto', 'theme', 'auto'),
     radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
     radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
+    radioEntry('Green on black', currentTheme === 'green', 'theme', 'green'),
     { kind: 'label', label: 'Style' },
     radioEntry('GitHub', currentStyleProfile === 'github', 'styleProfile', 'github'),
     radioEntry('VS Code', currentStyleProfile === 'vscode', 'styleProfile', 'vscode'),
@@ -607,6 +612,58 @@ async function copyPng(el: HTMLElement): Promise<void> {
   } finally {
     el.classList.remove('mc-force-light');
   }
+}
+
+// ---------------------------------------------------------------------------
+// PDF export
+// ---------------------------------------------------------------------------
+// Serialize the already-rendered preview (KaTeX HTML, Mermaid SVG, highlighted
+// code all live in the DOM) and hand it to the host, which wraps it in a
+// standalone HTML file and opens it in the browser for printing to PDF. Local
+// images are inlined as data URIs so they survive outside the webview; the host
+// injects preview.css + KaTeX CSS, so we send raw markup and let CSS style it.
+async function exportPdf(): Promise<void> {
+  try {
+    const clone = content.cloneNode(true) as HTMLElement;
+    clone
+      .querySelectorAll('[data-source-line]')
+      .forEach((el) => el.removeAttribute('data-source-line'));
+    await inlineImages(clone);
+    vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
+    toast('Opening PDF export…');
+  } catch {
+    toast('PDF export failed');
+  }
+}
+
+// Replace webview-hosted image srcs with data URIs so they load from a plain
+// file:// page. Remote (http/https) and already-inlined (data:) images are left
+// untouched: they still load in the browser, and the CSP forbids fetching them.
+async function inlineImages(root: HTMLElement): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img'));
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute('src') ?? '';
+      if (!src || /^(https?:|data:)/i.test(src)) {
+        return;
+      }
+      try {
+        const blob = await (await fetch(src)).blob();
+        img.setAttribute('src', await blobToDataUrl(blob));
+      } catch {
+        /* leave the original src; a broken image beats aborting the export */
+      }
+    }),
+  );
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ---------------------------------------------------------------------------
