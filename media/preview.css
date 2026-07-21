@@ -171,6 +171,18 @@ body {
   margin: 0 0 16px 0;
   text-align: center;
 }
+/* KaTeX and Mermaid now load lazily, so on the first math/diagram document the
+   raw `$...$` / diagram source could flash before the library finishes importing.
+   Hide the placeholders until they hydrate: renderKatex() stamps `data-tex` on
+   each `.mc-math` (on success and on caught error), and renderMermaid() replaces
+   every `pre.mermaid-src` with a `.mc-mermaid`, so both selectors stop matching
+   once the content is ready. */
+.mc-math:not([data-tex]) {
+  visibility: hidden;
+}
+pre.mermaid-src {
+  visibility: hidden;
+}
 .mc-error {
   color: var(--mc-error-fg);
   background: var(--mc-error-bg);

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { createMarkdownIt, escapeHtml } from './render';
 import { PdfEditorProvider } from './pdfEditor';
 import { classifyLink, localImageRef, shouldAutoPreview } from './preview-utils';
+import { applyMarkcopySetting } from './settingsScope';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -218,7 +219,7 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
       } else if (msg?.type === 'toast') {
         vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
       } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
-        applySetting(msg.key, msg.value);
+        void applyMarkcopySetting(msg.key, msg.value, state.docUri);
       } else if (msg?.type === 'openSettings') {
         vscode.commands.executeCommand('markcopy.openSettings');
       } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
@@ -254,29 +255,6 @@ function resourceRoots(context: vscode.ExtensionContext, docUri: vscode.Uri): vs
   const folder = vscode.workspace.getWorkspaceFolder(docUri);
   roots.push(folder ? folder.uri : vscode.Uri.joinPath(docUri, '..'));
   return roots;
-}
-
-// Persist a setting changed from the in-preview menu. Write to the scope where
-// the setting is actually defined, so a workspace (or folder) override isn't
-// silently shadowed by a Global write, which would make the menu appear to do
-// nothing. Falls back to Global (User) scope when there is no narrower override.
-function applySetting(key: string, value: unknown): void {
-  const config = vscode.workspace.getConfiguration('markcopy');
-  config.update(key, value, settingTarget(config, key));
-}
-
-function settingTarget(
-  config: vscode.WorkspaceConfiguration,
-  key: string,
-): vscode.ConfigurationTarget {
-  const info = config.inspect(key);
-  if (info?.workspaceFolderValue !== undefined) {
-    return vscode.ConfigurationTarget.WorkspaceFolder;
-  }
-  if (info?.workspaceValue !== undefined) {
-    return vscode.ConfigurationTarget.Workspace;
-  }
-  return vscode.ConfigurationTarget.Global;
 }
 
 function update(state: PreviewState): void {
@@ -502,7 +480,7 @@ body { padding: 24px 28px; box-sizing: border-box; }
 ${katexCss ? `<style>${katexCss}</style>` : ''}
 <style>${printCss}</style>
 </head>
-<body class="mc-force-light" data-style="github" data-mc-theme="light">
+<body class="mc-force-light" data-mc-theme="light">
 <div id="content" class="markdown-body">${bodyHtml}</div>
 <script>
 window.addEventListener('load', function () {
