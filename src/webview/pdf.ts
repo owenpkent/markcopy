@@ -37,6 +37,10 @@ let scale = ZOOM_LEVELS[zoomIndex];
 // it gets downscaled -> blurry) or exhausts memory. Roughly 4096x4096.
 const MAX_CANVAS_PIXELS = 16_777_216;
 
+// Phosphor green for the green theme's inverted pages. Matches the Markdown
+// preview's `--mc-fg` in the green palette (media/preview.css).
+const PHOSPHOR_GREEN = '#4bf07a';
+
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
 
@@ -212,19 +216,23 @@ async function ensureRendered(n: number): Promise<void> {
   }
 }
 
+// Render ABOVE the display resolution and let the browser downsample: this
+// supersamples the text so it stays sharp even where the webview under-reports
+// devicePixelRatio. Use at least 2x, or the real device ratio when higher,
+// clamped so the canvas never exceeds MAX_CANVAS_PIXELS (past which the browser
+// itself downscales the page -> the fuzziness we are fixing).
+function outputScaleFor(viewport: { width: number; height: number }): number {
+  const dpr = window.devicePixelRatio || 1;
+  const cap = Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height));
+  return Math.min(cap, Math.max(dpr, 2));
+}
+
 async function renderPage(n: number): Promise<void> {
   const page = pages[n - 1];
   const wrap = wrappers[n - 1];
   const viewport = page.getViewport({ scale });
 
-  // Render ABOVE the display resolution and let the browser downsample: this
-  // supersamples the text so it stays sharp even where the webview under-reports
-  // devicePixelRatio. Use at least 2x, or the real device ratio when higher,
-  // clamped so the canvas never exceeds MAX_CANVAS_PIXELS (past which the browser
-  // itself downscales the page -> the fuzziness we are fixing).
-  const dpr = window.devicePixelRatio || 1;
-  const cap = Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height));
-  const outputScale = Math.min(cap, Math.max(dpr, 2));
+  const outputScale = outputScaleFor(viewport);
 
   const canvas = wrap.querySelector('canvas') as HTMLCanvasElement;
   canvas.width = Math.floor(viewport.width * outputScale);
@@ -242,18 +250,10 @@ async function renderPage(n: number): Promise<void> {
   renderTasks.set(n, task);
   await task.promise;
 
-  // Dark mode: invert the rasterised pixels here rather than with a CSS filter.
-  // A CSS filter forces the browser to re-rasterise the layer at CSS resolution
-  // (blurry on HiDPI); inverting the bitmap keeps it crisp. `difference` against
-  // white is an exact colour inversion.
-  if (pagesInverted()) {
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'difference';
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
-  }
+  // Dark/green pages: recolour the rasterised pixels here rather than with a CSS
+  // filter. A CSS filter forces the browser to re-rasterise the layer at CSS
+  // resolution (blurry on HiDPI); baking it into the bitmap keeps it crisp.
+  tintCanvas(ctx, canvas, pageAppearance());
 
   // Text layer: transparent, selectable spans over the canvas.
   const textContent = await page.getTextContent();
@@ -508,7 +508,7 @@ document.addEventListener('contextmenu', (e) => {
     const n = Number(pageEl.dataset.page);
     const canvas = pageEl.querySelector('canvas');
     if (canvas && canvas.width > 0) {
-      items.push({ label: `Copy Page ${n} as PNG`, run: () => copyCanvasPng(canvas) });
+      items.push({ label: `Copy Page ${n} as PNG`, run: () => copyPagePng(n) });
     }
     items.push({ label: `Copy Page ${n} Text`, run: () => copyText(pageText.get(n) ?? '') });
     const cx = e.clientX;
@@ -522,7 +522,7 @@ document.addEventListener('contextmenu', (e) => {
     run: () => setMode(mode === 'hand' ? 'pointer' : 'hand'),
   });
   items.push({
-    label: pagesInverted() ? 'Light Pages' : 'Dark Pages',
+    label: pageAppearance() === 'normal' ? 'Dark Pages' : 'Light Pages',
     run: () => togglePages(),
   });
 
@@ -530,32 +530,72 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dark-mode pages
+// Dark / green pages
 // ---------------------------------------------------------------------------
 type PageMode = 'auto' | 'normal' | 'inverted';
 let pageMode: PageMode = 'auto';
 
+// How a page's pixels are recoloured: true colours, inverted (dark), or the
+// green-theme phosphor variant of the inverted look.
+type Appearance = 'normal' | 'inverted' | 'green';
+
+function themeIsGreen(): boolean {
+  return document.body.getAttribute('data-mc-theme') === 'green';
+}
+
 function isDarkTheme(): boolean {
   const t = document.body.getAttribute('data-mc-theme');
   if (t === 'dark') return true;
-  if (t === 'light') return false;
+  // 'light' and 'green' are handled explicitly elsewhere, never as auto-dark.
+  if (t === 'light' || t === 'green') return false;
   return (
     document.body.classList.contains('vscode-dark') ||
     document.body.classList.contains('vscode-high-contrast')
   );
 }
 
-function pagesInverted(): boolean {
-  if (pageMode === 'inverted') return true;
-  if (pageMode === 'normal') return false;
-  return isDarkTheme();
+// The session Dark/Light Pages toggle (pageMode) overrides everything; otherwise
+// the appearance follows markcopy.theme, where `green` yields the phosphor look
+// and `dark` (or auto over a dark editor theme) yields plain inversion.
+function pageAppearance(): Appearance {
+  if (pageMode === 'inverted') return 'inverted';
+  if (pageMode === 'normal') return 'normal';
+  if (themeIsGreen()) return 'green';
+  return isDarkTheme() ? 'inverted' : 'normal';
+}
+
+// Recolour a freshly rendered canvas in place. `difference` against white is an
+// exact colour inversion (dark pages); green then multiplies that white-on-black
+// by the phosphor green so the page reads green-on-black. Multiply leaves black
+// black and turns white into the fill colour.
+function tintCanvas(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  appearance: Appearance,
+): void {
+  if (appearance === 'normal') {
+    return;
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'difference';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (appearance === 'green') {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = PHOSPHOR_GREEN;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.restore();
 }
 
 function togglePages(): void {
-  pageMode = pagesInverted() ? 'normal' : 'inverted';
+  // The toggle only ever flips between true colours and dark inversion; green is
+  // reached through the theme setting, not this menu item.
+  pageMode = pageAppearance() === 'normal' ? 'inverted' : 'normal';
   document.body.classList.toggle('mc-pages-inverted', pageMode === 'inverted');
   document.body.classList.toggle('mc-pages-normal', pageMode === 'normal');
-  // Inversion is baked into the bitmap now, so re-rasterise the visible pages.
+  // The recolour is baked into the bitmap now, so re-rasterise the visible pages.
   for (const t of renderTasks.values()) {
     t.cancel();
   }
@@ -696,24 +736,10 @@ function copyText(text: string): void {
   toast('Copied');
 }
 
-async function copyCanvasPng(canvas: HTMLCanvasElement): Promise<void> {
+// Copy a page as PNG in its true colours, whatever the on-screen appearance.
+async function copyPagePng(n: number): Promise<void> {
   try {
-    // In dark mode the on-screen canvas is colour-inverted; copy the true page
-    // by inverting a throwaway copy back to its original colours.
-    let source = canvas;
-    if (pagesInverted()) {
-      const off = document.createElement('canvas');
-      off.width = canvas.width;
-      off.height = canvas.height;
-      const octx = off.getContext('2d');
-      if (octx) {
-        octx.drawImage(canvas, 0, 0);
-        octx.globalCompositeOperation = 'difference';
-        octx.fillStyle = '#fff';
-        octx.fillRect(0, 0, off.width, off.height);
-        source = off;
-      }
-    }
+    const source = await truePageCanvas(n);
     const blob: Blob | null = await new Promise((resolve) => source.toBlob(resolve, 'image/png'));
     if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -724,6 +750,46 @@ async function copyCanvasPng(canvas: HTMLCanvasElement): Promise<void> {
   } catch {
     toast('PNG copy failed');
   }
+}
+
+// A canvas holding the page in its original colours. For `inverted` the on-screen
+// bitmap is an exact inversion, so we invert a throwaway copy back (fast). For
+// `green` the phosphor multiply is not exactly reversible, so re-rasterise the
+// page clean from pdf.js instead.
+async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
+  const appearance = pageAppearance();
+  const onscreen = wrappers[n - 1].querySelector('canvas') as HTMLCanvasElement;
+
+  if (appearance === 'green') {
+    const page = pages[n - 1];
+    const viewport = page.getViewport({ scale });
+    const outputScale = outputScaleFor(viewport);
+    const off = document.createElement('canvas');
+    off.width = Math.floor(viewport.width * outputScale);
+    off.height = Math.floor(viewport.height * outputScale);
+    const octx = off.getContext('2d');
+    if (octx) {
+      const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
+      await page.render({ canvas: off, canvasContext: octx, viewport, transform }).promise;
+      return off;
+    }
+    return onscreen;
+  }
+
+  if (appearance === 'inverted') {
+    const off = document.createElement('canvas');
+    off.width = onscreen.width;
+    off.height = onscreen.height;
+    const octx = off.getContext('2d');
+    if (octx) {
+      octx.drawImage(onscreen, 0, 0);
+      octx.globalCompositeOperation = 'difference';
+      octx.fillStyle = '#fff';
+      octx.fillRect(0, 0, off.width, off.height);
+      return off;
+    }
+  }
+  return onscreen;
 }
 
 function escapeHtml(s: string): string {
