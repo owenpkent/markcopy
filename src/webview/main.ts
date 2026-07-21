@@ -159,6 +159,10 @@ async function renderMermaid(): Promise<void> {
     const host = document.createElement('div');
     host.className = 'mc-mermaid';
     host.dataset.sourceLine = pre.dataset.sourceLine ?? '';
+    // Keep the source so the diagram can be re-rendered in a light theme for PDF
+    // export (Mermaid bakes theme colors into the SVG, so a dark-theme diagram is
+    // unreadable on a forced-light printout).
+    host.dataset.mermaidSrc = code;
     pre.replaceWith(host);
     try {
       const { svg } = await mermaid.render(`mc-mmd-${i}-${idSeed()}`, code);
@@ -628,11 +632,46 @@ async function exportPdf(): Promise<void> {
     clone
       .querySelectorAll('[data-source-line]')
       .forEach((el) => el.removeAttribute('data-source-line'));
+    await relightMermaid(clone);
     await inlineImages(clone);
     vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
     toast('Opening PDF export…');
   } catch {
     toast('PDF export failed');
+  }
+}
+
+// Re-render every Mermaid diagram in the export clone with the light theme.
+// The on-screen SVGs bake in the (possibly dark) preview theme, which turns into
+// unreadable black boxes on the forced-light PDF page. We re-render from the
+// stashed source with `theme: 'default'`, then restore the on-screen config.
+async function relightMermaid(root: HTMLElement): Promise<void> {
+  const hosts = Array.from(root.querySelectorAll<HTMLElement>('.mc-mermaid'));
+  if (hosts.length === 0) {
+    return;
+  }
+  // `theme` last so it wins over any user `markcopy.mermaid` theme for the print.
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    ...mermaidConfig,
+    theme: 'default',
+  } as Parameters<typeof mermaid.initialize>[0]);
+  try {
+    for (let i = 0; i < hosts.length; i++) {
+      const src = hosts[i].dataset.mermaidSrc;
+      if (!src) {
+        continue;
+      }
+      try {
+        const { svg } = await mermaid.render(`mc-pdf-${i}-${idSeed()}`, src);
+        hosts[i].innerHTML = svg;
+      } catch {
+        /* leave the existing SVG; a themed diagram beats no diagram */
+      }
+    }
+  } finally {
+    initMermaid();
   }
 }
 
