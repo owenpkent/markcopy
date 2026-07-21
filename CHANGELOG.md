@@ -11,6 +11,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **Theme menu in the PDF viewer.** The PDF viewer's right-click menu now has the same **Theme** section as the Markdown preview (Auto / Light / Dark / Green on black). Picking one persists `markcopy.theme` (Global), so the two previews share a single theme, and re-tints the open pages immediately. The session-only **Dark Pages / Light Pages** quick toggle remains for a one-off inversion that doesn't change the saved theme.
 
+### Changed
+- **Faster preview load.** The Markdown preview bundle no longer ships Mermaid, KaTeX, html-to-image, and Turndown up front. It's now an ES-module code-split build that loads each of those on demand (Mermaid/KaTeX only when a document has a diagram/math, html-to-image on **Copy as PNG**, Turndown on **Copy Selection as Markdown**), so the initial script dropped from ~8.5 MB to ~19 KB. DOMPurify still loads eagerly since it runs on every render.
+
 ### Removed
 - The **VS Code style profile** (the `vscode` value of `markcopy.styleProfile`) and its **Style** menu section. It followed the editor theme's colors but rendered unreliably; the preview now always uses the GitHub-accurate styling, which is what pastes cleanly into docs and email. `markcopy.styleProfile` remains (now `github`-only) for compatibility.
 
