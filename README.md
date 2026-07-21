@@ -38,13 +38,13 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Save as PDF.** Export the rendered preview to a self-contained HTML file that opens in your browser and prints to PDF, with equations, diagrams, highlighted code, and local images all intact and text still selectable. Run **MarkCopy: Save as PDF** (Command Palette), click the PDF button in the preview's title bar, or use **Save as PDF…** in the right-click menu.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
-- **GitHub-accurate styling** by default, or a profile that follows your VS Code theme.
+- **GitHub-accurate styling** for output that pastes cleanly into docs and email.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview. A **green-on-black** terminal palette is available too (`markcopy.theme: green`, or **Green on black** in the Theme menu).
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating zoom toolbar (50 to 400 percent) keeps pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. It follows your theme in light or dark, with a right-click **Dark Pages** / **Light Pages** toggle to override it for the session. One extension previews both Markdown and PDF.
-- **Settings without leaving the preview.** Right-click for **Theme**, **Style**, and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
+- **Settings without leaving the preview.** Right-click for **Theme** and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
@@ -69,11 +69,11 @@ Local images in the document render automatically, and the right-click menu's se
 
 ## Settings
 
-`markcopy.styleProfile`, `markcopy.syncScroll`, `markcopy.autoPreview`, and `markcopy.theme` can also be changed live from the preview's right-click settings section or the gear icon in its title bar, not just here.
+`markcopy.syncScroll`, `markcopy.autoPreview`, `markcopy.math`, and `markcopy.theme` can also be changed live from the preview's right-click settings section or the gear icon in its title bar, not just here.
 
 | Setting                 | Type                                   | Default  | Description                                                                                                                                                            |
 | ----------------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile` | `github` \| `vscode`                   | `github` | `github` matches GitHub Markdown (best for pasting into docs and email); `vscode` follows the editor theme.                                                            |
+| `markcopy.styleProfile` | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                             |
 | `markcopy.syncScroll`   | boolean                                | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                              |
 | `markcopy.autoPreview`  | boolean                                | `true`   | Automatically open the preview beside the editor when you focus a Markdown file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
 | `markcopy.theme`        | `auto` \| `light` \| `dark` \| `green` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.          |
