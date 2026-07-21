@@ -181,7 +181,7 @@
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-texmath": "^1.0.0",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "^6.1.200",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
