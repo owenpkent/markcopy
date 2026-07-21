@@ -9,6 +9,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Green-on-black ("terminal") theme.** A new `green` value for `markcopy.theme` (and a **Green on black** option in the in-preview Theme menu) renders green text on a black background. Like `light` and `dark` it's a forced palette that ignores the VS Code theme; copied and PDF-exported output still comes out light-safe. The PDF _viewer_ follows the setting too: with `markcopy.theme` set to `green`, pages render as a green-on-black phosphor (an inverted, green-tinted bitmap, matching how Dark Pages inverts). **Copy Page as PNG** still yields the page in its true colours.
 - **KaTeX / LaTeX math rendering.** Inline `$...$` and display `$$...$$` now render as equations. Like Mermaid, the extension host emits an inert placeholder and the webview upgrades it with KaTeX after DOMPurify runs, so no math markup passes through the sanitizer. Right-click an equation to **Copy Equation as PNG** (fonts are embedded so it pastes cleanly into docs and email) or **Copy Equation as LaTeX**; "Copy as Markdown" also restores the original `$...$` source. Toggle with the `markcopy.math` setting (on by default; turn off for documents that use literal dollar signs).
 
+- **Theme menu in the PDF viewer.** The PDF viewer's right-click menu now has the same **Theme** section as the Markdown preview (Auto / Light / Dark / Green on black). Picking one persists `markcopy.theme` (Global), so the two previews share a single theme, and re-tints the open pages immediately. The session-only **Dark Pages / Light Pages** quick toggle remains for a one-off inversion that doesn't change the saved theme.
+
 ### Planned
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
