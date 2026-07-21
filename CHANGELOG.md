@@ -5,6 +5,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- **Save as PDF.** A new **MarkCopy: Save as PDF** command (also a button in the preview's title bar, an entry in the Markdown editor's right-click menu, and a **Save as PDF…** item in the in-preview right-click menu) exports the rendered preview. The webview serializes its already-rendered content (KaTeX equations, Mermaid SVGs, highlighted code) and the extension host wraps it in a self-contained HTML file carrying the preview's own CSS, with KaTeX fonts and local images inlined so it stands alone, then opens it in your default browser where it prints to PDF. Text stays selectable and the export forces the light palette for a clean printout. No new dependencies.
+- **Green-on-black ("terminal") theme.** A new `green` value for `markcopy.theme` (and a **Green on black** option in the in-preview Theme menu) renders green text on a black background. Like `light` and `dark` it's a forced palette that ignores the VS Code theme; copied and PDF-exported output still comes out light-safe.
 - **KaTeX / LaTeX math rendering.** Inline `$...$` and display `$$...$$` now render as equations. Like Mermaid, the extension host emits an inert placeholder and the webview upgrades it with KaTeX after DOMPurify runs, so no math markup passes through the sanitizer. Right-click an equation to **Copy Equation as PNG** (fonts are embedded so it pastes cleanly into docs and email) or **Copy Equation as LaTeX**; "Copy as Markdown" also restores the original `$...$` source. Toggle with the `markcopy.math` setting (on by default; turn off for documents that use literal dollar signs).
 
 ### Planned

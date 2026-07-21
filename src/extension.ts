@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createMarkdownIt } from './render';
+import { createMarkdownIt, escapeHtml } from './render';
 import { PdfEditorProvider } from './pdfEditor';
 import { classifyLink, localImageRef, shouldAutoPreview } from './preview-utils';
 
@@ -56,6 +56,20 @@ export function activate(context: vscode.ExtensionContext): void {
       if (current) {
         current.panel.reveal(vscode.ViewColumn.Beside, true);
         current.panel.webview.postMessage({ type: 'copyAll' });
+      } else {
+        vscode.window.showInformationMessage(
+          'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
+        );
+      }
+    }),
+
+    // Export the preview to a self-contained HTML file and open it in the default
+    // browser, where the user prints it to PDF. The webview serializes its already
+    // rendered content (KaTeX, Mermaid, highlighted code) and posts it back as a
+    // `pdfHtml` message, handled in onDidReceiveMessage below.
+    vscode.commands.registerCommand('markcopy.saveAsPdf', () => {
+      if (current) {
+        current.panel.webview.postMessage({ type: 'exportPdf' });
       } else {
         vscode.window.showInformationMessage(
           'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
@@ -209,6 +223,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         vscode.commands.executeCommand('markcopy.openSettings');
       } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
         void openLink(context, state, msg.href);
+      } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
+        void exportPdf(context, state, msg.bodyHtml);
       }
     },
     undefined,
@@ -405,6 +421,105 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+}
+
+// Assemble a self-contained HTML document from the webview's serialized content,
+// write it to the extension's storage folder, and open it in the OS default
+// browser. The page auto-invokes the print dialog, where the user picks
+// "Save as PDF". Reused by both the command and the in-preview menu item.
+async function exportPdf(
+  context: vscode.ExtensionContext,
+  state: PreviewState,
+  bodyHtml: string,
+): Promise<void> {
+  try {
+    const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd)$/i, '');
+    const html = await buildPdfHtml(context, bodyHtml, name);
+    const dir = context.globalStorageUri;
+    await vscode.workspace.fs.createDirectory(dir);
+    const safe = name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
+    const fileUri = vscode.Uri.joinPath(dir, `${safe}.html`);
+    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(html, 'utf8'));
+    await vscode.env.openExternal(fileUri);
+    vscode.window.setStatusBarMessage(
+      'MarkCopy: opened in your browser — press Ctrl/Cmd+P and choose "Save as PDF".',
+      6000,
+    );
+  } catch (err) {
+    void vscode.window.showErrorMessage(`MarkCopy: could not export PDF (${String(err)}).`);
+  }
+}
+
+// Wrap the rendered body in a standalone HTML page carrying the preview's own CSS
+// (so it looks identical to the on-screen preview) plus print tuning. Forces the
+// light palette for a clean printout regardless of the preview's display theme.
+async function buildPdfHtml(
+  context: vscode.ExtensionContext,
+  bodyHtml: string,
+  title: string,
+): Promise<string> {
+  const previewCss = await readMedia(context, 'preview.css');
+  // KaTeX CSS is only needed when the document contains math; skip its (font-heavy)
+  // inlining otherwise to keep the export small.
+  const katexCss = /class="(katex|mc-math)/.test(bodyHtml) ? await inlineKatexFonts(context) : '';
+  const printCss = `
+html, body { background: #ffffff; }
+body { padding: 24px 28px; box-sizing: border-box; }
+.markdown-body { max-width: 820px; margin: 0 auto; }
+@page { margin: 16mm; }
+@media print {
+  body { padding: 0; }
+  .markdown-body { max-width: none; }
+  pre, blockquote, table, .mc-mermaid, .mc-math { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+}`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${escapeHtml(title || 'MarkCopy')}</title>
+<style>${previewCss}</style>
+${katexCss ? `<style>${katexCss}</style>` : ''}
+<style>${printCss}</style>
+</head>
+<body class="mc-force-light" data-style="github" data-mc-theme="light">
+<div id="content" class="markdown-body">${bodyHtml}</div>
+<script>
+window.addEventListener('load', function () {
+  var print = function () { setTimeout(function () { window.print(); }, 200); };
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(print, print); }
+  else { print(); }
+});
+</script>
+</body>
+</html>`;
+}
+
+async function readMedia(context: vscode.ExtensionContext, ...segments: string[]): Promise<string> {
+  const uri = vscode.Uri.joinPath(context.extensionUri, 'media', ...segments);
+  const bytes = await vscode.workspace.fs.readFile(uri);
+  return Buffer.from(bytes).toString('utf8');
+}
+
+// Return katex.min.css with its woff2 font references replaced by base64 data URIs
+// so equations render in a plain file:// page (relative font URLs would 404, and
+// cross-origin file:// fonts are CORS-blocked). Browsers pick woff2 first, so the
+// now-unresolved woff/ttf fallbacks are never fetched.
+async function inlineKatexFonts(context: vscode.ExtensionContext): Promise<string> {
+  let css = await readMedia(context, 'katex', 'katex.min.css');
+  const fontDir = vscode.Uri.joinPath(context.extensionUri, 'media', 'katex', 'fonts');
+  const names = new Set([...css.matchAll(/url\(fonts\/([^)]+\.woff2)\)/g)].map((m) => m[1]));
+  for (const name of names) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(fontDir, name));
+      const dataUrl = `data:font/woff2;base64,${Buffer.from(bytes).toString('base64')}`;
+      css = css.split(`url(fonts/${name})`).join(`url(${dataUrl})`);
+    } catch {
+      /* skip a missing font; the rest still inline */
+    }
+  }
+  return css;
 }
 
 function basename(uri: vscode.Uri): string {

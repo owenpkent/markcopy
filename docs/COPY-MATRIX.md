@@ -62,11 +62,12 @@ Each page now has a real pdf.js text layer (transparent, selectable spans over t
 
 ### Always available
 
-| Action                           | Clipboard flavor           | Pastes well into                  |
-| -------------------------------- | -------------------------- | --------------------------------- |
-| Copy Whole Document as Rich Text | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
+| Action                           | Output                     | Goes to                                 |
+| -------------------------------- | -------------------------- | --------------------------------------- |
+| Copy Whole Document as Rich Text | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs       |
+| Save as PDF…                     | Self-contained HTML file   | Your browser, where you print it to PDF |
 
-The same whole-document action is available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**.
+Both are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text** and **MarkCopy: Save as PDF**. Save as PDF writes an HTML file (with the preview's CSS, KaTeX fonts, and local images inlined) and opens it in your default browser, so equations, diagrams, and highlighted code all carry over and the text stays selectable; press Ctrl/Cmd+P and choose **Save as PDF**.
 
 ## Notes
 
