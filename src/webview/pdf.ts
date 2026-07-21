@@ -637,6 +637,13 @@ function setTheme(value: string): void {
   document.body.classList.remove('mc-pages-inverted', 'mc-pages-normal');
   vscode.postMessage({ type: 'updateSetting', key: 'theme', value });
   rerenderPages();
+  const labels: Record<string, string> = {
+    auto: 'Auto',
+    light: 'Light',
+    dark: 'Dark',
+    green: 'Green on black',
+  };
+  toast(`Theme: ${labels[value] ?? value}`);
 }
 
 // Drop every rendered page and re-rasterise the visible ones. Used whenever the

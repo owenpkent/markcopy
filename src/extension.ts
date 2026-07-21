@@ -256,12 +256,27 @@ function resourceRoots(context: vscode.ExtensionContext, docUri: vscode.Uri): vs
   return roots;
 }
 
-// Persist a setting changed from the in-preview menu. User (Global) scope is the
-// safe default; onDidChangeConfiguration then re-renders and refreshes the menu.
+// Persist a setting changed from the in-preview menu. Write to the scope where
+// the setting is actually defined, so a workspace (or folder) override isn't
+// silently shadowed by a Global write, which would make the menu appear to do
+// nothing. Falls back to Global (User) scope when there is no narrower override.
 function applySetting(key: string, value: unknown): void {
-  vscode.workspace
-    .getConfiguration('markcopy')
-    .update(key, value, vscode.ConfigurationTarget.Global);
+  const config = vscode.workspace.getConfiguration('markcopy');
+  config.update(key, value, settingTarget(config, key));
+}
+
+function settingTarget(
+  config: vscode.WorkspaceConfiguration,
+  key: string,
+): vscode.ConfigurationTarget {
+  const info = config.inspect(key);
+  if (info?.workspaceFolderValue !== undefined) {
+    return vscode.ConfigurationTarget.WorkspaceFolder;
+  }
+  if (info?.workspaceValue !== undefined) {
+    return vscode.ConfigurationTarget.Workspace;
+  }
+  return vscode.ConfigurationTarget.Global;
 }
 
 function update(state: PreviewState): void {
