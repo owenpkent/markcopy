@@ -5,6 +5,8 @@ coverage/
 .vscode-test/
 media/webview.js
 media/webview.js.map
+media/chunk-*.js
+media/chunk-*.js.map
 media/katex/
 media/pdf.js
 media/pdf.js.map
