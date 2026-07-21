@@ -4,6 +4,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.3.0] - 2026-07-21
+
 ### Added
 - **Save as PDF.** A new **MarkCopy: Save as PDF** command (also a button in the preview's title bar, an entry in the Markdown editor's right-click menu, and a **Save as PDF…** item in the in-preview right-click menu) exports the rendered preview. The webview serializes its already-rendered content (KaTeX equations, Mermaid SVGs, highlighted code) and the extension host wraps it in a self-contained HTML file carrying the preview's own CSS, with KaTeX fonts and local images inlined so it stands alone, then opens it in your default browser where it prints to PDF. Text stays selectable and the export forces the light palette for a clean printout; Mermaid diagrams are re-rendered in the light theme for the export so a dark-preview diagram stays readable on the page. No new dependencies.
 - **Green-on-black ("terminal") theme.** A new `green` value for `markcopy.theme` (and a **Green on black** option in the in-preview Theme menu) renders green text on a black background. Like `light` and `dark` it's a forced palette that ignores the VS Code theme; copied and PDF-exported output still comes out light-safe. The PDF _viewer_ follows the setting too: with `markcopy.theme` set to `green`, pages render as a green-on-black phosphor (an inverted, green-tinted bitmap, matching how Dark Pages inverts). **Copy Page as PNG** still yields the page in its true colours.
@@ -16,10 +22,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Removed
 - The **VS Code style profile** (the `vscode` value of `markcopy.styleProfile`) and its **Style** menu section. It followed the editor theme's colors but rendered unreliably; the preview now always uses the GitHub-accurate styling, which is what pastes cleanly into docs and email. `markcopy.styleProfile` remains (now `github`-only) for compatibility.
-
-### Planned
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.2.2] - 2026-07-19
 
@@ -94,7 +96,9 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/owenpkent/markcopy/compare/v0.2.2...v0.3.0
+[0.2.2]: https://github.com/owenpkent/markcopy/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/owenpkent/markcopy/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/owenpkent/markcopy/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/owenpkent/markcopy/compare/v0.0.1...v0.1.0
