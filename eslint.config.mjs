@@ -10,6 +10,7 @@ export default tseslint.config(
       '.vscode-test',
       'node_modules',
       'media/webview.js',
+      'media/chunk-*.js',
       'media/pdf.js',
       'media/pdf.worker.js',
       '**/*.map',

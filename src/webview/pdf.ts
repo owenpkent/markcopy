@@ -66,6 +66,10 @@ window.addEventListener('message', (e: MessageEvent) => {
     comments = Array.isArray(msg.comments) ? (msg.comments as Comment[]) : [];
     commentSeq = comments.length;
     load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
+  } else if (msg?.type === 'setTheme' && typeof msg.value === 'string') {
+    // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
+    // to match, without persisting again.
+    applyTheme(msg.value as string);
   }
 });
 
@@ -627,16 +631,28 @@ function togglePages(): void {
   rerenderPages();
 }
 
-// Apply a theme picked from the Theme menu: update the attribute the appearance
-// logic keys off, clear any session Dark/Light override so the theme drives the
-// look, persist markcopy.theme (shared with the Markdown preview), and re-tint.
-function setTheme(value: string): void {
+// Apply a theme visually: update the attribute the appearance logic keys off,
+// clear any session Dark/Light override so the theme drives the look, and re-tint.
+// Does NOT persist, so it is safe to call from a host-pushed theme change. No-ops
+// when the theme already matches and there is no session override to clear, so
+// the host echoing back our own change costs nothing.
+function applyTheme(value: string): void {
+  if (value === currentTheme && pageMode === 'auto') {
+    return;
+  }
   currentTheme = value;
   document.body.setAttribute('data-mc-theme', value);
   pageMode = 'auto';
   document.body.classList.remove('mc-pages-inverted', 'mc-pages-normal');
-  vscode.postMessage({ type: 'updateSetting', key: 'theme', value });
   rerenderPages();
+}
+
+// Apply a theme picked from the Theme menu, then persist markcopy.theme (shared
+// with the Markdown preview and any other open PDF viewers) and confirm with a
+// toast.
+function setTheme(value: string): void {
+  applyTheme(value);
+  vscode.postMessage({ type: 'updateSetting', key: 'theme', value });
   const labels: Record<string, string> = {
     auto: 'Auto',
     light: 'Light',

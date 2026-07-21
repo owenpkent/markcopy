@@ -114,7 +114,9 @@ function toast(text: string): void {
 async function render(
   html: string,
   source: string,
-  styleProfile: string,
+  // Retained in the render message for protocol compatibility; markcopy.styleProfile
+  // is now github-only and no longer drives any styling, so it is unused here.
+  _styleProfile: string,
   theme: string,
   config: Record<string, unknown>,
   syncScroll: boolean,
@@ -126,7 +128,6 @@ async function render(
   const docChanged = docKey !== currentDocKey;
   currentDocKey = docKey;
   sourceLines = source.split(/\r?\n/);
-  document.body.dataset.style = styleProfile;
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';

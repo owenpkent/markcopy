@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { applyMarkcopySetting } from './settingsScope';
 
 // A read-only custom editor that renders PDF files with pdf.js in a webview,
 // exposing MarkCopy's copy actions (page as PNG, page text, all text).
@@ -32,7 +33,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const scriptUri = asUri('pdf.js', true);
     const workerUri = asUri('pdf.worker.js');
     const styleUri = asUri('preview.css', true);
-    const theme = vscode.workspace.getConfiguration('markcopy').get<string>('theme', 'auto');
+    const theme = vscode.workspace
+      .getConfiguration('markcopy', document.uri)
+      .get<string>('theme', 'auto');
     webview.html = this.html(webview, scriptUri, styleUri, nonce, theme);
 
     // Comments persist to a sidecar JSON file next to the PDF, so the PDF itself
@@ -55,22 +58,30 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         await writeComments(commentsUri, msg.comments);
       } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
         // Persist a setting changed from the PDF viewer's Theme menu, mirroring
-        // the Markdown preview. Write to the scope where the setting is defined
-        // (workspace/folder override, else Global) so a workspace value isn't
+        // the Markdown preview: write to the scope where the setting is defined
+        // (folder/workspace override, else Global) so a workspace value isn't
         // shadowed by a Global write. The webview applied it optimistically, so
-        // no reply is needed; an open Markdown preview picks it up via the
+        // no reply is needed; the config listener below re-tints any other open
+        // PDF viewers and an open Markdown preview picks it up via the
         // extension's onDidChangeConfiguration listener.
-        const config = vscode.workspace.getConfiguration('markcopy');
-        const info = config.inspect(msg.key);
-        const target =
-          info?.workspaceFolderValue !== undefined
-            ? vscode.ConfigurationTarget.WorkspaceFolder
-            : info?.workspaceValue !== undefined
-              ? vscode.ConfigurationTarget.Workspace
-              : vscode.ConfigurationTarget.Global;
-        await config.update(msg.key, msg.value, target);
+        await applyMarkcopySetting(msg.key, msg.value, document.uri);
       }
     });
+
+    // Keep the pages in sync when markcopy.theme changes elsewhere (the Markdown
+    // preview's Theme menu, or settings.json). Without this the tint only
+    // updated when the PDF was reopened. The webview no-ops when the value it is
+    // told to apply already matches, so echoing back our own change is harmless.
+    const themeListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('markcopy.theme', document.uri)) {
+        return;
+      }
+      const value = vscode.workspace
+        .getConfiguration('markcopy', document.uri)
+        .get<string>('theme', 'auto');
+      void webview.postMessage({ type: 'setTheme', value });
+    });
+    panel.onDidDispose(() => themeListener.dispose());
   }
 
   private html(
