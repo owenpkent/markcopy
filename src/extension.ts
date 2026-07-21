@@ -440,7 +440,9 @@ async function exportPdf(
     const safe = name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
     const fileUri = vscode.Uri.joinPath(dir, `${safe}.html`);
     await vscode.workspace.fs.writeFile(fileUri, Buffer.from(html, 'utf8'));
-    await vscode.env.openExternal(fileUri);
+    // globalStorageUri uses the `vscode-userdata:` scheme, which the OS shell
+    // can't open; re-wrap the on-disk path as a `file:` URI for the browser.
+    await vscode.env.openExternal(vscode.Uri.file(fileUri.fsPath));
     vscode.window.setStatusBarMessage(
       'MarkCopy: opened in your browser — press Ctrl/Cmd+P and choose "Save as PDF".',
       6000,

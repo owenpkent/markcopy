@@ -106,6 +106,7 @@ Webview to host:
 | `ready`         | none           | Signals the webview script has loaded.                                                                              |
 | `updateSetting` | `key`, `value` | Persist a `markcopy.*` setting from the in-preview menu (Global scope); the config-change listener then re-renders. |
 | `openSettings`  | none           | Run `markcopy.openSettings`, opening the native Settings UI scoped to the extension.                                |
+| `pdfHtml`       | `bodyHtml`     | Serialized preview markup for [PDF export](#pdf-export); the host wraps it in a standalone HTML file and opens it.  |
 
 The PDF preview uses its own message protocol: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes as a base64 string, `workerSrc`: the pdf.js worker URI, `comments`: the parsed sidecar comments array). The bytes are base64-encoded because a `Uint8Array` does not survive `postMessage` serialization to the webview; `pdf.ts` decodes it back to a `Uint8Array` before handing it to pdf.js. All copy actions run entirely in the webview with no further host round-trip; comments are the exception, since the webview posts `saveComments` (`comments`: the full current array) back to the host whenever a pin is added, edited, or deleted, and `pdfEditor.ts` writes that array to the sidecar JSON file, deleting the file when the array is empty.
 
@@ -146,6 +147,16 @@ Before reading computed styles, the source is briefly tagged with an `mc-force-l
 ### PNG copy
 
 `copyPng()` uses `html-to-image`'s `toBlob()` at 2x pixel ratio, then writes an `image/png` `ClipboardItem`. This is the one place the async Clipboard API is used, because image writes are not expressible through the `copy`-event path. If the environment blocks it, the user sees a toast rather than a silent failure. The same path handles **Copy Equation as PNG**; rasterizing a KaTeX equation additionally requires `html-to-image` to fetch KaTeX's web fonts, which is why the CSP has a same-origin `connect-src` (see [Content Security Policy](#content-security-policy)).
+
+## PDF export
+
+**Save as PDF** reuses the on-screen render rather than re-rendering the document: the preview already holds fully upgraded KaTeX HTML, Mermaid SVGs, and highlighted code, so `exportPdf()` clones `#content`, prepares the clone, and posts its `innerHTML` to the host as a `pdfHtml` message. Preparing the clone does three things the raw DOM can't be shipped without:
+
+- **Relight Mermaid.** Mermaid bakes theme colors into each SVG at render time (the same reason the host re-renders diagrams on a theme change, see [Theming](#theming)), so a diagram rendered for a dark preview is dark-filled with light labels: invisible black boxes on the forced-light PDF page. `relightMermaid()` re-renders every `.mc-mermaid` from the source stashed in `data-mermaid-src` at render time, with `theme: 'default'`, then restores the on-screen config via `initMermaid()`. Text, KaTeX, and code need no such treatment: they inherit color from CSS, which the PDF page forces light.
+- **Inline local images.** `inlineImages()` replaces every webview-hosted `src` with a `data:` URI so the images survive on a plain `file://` page outside the webview; remote `https:` and already-inlined `data:` sources are left alone.
+- **Strip `data-source-line`.** The scroll-sync attributes are preview-only noise in an exported document.
+
+The host (`exportPdf` in `src/extension.ts`) wraps the markup in a standalone HTML page carrying `preview.css` and the KaTeX stylesheet with its fonts inlined (via `buildPdfHtml`), forces the light palette for a clean printout, writes it to the extension's `globalStorageUri`, and opens it in the default browser, where the page auto-invokes the print dialog and the user picks "Save as PDF". Because `globalStorageUri` uses the `vscode-userdata:` scheme, which the OS shell has no handler for, the file is reopened as a plain `file:` URI (`vscode.Uri.file(fileUri.fsPath)`) before `openExternal`, or the browser hand-off fails.
 
 ## PDF preview
 
