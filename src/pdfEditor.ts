@@ -54,13 +54,21 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       } else if (msg?.type === 'saveComments') {
         await writeComments(commentsUri, msg.comments);
       } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
-        // Persist a setting changed from the PDF viewer's Theme menu (Global
-        // scope, mirroring the Markdown preview). The webview applies it
-        // optimistically, so no reply is needed; an open Markdown preview picks
-        // it up via the extension's onDidChangeConfiguration listener.
-        await vscode.workspace
-          .getConfiguration('markcopy')
-          .update(msg.key, msg.value, vscode.ConfigurationTarget.Global);
+        // Persist a setting changed from the PDF viewer's Theme menu, mirroring
+        // the Markdown preview. Write to the scope where the setting is defined
+        // (workspace/folder override, else Global) so a workspace value isn't
+        // shadowed by a Global write. The webview applied it optimistically, so
+        // no reply is needed; an open Markdown preview picks it up via the
+        // extension's onDidChangeConfiguration listener.
+        const config = vscode.workspace.getConfiguration('markcopy');
+        const info = config.inspect(msg.key);
+        const target =
+          info?.workspaceFolderValue !== undefined
+            ? vscode.ConfigurationTarget.WorkspaceFolder
+            : info?.workspaceValue !== undefined
+              ? vscode.ConfigurationTarget.Workspace
+              : vscode.ConfigurationTarget.Global;
+        await config.update(msg.key, msg.value, target);
       }
     });
   }
