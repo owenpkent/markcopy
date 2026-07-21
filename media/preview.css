@@ -355,6 +355,12 @@ body.mc-pages-inverted .mc-page {
 body.mc-pages-normal .mc-page {
   background: #fff;
 }
+/* Green theme: pages invert to green-on-black, so match the placeholder to black
+   to avoid a white flash before a page rasterises. The session Dark/Light toggle
+   (mc-pages-normal / mc-pages-inverted) still wins over this. */
+body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
+  background: #000;
+}
 .mc-page canvas {
   display: block;
   /* Keep the OS (e.g. Windows High Contrast) from recolouring rendered pages;
