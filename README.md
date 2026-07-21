@@ -1,6 +1,6 @@
 # MarkCopy: Rich Markdown & PDF Preview
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
+[![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/OwenPKent.markcopy.svg?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
 [![CI](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
