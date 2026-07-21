@@ -33,8 +33,12 @@ body {
    auto mode, i.e. no explicit override) when VS Code is in a dark or
    high-contrast theme. The `markcopy.theme` setting drives `data-mc-theme`. */
 body[data-mc-theme='dark'],
-body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']),
-body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark']) {
+body.vscode-dark:not([data-mc-theme='light']):not([data-mc-theme='dark']):not(
+    [data-mc-theme='green']
+  ),
+body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark']):not(
+    [data-mc-theme='green']
+  ) {
   --mc-fg: #e6edf3;
   --mc-bg: #0d1117;
   --mc-border: #30363d;
@@ -52,6 +56,29 @@ body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark'
   --hljs-title: #d2a8ff;
   --hljs-number: #79c0ff;
   --hljs-attr: #ffa657;
+}
+
+/* Green-on-black ("terminal") palette. A forced option, selected via the
+   `markcopy.theme` setting or the in-preview Theme menu; unlike auto dark it
+   ignores the VS Code theme. Copied/exported output still forces light. */
+body[data-mc-theme='green'] {
+  --mc-fg: #4bf07a;
+  --mc-bg: #000000;
+  --mc-border: #1f5c34;
+  --mc-code-bg: rgba(75, 240, 122, 0.12);
+  --mc-pre-bg: #061006;
+  --mc-quote-fg: #35bd63;
+  --mc-th-bg: #08140a;
+  --mc-link: #8affc1;
+  --mc-error-fg: #ff6b6b;
+  --mc-error-bg: #1a0a0a;
+  --mc-pdf-bg: #050805;
+  --hljs-comment: #2f9e54;
+  --hljs-keyword: #8affc1;
+  --hljs-string: #b6ffcf;
+  --hljs-title: #5effa0;
+  --hljs-number: #9cffbf;
+  --hljs-attr: #57e88a;
 }
 
 body {

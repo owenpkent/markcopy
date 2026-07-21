@@ -83,6 +83,9 @@ window.addEventListener('message', (e: MessageEvent) => {
     case 'copyAll':
       void copyRichText(content);
       break;
+    case 'exportPdf':
+      void exportPdf();
+      break;
   }
 });
 
@@ -156,6 +159,10 @@ async function renderMermaid(): Promise<void> {
     const host = document.createElement('div');
     host.className = 'mc-mermaid';
     host.dataset.sourceLine = pre.dataset.sourceLine ?? '';
+    // Keep the source so the diagram can be re-rendered in a light theme for PDF
+    // export (Mermaid bakes theme colors into the SVG, so a dark-theme diagram is
+    // unreadable on a forced-light printout).
+    host.dataset.mermaidSrc = code;
     pre.replaceWith(host);
     try {
       const { svg } = await mermaid.render(`mc-mmd-${i}-${idSeed()}`, code);
@@ -391,6 +398,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     label: 'Copy Whole Document as Rich Text',
     run: () => copyRichText(content),
   });
+  items.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   return items;
 }
 
@@ -424,6 +432,7 @@ function buildSettingsEntries(): MenuEntry[] {
     radioEntry('Auto', currentTheme === 'auto', 'theme', 'auto'),
     radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
     radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
+    radioEntry('Green on black', currentTheme === 'green', 'theme', 'green'),
     { kind: 'label', label: 'Style' },
     radioEntry('GitHub', currentStyleProfile === 'github', 'styleProfile', 'github'),
     radioEntry('VS Code', currentStyleProfile === 'vscode', 'styleProfile', 'vscode'),
@@ -607,6 +616,93 @@ async function copyPng(el: HTMLElement): Promise<void> {
   } finally {
     el.classList.remove('mc-force-light');
   }
+}
+
+// ---------------------------------------------------------------------------
+// PDF export
+// ---------------------------------------------------------------------------
+// Serialize the already-rendered preview (KaTeX HTML, Mermaid SVG, highlighted
+// code all live in the DOM) and hand it to the host, which wraps it in a
+// standalone HTML file and opens it in the browser for printing to PDF. Local
+// images are inlined as data URIs so they survive outside the webview; the host
+// injects preview.css + KaTeX CSS, so we send raw markup and let CSS style it.
+async function exportPdf(): Promise<void> {
+  try {
+    const clone = content.cloneNode(true) as HTMLElement;
+    clone
+      .querySelectorAll('[data-source-line]')
+      .forEach((el) => el.removeAttribute('data-source-line'));
+    await relightMermaid(clone);
+    await inlineImages(clone);
+    vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
+    toast('Opening PDF export…');
+  } catch {
+    toast('PDF export failed');
+  }
+}
+
+// Re-render every Mermaid diagram in the export clone with the light theme.
+// The on-screen SVGs bake in the (possibly dark) preview theme, which turns into
+// unreadable black boxes on the forced-light PDF page. We re-render from the
+// stashed source with `theme: 'default'`, then restore the on-screen config.
+async function relightMermaid(root: HTMLElement): Promise<void> {
+  const hosts = Array.from(root.querySelectorAll<HTMLElement>('.mc-mermaid'));
+  if (hosts.length === 0) {
+    return;
+  }
+  // `theme` last so it wins over any user `markcopy.mermaid` theme for the print.
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    ...mermaidConfig,
+    theme: 'default',
+  } as Parameters<typeof mermaid.initialize>[0]);
+  try {
+    for (let i = 0; i < hosts.length; i++) {
+      const src = hosts[i].dataset.mermaidSrc;
+      if (!src) {
+        continue;
+      }
+      try {
+        const { svg } = await mermaid.render(`mc-pdf-${i}-${idSeed()}`, src);
+        hosts[i].innerHTML = svg;
+      } catch {
+        /* leave the existing SVG; a themed diagram beats no diagram */
+      }
+    }
+  } finally {
+    initMermaid();
+  }
+}
+
+// Replace webview-hosted image srcs with data URIs so they load from a plain
+// file:// page. Remote (http/https) and already-inlined (data:) images are left
+// untouched: they still load in the browser, and the CSP forbids fetching them.
+async function inlineImages(root: HTMLElement): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img'));
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute('src') ?? '';
+      if (!src || /^(https?:|data:)/i.test(src)) {
+        return;
+      }
+      try {
+        const blob = await (await fetch(src)).blob();
+        img.setAttribute('src', await blobToDataUrl(blob));
+      } catch {
+        /* leave the original src; a broken image beats aborting the export */
+      }
+    }),
+  );
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ---------------------------------------------------------------------------
