@@ -338,6 +338,11 @@ html.mc-pdf-root::-webkit-scrollbar-corner {
   flex: 0 0 auto;
   background: #fff;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  /* Never let a canvas paint outside its page box. During a zoom the canvas can
+     briefly keep its previous (larger) size before it re-rasterises; without
+     this clip that overflow would widen #pdf-root and create empty scrollable
+     deadspace around the pages. */
+  overflow: clip;
 }
 /* Placeholder colour for not-yet-rasterised pages. In dark mode the canvas
    filter darkens rendered pages, so match the placeholder to avoid a white
