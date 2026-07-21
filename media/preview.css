@@ -73,12 +73,15 @@ body[data-mc-theme='green'] {
   --mc-error-fg: #ff6b6b;
   --mc-error-bg: #1a0a0a;
   --mc-pdf-bg: #050805;
-  --hljs-comment: #2f9e54;
-  --hljs-keyword: #8affc1;
-  --hljs-string: #b6ffcf;
-  --hljs-title: #5effa0;
-  --hljs-number: #9cffbf;
-  --hljs-attr: #57e88a;
+  /* Green stays the base (plain text, functions), but keywords get a cool cyan
+     accent, strings a warm yellow-green, and numbers an amber, so tokens are
+     actually distinguishable instead of a flat wall of green. Comments recede. */
+  --hljs-comment: #3d7d55;
+  --hljs-keyword: #86e0ff;
+  --hljs-string: #d6f98a;
+  --hljs-title: #7dffb0;
+  --hljs-number: #f5c86b;
+  --hljs-attr: #9fe6b5;
 }
 
 body {
