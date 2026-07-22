@@ -21,6 +21,18 @@ MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark
 
 ![The MarkCopy preview and copy menu in a dark VS Code theme](docs/media/context-menu-dark.png)
 
+## Compared to the alternatives
+
+|                                          | Built-in | Markdown Preview Enhanced | MarkCopy |
+| ---------------------------------------- | :------: | :-----------------------: | :------: |
+| Rich-text copy from the rendered preview |    No    |            No             | **Yes**  |
+| Per-code-block copy                      |    No    |      Requested, open      | **Yes**  |
+| Table as CSV / TSV / cells               |    No    |          Partial          | **Yes**  |
+| Diagram as PNG to clipboard              |    No    |      Export to file       | **Yes**  |
+| Copy block as Markdown source            |    No    |            No             | **Yes**  |
+| Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
+| PDF preview built in                     |    No    |            No             | **Yes**  |
+
 ## Why it exists
 
 When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*`. Word, Outlook, Gmail and Google Docs are rich-text editors: they render formatting only when it arrives on the clipboard as `text/html`. MarkCopy renders your Markdown, then writes **both** `text/html` and `text/plain` to the clipboard so the receiving app keeps your headings, bold, lists, tables, links and code. Styles are inlined so the formatting even survives Gmail and Outlook, which strip `<style>` blocks and external CSS.
@@ -126,18 +138,6 @@ MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it i
 A floating toolbar in the bottom-right corner shows the current page (for example `3 / 12`) as you scroll; click it, type a page number, and press Enter to jump there. The same toolbar steps zoom through preset levels (50 to 400 percent) with minus/plus buttons, Ctrl and plus / Ctrl and minus / Ctrl and 0, or Ctrl plus the mouse wheel; clicking the percentage resets to 100 percent. Pages re-rasterise at each level, and only pages near the viewport stay rendered, so large PDFs stay sharp and memory-bounded. The view also has always-visible styled scrollbars.
 
 The file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network. To open a PDF as raw bytes instead, use **Reopen Editor With...** from the editor title menu.
-
-## Compared to the alternatives
-
-|                                          | Built-in | Markdown Preview Enhanced | MarkCopy |
-| ---------------------------------------- | :------: | :-----------------------: | :------: |
-| Rich-text copy from the rendered preview |    No    |            No             | **Yes**  |
-| Per-code-block copy                      |    No    |      Requested, open      | **Yes**  |
-| Table as CSV / TSV / cells               |    No    |          Partial          | **Yes**  |
-| Diagram as PNG to clipboard              |    No    |      Export to file       | **Yes**  |
-| Copy block as Markdown source            |    No    |            No             | **Yes**  |
-| Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
-| PDF preview built in                     |    No    |            No             | **Yes**  |
 
 ## Documentation
 
