@@ -520,23 +520,18 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
 #mc-toolbar button:hover {
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
 }
-#mc-zoom-label {
+/* Both labels are <button>s (keyboard-focusable), so the shared `#mc-toolbar
+   button` rule above styles them too; the extra #mc-toolbar scope here outweighs
+   it, or its `font: inherit` and 26px min-width would win on specificity. */
+#mc-toolbar #mc-zoom-label {
   min-width: 44px;
-  text-align: center;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-#mc-page-label {
+#mc-toolbar #mc-page-label {
   min-width: 52px;
-  text-align: center;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  border-radius: 5px;
-  padding: 3px 4px;
-}
-#mc-page-label:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
 }
 /* Empty until the document loads; hide it (and the divider) rather than show a
    blank gap. [hidden] covers the go-to-page input swap. */

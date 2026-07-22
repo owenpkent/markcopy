@@ -743,6 +743,11 @@ document.addEventListener('pointercancel', endPan);
 // ---------------------------------------------------------------------------
 let currentPage = 1;
 let pageScrollRaf = 0;
+// Set by goToPage when its scrollIntoView actually moved the view: the scroll
+// event that lands next is the jump itself, not the user scrolling away, so the
+// midline scan skips once and the label keeps the page the user asked for (a
+// target shorter than half the viewport can never reach the midline).
+let pageJumpScrollPending = false;
 
 // The page under the vertical middle of the viewport. Wrappers are in document
 // order, so once a page starts below the midline no later page can match; bail
@@ -788,6 +793,10 @@ window.addEventListener(
     }
     pageScrollRaf = requestAnimationFrame(() => {
       pageScrollRaf = 0;
+      if (pageJumpScrollPending) {
+        pageJumpScrollPending = false;
+        return; // the label already shows the page goToPage jumped to
+      }
       const n = pageAtViewportCenter();
       if (n !== currentPage) {
         currentPage = n;
@@ -803,7 +812,13 @@ function goToPage(n: number): void {
     return;
   }
   const clamped = Math.min(doc.numPages, Math.max(1, n));
+  const s = scroller();
+  const { scrollTop, scrollLeft } = s;
   wrappers[clamped - 1].scrollIntoView({ block: 'start' });
+  // Instant scrollIntoView updates the scroll position synchronously; arm the
+  // one-shot scan suppression only when it actually moved, so a no-op jump
+  // (already there) does not swallow the next real scroll's recompute.
+  pageJumpScrollPending = s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft;
   currentPage = clamped;
   updatePageLabel();
 }
@@ -841,13 +856,18 @@ function beginPageJump(): void {
   input.addEventListener('keydown', (e) => {
     e.stopPropagation(); // keep viewer shortcuts (Escape, Ctrl+0…) out of the input
     if (e.key === 'Enter') {
-      const n = Number.parseInt(input.value, 10);
+      // valueAsNumber, not parseInt: number inputs accept scientific notation,
+      // and parseInt would read "1e3" as page 1 instead of 1000. Round because
+      // the value can still be fractional and wrappers is integer-indexed.
+      const n = Math.round(input.valueAsNumber);
       done();
+      label.focus(); // hand focus back for keyboard users (blur-away cancels skip this)
       if (Number.isFinite(n)) {
         goToPage(n);
       }
     } else if (e.key === 'Escape') {
       done();
+      label.focus();
     }
   });
   input.addEventListener('blur', done);
@@ -861,11 +881,13 @@ function beginPageJump(): void {
 function buildToolbar(): void {
   const bar = document.createElement('div');
   bar.id = 'mc-toolbar';
+  // The page and zoom labels are real <button>s (not spans) so they are
+  // keyboard-focusable and Enter/Space activates them like a click.
   bar.innerHTML =
-    '<span id="mc-page-label" title="Go to page…"></span>' +
+    '<button type="button" id="mc-page-label" title="Go to page…"></button>' +
     '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
     '<button type="button" data-act="out" title="Zoom out (Ctrl -)">−</button>' +
-    '<span id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</span>' +
+    '<button type="button" id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</button>' +
     '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>';
   bar.addEventListener('pointerdown', (e) => e.stopPropagation());
   bar.addEventListener('click', (e) => {
