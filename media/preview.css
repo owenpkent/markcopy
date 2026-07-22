@@ -60,28 +60,30 @@ body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark'
 
 /* Green-on-black ("terminal") palette. A forced option, selected via the
    `markcopy.theme` setting or the in-preview Theme menu; unlike auto dark it
-   ignores the VS Code theme. Copied/exported output still forces light. */
+   ignores the VS Code theme. Copied/exported output still forces light. The
+   green is pure #00ff00, matching GNOME Terminal's "Green on black" profile;
+   the derived greens sit on the same hue. */
 body[data-mc-theme='green'] {
-  --mc-fg: #4bf07a;
+  --mc-fg: #00ff00;
   --mc-bg: #000000;
-  --mc-border: #1f5c34;
-  --mc-code-bg: rgba(75, 240, 122, 0.12);
+  --mc-border: #1a5c1a;
+  --mc-code-bg: rgba(0, 255, 0, 0.12);
   --mc-pre-bg: #061006;
-  --mc-quote-fg: #35bd63;
+  --mc-quote-fg: #00bb00;
   --mc-th-bg: #08140a;
-  --mc-link: #8affc1;
+  --mc-link: #80ff80;
   --mc-error-fg: #ff6b6b;
   --mc-error-bg: #1a0a0a;
   --mc-pdf-bg: #050805;
   /* Green stays the base (plain text, functions), but keywords get a cool cyan
      accent, strings a warm yellow-green, and numbers an amber, so tokens are
      actually distinguishable instead of a flat wall of green. Comments recede. */
-  --hljs-comment: #3d7d55;
+  --hljs-comment: #2e7d2e;
   --hljs-keyword: #86e0ff;
   --hljs-string: #d6f98a;
-  --hljs-title: #7dffb0;
+  --hljs-title: #66ff66;
   --hljs-number: #f5c86b;
-  --hljs-attr: #9fe6b5;
+  --hljs-attr: #99e699;
 }
 
 body {

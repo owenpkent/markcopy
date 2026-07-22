@@ -37,9 +37,10 @@ let scale = ZOOM_LEVELS[zoomIndex];
 // it gets downscaled -> blurry) or exhausts memory. Roughly 4096x4096.
 const MAX_CANVAS_PIXELS = 16_777_216;
 
-// Phosphor green for the green theme's inverted pages. Matches the Markdown
+// Phosphor green for the green theme's inverted pages: pure green, the same
+// value as GNOME Terminal's "Green on black" profile. Matches the Markdown
 // preview's `--mc-fg` in the green palette (media/preview.css).
-const PHOSPHOR_GREEN = '#4bf07a';
+const PHOSPHOR_GREEN = '#00ff00';
 
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
