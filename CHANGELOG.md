@@ -4,15 +4,17 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.4.0] - 2026-07-22
+
 ### Added
 - **Page indicator in the PDF viewer.** The floating toolbar now shows the current page as you scroll (e.g. `3 / 12`), tracked by whichever page sits under the middle of the viewport. Click it to type a page number and jump straight there (Enter jumps, Escape cancels). The page and zoom labels are real buttons, so the whole toolbar is keyboard-accessible.
 
 ### Changed
 - **Truer terminal green.** The green-on-black theme's green is now pure `#00ff00` (the same green as GNOME Terminal's "Green on black" profile) instead of the previous softer mint, in both the Markdown preview palette and the PDF viewer's phosphor page tint; the palette's derived greens (borders, links, quotes, code tokens) moved to the same hue.
-
-### Planned
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.3.0] - 2026-07-21
 
@@ -102,7 +104,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/owenpkent/markcopy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/owenpkent/markcopy/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/owenpkent/markcopy/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/owenpkent/markcopy/compare/v0.2.0...v0.2.1
