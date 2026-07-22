@@ -155,6 +155,7 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
   }
 
   updateZoomLabel();
+  updatePageLabel();
   toast(`Loaded ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`);
 }
 
@@ -314,7 +315,13 @@ function setZoomIndex(i: number): void {
   renderedScale.clear();
   inFlight.clear();
   window.clearTimeout(zoomTimer);
-  zoomTimer = window.setTimeout(refresh, 120);
+  zoomTimer = window.setTimeout(() => {
+    refresh();
+    // Page heights changed under a fixed scroll position, so the midline may
+    // now land on a different page without any scroll event firing.
+    currentPage = pageAtViewportCenter();
+    updatePageLabel();
+  }, 120);
 }
 
 function zoomIn(): void {
@@ -731,12 +738,131 @@ document.addEventListener('pointerup', endPan);
 document.addEventListener('pointercancel', endPan);
 
 // ---------------------------------------------------------------------------
+// Page indicator
+// ---------------------------------------------------------------------------
+let currentPage = 1;
+let pageScrollRaf = 0;
+
+// The page under the vertical middle of the viewport. Wrappers are in document
+// order, so once a page starts below the midline no later page can match; bail
+// out there to keep the scan cheap on long documents.
+function pageAtViewportCenter(): number {
+  const mid = window.innerHeight / 2;
+  let best = currentPage;
+  let bestDist = Infinity;
+  for (let i = 0; i < wrappers.length; i++) {
+    const rect = wrappers[i].getBoundingClientRect();
+    if (rect.top <= mid && rect.bottom >= mid) {
+      return i + 1;
+    }
+    if (rect.top > mid) {
+      // First page fully below the midline: it (or the previous one) is the
+      // nearest; nothing further down can be closer.
+      if (rect.top - mid < bestDist) {
+        best = i + 1;
+      }
+      break;
+    }
+    const dist = mid - rect.bottom; // page is fully above the midline
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i + 1;
+    }
+  }
+  return best;
+}
+
+function updatePageLabel(): void {
+  const label = document.getElementById('mc-page-label');
+  if (label) {
+    label.textContent = doc ? `${currentPage} / ${doc.numPages}` : '';
+  }
+}
+
+window.addEventListener(
+  'scroll',
+  () => {
+    if (pageScrollRaf) {
+      return;
+    }
+    pageScrollRaf = requestAnimationFrame(() => {
+      pageScrollRaf = 0;
+      const n = pageAtViewportCenter();
+      if (n !== currentPage) {
+        currentPage = n;
+        updatePageLabel();
+      }
+    });
+  },
+  { passive: true },
+);
+
+function goToPage(n: number): void {
+  if (!doc) {
+    return;
+  }
+  const clamped = Math.min(doc.numPages, Math.max(1, n));
+  wrappers[clamped - 1].scrollIntoView({ block: 'start' });
+  currentPage = clamped;
+  updatePageLabel();
+}
+
+// Swap the "3 / 12" label for a number input; Enter jumps, Escape/blur cancels.
+function beginPageJump(): void {
+  if (!doc) {
+    return;
+  }
+  const label = document.getElementById('mc-page-label');
+  if (!label || label.hidden) {
+    return;
+  }
+  const input = document.createElement('input');
+  input.id = 'mc-page-input';
+  input.type = 'number';
+  input.min = '1';
+  input.max = String(doc.numPages);
+  input.value = String(currentPage);
+  input.setAttribute('aria-label', 'Go to page');
+  label.hidden = true;
+  label.insertAdjacentElement('afterend', input);
+
+  // Removing the input fires its blur handler mid-removal, which would re-enter
+  // done() and throw; run it once only.
+  let closed = false;
+  const done = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    input.remove();
+    label.hidden = false;
+  };
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // keep viewer shortcuts (Escape, Ctrl+0…) out of the input
+    if (e.key === 'Enter') {
+      const n = Number.parseInt(input.value, 10);
+      done();
+      if (Number.isFinite(n)) {
+        goToPage(n);
+      }
+    } else if (e.key === 'Escape') {
+      done();
+    }
+  });
+  input.addEventListener('blur', done);
+  input.focus();
+  input.select();
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 function buildToolbar(): void {
   const bar = document.createElement('div');
   bar.id = 'mc-toolbar';
   bar.innerHTML =
+    '<span id="mc-page-label" title="Go to page…"></span>' +
+    '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
     '<button type="button" data-act="out" title="Zoom out (Ctrl -)">−</button>' +
     '<span id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</span>' +
     '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>';
@@ -745,6 +871,10 @@ function buildToolbar(): void {
     const target = e.target as HTMLElement;
     if (target.id === 'mc-zoom-label') {
       zoomReset();
+      return;
+    }
+    if (target.id === 'mc-page-label') {
+      beginPageJump();
       return;
     }
     const act = target.closest('button')?.dataset.act;
