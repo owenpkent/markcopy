@@ -15,7 +15,7 @@ VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanc
 
 ![Right-click a table in the MarkCopy preview to copy it as rich text, CSV, TSV, or PNG](docs/media/context-menu.png)
 
-<!-- The images are generated from the real preview + media/preview.css via `npm run screenshot`. A screen-recorded GIF of pasting into Word or Gmail would be a welcome contribution. -->
+<!-- The images are generated from the real preview bundles (media/webview.js, media/pdf.js) + media/preview.css via `npm run screenshot`. A screen-recorded GIF of pasting into Word or Gmail would be a welcome contribution. -->
 
 MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark palette:
 
@@ -45,6 +45,12 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's right-click **Theme** menu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle. One extension previews both Markdown and PDF.
 - **Settings without leaving the preview.** Right-click for **Theme** and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
+
+![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
+
+The optional green-on-black terminal palette (`markcopy.theme: green`):
+
+![The green-on-black terminal theme rendering code, a table, and a blockquote](docs/media/terminal-green.png)
 
 See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, the clipboard flavor it writes, and where it pastes cleanly.
 
@@ -114,6 +120,8 @@ MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it i
 - **Hand Tool (Drag to Scroll)** / **Pointer Tool (Select Text)**: right-click to toggle between panning by drag and selecting text.
 - **Theme**: the same menu as the Markdown preview (Auto, Light, Dark, or Green on black). Picking one persists `markcopy.theme` (shared with the Markdown preview) and re-tints the pages; Green on black renders them as green-on-black phosphor.
 - **Dark Pages** / **Light Pages**: a session-only override of the page palette that does not change the saved theme (it otherwise follows `markcopy.theme`, like the Markdown preview).
+
+![The PDF viewer in dark mode with the right-click menu open and the page/zoom toolbar in the corner](docs/media/pdf-viewer.png)
 
 A floating toolbar in the bottom-right corner shows the current page (for example `3 / 12`) as you scroll; click it, type a page number, and press Enter to jump there. The same toolbar steps zoom through preset levels (50 to 400 percent) with minus/plus buttons, Ctrl and plus / Ctrl and minus / Ctrl and 0, or Ctrl plus the mouse wheel; clicking the percentage resets to 100 percent. Pages re-rasterise at each level, and only pages near the viewport stay rendered, so large PDFs stay sharp and memory-bounded. The view also has always-visible styled scrollbars.
 
