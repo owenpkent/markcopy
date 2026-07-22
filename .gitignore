@@ -15,6 +15,10 @@ media/pdf.worker.js.map
 *.vsix
 .DS_Store
 
+# Generated manual-test fixture (node scripts/make-sample-pdf.js)
+/sample.pdf
+/sample.pdf.mccomments.json
+
 # Local secrets (publishing tokens). Never commit real values; see .env.example.
 .env
 .env.local

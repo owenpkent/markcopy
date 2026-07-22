@@ -74,6 +74,18 @@ Both registries need a token (see [One-time setup](#one-time-setup) for how to m
 
 With `.env` loaded, the publish steps below are just `npm run publish:vsce` and `npm run publish:ovsx` with no `-p` flag. If you would rather not use a file, pass the token inline instead (`npm run publish:vsce -- -p <PAT>`) or run `vsce login` once; the `.env` flow is only a convenience.
 
+## Pre-release checklist
+
+Everything here happens **before** Phase 1 below; nothing in it is destructive, so it can be redone freely until it all passes.
+
+- [ ] `main` is green in CI and your working tree is clean (`git status`).
+- [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`.
+- [ ] Integration tests pass: `npm run test:integration` (on Linux: `xvfb-run -a npm run test:integration`).
+- [ ] The manual pass in [docs/TESTING.md](docs/TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**.
+- [ ] [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` matches what actually shipped since the last tag (`git log v<last>..HEAD --oneline` is the ground truth), and user-facing changes are reflected in [README.md](README.md) and `docs/`.
+- [ ] If visuals changed, assets are regenerated and committed: `npm run icon` and `npm run screenshot`.
+- [ ] The version bump you intend (patch / minor / major) matches the changelog contents.
+
 ## Release steps
 
 Releasing has **two phases**, and it is easy to think you are done after the first. **Phase 1 puts the release in git; Phase 2 is what actually ships it to users.** Pushing a commit or tag does **not** publish anything: there is no CI automation for publishing (`.github/workflows/ci.yml` only builds and tests), so the extension stays at whatever version is currently live on the Marketplace / Open VSX until you run the Phase 2 `publish:` commands by hand. Confirm what is actually live at any time with:
@@ -85,7 +97,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ### Phase 1: cut the release in git
 
-1. Start from a clean `main` with green CI.
+1. Start from a clean `main` with green CI and the [pre-release checklist](#pre-release-checklist) done.
 2. Bump the version: `npm version patch` (or `minor` / `major`). This updates `package.json` and `package-lock.json`; it also creates a git tag unless you pass `--no-git-tag-version` (useful when you want to tag by hand after the changelog edit).
 3. Update [CHANGELOG.md](CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
 4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
@@ -105,7 +117,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    npm run vsix
    code --install-extension markcopy-<version>.vsix
    ```
-   Open a Markdown file and a PDF; confirm the preview, a couple of copy actions, and light/dark.
+   Open a Markdown file and a PDF; confirm the preview, a couple of copy actions, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](docs/TESTING.md) are the minimum here).
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
 9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
 10. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).

@@ -62,6 +62,10 @@ npm run test:integration   # downloads VS Code and runs the extension inside it
 
 Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, and that the preview panel opens. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
 
+### Manual testing
+
+The manual test plan is [docs/TESTING.md](docs/TESTING.md): checklists for the Markdown preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](RELEASING.md)), and the place to start when verifying a webview change by hand. The PDF fixture it uses comes from `node scripts/make-sample-pdf.js` (writes `sample.pdf`, gitignored).
+
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).
@@ -86,6 +90,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).          |
 | `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.       |
 | `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).          |
+| `scripts/make-sample-pdf.js`     | Generates `sample.pdf`, the manual-test fixture (docs/TESTING.md).  |
 | `docs/`                          | Architecture and copy-matrix reference.                             |
 | `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                       |
 

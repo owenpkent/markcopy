@@ -10,6 +10,8 @@ tsconfig.json
 .env.*
 **/*.map
 sample.md
+sample.pdf
+sample.pdf.mccomments.json
 *.vsix
 .github/**
 docs/**
