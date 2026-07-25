@@ -397,10 +397,16 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
     });
   }
 
+  // A group with no formats would put a "Copy X" row on the menu with nothing
+  // behind it. None of the groups above can come out empty today, but the
+  // Diagram group builds its list conditionally, so make the invariant hold
+  // here rather than leaving it to whoever adds the next group.
+  const specific = groups.filter((group) => group.actions.length > 0);
+
   // "Block" grabs the whole element you clicked in. It's the fallback for when
   // nothing more specific applies, so it drops out as soon as anything does.
-  if (block && groups.length === 0) {
-    groups.push({
+  if (block && specific.length === 0) {
+    specific.push({
       noun: 'Block',
       actions: [
         { label: 'Rich Text', run: () => copyRichText(block) },
@@ -410,7 +416,7 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
     });
   }
 
-  return groups;
+  return specific;
 }
 
 function buildMenu(target: HTMLElement): MenuEntry[] {

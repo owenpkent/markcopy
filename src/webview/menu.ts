@@ -21,6 +21,17 @@ export interface MenuController {
   hide(): void;
 }
 
+// Grace period before a submenu closes once the pointer leaves the row that
+// opened it. The path from a row to its panel is diagonal, so it clips the rows
+// in between; closing on the first of those would dismiss the panel the user is
+// on their way to.
+const HOVER_CLOSE_MS = 150;
+
+// Ids exist only to wire aria-controls/aria-labelledby. Each webview builds one
+// menu, but the counter is module-level so two controllers could never mint the
+// same id.
+let panelSeq = 0;
+
 export function createMenu(root: HTMLDivElement): MenuController {
   // Every panel currently on screen, shallowest first. panels[0] is `root`
   // while the menu is open, and the array is empty while it is closed, so a
@@ -28,12 +39,36 @@ export function createMenu(root: HTMLDivElement): MenuController {
   const panels: HTMLDivElement[] = [];
   // The submenu row a panel was opened from, so closing can un-expand it.
   const anchorOf = new WeakMap<HTMLDivElement, HTMLElement>();
+  // A hover-out close waiting on HOVER_CLOSE_MS, if one is queued.
+  let pendingClose: number | undefined;
+
+  function cancelPendingClose(): void {
+    if (pendingClose !== undefined) {
+      window.clearTimeout(pendingClose);
+      pendingClose = undefined;
+    }
+  }
+
+  function scheduleClose(depth: number): void {
+    cancelPendingClose();
+    pendingClose = window.setTimeout(() => {
+      pendingClose = undefined;
+      closeFrom(depth);
+    }, HOVER_CLOSE_MS);
+  }
 
   // Tear down every panel from `depth` down. closeFrom(0) closes the whole menu.
   function closeFrom(depth: number): void {
+    // An explicit close supersedes whatever the pointer had queued.
+    cancelPendingClose();
     while (panels.length > depth) {
       const panel = panels.pop() as HTMLDivElement;
-      anchorOf.get(panel)?.setAttribute('aria-expanded', 'false');
+      const anchor = anchorOf.get(panel);
+      if (anchor) {
+        anchor.setAttribute('aria-expanded', 'false');
+        // The panel it pointed at is about to leave the document.
+        anchor.removeAttribute('aria-controls');
+      }
       if (panel === root) {
         root.hidden = true;
         root.innerHTML = '';
@@ -58,16 +93,44 @@ export function createMenu(root: HTMLDivElement): MenuController {
     list[next].focus();
   }
 
+  // Does the panel at `depth` already belong to this row?
+  function isOpenFor(anchor: HTMLElement, depth: number): boolean {
+    const panel = panels[depth];
+    return !!panel && anchorOf.get(panel) === anchor;
+  }
+
+  function wirePanel(panel: HTMLDivElement): void {
+    // Panel chrome (the padding, the dividers, the group headings) has no click
+    // behavior of its own, and the document-level handler each webview uses to
+    // close the menu can't tell a stray click on it from a click outside the
+    // menu. Swallow those, so a slightly-off click does nothing instead of
+    // tearing down every open panel.
+    panel.addEventListener('click', (ev) => ev.stopPropagation());
+    // Reaching any panel means the pointer was travelling towards it, not away.
+    panel.addEventListener('mouseenter', cancelPendingClose);
+  }
+  wirePanel(root);
+
   function openSubmenu(anchor: HTMLElement, entries: MenuEntry[], depth: number): void {
     const parent = panels[depth - 1];
     if (!parent) return;
     const panel = document.createElement('div');
     panel.className = 'mc-menu mc-menu--sub';
     panel.setAttribute('role', 'menu');
+    // The panel hangs off <body> rather than off the row that opened it, so
+    // nothing connects the two structurally. Name each end for the other, or a
+    // screen reader announces "Copy as, submenu, expanded" and then finds no
+    // submenu to move into.
+    panelSeq += 1;
+    panel.id = `mc-submenu-${panelSeq}`;
+    if (!anchor.id) anchor.id = `mc-submenu-anchor-${panelSeq}`;
+    panel.setAttribute('aria-labelledby', anchor.id);
+    anchor.setAttribute('aria-controls', panel.id);
+    anchor.setAttribute('aria-expanded', 'true');
+    wirePanel(panel);
     document.body.appendChild(panel);
     panels.push(panel);
     anchorOf.set(panel, anchor);
-    anchor.setAttribute('aria-expanded', 'true');
     render(panel, entries, depth);
 
     // Sit just inside the parent's right edge (so the diagonal mouse path from
@@ -132,21 +195,35 @@ export function createMenu(root: HTMLDivElement): MenuController {
       el.textContent = entry.label;
     }
 
-    // Hovering any row dismisses whatever the previously hovered row had open,
-    // then opens this row's own panel. Keyboard focus only closes: submenus are
-    // opened deliberately with ArrowRight or Enter, so arrowing past a submenu
-    // row doesn't spray panels across the screen.
+    // Hovering a submenu row opens its panel. Hovering any other row queues the
+    // dismissal of whatever was open, on a delay so the pointer can cut the
+    // corner into the panel it is heading for (see HOVER_CLOSE_MS). Keyboard
+    // focus only closes: submenus are opened deliberately with ArrowRight or
+    // Enter, so arrowing past a submenu row doesn't spray panels across the
+    // screen.
     el.addEventListener('mouseenter', () => {
+      cancelPendingClose();
+      if (entry.kind !== 'submenu') {
+        scheduleClose(depth + 1);
+        return;
+      }
+      // Coming back to the row that opened the current panel shouldn't rebuild it.
+      if (isOpenFor(el, depth + 1)) return;
       closeFrom(depth + 1);
-      if (entry.kind === 'submenu') openSubmenu(el, entry.entries, depth + 1);
+      openSubmenu(el, entry.entries, depth + 1);
     });
     el.addEventListener('focus', () => closeFrom(depth + 1));
 
     el.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      cancelPendingClose();
       if (entry.kind === 'submenu') {
-        closeFrom(depth + 1);
-        openSubmenu(el, entry.entries, depth + 1);
+        // Hover may already have opened this panel; keep it rather than
+        // flickering it away and building the very same rows again.
+        if (!isOpenFor(el, depth + 1)) {
+          closeFrom(depth + 1);
+          openSubmenu(el, entry.entries, depth + 1);
+        }
         focusFirst(panels[depth + 1]);
         return;
       }
@@ -204,6 +281,12 @@ export function createMenu(root: HTMLDivElement): MenuController {
       if (rect.bottom > window.innerHeight) {
         root.style.top = `${Math.max(0, pageY - rect.height)}px`;
       }
+      // The arrow keys only drive the menu once something inside it holds
+      // focus, and most actions now sit one level down, so hand the keyboard
+      // the first row instead of making the user Tab in blind. Focusing a
+      // non-editable element leaves the document's text selection alone, which
+      // the "Copy Selection" actions read at click time.
+      focusFirst(root);
     },
     hide() {
       closeFrom(0);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMenu, type MenuEntry } from '../src/webview/menu';
 
 function makeRoot(): HTMLDivElement {
@@ -22,11 +22,34 @@ function hover(el: Element): void {
   el.dispatchEvent(new MouseEvent('mouseenter'));
 }
 
+function press(el: Element, key: string): void {
+  el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+}
+
+// A menu whose first row opens a submenu, used by most of the nesting tests.
+function nested(): MenuEntry[] {
+  return [
+    {
+      kind: 'submenu',
+      label: 'Copy as',
+      entries: [
+        { kind: 'item', label: 'CSV', run: () => {} },
+        { kind: 'item', label: 'PNG', run: () => {} },
+      ],
+    },
+    { kind: 'item', label: 'Copy Table', run: () => {} },
+  ];
+}
+
 describe('createMenu', () => {
   let root: HTMLDivElement;
 
   beforeEach(() => {
     root = makeRoot();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders items, dividers, group labels and checkmarks', () => {
@@ -49,21 +72,12 @@ describe('createMenu', () => {
     );
   });
 
-  it('opens a submenu on hover and closes it when a sibling is hovered', () => {
+  it('opens a submenu on hover and closes it once the pointer settles on a sibling', () => {
+    vi.useFakeTimers();
     const menu = createMenu(root);
-    menu.show(0, 0, [
-      { kind: 'item', label: 'Copy Table', run: () => {} },
-      {
-        kind: 'submenu',
-        label: 'Copy as',
-        entries: [
-          { kind: 'item', label: 'CSV', run: () => {} },
-          { kind: 'item', label: 'PNG', run: () => {} },
-        ],
-      },
-    ]);
+    menu.show(0, 0, nested());
 
-    const [primary, submenuRow] = Array.from(root.querySelectorAll('.mc-menu-item'));
+    const [submenuRow, primary] = Array.from(root.querySelectorAll('.mc-menu-item'));
     expect(panels()).toHaveLength(1);
     expect(submenuRow.getAttribute('aria-expanded')).toBe('false');
 
@@ -72,10 +86,43 @@ describe('createMenu', () => {
     expect(labels(panels()[1])).toEqual(['CSV', 'PNG']);
     expect(submenuRow.getAttribute('aria-expanded')).toBe('true');
 
-    // Moving to a different row on the parent panel dismisses the submenu.
+    // Moving to a different row queues the dismissal rather than firing it.
     hover(primary);
+    expect(panels()).toHaveLength(2);
+    vi.advanceTimersByTime(500);
     expect(panels()).toHaveLength(1);
     expect(submenuRow.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps a submenu open when the pointer clips a sibling row on the way in', () => {
+    vi.useFakeTimers();
+    const menu = createMenu(root);
+    menu.show(0, 0, nested());
+
+    const [submenuRow, primary] = Array.from(root.querySelectorAll('.mc-menu-item'));
+    hover(submenuRow);
+    const panel = panels()[1];
+
+    // The diagonal path from the row to its panel crosses the row below it.
+    hover(primary);
+    panel.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(500);
+
+    expect(panels()).toHaveLength(2);
+    expect(panels()[1]).toBe(panel);
+  });
+
+  it('does not rebuild a submenu when the pointer returns to the row that opened it', () => {
+    const menu = createMenu(root);
+    menu.show(0, 0, nested());
+
+    const submenuRow = root.querySelector('.mc-menu-item') as HTMLElement;
+    hover(submenuRow);
+    const panel = panels()[1];
+
+    hover(submenuRow);
+    expect(panels()).toHaveLength(2);
+    expect(panels()[1]).toBe(panel);
   });
 
   it('nests submenus and tears down every level on hide', () => {
@@ -147,5 +194,128 @@ describe('createMenu', () => {
     menu.show(5, 5, entries);
     expect(panels()).toHaveLength(1);
     expect(labels(root)).toEqual(['Copy as']);
+  });
+
+  it('focuses the first row when it opens, so the arrow keys work straight away', () => {
+    const menu = createMenu(root);
+    menu.show(0, 0, [
+      { kind: 'label', label: 'Theme' },
+      { kind: 'item', label: 'Copy Table', run: () => {} },
+    ]);
+
+    // The group heading isn't focusable, so the first real row takes it.
+    expect(document.activeElement).toBe(root.querySelector('.mc-menu-item'));
+  });
+
+  it('moves focus with the arrow keys, skipping chrome and wrapping at both ends', () => {
+    const menu = createMenu(root);
+    menu.show(0, 0, [
+      { kind: 'item', label: 'One', run: () => {} },
+      { kind: 'divider' },
+      { kind: 'item', label: 'Two', run: () => {} },
+      { kind: 'item', label: 'Three', run: () => {} },
+    ]);
+
+    const items = Array.from(root.querySelectorAll<HTMLElement>('.mc-menu-item'));
+    expect(document.activeElement).toBe(items[0]);
+
+    press(items[0], 'ArrowDown'); // steps over the divider
+    expect(document.activeElement).toBe(items[1]);
+
+    press(items[1], 'ArrowUp');
+    expect(document.activeElement).toBe(items[0]);
+
+    press(items[0], 'ArrowUp'); // wraps to the end
+    expect(document.activeElement).toBe(items[2]);
+
+    press(items[2], 'ArrowDown'); // and back round
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it('opens a submenu with ArrowRight and steps back out with ArrowLeft', () => {
+    const menu = createMenu(root);
+    menu.show(0, 0, nested());
+
+    const anchor = root.querySelector('.mc-menu-item') as HTMLElement;
+    expect(document.activeElement).toBe(anchor);
+
+    press(anchor, 'ArrowRight');
+    expect(panels()).toHaveLength(2);
+    expect(document.activeElement).toBe(panels()[1].querySelector('.mc-menu-item'));
+
+    press(document.activeElement as Element, 'ArrowLeft');
+    expect(panels()).toHaveLength(1);
+    expect(document.activeElement).toBe(anchor);
+    expect(anchor.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('lets Escape pop one level, and reach the host only at the top', () => {
+    let reachedHost = 0;
+    const onKeydown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') reachedHost++;
+    };
+    document.addEventListener('keydown', onKeydown);
+
+    const menu = createMenu(root);
+    menu.show(0, 0, nested());
+    const anchor = root.querySelector('.mc-menu-item') as HTMLElement;
+
+    press(anchor, 'ArrowRight');
+    expect(panels()).toHaveLength(2);
+
+    // Inside a submenu, Escape closes that panel and stops there: the host's
+    // handler would otherwise tear down the whole menu.
+    press(document.activeElement as Element, 'Escape');
+    expect(panels()).toHaveLength(1);
+    expect(reachedHost).toBe(0);
+
+    // At the top level it falls through, so the host can close the menu.
+    press(anchor, 'Escape');
+    expect(reachedHost).toBe(1);
+
+    document.removeEventListener('keydown', onKeydown);
+  });
+
+  it('links each submenu to the row that opened it, and unlinks it on close', () => {
+    const menu = createMenu(root);
+    menu.show(0, 0, nested());
+    const anchor = root.querySelector('.mc-menu-item') as HTMLElement;
+    expect(anchor.getAttribute('aria-haspopup')).toBe('true');
+    expect(anchor.hasAttribute('aria-controls')).toBe(false);
+
+    hover(anchor);
+    const panel = panels()[1];
+    expect(panel.id).not.toBe('');
+    expect(anchor.id).not.toBe('');
+    // Nothing links the two structurally: the panel hangs off <body>.
+    expect(panel.parentElement).toBe(document.body);
+    expect(anchor.getAttribute('aria-controls')).toBe(panel.id);
+    expect(panel.getAttribute('aria-labelledby')).toBe(anchor.id);
+
+    menu.hide();
+    expect(anchor.hasAttribute('aria-controls')).toBe(false);
+    expect(anchor.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('swallows clicks on panel chrome so the host does not close the menu', () => {
+    let reachedHost = 0;
+    const onClick = (): void => void reachedHost++;
+    document.addEventListener('click', onClick);
+
+    const menu = createMenu(root);
+    menu.show(0, 0, [
+      { kind: 'label', label: 'Theme' },
+      { kind: 'divider' },
+      { kind: 'item', label: 'Auto', run: () => {} },
+    ]);
+
+    (root.querySelector('.mc-menu-group-label') as HTMLElement).click();
+    (root.querySelector('.mc-menu-divider') as HTMLElement).click();
+    root.click(); // the panel's own padding
+
+    expect(reachedHost).toBe(0);
+    expect(root.hidden).toBe(false);
+
+    document.removeEventListener('click', onClick);
   });
 });
