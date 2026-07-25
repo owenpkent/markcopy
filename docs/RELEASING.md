@@ -81,8 +81,8 @@ Everything here happens **before** Phase 1 below; nothing in it is destructive, 
 - [ ] `main` is green in CI and your working tree is clean (`git status`).
 - [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`.
 - [ ] Integration tests pass: `npm run test:integration` (on Linux: `xvfb-run -a npm run test:integration`).
-- [ ] The manual pass in [docs/TESTING.md](docs/TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**.
-- [ ] [CHANGELOG.md](CHANGELOG.md) `[Unreleased]` matches what actually shipped since the last tag (`git log v<last>..HEAD --oneline` is the ground truth), and user-facing changes are reflected in [README.md](README.md) and `docs/`.
+- [ ] The manual pass in [docs/TESTING.md](TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**.
+- [ ] [CHANGELOG.md](../CHANGELOG.md) `[Unreleased]` matches what actually shipped since the last tag (`git log v<last>..HEAD --oneline` is the ground truth), and user-facing changes are reflected in [README.md](../README.md) and `docs/`.
 - [ ] If visuals changed, assets are regenerated and committed: `npm run icon` and `npm run screenshot`.
 - [ ] The version bump you intend (patch / minor / major) matches the changelog contents.
 
@@ -99,7 +99,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 1. Start from a clean `main` with green CI and the [pre-release checklist](#pre-release-checklist) done.
 2. Bump the version: `npm version patch` (or `minor` / `major`). This updates `package.json` and `package-lock.json`; it also creates a git tag unless you pass `--no-git-tag-version` (useful when you want to tag by hand after the changelog edit).
-3. Update [CHANGELOG.md](CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
+3. Update [CHANGELOG.md](../CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
 4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
 5. If visuals changed, regenerate assets: `npm run icon` and `npm run screenshot`.
 6. Commit, tag, and push:
@@ -117,7 +117,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    npm run vsix
    code --install-extension markcopy-<version>.vsix
    ```
-   Open a Markdown file and a PDF; confirm the preview, a couple of copy actions, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](docs/TESTING.md) are the minimum here).
+   Open a Markdown file and a PDF; confirm the preview, a couple of copy actions, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
 9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
 10. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).

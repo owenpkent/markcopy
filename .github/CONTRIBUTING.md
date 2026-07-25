@@ -26,7 +26,7 @@ npm run watch       # rebuild the extension host and webviews on change
 2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js`.
 3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why there are separate bundles.
+See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for why there are separate bundles.
 
 ## Lint and format
 
@@ -64,7 +64,7 @@ Integration tests live in `test-integration/` and run under Mocha inside a real 
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](docs/TESTING.md): checklists for the Markdown preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](RELEASING.md)), and the place to start when verifying a webview change by hand. The PDF fixture it uses comes from `node scripts/make-sample-pdf.js` (writes `sample.pdf`, gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)), and the place to start when verifying a webview change by hand. The PDF fixture it uses comes from `node scripts/make-sample-pdf.js` (writes `sample.pdf`, gitignored).
 
 ## Debug
 
@@ -77,22 +77,23 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Project layout
 
-| Path                             | What lives here                                                     |
-| -------------------------------- | ------------------------------------------------------------------- |
-| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync.           |
-| `src/render.ts`                  | markdown-it setup and source-line mapping.                          |
-| `src/webview/main.ts`            | Markdown webview: rendering, context menu, clipboard, PNG, Mermaid. |
-| `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                     |
-| `src/webview/pdf.ts`             | PDF webview: pdf.js rendering and page/text copy actions.           |
-| `src/webview/table.ts`           | CSV/TSV table serialization (pure, unit-tested).                    |
-| `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                  |
-| `tests/`                         | Vitest unit tests.                                                  |
-| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).          |
-| `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.       |
-| `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).          |
-| `scripts/make-sample-pdf.js`     | Generates `sample.pdf`, the manual-test fixture (docs/TESTING.md).  |
-| `docs/`                          | Architecture and copy-matrix reference.                             |
-| `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                       |
+| Path                             | What lives here                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync.                                       |
+| `src/render.ts`                  | markdown-it setup and source-line mapping.                                                      |
+| `src/webview/main.ts`            | Markdown webview: rendering, context-menu entry tree, clipboard, PNG, Mermaid.                  |
+| `src/webview/menu.ts`            | Shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by both webviews. |
+| `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                                                 |
+| `src/webview/pdf.ts`             | PDF webview: pdf.js rendering, page/text copy actions, and its context-menu entry tree.         |
+| `src/webview/table.ts`           | CSV/TSV table serialization (pure, unit-tested).                                                |
+| `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                              |
+| `tests/`                         | Vitest unit tests.                                                                              |
+| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                      |
+| `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                   |
+| `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).                                      |
+| `scripts/make-sample-pdf.js`     | Generates `sample.pdf`, the manual-test fixture (docs/TESTING.md).                              |
+| `docs/`                          | Architecture and copy-matrix reference.                                                         |
+| `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                                                   |
 
 ## Coding conventions
 
@@ -100,17 +101,17 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 - Match the surrounding style: the existing files favor small focused functions and section banners.
 - No em dashes in any text or comment; use commas, colons, or parentheses.
 - Do not bundle `vscode` (it is external and provided at runtime).
-- When adding a copy action, write both `text/html` and `text/plain` where formatting matters, and add a row to [docs/COPY-MATRIX.md](docs/COPY-MATRIX.md).
+- When adding a copy action, write both `text/html` and `text/plain` where formatting matters, and add a row to [docs/COPY-MATRIX.md](../docs/COPY-MATRIX.md).
 
 ## Adding a context-menu action
 
-1. Add a `MenuItem` in `buildMenu()` in `src/webview/main.ts`, gated on the element type you detect with `target.closest(...)`.
+1. Add a `MenuEntry` (see `src/webview/menu.ts` for the kinds: `item`, `submenu`, `label`, `divider`, `radio`, `checkbox`) in `buildMenu()` in `src/webview/main.ts` (or the equivalent in `src/webview/pdf.ts`), gated on the element type you detect with `target.closest(...)`. A new format for an existing element usually just adds another `item` to its `Copy as` submenu rather than a new top-level row.
 2. Implement the copy in a helper (`copyText`, `copyRichText`, `copyPng`, or a new one) and call `toast()` on success.
-3. Document it in the [Copy Matrix](docs/COPY-MATRIX.md).
+3. Document it in the [Copy Matrix](../docs/COPY-MATRIX.md).
 
 ## Releasing
 
-Full steps (publisher setup, both registries, verified-publisher badge) are in [RELEASING.md](RELEASING.md). In short:
+Full steps (publisher setup, both registries, verified-publisher badge) are in [RELEASING.md](../docs/RELEASING.md). In short:
 
 ```bash
 npm version patch                # bump version + tag
@@ -119,8 +120,8 @@ npm run publish:vsce             # VS Code Marketplace (needs vsce login OwenPKe
 npm run publish:ovsx             # Open VSX (needs an Open VSX token)
 ```
 
-Move the `[Unreleased]` entries in [CHANGELOG.md](CHANGELOG.md) under the new version before releasing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
+Move the `[Unreleased]` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version before releasing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
 
 ## Filing issues
 
-Include your VS Code version, OS, a minimal `.md` that reproduces the problem, and which copy action and paste target were involved (for example, "Copy Table as Rich Text, pasting into Outlook").
+Include your VS Code version, OS, a minimal `.md` that reproduces the problem, and which copy action and paste target were involved (for example, "Copy Table, pasting into Outlook").
