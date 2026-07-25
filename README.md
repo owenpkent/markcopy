@@ -1,11 +1,11 @@
 # MarkCopy: Rich Markdown & PDF Preview
 
-[![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/OwenPKent.markcopy.svg?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
 [![CI](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![VS Code ^1.90](https://img.shields.io/badge/VS%20Code-%5E1.90-007ACC.svg)](https://code.visualstudio.com/)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](.github/CONTRIBUTING.md)
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
@@ -40,23 +40,24 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 ## Features
 
 - **Copy as Rich Text**, for the whole document or just a selection. Pastes formatted into Word, Outlook, Gmail, Google Docs, Slack and OneNote.
-- **Per-element right-click copy**, with the menu adapting to what you clicked:
-  - Code block: **Copy Code** as plain text.
-  - Table: **Rich Text**, **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), or **PNG**.
-  - Mermaid diagram: **PNG** or **SVG**.
-  - Equation (KaTeX): **Copy Equation as PNG** or **Copy Equation as LaTeX**.
-  - Any block: **Rich Text**, **Markdown source**, or **PNG**.
-- **Copy as raw Markdown**, for a selection or a single block.
+- **Per-element right-click copy**, with a short top-level menu that names whatever you clicked and a **Copy as** submenu for every other format:
+  - Selection: top level copies **Rich Text**; **Copy as** has **Markdown**.
+  - Code block: top level copies **Plain Text**.
+  - Table: top level copies **Rich Text**; **Copy as** has **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), and **PNG**.
+  - Mermaid diagram: top level copies **PNG**; **Copy as** has **SVG**.
+  - Equation (KaTeX): top level copies **PNG**; **Copy as** has **LaTeX**.
+  - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.
+- **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
 - **Save as PDF.** Export the rendered preview to a self-contained HTML file that opens in your browser and prints to PDF, with equations, diagrams, highlighted code, and local images all intact and text still selectable. Run **MarkCopy: Save as PDF** (Command Palette), click the PDF button in the preview's title bar, or use **Save as PDF…** in the right-click menu.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
 - **GitHub-accurate styling** for output that pastes cleanly into docs and email.
-- **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview. A **green-on-black** terminal palette is available too (`markcopy.theme: green`, or **Green on black** in the Theme menu).
+- **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview. A **green-on-black** terminal palette is available too (`markcopy.theme: green`, or **Green on black** under **Preferences > Theme**).
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG**, **Copy Page Text**, **Copy All Text**, and **Copy Selected Text**. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, right-click toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's right-click **Theme** menu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle. One extension previews both Markdown and PDF.
-- **Settings without leaving the preview.** Right-click for **Theme** and **Sync scroll** / **Auto-open preview** / **Math** toggles, or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews both Markdown and PDF.
+- **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
 
@@ -74,7 +75,7 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a printable PDF via your browser.
 
-Local images in the document render automatically, and the right-click menu's settings section (or the gear icon in the preview's title bar) lets you change theme, sync scroll, math, and auto-preview without leaving the preview.
+Local images in the document render automatically, and the right-click menu's **Preferences** submenu (or the gear icon in the preview's title bar) lets you change theme, sync scroll, math, and auto-preview without leaving the preview.
 
 ## Commands
 
@@ -87,7 +88,7 @@ Local images in the document render automatically, and the right-click menu's se
 
 ## Settings
 
-`markcopy.syncScroll`, `markcopy.autoPreview`, `markcopy.math`, and `markcopy.theme` can also be changed live from the preview's right-click settings section or the gear icon in its title bar, not just here.
+`markcopy.syncScroll`, `markcopy.autoPreview`, `markcopy.math`, and `markcopy.theme` can also be changed live from the preview's right-click **Preferences** submenu or the gear icon in its title bar, not just here.
 
 | Setting                 | Type                                   | Default  | Description                                                                                                                                                            |
 | ----------------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -115,7 +116,7 @@ npm run vsix                                   # produces markcopy-<version>.vsi
 code --install-extension markcopy-<version>.vsix
 ```
 
-See [RELEASING.md](RELEASING.md) for how releases are cut and published.
+See [RELEASING.md](docs/RELEASING.md) for how releases are cut and published.
 
 ## How the copy works
 
@@ -125,13 +126,11 @@ See [RELEASING.md](RELEASING.md) for how releases are cut and published.
 
 MarkCopy registers as the editor for `.pdf` files, so opening a PDF renders it inline (VS Code has no built-in PDF viewer). Rendering uses Mozilla's pdf.js, the same engine behind [folio](https://github.com/owenpkent/folio). Each page has a real, selectable text layer over the canvas, so you can highlight text directly on the page. Right-click a page for:
 
+- **Copy Selection**: just the text you highlight (only shown when you have a selection).
 - **Copy Page as PNG**: the rendered page as an image, for slides and chat.
-- **Copy Page Text** / **Copy All Text**: the selectable text, extracted per page.
-- **Copy Selected Text**: just the text you highlight.
+- **Copy as**: **Page Text** or **All Text**, the selectable text extracted per page or for the whole document.
 - **Add Comment Here**: drop a pin with an editable note; click a pin to edit or delete it. Comments are saved to a `<filename>.pdf.mccomments.json` file next to the PDF (the PDF itself stays read-only) and reload when you reopen it.
-- **Hand Tool (Drag to Scroll)** / **Pointer Tool (Select Text)**: right-click to toggle between panning by drag and selecting text.
-- **Theme**: the same menu as the Markdown preview (Auto, Light, Dark, or Green on black). Picking one persists `markcopy.theme` (shared with the Markdown preview) and re-tints the pages; Green on black renders them as green-on-black phosphor.
-- **Dark Pages** / **Light Pages**: a session-only override of the page palette that does not change the saved theme (it otherwise follows `markcopy.theme`, like the Markdown preview).
+- **Preferences**: toggle between **Hand Tool (Drag to Scroll)** and **Pointer Tool (Select Text)**, toggle **Dark Pages** / **Light Pages** (a session-only override of the page palette that does not change the saved theme), and open the same **Theme** submenu as the Markdown preview (Auto, Light, Dark, or Green on black). Picking a theme persists `markcopy.theme` (shared with the Markdown preview) and re-tints the pages; Green on black renders them as green-on-black phosphor.
 
 ![The PDF viewer in dark mode with the right-click menu open and the page/zoom toolbar in the corner](docs/media/pdf-viewer.png)
 
@@ -143,9 +142,9 @@ The file is read by the extension host and handed to the webview as bytes, so no
 
 - [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
 - [Architecture](docs/ARCHITECTURE.md): how rendering, the webview, and the clipboard fit together.
-- [Contributing](CONTRIBUTING.md): build, debug, and release.
-- [Code of Conduct](CODE_OF_CONDUCT.md).
-- [Security](SECURITY.md): CSP, sandboxing, and reporting.
+- [Contributing](.github/CONTRIBUTING.md): build, debug, and release.
+- [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+- [Security](.github/SECURITY.md): CSP, sandboxing, and reporting.
 - [Changelog](CHANGELOG.md).
 
 ## Develop
@@ -158,7 +157,7 @@ npm test            # vitest unit tests
 # press F5 in VS Code to launch the Extension Development Host, then open sample.md
 ```
 
-Full details in [CONTRIBUTING.md](CONTRIBUTING.md).
+Full details in [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
 ## Roadmap
 

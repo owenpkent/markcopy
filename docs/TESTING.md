@@ -1,6 +1,6 @@
 # Testing MarkCopy
 
-How MarkCopy gets verified, from the automated suites to the manual checklist that gates a release. The automated layers run on every push; the manual checklist below is what "tested" means before publishing (see the [pre-release checklist](../RELEASING.md#pre-release-checklist) in RELEASING.md).
+How MarkCopy gets verified, from the automated suites to the manual checklist that gates a release. The automated layers run on every push; the manual checklist below is what "tested" means before publishing (see the [pre-release checklist](RELEASING.md#pre-release-checklist) in RELEASING.md).
 
 ## The three layers
 
@@ -37,20 +37,22 @@ Work through the checklists below. A **patch** release needs the sections touche
 
 Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COPY-MATRIX.md).
 
-- [ ] ★ Right-click a table, **Copy Table (Rich Text)**, paste into Word or Google Docs: a real table arrives, not Markdown source.
-- [ ] **Copy Table as CSV**, paste into Excel or Google Sheets: real cells.
-- [ ] **Copy Block as PNG** on a paragraph, paste into a chat or slide: an image arrives.
-- [ ] **Copy Diagram as PNG** on a Mermaid diagram.
-- [ ] Select some text, right-click, **Copy Selection as Markdown**: the original Markdown source comes back.
-- [ ] Right-click a rendered equation, **Copy Equation as LaTeX**: the original source comes back.
-- [ ] ★ **Copy Whole Document as Rich Text** (menu or command palette), paste into an email draft: formatting intact.
+- [ ] ★ Right-click a table, **Copy Table** (top-level), paste into Word or Google Docs: a real table arrives, not Markdown source.
+- [ ] Right-click a table -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells.
+- [ ] Right-click a paragraph -> **Copy as** -> **PNG**, paste into a chat or slide: an image arrives.
+- [ ] Right-click a Mermaid diagram, **Copy Diagram** (top-level): an image arrives.
+- [ ] Select some text, right-click -> **Copy as** -> **Markdown**: the original Markdown source comes back.
+- [ ] Right-click a rendered equation -> **Copy as** -> **LaTeX**: the original source comes back.
+- [ ] ★ **Copy Whole Document** (top-level menu, or the command palette's **Copy Whole Document as Rich Text**), paste into an email draft: formatting intact.
 - [ ] Every successful copy shows a toast.
+- [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
 
 ### Settings, themes, and sync
 
-- [ ] Right-click, **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.
+- [ ] Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
-- [ ] **Sync scroll**, **Auto-open preview**, and **Math** toggles in the menu write through to settings; the gear icon opens the MarkCopy settings page.
+- [ ] **Sync scroll**, **Auto-open preview**, and **Math** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
+- [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
 - [ ] With sync scroll on, scrolling the editor scrolls the preview to match.
 - [ ] **MarkCopy: Save as PDF** produces a PDF of the document.
 
@@ -76,10 +78,10 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 
 ### Tools, selection, and copy
 
-- [ ] Right-click toggles between **Hand** (drag pans) and **Pointer** (text selection) tools.
-- [ ] Select text with the Pointer tool; right-click, **Copy Selected Text** pastes the selection.
-- [ ] **Copy Page N Text** and **Copy All Text** paste the expected plain text.
-- [ ] ★ **Copy Page N as PNG** yields a true-color page image even when the viewer shows dark or green pages.
+- [ ] Right-click -> **Preferences** toggles between **Hand Tool (Drag to Scroll)** and **Pointer Tool (Select Text)**.
+- [ ] Select text with the Pointer tool; right-click, top-level **Copy Selection** pastes the selection.
+- [ ] Right-click -> **Copy as** -> **Page N Text** and **Copy as** -> **All Text** paste the expected plain text.
+- [ ] ★ Right-click a page, top-level **Copy Page N as PNG** yields a true-color page image even when the viewer shows dark or green pages.
 
 ### Comments
 
@@ -88,8 +90,8 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 
 ### Theming
 
-- [ ] ★ **Theme** menu: Auto, Light, Dark, and Green on black re-tint the pages; Green on black renders green-on-black phosphor in pure `#00ff00`.
-- [ ] **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
+- [ ] ★ Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black re-tint the pages; Green on black renders green-on-black phosphor in pure `#00ff00`.
+- [ ] Right-click -> **Preferences**, the **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
 - [ ] Changing the theme from a Markdown preview (or settings.json) re-tints an already-open PDF.
 - [ ] Scrollbars are always visible and styled.
 
@@ -99,4 +101,4 @@ For a minor or major release, take the ★ copy rows above to the real targets a
 
 ## When a check fails
 
-A regression in shipped behavior blocks the release: fix it (or revert the offending change) and restart the checklist section it belongs to. For a pre-existing issue that a release does not make worse, file it and move on. Either way, capture what broke and where it was pasted (the [issue guidance](../CONTRIBUTING.md#filing-issues) asks for the copy action and paste target).
+A regression in shipped behavior blocks the release: fix it (or revert the offending change) and restart the checklist section it belongs to. For a pre-existing issue that a release does not make worse, file it and move on. Either way, capture what broke and where it was pasted (the [issue guidance](../.github/CONTRIBUTING.md#filing-issues) asks for the copy action and paste target).

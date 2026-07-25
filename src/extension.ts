@@ -392,7 +392,7 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
     // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
-    // copying an equation as an image (see SECURITY.md).
+    // copying an equation as an image (see .github/SECURITY.md).
     `connect-src ${webview.cspSource}`,
     // 'strict-dynamic' lets the nonce'd entry module import its code-split
     // sibling chunks (media/chunk-*.js) without each needing its own nonce.
