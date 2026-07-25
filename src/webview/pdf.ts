@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import { createMenu, type MenuEntry } from './menu';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -362,7 +363,7 @@ document.addEventListener(
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    menu.hidden = true;
+    contextMenu.hide();
     closeNote();
     return;
   }
@@ -500,64 +501,86 @@ function closeNote(): void {
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
-interface MenuItem {
-  label: string;
-  run?: () => void | Promise<void>;
-  checked?: boolean; // renders as a radio row with a check
-  header?: boolean; // non-interactive group label
-  divider?: boolean;
-}
+const contextMenu = createMenu(menu);
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const target = e.target as HTMLElement;
   const pageEl = target.closest<HTMLElement>('.mc-page');
-  const items: MenuItem[] = [];
+  const entries: MenuEntry[] = [];
+  // The remaining copy formats, one level down under "Copy as".
+  const variants: MenuEntry[] = [];
 
   const selection = window.getSelection()?.toString().trim();
   if (selection) {
-    items.push({ label: 'Copy Selected Text', run: () => copyText(selection) });
+    entries.push({ kind: 'item', label: 'Copy Selection', run: () => copyText(selection) });
   }
 
   if (pageEl) {
     const n = Number(pageEl.dataset.page);
     const canvas = pageEl.querySelector('canvas');
+    // A page's image is the headline action, so it stays at the top level when
+    // it's available; its text drops into "Copy as" alongside the document's.
     if (canvas && canvas.width > 0) {
-      items.push({ label: `Copy Page ${n} as PNG`, run: () => copyPagePng(n) });
+      entries.push({ kind: 'item', label: `Copy Page ${n} as PNG`, run: () => copyPagePng(n) });
     }
-    items.push({ label: `Copy Page ${n} Text`, run: () => copyText(pageText.get(n) ?? '') });
-    const cx = e.clientX;
-    const cy = e.clientY;
-    items.push({ label: 'Add Comment Here', run: () => addCommentAt(pageEl, cx, cy) });
+    variants.push({
+      kind: 'item',
+      label: `Page ${n} Text`,
+      run: () => copyText(pageText.get(n) ?? ''),
+    });
   }
 
-  items.push({ label: 'Copy All Text', run: () => copyText(allText()) });
-  items.push({
-    label: mode === 'hand' ? 'Pointer Tool (Select Text)' : 'Hand Tool (Drag to Scroll)',
-    run: () => setMode(mode === 'hand' ? 'pointer' : 'hand'),
-  });
-  items.push({
-    label: pageAppearance() === 'normal' ? 'Dark Pages' : 'Light Pages',
-    run: () => togglePages(),
-  });
-  // Theme section, matching the Markdown preview's Theme menu. Picking one
-  // persists markcopy.theme (shared by both surfaces) and re-tints the pages.
-  items.push({ label: '', divider: true });
-  items.push(...themeItems());
+  variants.push({ kind: 'item', label: 'All Text', run: () => copyText(allText()) });
+  entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
 
-  showMenu(e.pageX, e.pageY, items);
+  if (pageEl) {
+    const cx = e.clientX;
+    const cy = e.clientY;
+    entries.push({ kind: 'divider' });
+    entries.push({
+      kind: 'item',
+      label: 'Add Comment Here',
+      run: () => addCommentAt(pageEl, cx, cy),
+    });
+  }
+
+  entries.push({ kind: 'divider' });
+  entries.push({ kind: 'submenu', label: 'Preferences', entries: preferenceEntries() });
+
+  contextMenu.show(e.pageX, e.pageY, entries);
 });
 
+// View settings, mirroring the Markdown preview's "Preferences" submenu
+// (buildSettingsEntries in main.ts). Picking a theme persists markcopy.theme,
+// which both surfaces share, and re-tints the pages.
+function preferenceEntries(): MenuEntry[] {
+  return [
+    {
+      kind: 'item',
+      label: mode === 'hand' ? 'Pointer Tool (Select Text)' : 'Hand Tool (Drag to Scroll)',
+      run: () => setMode(mode === 'hand' ? 'pointer' : 'hand'),
+    },
+    {
+      kind: 'item',
+      label: pageAppearance() === 'normal' ? 'Dark Pages' : 'Light Pages',
+      run: () => togglePages(),
+    },
+    { kind: 'divider' },
+    { kind: 'submenu', label: 'Theme', entries: themeItems() },
+  ];
+}
+
 // The Auto/Light/Dark/Green radio group, identical in labels and behavior to the
-// Markdown preview's Theme menu (buildSettingsEntries in main.ts).
-function themeItems(): MenuItem[] {
-  const entry = (label: string, value: string): MenuItem => ({
+// Markdown preview's Theme submenu.
+function themeItems(): MenuEntry[] {
+  const entry = (label: string, value: string): MenuEntry => ({
+    kind: 'radio',
     label,
     checked: currentTheme === value,
     run: () => setTheme(value),
   });
   return [
-    { label: 'Theme', header: true },
     entry('Auto', 'auto'),
     entry('Light', 'light'),
     entry('Dark', 'dark'),
@@ -682,7 +705,7 @@ function rerenderPages(): void {
   refresh();
 }
 
-document.addEventListener('click', () => (menu.hidden = true));
+document.addEventListener('click', () => contextMenu.hide());
 
 // ---------------------------------------------------------------------------
 // Hand tool (drag to scroll) — active only in hand mode
@@ -702,7 +725,7 @@ document.addEventListener('pointerdown', (e) => {
   if (
     e.button !== 0 ||
     mode !== 'hand' ||
-    (e.target as HTMLElement).closest('#mc-menu, .mc-pin, .mc-note, #mc-toolbar')
+    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar')
   ) {
     return;
   }
@@ -907,56 +930,6 @@ function buildToolbar(): void {
   document.body.appendChild(bar);
 }
 buildToolbar();
-
-function showMenu(x: number, y: number, items: MenuItem[]): void {
-  menu.innerHTML = '';
-  for (const item of items) {
-    if (item.divider) {
-      const el = document.createElement('div');
-      el.className = 'mc-menu-divider';
-      el.setAttribute('role', 'separator');
-      menu.appendChild(el);
-      continue;
-    }
-    if (item.header) {
-      const el = document.createElement('div');
-      el.className = 'mc-menu-group-label';
-      el.textContent = item.label;
-      menu.appendChild(el);
-      continue;
-    }
-    const el = document.createElement('div');
-    el.tabIndex = 0;
-    if (item.checked !== undefined) {
-      el.className = 'mc-menu-item mc-menu-item--check';
-      el.setAttribute('role', 'menuitemradio');
-      el.setAttribute('aria-checked', String(item.checked));
-      const check = document.createElement('span');
-      check.className = 'mc-menu-check';
-      check.setAttribute('aria-hidden', 'true');
-      check.textContent = item.checked ? '✓' : '';
-      const text = document.createElement('span');
-      text.textContent = item.label;
-      el.append(check, text);
-    } else {
-      el.className = 'mc-menu-item';
-      el.setAttribute('role', 'menuitem');
-      el.textContent = item.label;
-    }
-    el.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      menu.hidden = true;
-      void item.run?.();
-    });
-    menu.appendChild(el);
-  }
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  menu.hidden = false;
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, x - rect.width)}px`;
-  if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, y - rect.height)}px`;
-}
 
 // ---------------------------------------------------------------------------
 // Clipboard

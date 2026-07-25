@@ -621,6 +621,21 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   flex: none;
   text-align: center;
 }
+/* Submenu panels are created on demand and appended to <body>; they carry
+   .mc-menu too, so they inherit the panel chrome above. */
+.mc-menu--sub {
+  min-width: 160px;
+}
+.mc-menu-item--submenu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.mc-menu-arrow {
+  flex: none;
+  opacity: 0.6;
+}
 
 /* ---- Toast --------------------------------------------------------------- */
 .mc-toast {
