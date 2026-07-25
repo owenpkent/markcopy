@@ -3,6 +3,7 @@ import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited } from './table';
+import { createMenu, type MenuEntry } from './menu';
 
 // Heavy libraries are loaded lazily on first use so the initial webview bundle
 // stays small. Each getter caches the module's default export after the first
@@ -309,35 +310,33 @@ window.addEventListener(
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
-// A plain clickable action ('item'), a group heading ('label', not
-// interactive), a horizontal rule ('divider'), or a radio/checkbox setting
-// toggle that renders a leading checkmark when active.
-type MenuEntry =
-  | { kind: 'item'; label: string; run: () => void | Promise<void> }
-  | { kind: 'label'; label: string }
-  | { kind: 'divider' }
-  | { kind: 'radio' | 'checkbox'; label: string; checked: boolean; run: () => void };
+const contextMenu = createMenu(menu);
 
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  const target = e.target as HTMLElement;
-  const entries: MenuEntry[] = [
-    ...buildMenu(target),
-    { kind: 'divider' },
-    ...buildSettingsEntries(),
-  ];
-  showMenu(e.pageX, e.pageY, entries);
+  contextMenu.show(e.pageX, e.pageY, buildMenu(e.target as HTMLElement));
 });
 
-document.addEventListener('click', () => hideMenu());
+document.addEventListener('click', () => contextMenu.hide());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    hideMenu();
+    contextMenu.hide();
   }
 });
 
-function buildMenu(target: HTMLElement): MenuEntry[] {
-  const items: MenuEntry[] = [];
+// One thing you can copy (a table, a diagram, the selection…) and every format
+// MarkCopy can put it on the clipboard in. `actions[0]` is the format the
+// top-level "Copy X" row uses; the rest live in the "Copy as" submenu.
+interface CopyGroup {
+  noun: string;
+  actions: { label: string; run: () => void | Promise<void> }[];
+}
+
+// The copy groups that apply to the clicked element, most specific first.
+// Several can apply at once — selecting text inside a table yields both — and
+// the first one drives the menu's primary row.
+function copyGroups(target: HTMLElement): CopyGroup[] {
+  const groups: CopyGroup[] = [];
   const selection = window.getSelection();
   const hasSelection = !!selection && selection.toString().trim().length > 0;
   const block = target.closest<HTMLElement>('[data-source-line]');
@@ -347,81 +346,109 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   const mathEl = target.closest<HTMLElement>('.mc-math');
 
   if (hasSelection) {
-    items.push({
-      kind: 'item',
-      label: 'Copy Selection as Rich Text',
-      run: () => copyRichFromSelection(),
-    });
-    items.push({
-      kind: 'item',
-      label: 'Copy Selection as Markdown',
-      run: async () => copyText(await selectionMarkdown()),
+    groups.push({
+      noun: 'Selection',
+      actions: [
+        { label: 'Rich Text', run: () => copyRichFromSelection() },
+        { label: 'Markdown', run: async () => copyText(await selectionMarkdown()) },
+      ],
     });
   }
 
   if (code) {
-    items.push({ kind: 'item', label: 'Copy Code', run: () => copyText(code.textContent ?? '') });
+    groups.push({
+      noun: 'Code',
+      actions: [{ label: 'Plain Text', run: () => copyText(code.textContent ?? '') }],
+    });
   }
 
   if (table) {
-    items.push({ kind: 'item', label: 'Copy Table (Rich Text)', run: () => copyRichText(table) });
-    items.push({
-      kind: 'item',
-      label: 'Copy Table as CSV',
-      run: () => copyText(tableToDelimited(table, ',')),
+    groups.push({
+      noun: 'Table',
+      actions: [
+        { label: 'Rich Text', run: () => copyRichText(table) },
+        { label: 'CSV', run: () => copyText(tableToDelimited(table, ',')) },
+        { label: 'TSV', run: () => copyText(tableToDelimited(table, '\t')) },
+        { label: 'PNG', run: () => copyPng(table) },
+      ],
     });
-    items.push({
-      kind: 'item',
-      label: 'Copy Table as TSV',
-      run: () => copyText(tableToDelimited(table, '\t')),
-    });
-    items.push({ kind: 'item', label: 'Copy Table as PNG', run: () => copyPng(table) });
   }
 
   if (mermaidEl) {
-    items.push({ kind: 'item', label: 'Copy Diagram as PNG', run: () => copyPng(mermaidEl) });
     const svg = mermaidEl.querySelector('svg');
-    if (svg) {
-      items.push({
-        kind: 'item',
-        label: 'Copy Diagram as SVG',
-        run: () => copyText(svg.outerHTML),
-      });
-    }
+    groups.push({
+      noun: 'Diagram',
+      actions: [
+        { label: 'PNG', run: () => copyPng(mermaidEl) },
+        ...(svg ? [{ label: 'SVG', run: () => copyText(svg.outerHTML) }] : []),
+      ],
+    });
   }
 
   if (mathEl) {
     const tex = mathEl.dataset.tex ?? mathEl.textContent ?? '';
     const display = mathEl.dataset.display === '1';
-    items.push({ kind: 'item', label: 'Copy Equation as PNG', run: () => copyPng(mathEl) });
-    items.push({
-      kind: 'item',
-      label: 'Copy Equation as LaTeX',
-      run: () => copyText(display ? `$$${tex}$$` : `$${tex}$`),
+    groups.push({
+      noun: 'Equation',
+      actions: [
+        { label: 'PNG', run: () => copyPng(mathEl) },
+        { label: 'LaTeX', run: () => copyText(display ? `$$${tex}$$` : `$${tex}$`) },
+      ],
     });
   }
 
-  // "Copy Block" grabs the whole element you clicked in. It's the no-selection
-  // convenience, so hide it once there's a selection to avoid overlapping the
-  // "Copy Selection" actions above.
-  if (block && !hasSelection && !code && !table && !mermaidEl && !mathEl) {
-    items.push({ kind: 'item', label: 'Copy Block as Rich Text', run: () => copyRichText(block) });
-    items.push({
-      kind: 'item',
-      label: 'Copy Block as Markdown',
-      run: () => copyText(blockMarkdown(block)),
+  // "Block" grabs the whole element you clicked in. It's the fallback for when
+  // nothing more specific applies, so it drops out as soon as anything does.
+  if (block && groups.length === 0) {
+    groups.push({
+      noun: 'Block',
+      actions: [
+        { label: 'Rich Text', run: () => copyRichText(block) },
+        { label: 'Markdown', run: () => copyText(blockMarkdown(block)) },
+        { label: 'PNG', run: () => copyPng(block) },
+      ],
     });
-    items.push({ kind: 'item', label: 'Copy Block as PNG', run: () => copyPng(block) });
+  }
+
+  return groups;
+}
+
+function buildMenu(target: HTMLElement): MenuEntry[] {
+  const entries: MenuEntry[] = [];
+  const groups = copyGroups(target);
+
+  if (groups.length > 0) {
+    const [first, ...rest] = groups;
+    entries.push({ kind: 'item', label: `Copy ${first.noun}`, run: first.actions[0].run });
+
+    // Everything the primary row didn't cover: the clicked thing's other
+    // formats, then every format of the less specific things around it.
+    const sections = [{ noun: first.noun, actions: first.actions.slice(1) }, ...rest].filter(
+      (group) => group.actions.length > 0,
+    );
+    const variants: MenuEntry[] = [];
+    for (const group of sections) {
+      // Only head the sections when more than one contributes, so the common
+      // single-context case reads as a bare list of formats.
+      if (sections.length > 1) {
+        variants.push({ kind: 'label', label: group.noun });
+      }
+      for (const action of group.actions) {
+        variants.push({ kind: 'item', label: action.label, run: action.run });
+      }
+    }
+    if (variants.length > 0) {
+      entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
+    }
+    entries.push({ kind: 'divider' });
   }
 
   // Always-available document-level actions.
-  items.push({
-    kind: 'item',
-    label: 'Copy Whole Document as Rich Text',
-    run: () => copyRichText(content),
-  });
-  items.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
-  return items;
+  entries.push({ kind: 'item', label: 'Copy Whole Document', run: () => copyRichText(content) });
+  entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
+  entries.push({ kind: 'divider' });
+  entries.push({ kind: 'submenu', label: 'Preferences', entries: buildSettingsEntries() });
+  return entries;
 }
 
 // A radio-style setting entry (Theme / Style groups): posts `updateSetting`
@@ -446,15 +473,20 @@ function checkboxEntry(label: string, checked: boolean, key: string): MenuEntry 
   };
 }
 
-// The persistent SETTINGS section, shown on every right-click below a divider
-// from the contextual copy actions. Reflects the last values seen in `render`.
+// The contents of the "Preferences" submenu, rebuilt on every right-click so it
+// reflects the last setting values seen in `render`.
 function buildSettingsEntries(): MenuEntry[] {
   return [
-    { kind: 'label', label: 'Theme' },
-    radioEntry('Auto', currentTheme === 'auto', 'theme', 'auto'),
-    radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
-    radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
-    radioEntry('Green on black', currentTheme === 'green', 'theme', 'green'),
+    {
+      kind: 'submenu',
+      label: 'Theme',
+      entries: [
+        radioEntry('Auto', currentTheme === 'auto', 'theme', 'auto'),
+        radioEntry('Light', currentTheme === 'light', 'theme', 'light'),
+        radioEntry('Dark', currentTheme === 'dark', 'theme', 'dark'),
+        radioEntry('Green on black', currentTheme === 'green', 'theme', 'green'),
+      ],
+    },
     { kind: 'divider' },
     checkboxEntry('Sync scroll', currentSyncScroll, 'syncScroll'),
     checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
@@ -466,65 +498,6 @@ function buildSettingsEntries(): MenuEntry[] {
       run: () => vscode.postMessage({ type: 'openSettings' }),
     },
   ];
-}
-
-function showMenu(x: number, y: number, entries: MenuEntry[]): void {
-  menu.innerHTML = '';
-  for (const entry of entries) {
-    if (entry.kind === 'divider') {
-      const el = document.createElement('div');
-      el.className = 'mc-menu-divider';
-      el.setAttribute('role', 'separator');
-      menu.appendChild(el);
-      continue;
-    }
-    if (entry.kind === 'label') {
-      const el = document.createElement('div');
-      el.className = 'mc-menu-group-label';
-      el.textContent = entry.label;
-      menu.appendChild(el);
-      continue;
-    }
-    const el = document.createElement('div');
-    el.tabIndex = 0;
-    if (entry.kind === 'radio' || entry.kind === 'checkbox') {
-      el.className = 'mc-menu-item mc-menu-item--check';
-      el.setAttribute('role', entry.kind === 'radio' ? 'menuitemradio' : 'menuitemcheckbox');
-      el.setAttribute('aria-checked', String(entry.checked));
-      const check = document.createElement('span');
-      check.className = 'mc-menu-check';
-      check.setAttribute('aria-hidden', 'true');
-      check.textContent = entry.checked ? '✓' : '';
-      const text = document.createElement('span');
-      text.textContent = entry.label;
-      el.append(check, text);
-    } else {
-      el.className = 'mc-menu-item';
-      el.setAttribute('role', 'menuitem');
-      el.textContent = entry.label;
-    }
-    el.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      hideMenu();
-      void entry.run();
-    });
-    menu.appendChild(el);
-  }
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  menu.hidden = false;
-  // Keep the menu inside the viewport.
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) {
-    menu.style.left = `${Math.max(0, x - rect.width)}px`;
-  }
-  if (rect.bottom > window.innerHeight) {
-    menu.style.top = `${Math.max(0, y - rect.height)}px`;
-  }
-}
-
-function hideMenu(): void {
-  menu.hidden = true;
 }
 
 // ---------------------------------------------------------------------------
