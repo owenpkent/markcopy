@@ -4,13 +4,15 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Changed
-- **Markdown preview menu, restructured into a short top level plus submenus.** The in-preview right-click menu used to be a long flat list, up to 19 rows (16 even on a plain paragraph, since an 11-row settings block was appended unconditionally). It's now at most 6 rows: a top-level `Copy <Noun>` item that names whatever you clicked (Selection, Code, Table, Diagram, Equation, or Block, in that precedence) and copies it in its primary format, a `Copy as` submenu holding every remaining format for that element (split into headed sections, like `SELECTION` and `TABLE`, when more than one context applies), `Copy Whole Document`, `Save as PDF…`, and a `Preferences` submenu for Theme, Sync scroll, Auto-open preview, Math, and MarkCopy Settings. No action was removed; every one of them just moved one level down. Both webviews now share a single menu engine (`src/webview/menu.ts`) with keyboard navigation, replacing the near-duplicate `showMenu` implementations that used to live in `main.ts` and `pdf.ts`. Opening the menu focuses its first row, so the arrow keys drive it immediately: up/down to move, right or Enter to open a submenu, left or Escape to back out one level, Enter/Space to activate. An open submenu also survives the pointer clipping the row below it on the way in, and a stray click on a divider, a group heading, or a panel's padding no longer closes the menu.
-- **PDF viewer menu, restructured to match.** The PDF viewer's right-click menu was up to 13 rows and is now at most 5: top-level `Copy Selection` (when text is selected) and `Copy Page N as PNG` (over a rendered page), a `Copy as` submenu (`Page N Text`, `All Text`), `Add Comment Here`, and a `Preferences` submenu for the Hand/Pointer tool toggle, the Dark/Light Pages toggle, and a nested `Theme` submenu. It uses the same shared menu engine as the Markdown preview, so it gets the same keyboard navigation for free.
-
 ### Planned
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [0.5.0] - 2026-07-25
+
+### Changed
+- **Markdown preview menu, restructured into a short top level plus submenus.** The in-preview right-click menu used to be a long flat list, up to 19 rows (16 even on a plain paragraph, since an 11-row settings block was appended unconditionally). It's now at most 6 rows: a top-level `Copy <Noun>` item that names whatever you clicked (Selection, Code, Table, Diagram, Equation, or Block, in that precedence) and copies it in its primary format, a `Copy as` submenu holding every remaining format for that element (split into headed sections, like `SELECTION` and `TABLE`, when more than one context applies), `Copy Whole Document`, `Save as PDF…`, and a `Preferences` submenu for Theme, Sync scroll, Auto-open preview, Math, and MarkCopy Settings. No action was removed; every one of them just moved one level down. Both webviews now share a single menu engine (`src/webview/menu.ts`) with keyboard navigation, replacing the near-duplicate `showMenu` implementations that used to live in `main.ts` and `pdf.ts`. Opening the menu focuses its first row, so the arrow keys drive it immediately: up/down to move, right or Enter to open a submenu, left or Escape to back out one level, Enter/Space to activate. An open submenu also survives the pointer clipping the row below it on the way in, and a stray click on a divider, a group heading, or a panel's padding no longer closes the menu.
+- **PDF viewer menu, restructured to match.** The PDF viewer's right-click menu was up to 13 rows and is now at most 5: top-level `Copy Selection` (when text is selected) and `Copy Page N as PNG` (over a rendered page), a `Copy as` submenu (`Page N Text`, `All Text`), `Add Comment Here`, and a `Preferences` submenu for the Hand/Pointer tool toggle, the Dark/Light Pages toggle, and a nested `Theme` submenu. It uses the same shared menu engine as the Markdown preview, so it gets the same keyboard navigation for free.
 
 ## [0.4.0] - 2026-07-22
 
@@ -108,7 +110,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/owenpkent/markcopy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/owenpkent/markcopy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/owenpkent/markcopy/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/owenpkent/markcopy/compare/v0.2.1...v0.2.2
