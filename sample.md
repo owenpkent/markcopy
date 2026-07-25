@@ -33,3 +33,11 @@ flowchart LR
   B --> D[PNG]
   B --> E[Markdown]
 ```
+
+## Math
+
+An inline equation, $E = mc^2$, sits in a sentence. A display one stands alone:
+
+$$
+\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}
+$$
