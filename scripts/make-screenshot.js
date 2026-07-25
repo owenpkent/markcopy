@@ -64,14 +64,37 @@ formatting intact. Right-click anything in the preview to copy it.
 | Diagram as PNG |    No    |   Yes    |
 `;
 
-// A context menu positioned over the table, with the top item "hovered".
+// The menu as buildMenu() in src/webview/main.ts produces it for a right-click
+// on a table: a short top level naming what you clicked, with that element's
+// remaining formats one level down under "Copy as", shown here hovered open.
+//
+// This is static markup because these two shots render preview.css over plain
+// HTML rather than booting the webview bundle, so it has to be kept in step
+// with buildMenu() by hand. (The PDF shot below drives the real menu engine, so
+// it follows along on its own.) The geometry mirrors createMenu(): a submenu
+// sits 4px inside the parent panel's right edge and 4px above its own row.
+const highlighted =
+  'background:var(--vscode-menu-selectionBackground,#0969da); ' +
+  'color:var(--vscode-menu-selectionForeground,#fff);';
 const menu = `
 <div class="mc-menu" style="left:300px; top:250px;">
-  <div class="mc-menu-item" style="background:#0969da; color:#fff;">Copy Table (Rich Text)</div>
-  <div class="mc-menu-item">Copy Table as CSV</div>
-  <div class="mc-menu-item">Copy Table as TSV</div>
-  <div class="mc-menu-item">Copy Table as PNG</div>
-  <div class="mc-menu-item">Copy Whole Document as Rich Text</div>
+  <div class="mc-menu-item">Copy Table</div>
+  <div class="mc-menu-item mc-menu-item--submenu" style="${highlighted}">
+    <span>Copy as</span><span class="mc-menu-arrow">▸</span>
+  </div>
+  <div class="mc-menu-divider"></div>
+  <div class="mc-menu-item">Copy Whole Document</div>
+  <div class="mc-menu-item">Save as PDF…</div>
+  <div class="mc-menu-divider"></div>
+  <div class="mc-menu-item mc-menu-item--submenu">
+    <span>Preferences</span><span class="mc-menu-arrow">▸</span>
+  </div>
+</div>
+<div class="mc-menu mc-menu--sub" style="left:518px; top:279px;">
+  <div class="mc-menu-item">Rich Text</div>
+  <div class="mc-menu-item">CSV</div>
+  <div class="mc-menu-item">TSV</div>
+  <div class="mc-menu-item">PNG</div>
 </div>`;
 
 // Framing shared by every Markdown shot: page background plus a rounded card
