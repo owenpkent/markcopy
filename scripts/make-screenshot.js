@@ -34,17 +34,23 @@ fs.mkdirSync(outDir, { recursive: true });
 // (hljs classes, mermaid/math placeholders, source-line mapping) is exactly
 // what the webview receives in production.
 // ---------------------------------------------------------------------------
-const renderBundle = path.join(outDir, '_render.cjs');
-esbuild.buildSync({
-  entryPoints: [path.join(root, 'src', 'render.ts')],
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  outfile: renderBundle,
-  logLevel: 'silent',
-});
-const { createMarkdownIt } = require(renderBundle);
-fs.unlinkSync(renderBundle);
+function bundleHost(entry) {
+  const outfile = path.join(outDir, `_${entry}.cjs`);
+  esbuild.buildSync({
+    entryPoints: [path.join(root, 'src', `${entry}.ts`)],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outfile,
+    logLevel: 'silent',
+  });
+  const mod = require(outfile);
+  fs.unlinkSync(outfile);
+  return mod;
+}
+
+const { createMarkdownIt } = bundleHost('render');
+const { renderCsvHtml } = bundleHost('csv');
 const md = createMarkdownIt();
 
 const css = fs.readFileSync(path.join(root, 'media', 'preview.css'), 'utf8');
@@ -210,7 +216,56 @@ kubectl rollout status deploy/api --watch
 `;
 
 // ---------------------------------------------------------------------------
-// Shot 5: the real pdf.js viewer (pdfEditor.ts skeleton + `load` message).
+// Shot 5: a .csv file in the grid view, rendered by the real csv.ts + the real
+// webview bundle (which is what attaches the column-resize handles).
+// ---------------------------------------------------------------------------
+const csvSample = `region,rep,units,revenue,margin,close date
+North America,Dana Whitfield,1284,"$412,900",38.2%,2026-03-14
+EMEA,Jules Ferreira,976,"$298,140",41.7%,2026-03-18
+APAC,Wen Zhao,1502,"$511,375",35.9%,2026-02-27
+LATAM,Sofia Marchetti,433,"$121,860",29.4%,2026-04-02
+North America,Priya Raghunathan,1197,"$389,220",40.1%,2026-03-29
+EMEA,Tomas Lindqvist,845,"$264,505",37.6%,2026-04-11
+APAC,Hana Kobayashi,1361,"$447,930",39.8%,2026-03-06
+LATAM,Mateo Delgado,612,"$178,445",31.2%,2026-04-19
+`;
+
+// The CSV layout deliberately has no card frame: the grid is the document, so it
+// fills the panel exactly as it does in the real preview.
+function buildCsvHarness(theme) {
+  const message = {
+    type: 'render',
+    html: renderCsvHtml(csvSample).html,
+    source: csvSample,
+    kind: 'csv',
+    styleProfile: 'github',
+    theme,
+    mermaidConfig: {},
+    syncScroll: false,
+    autoPreview: false,
+    math: false,
+    docKey: 'screenshot-csv',
+  };
+  return `<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="/media/preview.css" rel="stylesheet">
+<script>
+  window.acquireVsCodeApi = () => ({ postMessage() {}, getState() {}, setState() {} });
+</script>
+</head>
+<body>
+  <div id="content" class="markdown-body"></div>
+  <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
+  <div id="mc-toast" class="mc-toast" hidden></div>
+  <script type="module" src="/media/webview.js"></script>
+  <script type="module">
+    window.postMessage(${JSON.stringify(message)}, '*');
+  </script>
+</body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Shot 6: the real pdf.js viewer (pdfEditor.ts skeleton + `load` message).
 // ---------------------------------------------------------------------------
 // A small hand-written PDF (raw objects + xref, like make-sample-pdf.js) that
 // looks like a real document, so the viewer shot shows a plausible page rather
@@ -453,12 +508,28 @@ async function main() {
       'terminal-green.png',
       { width: 880, height: 500, budgetMs: 20000 },
     );
+    await shoot(harness('_shot-csv.html', buildCsvHarness('light')), 'csv-preview.png', {
+      width: 880,
+      height: 420,
+      budgetMs: 8000,
+    });
+    await shoot(harness('_shot-csv-dark.html', buildCsvHarness('dark')), 'csv-preview-dark.png', {
+      width: 880,
+      height: 420,
+      budgetMs: 8000,
+    });
     await shoot(harness('_shot-pdf.html', buildPdfHarness('dark')), 'pdf-viewer.png', {
       width: 880,
       height: 580,
     });
   } finally {
-    for (const f of ['_shot-rendering.html', '_shot-green.html', '_shot-pdf.html']) {
+    for (const f of [
+      '_shot-rendering.html',
+      '_shot-green.html',
+      '_shot-csv.html',
+      '_shot-csv-dark.html',
+      '_shot-pdf.html',
+    ]) {
       fs.rmSync(path.join(root, f), { force: true });
     }
     server.close();

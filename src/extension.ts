@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { createMarkdownIt, escapeHtml } from './render';
 import { PdfEditorProvider } from './pdfEditor';
-import { classifyLink, localImageRef, shouldAutoPreview } from './preview-utils';
+import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
+import { cellEdit, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 
 const VIEW_TYPE = 'markcopy.preview';
@@ -43,7 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
         dismissedPreviews.delete(doc.uri.toString());
         openPreview(context, doc);
       } else {
-        vscode.window.showInformationMessage('MarkCopy: open a Markdown file first.');
+        vscode.window.showInformationMessage('MarkCopy: open a Markdown or CSV file first.');
       }
     }),
 
@@ -141,6 +142,7 @@ function maybeAutoPreview(
     languageId: doc.languageId,
     scheme: doc.uri.scheme,
     docKey: doc.uri.toString(),
+    path: doc.uri.path,
     dismissed: dismissedPreviews,
   });
   if (eligible) {
@@ -157,7 +159,7 @@ function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
   if (uri && uri.scheme === 'file') {
     return vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
   }
-  if (active && active.document.languageId === 'markdown') {
+  if (active && previewKind(active.document.languageId, active.document.uri.path)) {
     return active.document;
   }
   return active?.document;
@@ -226,6 +228,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         void openLink(context, state, msg.href);
       } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
         void exportPdf(context, state, msg.bodyHtml);
+      } else if (msg?.type === 'editCell') {
+        void applyCellEdit(state, msg);
       }
     },
     undefined,
@@ -272,9 +276,19 @@ function update(state: PreviewState): void {
     md = createMarkdownIt({ math });
     mdMath = math;
   }
-  const html = md.render(source, {
-    resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
-  });
+  // Both kinds end up as HTML in the same `render` message; the webview only
+  // needs `kind` to pick the layout (a CSV is a full-width, self-scrolling grid).
+  const kind = previewKind(doc.languageId, state.docUri.path) ?? 'markdown';
+  const html =
+    kind === 'csv'
+      ? renderCsvHtml(source, {
+          delimiter: cfg.get<string>('csv.delimiter', 'auto'),
+          headerRow: cfg.get<boolean>('csv.headerRow', true),
+          maxRows: cfg.get<number>('csv.maxRows', 5000),
+        }).html
+      : md.render(source, {
+          resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
+        });
   state.panel.title = `Preview ${basename(state.docUri)}`;
   // A one-shot heading reveal, set when a link navigated here. The webview also
   // scrolls a newly-targeted document to the top on its own (docKey change).
@@ -284,6 +298,8 @@ function update(state: PreviewState): void {
     type: 'render',
     html,
     source,
+    kind,
+    docVersion: doc.version,
     docKey: state.docUri.toString(),
     revealFragment,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
@@ -293,6 +309,54 @@ function update(state: PreviewState): void {
     autoPreview: cfg.get<boolean>('autoPreview', true),
     math,
   });
+}
+
+// Write one edited CSV cell back into the document.
+//
+// The grid never edits itself: it posts the new value and waits for the document
+// to change, which re-renders the preview. That keeps the file authoritative and
+// puts every cell edit in the editor's own undo stack, so Ctrl+Z works normally.
+//
+// `docVersion` is the version the grid was rendered from. If the document has
+// moved on since (the user typed in the editor, or an earlier edit is still
+// settling), the row the grid is pointing at may no longer be that row, so the
+// edit is dropped rather than applied to the wrong line.
+async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
+  const line = Number(msg.line);
+  const column = Number(msg.column);
+  const value = msg.value;
+  if (!Number.isInteger(line) || !Number.isInteger(column) || typeof value !== 'string') {
+    return;
+  }
+
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
+    return;
+  }
+  if (typeof msg.docVersion === 'number' && msg.docVersion !== doc.version) {
+    return; // stale grid; the re-render already on its way carries the truth
+  }
+
+  const text = doc.getText();
+  const configured = vscode.workspace
+    .getConfiguration('markcopy')
+    .get<string>('csv.delimiter', 'auto');
+  const delimiter = !configured || configured === 'auto' ? sniffDelimiter(text) : configured;
+
+  const edit = cellEdit(text, delimiter, line, column, value);
+  if (!edit) {
+    return;
+  }
+
+  const range = new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end));
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.replace(doc.uri, range, edit.text);
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) {
+    void vscode.window.showWarningMessage('MarkCopy: could not edit this file.');
+  }
 }
 
 // Rewrite a relative/local markdown image src to a webview-safe URI so it loads
@@ -428,7 +492,7 @@ async function exportPdf(
   bodyHtml: string,
 ): Promise<void> {
   try {
-    const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd)$/i, '');
+    const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab)$/i, '');
     const html = await buildPdfHtml(context, bodyHtml, name);
     const dir = context.globalStorageUri;
     await vscode.workspace.fs.createDirectory(dir);

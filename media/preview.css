@@ -21,6 +21,10 @@ body {
   --mc-error-fg: #d1242f;
   --mc-error-bg: #ffebe9;
   --mc-pdf-bg: #525659;
+  --mc-row-alt: #e8ecf1;
+  --mc-row-hover: #d8e6fa;
+  --mc-accent: #0969da;
+  --mc-muted-fg: #8c959f;
   --hljs-comment: #6a737d;
   --hljs-keyword: #d73a49;
   --hljs-string: #032f62;
@@ -50,6 +54,10 @@ body.vscode-high-contrast:not([data-mc-theme='light']):not([data-mc-theme='dark'
   --mc-error-fg: #ff7b72;
   --mc-error-bg: #2d1214;
   --mc-pdf-bg: #2a2a2b;
+  --mc-row-alt: #1b222c;
+  --mc-row-hover: #253040;
+  --mc-accent: #4493f8;
+  --mc-muted-fg: #7d8590;
   --hljs-comment: #8b949e;
   --hljs-keyword: #ff7b72;
   --hljs-string: #a5d6ff;
@@ -75,6 +83,10 @@ body[data-mc-theme='green'] {
   --mc-error-fg: #ff6b6b;
   --mc-error-bg: #1a0a0a;
   --mc-pdf-bg: #050805;
+  --mc-row-alt: #0c1f0e;
+  --mc-row-hover: #16351a;
+  --mc-accent: #00ff00;
+  --mc-muted-fg: #2e7d2e;
   /* Green stays the base (plain text, functions), but keywords get a cool cyan
      accent, strings a warm yellow-green, and numbers an amber, so tokens are
      actually distinguishable instead of a flat wall of green. Comments recede. */
@@ -159,6 +171,240 @@ body {
   background: var(--mc-th-bg);
   font-weight: 600;
 }
+/* ---- CSV / TSV grid ------------------------------------------------------
+   A .csv or .tsv document is parsed in the extension host and rendered as an
+   ordinary <table>, so the right-click copy menu, the themes, and the PDF export
+   all treat it like any other table. These rules are what make it read as a
+   spreadsheet instead of a Markdown table: a scroll container of its own, a
+   header and row-number gutter that stay put while you scroll, zebra striping,
+   and drag handles wired up by src/webview/csvTable.ts. */
+
+/* A CSV document is nothing but the grid, so give it the whole panel and let the
+   grid, not the page, do the scrolling. That is what lets the header stick. */
+body[data-mc-kind='csv'] .markdown-body {
+  max-width: none;
+  padding: 16px 18px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+body[data-mc-kind='csv'] .mc-csv-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mc-csv-wrap {
+  overflow: auto;
+  border: 1px solid var(--mc-border);
+  border-radius: 10px;
+  background: var(--mc-bg);
+  /* The sticky header and gutter paint over the rounded corners without this. */
+  isolation: isolate;
+}
+
+.markdown-body table.mc-csv {
+  display: table;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0;
+  overflow: visible;
+  font-size: 13px;
+  line-height: 1.45;
+  /* Digits line up column-wise, which is most of what makes a grid look tidy. */
+  font-variant-numeric: tabular-nums;
+  /* Size the columns to their contents rather than stretching them across the
+     panel: a two-column file would otherwise get two 300px columns holding one
+     word each. Anything wider than the panel overflows and .mc-csv-wrap scrolls.
+     Once a column is dragged, csvTable.ts replaces this with an explicit px
+     width (see retotal). */
+  width: max-content;
+  max-width: none;
+}
+
+.markdown-body table.mc-csv th,
+.markdown-body table.mc-csv td {
+  position: relative;
+  border: 0;
+  border-bottom: 1px solid var(--mc-border);
+  border-right: 1px solid var(--mc-border);
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+  /* One line per row keeps the rows an even height; a too-wide cell ellipsizes
+     and the reader drags the column open (or double-clicks the grip). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+/* Measuring a column's natural width for double-click auto-fit: the cap and the
+   clipping have to come off or every column would measure the same 420px. */
+.markdown-body table.mc-csv.mc-csv-measuring th,
+.markdown-body table.mc-csv.mc-csv-measuring td {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+.markdown-body table.mc-csv tr > *:last-child {
+  border-right: 0;
+}
+.markdown-body table.mc-csv tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+/* Header: sticky against the wrapper, and opaque so rows scroll under it. */
+.markdown-body table.mc-csv thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--mc-th-bg);
+  font-weight: 600;
+  /* A border on a sticky cell scrolls away with the row underneath it. */
+  box-shadow: inset 0 -1px 0 var(--mc-border);
+  padding-right: 16px;
+}
+
+/* Row-number gutter. `data-mc-ignore` keeps it out of the clipboard; see
+   tableToDelimited in src/webview/table.ts. */
+.markdown-body table.mc-csv .mc-csv-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1%;
+  min-width: 44px;
+  background: var(--mc-th-bg);
+  color: var(--mc-muted-fg);
+  font-weight: 400;
+  text-align: right;
+  user-select: none;
+  box-shadow: inset -1px 0 0 var(--mc-border);
+}
+.markdown-body table.mc-csv thead .mc-csv-gutter {
+  z-index: 3; /* the corner cell sits above both sticky axes */
+  box-shadow:
+    inset -1px 0 0 var(--mc-border),
+    inset 0 -1px 0 var(--mc-border);
+}
+
+.markdown-body table.mc-csv tbody tr:nth-child(even) > * {
+  background: var(--mc-row-alt);
+}
+.markdown-body table.mc-csv tbody tr:hover > * {
+  background: var(--mc-row-hover);
+}
+.markdown-body table.mc-csv tbody tr:hover .mc-csv-gutter {
+  color: var(--mc-fg);
+}
+.markdown-body table.mc-csv .mc-csv-num {
+  text-align: right;
+}
+
+/* Editing. A cell is selected on click and edited on double-click, Enter, F2, or
+   by typing over it (see src/webview/csvEdit.ts). The commit goes to the
+   document, not to the DOM, so these styles only ever cover the transient
+   selected and editing states. */
+.markdown-body table.mc-csv .mc-csv-cell {
+  cursor: cell;
+}
+.markdown-body table.mc-csv .mc-csv-cell--focus {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: -2px;
+  /* Above the neighbouring cells' borders, so the ring is unbroken. */
+  z-index: 1;
+}
+/* Let a tall editor spill over the rows beneath instead of being clipped. The
+   cell keeps its padding: changing it here would resize the cell the instant
+   editing began. */
+.markdown-body table.mc-csv .mc-csv-cell--editing {
+  overflow: visible;
+}
+.mc-csv-input {
+  /* Absolutely positioned on purpose. A <textarea> has an intrinsic width from
+     its `cols` attribute (20 characters by default), and in an auto-layout
+     table that intrinsic width becomes the column's minimum, so an in-flow
+     editor visibly widens the whole column the moment you start typing.
+     Out of flow it contributes nothing to sizing and simply covers the cell. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  /* Matches the cell's own padding, so the text does not shift as it turns into
+     an editor. */
+  padding: 5px 10px;
+  border: 0;
+  outline: 2px solid var(--mc-accent);
+  outline-offset: -2px;
+  border-radius: 0;
+  /* Opaque, so it hides the cell text it is sitting on top of. */
+  background: var(--mc-bg);
+  color: var(--mc-fg);
+  font: inherit;
+  line-height: inherit;
+  resize: none;
+  /* Wrap long values and grow downwards (height is set by csvEdit.ts) rather
+     than scrolling sideways, so what you are typing stays visible. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow: auto;
+  z-index: 5;
+}
+
+/* Resize handle: an invisible grab strip straddling the column edge that tints
+   on hover, drag, and keyboard focus. */
+.mc-csv-grip {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+  /* Drawn as a centered 2px line so the hit area stays comfortably wider. */
+  background: linear-gradient(to right, transparent 3px, currentColor 3px 5px, transparent 5px);
+  color: transparent;
+  transition: color 0.12s ease-out;
+}
+.mc-csv-grip:hover,
+.mc-csv-grip:focus-visible,
+.mc-csv-grip--active {
+  color: var(--mc-accent);
+  outline: none;
+}
+/* Keep the pointer a resize cursor for the whole drag, even once it leaves the
+   grip, and stop the drag from selecting cell text on the way past. */
+body.mc-csv-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.mc-csv-note {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  color: var(--mc-quote-fg);
+  flex: 0 0 auto;
+}
+
+/* Printing (the PDF export) has no viewport to scroll, so unwrap the grid and
+   let it flow across pages. */
+@media print {
+  .mc-csv-wrap {
+    overflow: visible;
+    max-height: none;
+  }
+  .markdown-body table.mc-csv th,
+  .markdown-body table.mc-csv td {
+    white-space: normal;
+    overflow: visible;
+  }
+  .mc-csv-grip {
+    display: none;
+  }
+}
+
 .markdown-body img {
   max-width: 100%;
 }
@@ -235,6 +481,16 @@ pre.mermaid-src {
 .mc-force-light code,
 .mc-force-light th {
   background-color: #f6f8fa !important;
+}
+/* The blanket `background-color: transparent` above would flatten the CSV grid's
+   zebra striping out of anything copied or exported. Put it back in the light
+   palette, on the cells rather than the row, because that is what survives a
+   paste into Word / Gmail / Docs. */
+.mc-force-light table.mc-csv tbody tr:nth-child(even) > * {
+  background-color: #e8ecf1 !important;
+}
+.mc-force-light table.mc-csv .mc-csv-gutter {
+  color: #8c959f !important;
 }
 .mc-force-light a {
   color: #0969da !important;

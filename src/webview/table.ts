@@ -1,10 +1,14 @@
 // Serialize a rendered HTML table to delimiter-separated values. Pass ',' for
 // CSV or '\t' for TSV. CSV fields follow RFC 4180 quoting; TSV flattens tabs and
 // newlines to spaces. Pure enough to unit-test with a jsdom table element.
+//
+// Cells marked `data-mc-ignore` are viewer chrome rather than data (today that
+// is the CSV grid's row-number gutter), so they are left out. What you copy is
+// what the document contains.
 export function tableToDelimited(table: HTMLElement, delimiter: string): string {
   return Array.from(table.querySelectorAll('tr'))
     .map((tr) =>
-      Array.from(tr.querySelectorAll('th,td'))
+      Array.from(tr.querySelectorAll('th:not([data-mc-ignore]),td:not([data-mc-ignore])'))
         .map((c) => escapeField((c.textContent ?? '').trim(), delimiter))
         .join(delimiter),
     )

@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown & PDF Preview",
-  "description": "One-stop Markdown and PDF preview with right-click copy: rich text, per-element (code / table / diagram), raw Markdown, CSV/TSV, and PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV & PDF Preview",
+  "description": "One-stop Markdown, CSV, and PDF preview with right-click copy: rich text, per-element (code / table / diagram), raw Markdown, CSV/TSV, and PNG.",
   "version": "0.5.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -26,6 +26,9 @@
     "markdown",
     "pdf",
     "pdf viewer",
+    "csv",
+    "csv viewer",
+    "tsv",
     "preview",
     "copy",
     "rich text",
@@ -40,9 +43,34 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onLanguage:csv",
+    "onLanguage:tsv"
   ],
   "contributes": {
+    "languages": [
+      {
+        "id": "csv",
+        "aliases": [
+          "CSV",
+          "csv"
+        ],
+        "extensions": [
+          ".csv"
+        ]
+      },
+      {
+        "id": "tsv",
+        "aliases": [
+          "TSV",
+          "tsv"
+        ],
+        "extensions": [
+          ".tsv",
+          ".tab"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "markcopy.openPreview",
@@ -96,19 +124,19 @@
       "editor/context": [
         {
           "command": "markcopy.openPreview",
-          "when": "editorLangId == markdown",
+          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
           "group": "1_markcopy"
         },
         {
           "command": "markcopy.saveAsPdf",
-          "when": "editorLangId == markdown",
+          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
           "group": "1_markcopy"
         }
       ],
       "explorer/context": [
         {
           "command": "markcopy.openPreview",
-          "when": "resourceLangId == markdown",
+          "when": "resourceLangId == markdown || resourceLangId == csv || resourceLangId == tsv",
           "group": "navigation"
         }
       ]
@@ -132,7 +160,7 @@
         "markcopy.autoPreview": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically open the MarkCopy preview to the side when you open a Markdown file. The preview follows the focused editor and keeps your cursor in place. Turn off to open previews manually."
+          "description": "Automatically open the MarkCopy preview to the side when you open a Markdown, CSV, or TSV file. The preview follows the focused editor and keeps your cursor in place. Turn off to open previews manually."
         },
         "markcopy.theme": {
           "type": "string",
@@ -161,6 +189,36 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Render LaTeX math with [KaTeX](https://katex.org). Inline `$...$` and display `$$...$$` become equations you can right-click to copy as an image or as LaTeX. Turn off for documents that use literal dollar signs."
+        },
+        "markcopy.csv.delimiter": {
+          "type": "string",
+          "enum": [
+            "auto",
+            ",",
+            "\t",
+            ";",
+            "|"
+          ],
+          "enumDescriptions": [
+            "Detect the delimiter from the file's contents.",
+            "Comma.",
+            "Tab.",
+            "Semicolon.",
+            "Pipe."
+          ],
+          "default": "auto",
+          "markdownDescription": "Field separator for the CSV/TSV preview. `auto` picks whichever separator splits the file into the most consistent columns."
+        },
+        "markcopy.csv.headerRow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Treat the first row of a CSV/TSV file as column headers. Turn off for files that start straight into data."
+        },
+        "markcopy.csv.maxRows": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1,
+          "description": "Maximum number of CSV/TSV rows to render. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large files."
         }
       }
     }

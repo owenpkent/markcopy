@@ -41,7 +41,7 @@ CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 
-`npm run screenshot` regenerates the README hero image (`docs/media/context-menu.png`) by rendering the real preview with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`).
+`npm run screenshot` regenerates the README images into `docs/media/` (the context menu, the rendered Markdown/math/diagram shot, the green terminal palette, the CSV grid in light and dark, and the PDF viewer) by rendering the real preview bundles with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`). Because it drives the real bundles, it doubles as a way to eyeball a layout change that unit tests cannot see.
 
 ## Tests
 
@@ -52,7 +52,9 @@ npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
-Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`).
+Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`).
+
+jsdom has no layout engine, so anything size-dependent is stubbed (see `tests/csvTable.test.ts` for `getBoundingClientRect`). Tests can prove the _mechanism_ that keeps the grid's geometry correct but not the pixels; check those in the Extension Development Host.
 
 ### Integration tests (VS Code)
 
@@ -60,18 +62,20 @@ Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, h
 npm run test:integration   # downloads VS Code and runs the extension inside it
 ```
 
-Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, and that the preview panel opens. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
+Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, and that the preview panel opens (for both Markdown and CSV). On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)), and the place to start when verifying a webview change by hand. The PDF fixture it uses comes from `node scripts/make-sample-pdf.js` (writes `sample.pdf`, gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)), and the place to start when verifying a webview change by hand. Its fixtures are `sample.md` and `sample.csv` (both committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).
-2. Press **F5** in VS Code. This launches the Extension Development Host with MarkCopy loaded (the `.vscode/launch.json` config runs `npm: compile` first).
-3. In the new window, open `sample.md` and run **MarkCopy: Open Rich Preview to the Side**.
+2. Press **F5** in VS Code. This launches the Extension Development Host with MarkCopy loaded (the `.vscode/launch.json` config runs `npm: compile` first, and opens this repo as the dev host's workspace so the fixtures are to hand).
+3. In the new window, open `sample.md` or `sample.csv`; the preview opens beside it automatically, or run **MarkCopy: Open Rich Preview to the Side**.
 4. Right-click around the preview to exercise the copy paths.
+
+Changes to `package.json` contributions (languages, activation events, menus, settings) are only read when the dev host **process** starts, so close the window and press F5 again rather than reloading it.
 
 To debug the webview itself, open **Developer: Open Webview Developer Tools** from the Command Palette in the Extension Development Host.
 
@@ -85,7 +89,10 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/webview/menu.ts`            | Shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by both webviews. |
 | `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                                                 |
 | `src/webview/pdf.ts`             | PDF webview: pdf.js rendering, page/text copy actions, and its context-menu entry tree.         |
-| `src/webview/table.ts`           | CSV/TSV table serialization (pure, unit-tested).                                                |
+| `src/csv.ts`                     | Host: CSV/TSV parsing (RFC 4180), delimiter sniffing, grid HTML, and cell edits.                |
+| `src/webview/csvTable.ts`        | CSV grid: drag-to-resize columns.                                                               |
+| `src/webview/csvEdit.ts`         | CSV grid: cell selection, navigation, and inline editing.                                       |
+| `src/webview/table.ts`           | CSV/TSV clipboard serialization (pure, unit-tested).                                            |
 | `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                              |
 | `tests/`                         | Vitest unit tests.                                                                              |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                      |

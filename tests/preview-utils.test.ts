@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLink, localImageRef, shouldAutoPreview } from '../src/preview-utils';
+import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from '../src/preview-utils';
 
 describe('localImageRef', () => {
   it('leaves remote and inline URIs untouched', () => {
@@ -101,6 +101,32 @@ describe('classifyLink', () => {
   });
 });
 
+describe('previewKind', () => {
+  it('maps the language ids MarkCopy renders', () => {
+    expect(previewKind('markdown')).toBe('markdown');
+    expect(previewKind('csv')).toBe('csv');
+    expect(previewKind('tsv')).toBe('csv');
+  });
+
+  it('returns undefined for anything else', () => {
+    expect(previewKind('typescript')).toBeUndefined();
+    expect(previewKind('plaintext')).toBeUndefined();
+  });
+
+  // Another extension (or files.associations) can claim .csv, which would
+  // otherwise leave "Open Rich Preview" inert on an obvious spreadsheet.
+  it('falls back to the file extension', () => {
+    expect(previewKind('plaintext', '/a/b/data.csv')).toBe('csv');
+    expect(previewKind('plaintext', '/a/b/data.TSV')).toBe('csv');
+    expect(previewKind('plaintext', '/a/b/notes.markdown')).toBe('markdown');
+    expect(previewKind('plaintext', '/a/b/main.ts')).toBeUndefined();
+  });
+
+  it('prefers the language id over the extension', () => {
+    expect(previewKind('markdown', '/a/b/weird.csv')).toBe('markdown');
+  });
+});
+
 describe('shouldAutoPreview', () => {
   const base = {
     enabled: true,
@@ -118,8 +144,17 @@ describe('shouldAutoPreview', () => {
     expect(shouldAutoPreview({ ...base, enabled: false })).toBe(false);
   });
 
-  it('ignores non-markdown documents', () => {
+  it('ignores documents MarkCopy cannot render', () => {
     expect(shouldAutoPreview({ ...base, languageId: 'plaintext' })).toBe(false);
+  });
+
+  it('opens for CSV and TSV documents too', () => {
+    expect(shouldAutoPreview({ ...base, languageId: 'csv' })).toBe(true);
+    expect(shouldAutoPreview({ ...base, languageId: 'tsv' })).toBe(true);
+  });
+
+  it('falls back to the file extension when the language id is not ours', () => {
+    expect(shouldAutoPreview({ ...base, languageId: 'plaintext', path: '/a/data.csv' })).toBe(true);
   });
 
   it('ignores non-file schemes (untitled, output, git, etc.)', () => {

@@ -96,6 +96,34 @@ export function classifyLink(href: string): LinkTarget | null {
   };
 }
 
+/** How a previewable document is turned into HTML for the webview. */
+export type PreviewKind = 'markdown' | 'csv';
+
+const PREVIEW_LANGUAGES: Record<string, PreviewKind> = {
+  markdown: 'markdown',
+  csv: 'csv',
+  tsv: 'csv',
+};
+
+// What MarkCopy would render this document as, or undefined if it can't preview
+// it. Normally the language id decides. The extension contributes the `csv` and
+// `tsv` ids itself, but another extension (or the user's `files.associations`)
+// can map those files elsewhere, so a recognized extension is accepted too,
+// rather than leaving "Open Rich Preview" inert on an obvious .csv.
+export function previewKind(languageId: string, path = ''): PreviewKind | undefined {
+  const byLanguage = PREVIEW_LANGUAGES[languageId];
+  if (byLanguage) {
+    return byLanguage;
+  }
+  if (/\.(csv|tsv|tab)$/i.test(path)) {
+    return 'csv';
+  }
+  if (/\.(md|markdown|mdown|mkd|mdx)$/i.test(path)) {
+    return 'markdown';
+  }
+  return undefined;
+}
+
 export interface AutoPreviewInput {
   /** Value of the `markcopy.autoPreview` setting. */
   enabled: boolean;
@@ -105,17 +133,20 @@ export interface AutoPreviewInput {
   scheme: string;
   /** Stable key (uri.toString()) of the document. */
   docKey: string;
+  /** Path of the document, used when the language id is not conclusive. */
+  path?: string;
   /** Documents whose preview the user explicitly closed this session. */
   dismissed: ReadonlySet<string>;
 }
 
 // Whether focusing a document should auto-open (or retarget) the preview.
-// Gated by the setting, restricted to on-disk Markdown, and suppressed for any
-// document the user has deliberately closed so we never fight them.
+// Gated by the setting, restricted to on-disk documents MarkCopy can render,
+// and suppressed for any document the user has deliberately closed so we never
+// fight them.
 export function shouldAutoPreview(input: AutoPreviewInput): boolean {
   return (
     input.enabled &&
-    input.languageId === 'markdown' &&
+    previewKind(input.languageId, input.path ?? '') !== undefined &&
     input.scheme === 'file' &&
     !input.dismissed.has(input.docKey)
   );
