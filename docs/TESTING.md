@@ -80,6 +80,7 @@ Open [sample.csv](../sample.csv).
 - [ ] Set `markcopy.csv.maxRows` to `3`: only 3 rows render and a note says how many of the total are hidden.
 - [ ] Turn `markcopy.csv.headerRow` off: the first row becomes ordinary data and there is no pinned header.
 - [ ] Open a `.tsv` (or set `markcopy.csv.delimiter` explicitly): the delimiter is picked up correctly.
+- [ ] Save a `.tsv` whose fields contain commas (e.g. `name,full<TAB>city,town`): it renders as two columns, not three. The file extension wins over what scoring alone would pick.
 
 ### Columns
 
@@ -88,6 +89,8 @@ Open [sample.csv](../sample.csv).
 - [ ] Double-click a divider: the column snaps to fit its widest value.
 - [ ] Tab to a divider and use Left/Right (and Shift+Left/Right): the column resizes; Enter auto-fits it.
 - [ ] After resizing, right-click the grid: **Reset Column Widths** appears and restores the original layout. It does not appear on a grid you have not resized.
+- [ ] Double-click a **header** cell, press **Escape**, then drag that same column's divider: it still resizes. (Ending an edit must not take the divider with it; likewise after committing an unchanged value.)
+- [ ] Tab to a divider and press **Enter**: the column auto-fits and no cell editor opens. Left/Right resize without also moving the cell selection.
 
 ### Editing
 
@@ -105,6 +108,8 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 - [ ] Edit row 2 (whose `product` is already quoted) and check the **other** columns in that line are byte-for-byte unchanged: editing must not reformat the rest of the row.
 - [ ] Edit a cell on row 9 (the short row) past its last field: the row is padded with delimiters rather than shifting other columns.
 - [ ] Edit a cell, then immediately edit the one below: no focus is lost between commits.
+- [ ] Edit two cells in quick succession, committing each with Enter: **both** land in the file. (The second must not be dropped for being one document version behind.)
+- [ ] Start editing a cell, then click straight onto a different cell: the edit is kept and focus stays on the cell you clicked, rather than snapping back.
 - [ ] Type in the text editor while the grid is open: the grid keeps up, and nothing is corrupted.
 - [ ] Arrow keys move the selection; Tab enters the grid once rather than stepping through every cell.
 
@@ -112,8 +117,9 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 
 - [ ] ★ Right-click the grid -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells, and **no row-number column**.
 - [ ] The pasted data round-trips the tricky rows: the quoted comma, the escaped quotes, and the multi-line cell all come back intact.
-- [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme.
-- [ ] **Copy as** -> **PNG** puts an image of the grid on the clipboard.
+- [ ] A field with deliberate leading/trailing spaces keeps them through a **Copy as** -> **CSV** round-trip.
+- [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme, and with **no row-number column**.
+- [ ] **Copy as** -> **PNG** puts an image of the grid on the clipboard, again with no row-number column.
 - [ ] **Save as PDF** exports the grid; it flows across pages rather than being clipped to one screen, and the resize handles are absent.
 
 ## PDF viewer

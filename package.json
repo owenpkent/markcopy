@@ -2,7 +2,7 @@
   "name": "markcopy",
   "displayName": "MarkCopy: Rich Markdown, CSV & PDF Preview",
   "description": "One-stop Markdown, CSV, and PDF preview with right-click copy: rich text, per-element (code / table / diagram), raw Markdown, CSV/TSV, and PNG.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "OwenPKent",
   "license": "MIT",
   "author": "OK Studio",

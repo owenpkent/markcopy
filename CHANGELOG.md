@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.6.0] - 2026-07-27
+
 ### Added
 - **CSV and TSV preview.** Opening a `.csv` or `.tsv` file now renders it as a spreadsheet-style grid instead of leaving you to read raw delimiters. The extension contributes the `csv` and `tsv` language ids and activates on them, so the preview auto-opens beside the file exactly like Markdown does (`markcopy.autoPreview`), and **MarkCopy: Open Rich Preview to the Side** works from the editor and Explorer context menus.
   - **The grid.** A header row and a row-number gutter that stay pinned while you scroll both axes, alternating row colors, row hover highlighting, numeric cells (including `$1,234`, `38.2%`, and accounting-style `(1,234.50)`) aligned right with tabular figures, and columns sized to their contents. Long values are clipped with an ellipsis so every row stays one line tall. All three palettes (light, dark, and green-on-black) are supported.
@@ -24,10 +31,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - Cells marked `data-mc-ignore` are now dropped from every copy path: the CSV/TSV serializer skips them, rich-text copy removes them from its clone, and a PNG capture hides them. No Markdown table emits that attribute, so Markdown copies are unaffected.
 - Preview re-renders triggered by typing are coalesced over an 80 ms window. A Markdown document was cheap to re-render on every keystroke; a CSV costs a delimiter sniff, a full parse, and a grid of up to `markcopy.csv.maxRows` rows.
 - The extension also activates on `onLanguage:mdx`, which `previewKind` already claimed by file extension but could never be reached for.
-
-### Planned
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.5.0] - 2026-07-25
 
@@ -131,7 +134,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/owenpkent/markcopy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/owenpkent/markcopy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/owenpkent/markcopy/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/owenpkent/markcopy/compare/v0.2.2...v0.3.0
