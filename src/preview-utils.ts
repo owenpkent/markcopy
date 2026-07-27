@@ -101,6 +101,7 @@ export type PreviewKind = 'markdown' | 'csv';
 
 const PREVIEW_LANGUAGES: Record<string, PreviewKind> = {
   markdown: 'markdown',
+  mdx: 'markdown',
   csv: 'csv',
   tsv: 'csv',
 };

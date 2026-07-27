@@ -6,10 +6,18 @@
 // is the CSV grid's row-number gutter), so they are left out. What you copy is
 // what the document contains.
 export function tableToDelimited(table: HTMLElement, delimiter: string): string {
+  // A CSV grid shows the file's own fields, so its cell text is data: trimming
+  // it would quietly drop significant leading and trailing spaces from a copy
+  // that is otherwise a faithful round-trip. In a Markdown table the same
+  // whitespace is incidental rendering, so it still goes.
+  const verbatim = table.classList.contains('mc-csv');
   return Array.from(table.querySelectorAll('tr'))
     .map((tr) =>
       Array.from(tr.querySelectorAll('th:not([data-mc-ignore]),td:not([data-mc-ignore])'))
-        .map((c) => escapeField((c.textContent ?? '').trim(), delimiter))
+        .map((c) => {
+          const text = c.textContent ?? '';
+          return escapeField(verbatim ? text : text.trim(), delimiter);
+        })
         .join(delimiter),
     )
     .join('\r\n');

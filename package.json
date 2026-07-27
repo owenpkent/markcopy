@@ -44,6 +44,7 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:markdown",
+    "onLanguage:mdx",
     "onLanguage:csv",
     "onLanguage:tsv"
   ],

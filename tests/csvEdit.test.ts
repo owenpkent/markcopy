@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderCsvHtml } from '../src/csv';
 import { enableCsvEditing } from '../src/webview/csvEdit';
+import { enhanceCsvTables } from '../src/webview/csvTable';
 
 // name,qty  /  Widget,3  /  Gadget,12: header on line 0, body on lines 1 and 2.
 const CSV = 'name,qty\nWidget,3\nGadget,12';
@@ -21,6 +22,9 @@ beforeEach(() => {
   enableCsvEditing(document.createElement('div'), () => {});
   commit = vi.fn();
   document.body.innerHTML = renderCsvHtml(CSV).html;
+  // Wire the grid the way main.ts does. The resize handles live inside the same
+  // cells the editor covers, so editing has to be exercised with them present.
+  enhanceCsvTables(document.body);
   enableCsvEditing(document.body, commit);
 });
 
@@ -272,6 +276,44 @@ describe('editing a cell', () => {
   });
 });
 
+// The resize grip is a child of the very cell the editor covers, and it sits in
+// the bubble path of the grid's own key handling. Both are easy to break from
+// the other module, so pin them from here, where the two are wired together.
+describe('living alongside the column resize handles', () => {
+  const grip = (c: number): HTMLElement => cell(-1, c).querySelector('.mc-csv-grip') as HTMLElement;
+
+  it('keeps the grip when an edit is abandoned', () => {
+    expect(grip(0)).not.toBeNull();
+    key(cell(-1, 0), 'Enter');
+    key(editor()!, 'Escape');
+    expect(grip(0)).not.toBeNull();
+  });
+
+  it('keeps the grip when an edit commits an unchanged value', () => {
+    key(cell(-1, 0), 'Enter');
+    key(editor()!, 'Enter');
+    expect(commit).not.toHaveBeenCalled();
+    expect(grip(0)).not.toBeNull();
+  });
+
+  it('leaves the cell showing its value after an abandoned edit', () => {
+    key(cell(-1, 0), 'Enter');
+    editor()!.value = 'scratch';
+    key(editor()!, 'Escape');
+    expect(cell(-1, 0).textContent).toBe('name');
+  });
+
+  it('does not open the cell editor when Enter auto-fits a column', () => {
+    key(grip(0), 'Enter');
+    expect(editor()).toBeNull();
+  });
+
+  it('does not move the selection when an arrow resizes a column', () => {
+    key(grip(0), 'ArrowRight');
+    expect(document.querySelector('.mc-csv-cell--focus')).toBeNull();
+  });
+});
+
 describe('focus across re-renders', () => {
   it('restores the focused cell after the grid is rebuilt', () => {
     click(cell(1, 1));
@@ -284,5 +326,20 @@ describe('focus across re-renders', () => {
     enableCsvEditing(document.body, commit);
 
     expect(document.activeElement).toBe(cell(1, 1));
+  });
+
+  // Clicking straight from an open editor onto another cell blurs the editor,
+  // which commits. The commit must not drag focus back to the cell just left.
+  it('leaves focus on a cell clicked into from an open editor', () => {
+    click(cell(0, 0));
+    key(cell(0, 0), 'Enter');
+    editor()!.value = 'Sprocket';
+    // No synthetic blur: focusing the new cell is what blurs the editor, and the
+    // commit therefore runs from inside that .focus() call.
+    click(cell(1, 1));
+
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+    expect(cell(1, 1).classList.contains('mc-csv-cell--focus')).toBe(true);
+    expect(cell(0, 0).classList.contains('mc-csv-cell--focus')).toBe(false);
   });
 });

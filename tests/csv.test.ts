@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { isNumeric, parseDelimited, renderCsvHtml, sniffDelimiter } from '../src/csv';
+import {
+  delimiterHint,
+  isNumeric,
+  parseDelimited,
+  renderCsvHtml,
+  sniffDelimiter,
+} from '../src/csv';
 
 const cellsOf = (text: string, delimiter = ','): string[][] =>
   parseDelimited(text, delimiter).records.map((r) => r.cells);
@@ -79,6 +85,19 @@ describe('parseDelimited source lines', () => {
     const { records } = parseDelimited('a\n\n\nb', ',');
     expect(records.map((r) => r.line)).toEqual([0, 3]);
   });
+
+  // Line terminators inside a quoted field have to be counted exactly the way
+  // the document counts them, or `line` stops matching the editor and scroll
+  // sync points at the wrong row.
+  it('counts a CRLF inside a quoted field once', () => {
+    const { records } = parseDelimited('h\r\n"multi\r\nline"\r\nc', ',');
+    expect(records.map((r) => r.line)).toEqual([0, 1, 3]);
+  });
+
+  it('counts a lone CR inside a quoted field', () => {
+    const { records } = parseDelimited('h\r"multi\rline"\rc', ',');
+    expect(records.map((r) => r.line)).toEqual([0, 1, 3]);
+  });
 });
 
 describe('parseDelimited truncation', () => {
@@ -96,6 +115,22 @@ describe('parseDelimited truncation', () => {
 
   it('counts records past the cap that contain quoted newlines', () => {
     const { records, dropped } = parseDelimited('a\n"x\ny"\nb', ',', 1);
+    expect(records).toHaveLength(1);
+    expect(dropped).toBe(2);
+  });
+
+  // Past the cap the parser stops accumulating field text, so it can no longer
+  // ask "is this field empty?" to decide whether a quote opens a quoted field.
+  // If that regressed, the delimiters inside these quotes would split rows and
+  // the count would come out wrong.
+  it('keeps quoting rules past the cap, where no text is accumulated', () => {
+    const { records, dropped } = parseDelimited('a,b\n"x,y",z\n"p,q",r', ',', 1);
+    expect(records).toHaveLength(1);
+    expect(dropped).toBe(2);
+  });
+
+  it('keeps treating a mid-field quote as data past the cap', () => {
+    const { records, dropped } = parseDelimited('a,b\nx"y,z\np,q', ',', 1);
     expect(records).toHaveLength(1);
     expect(dropped).toBe(2);
   });
@@ -133,6 +168,48 @@ describe('sniffDelimiter', () => {
 
   it('falls back to comma for empty input', () => {
     expect(sniffDelimiter('')).toBe(',');
+  });
+});
+
+describe('sniffDelimiter with a type hint', () => {
+  // A .tsv whose fields contain commas: scoring alone picks the comma, which
+  // splits this two-column file into three and would then write edits back with
+  // the wrong separator.
+  const tsv = 'name,full\tcity,town\nAda,A\tLondon,L\nBob,B\tParis,P';
+
+  it('scores the comma higher without a hint', () => {
+    expect(sniffDelimiter(tsv)).toBe(',');
+  });
+
+  it('takes the hinted tab for a tsv document', () => {
+    expect(sniffDelimiter(tsv, '\t')).toBe('\t');
+    expect(parseDelimited(tsv, sniffDelimiter(tsv, '\t')).records[0].cells).toEqual([
+      'name,full',
+      'city,town',
+    ]);
+  });
+
+  it('ignores a hint the file does not actually support', () => {
+    // Comma-separated content that happens to be named .tsv: the tab splits
+    // nothing, so scoring still decides.
+    expect(sniffDelimiter('a,b,c\n1,2,3', '\t')).toBe(',');
+  });
+});
+
+describe('delimiterHint', () => {
+  it('hints tab for the tsv language', () => {
+    expect(delimiterHint('tsv')).toBe('\t');
+  });
+
+  it.each(['/tmp/data.tsv', '/tmp/data.TAB'])('hints tab for %s', (path) => {
+    expect(delimiterHint('plaintext', path)).toBe('\t');
+  });
+
+  it.each([
+    ['csv', '/tmp/data.csv'],
+    ['markdown', '/tmp/readme.md'],
+  ])('hints nothing for %s', (languageId, path) => {
+    expect(delimiterHint(languageId, path)).toBeUndefined();
   });
 });
 

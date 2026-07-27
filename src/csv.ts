@@ -8,7 +8,7 @@
 // menu treats the result as an ordinary table (copy as rich text / CSV / TSV /
 // PNG all work without knowing where the table came from).
 
-import { escapeHtml } from './render';
+import { escapeAttr, escapeHtml } from './render';
 
 /** The delimiters we sniff for, in tie-break order. */
 export const DELIMITERS = [',', '\t', ';', '|'] as const;
@@ -73,6 +73,11 @@ export function parseDelimited(
   // Whether anything at all has been seen for the record in progress. Lets a
   // trailing newline close the last record without opening an empty one.
   let open = false;
+  // Whether the field in progress has consumed any character yet. Tracked apart
+  // from `field` because past `maxRecords` we stop accumulating text, and the
+  // "a quote only opens a field at its start" rule still has to hold so the
+  // remaining records are counted correctly.
+  let dirty = false;
   let line = 0; // line the record in progress started on
   let scanLine = 0; // line the cursor is on
 
@@ -86,6 +91,7 @@ export function parseDelimited(
       spans.push({ start: fieldStart + base, end: end + base });
     }
     field = '';
+    dirty = false;
   };
 
   const endRecord = (end: number, nextStart: number): void => {
@@ -108,25 +114,33 @@ export function parseDelimited(
     if (inQuotes) {
       if (ch === '"') {
         if (src[i + 1] === '"') {
-          field += '"';
+          if (keeping()) {
+            field += '"';
+          }
           i++;
         } else {
           inQuotes = false;
         }
       } else {
-        if (ch === '\n') {
+        // Count the same line terminators the document does, so `line` keeps
+        // matching the editor's numbering: LF, and a CR that is not part of a
+        // CRLF pair (the LF of a pair does the counting for both).
+        if (ch === '\n' || (ch === '\r' && src[i + 1] !== '\n')) {
           scanLine++;
         }
-        field += ch;
+        if (keeping()) {
+          field += ch;
+        }
       }
       continue;
     }
 
-    if (ch === '"' && field === '') {
+    if (ch === '"' && !dirty) {
       // Only a quote at the very start of a field opens a quoted field; anywhere
       // else it is literal data (`a"b`).
       inQuotes = true;
       open = true;
+      dirty = true;
     } else if (ch === delimiter) {
       endField(i);
       fieldStart = i + 1;
@@ -139,51 +153,84 @@ export function parseDelimited(
       }
       scanLine++;
       // A blank line between records is not a record.
-      if (open || field !== '') {
+      if (open || dirty) {
         endRecord(eol, i + 1);
       } else {
         line = scanLine;
         fieldStart = i + 1;
       }
     } else {
-      field += ch;
+      if (keeping()) {
+        field += ch;
+      }
       open = true;
+      dirty = true;
     }
   }
 
-  if (open || field !== '') {
+  if (open || dirty) {
     endRecord(src.length, src.length);
   }
 
   return { records, dropped };
 }
 
+/**
+ * The delimiter a document's own type implies, if any. A `.tsv` or `.tab` file
+ * has already told us what separates its fields; nothing else has.
+ */
+export function delimiterHint(languageId: string, path = ''): Delimiter | undefined {
+  return languageId === 'tsv' || /\.(tsv|tab)$/i.test(path) ? '\t' : undefined;
+}
+
+// How well one candidate delimiter splits a sample, or null if it does not
+// split it into a table at all.
+function scoreDelimiter(
+  sample: string,
+  delimiter: string,
+): { columns: number; consistent: boolean } | null {
+  const { records } = parseDelimited(sample, delimiter, 20);
+  // The last record of a truncated sample is usually a partial line; drop it
+  // so a clipped row does not read as an inconsistent one.
+  const rows = records.length > 1 ? records.slice(0, -1) : records;
+  if (rows.length === 0) {
+    return null;
+  }
+  const widths = rows.map((r) => r.cells.length);
+  const columns = widths[0];
+  if (columns < 2) {
+    return null;
+  }
+  return { columns, consistent: widths.every((w) => w === columns) };
+}
+
 // Guess which delimiter a document uses by parsing its first few kilobytes with
 // each candidate and preferring the one that yields the most columns at a
 // consistent width. Files with a single column (no delimiter at all) fall back
 // to a comma, which renders them as a one-column table rather than nothing.
-export function sniffDelimiter(text: string): Delimiter {
+//
+// `hint` is the delimiter the document's type implies (see delimiterHint). It is
+// taken as long as it actually splits the file into consistent columns, because
+// scoring alone gets a TSV wrong: fields holding commas score comma higher than
+// tab, which would shred a two-column file into three and then write edits back
+// with the wrong separator.
+export function sniffDelimiter(text: string, hint?: Delimiter): Delimiter {
   const sample = text.slice(0, 64 * 1024);
+  if (hint && scoreDelimiter(sample, hint)?.consistent) {
+    return hint;
+  }
+
   let best: Delimiter = ',';
   let bestScore = -1;
 
   for (const delimiter of DELIMITERS) {
-    const { records } = parseDelimited(sample, delimiter, 20);
-    // The last record of a truncated sample is usually a partial line; drop it
-    // so a clipped row does not read as an inconsistent one.
-    const rows = records.length > 1 ? records.slice(0, -1) : records;
-    if (rows.length === 0) {
+    const scored = scoreDelimiter(sample, delimiter);
+    if (!scored) {
       continue;
     }
-    const widths = rows.map((r) => r.cells.length);
-    const columns = widths[0];
-    if (columns < 2) {
-      continue;
-    }
-    const consistent = widths.every((w) => w === columns);
     // Consistency dominates: a file of clean 3-column rows beats one where a
     // stray character happens to split more fields on some lines.
-    const score = (consistent ? 1000 : 0) + columns;
+    const score = (scored.consistent ? 1000 : 0) + scored.columns;
     if (score > bestScore) {
       bestScore = score;
       best = delimiter;
@@ -253,6 +300,8 @@ export function cellEdit(
 export interface CsvHtmlOptions {
   /** 'auto' sniffs the delimiter; anything else is used verbatim. */
   delimiter?: 'auto' | string;
+  /** Delimiter the document's type implies, consulted only when sniffing. */
+  hint?: Delimiter;
   /** Treat the first record as column headers. Default true. */
   headerRow?: boolean;
   /** Body rows to render before truncating. Default 5000. */
@@ -291,7 +340,7 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
   const headerRow = opts.headerRow !== false;
   const maxRows = Math.max(1, opts.maxRows ?? 5000);
   const delimiter =
-    !opts.delimiter || opts.delimiter === 'auto' ? sniffDelimiter(text) : opts.delimiter;
+    !opts.delimiter || opts.delimiter === 'auto' ? sniffDelimiter(text, opts.hint) : opts.delimiter;
 
   // One extra record so the header does not eat into the body-row budget.
   const { records, dropped } = parseDelimited(text, delimiter, maxRows + (headerRow ? 1 : 0));
@@ -328,7 +377,9 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
     parts.push('<th class="mc-csv-gutter" data-mc-ignore="1" aria-hidden="true"></th>');
     for (let c = 0; c < columns; c++) {
       const value = header.cells[c] ?? '';
-      parts.push(`<th scope="col" title="${attr(value)}"><span>${escapeHtml(value)}</span></th>`);
+      parts.push(
+        `<th scope="col" title="${escapeAttr(value)}"><span>${escapeHtml(value)}</span></th>`,
+      );
     }
     parts.push('</tr></thead>');
   }
@@ -359,10 +410,6 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
   parts.push('</div>');
 
   return { html: parts.join(''), delimiter, rows: body.length, columns };
-}
-
-function attr(s: string): string {
-  return escapeHtml(s).replace(/"/g, '&quot;');
 }
 
 function num(n: number): string {

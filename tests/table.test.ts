@@ -53,4 +53,21 @@ describe('tableToDelimited', () => {
     const table = document.querySelector('table') as HTMLElement;
     expect(tableToDelimited(table, ',')).toBe('Name\r\nAda');
   });
+
+  // A CSV grid's cell text is the file's own field; a Markdown table's is the
+  // product of rendering. Only the latter's surrounding whitespace is noise.
+  describe('whitespace', () => {
+    const build = (cls: string): HTMLElement => {
+      document.body.innerHTML = `<table class="${cls}"><tbody><tr><td>  pad  </td><td>b</td></tr></tbody></table>`;
+      return document.querySelector('table') as HTMLElement;
+    };
+
+    it('keeps significant spaces in a CSV grid', () => {
+      expect(tableToDelimited(build('mc-csv'), ',')).toBe('  pad  ,b');
+    });
+
+    it('still trims a Markdown table', () => {
+      expect(tableToDelimited(build(''), ',')).toBe('pad,b');
+    });
+  });
 });
