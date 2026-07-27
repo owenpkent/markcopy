@@ -5,7 +5,11 @@
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      // Open this repo as the dev host's workspace so the manual-test fixtures
+      // (sample.md, sample.csv, and sample.pdf once generated) are one click away
+      // in the Explorer. Without the folder argument the dev host starts empty,
+      // and there is nothing to preview.
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "preLaunchTask": "npm: compile"
     }

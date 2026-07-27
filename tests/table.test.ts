@@ -44,4 +44,13 @@ describe('tableToDelimited', () => {
   it('produces TSV with tab separators', () => {
     expect(tableToDelimited(makeTable(), '\t')).toBe('Feature\tVal\r\nCSV, x\tYes');
   });
+
+  // The CSV preview's row-number gutter is viewer chrome, not data.
+  it('leaves cells marked data-mc-ignore out', () => {
+    document.body.innerHTML =
+      '<table><thead><tr><th data-mc-ignore="1"></th><th>Name</th></tr></thead>' +
+      '<tbody><tr><th data-mc-ignore="1">1</th><td>Ada</td></tr></tbody></table>';
+    const table = document.querySelector('table') as HTMLElement;
+    expect(tableToDelimited(table, ',')).toBe('Name\r\nAda');
+  });
 });

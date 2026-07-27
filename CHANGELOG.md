@@ -4,6 +4,25 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- **CSV and TSV preview.** Opening a `.csv` or `.tsv` file now renders it as a spreadsheet-style grid instead of leaving you to read raw delimiters. The extension contributes the `csv` and `tsv` language ids and activates on them, so the preview auto-opens beside the file exactly like Markdown does (`markcopy.autoPreview`), and **MarkCopy: Open Rich Preview to the Side** works from the editor and Explorer context menus.
+  - **The grid.** A header row and a row-number gutter that stay pinned while you scroll both axes, alternating row colors, row hover highlighting, numeric cells (including `$1,234`, `38.2%`, and accounting-style `(1,234.50)`) aligned right with tabular figures, and columns sized to their contents. Long values are clipped with an ellipsis so every row stays one line tall. All three palettes (light, dark, and green-on-black) are supported.
+  - **Resizable columns.** Drag any column divider to resize it. Double-click a divider (or focus it and press Enter) to fit the column to its widest cell; the arrow keys nudge a focused divider, with Shift for coarse steps. Right-click a grid you have resized for **Reset Column Widths**. The dividers are `role="separator"` and keyboard-reachable.
+  - **Parsing.** Fields follow RFC 4180, so commas, quotes (`""`), and newlines inside a quoted cell all survive, and CRLF/LF/CR line endings and a UTF-8 BOM are handled. The delimiter is detected from the file's contents (comma, tab, semicolon, or pipe) by whichever splits it into the most consistent columns. Ragged rows are padded out to the widest row.
+  - **Copying works as it does everywhere else.** The grid is a real `<table>`, so the existing right-click menu applies unchanged: **Copy Table** as rich text, or **Copy as** CSV, TSV, or PNG. The row-number gutter is marked `data-mc-ignore` and is excluded from the CSV/TSV serializers, so what you copy is the data in the file, not the viewer's chrome. **Save as PDF** works too.
+  - **Editable cells.** Click a cell to select it, then edit it: double-click, Enter, F2, or just start typing (which replaces the value, as in a spreadsheet). Enter commits and moves down, Tab commits and moves right, Shift+Enter puts a newline *inside* the cell, Escape discards, and Delete clears. Arrow keys move between cells, and the grid takes a single Tab stop rather than one per cell. Headers are editable too.
+    - Edits are written straight to the file, so `Ctrl+Z` in the editor undoes them like any other change, and the grid and the text always agree.
+    - Only the edited field is rewritten. The rest of the row keeps its exact original bytes, including quoting MarkCopy would not have chosen itself and the file's existing line endings, so editing one cell never churns the whole file. Quotes are added or dropped only as the new value requires, and a value containing a comma, a quote, or a newline round-trips intact.
+    - A row shorter than the grid is wide is padded out in place when you edit past its end.
+  - **Large files.** Rendering stops at `markcopy.csv.maxRows` (default 5000) and the grid reports exactly how many rows it is hiding, rather than freezing the preview on a huge file.
+  - New settings: `markcopy.csv.delimiter` (`auto` by default), `markcopy.csv.headerRow`, and `markcopy.csv.maxRows`.
+
+### Fixed
+- The Extension Development Host (F5) started with no folder open, so none of the manual-test fixtures were reachable without opening one by hand. `.vscode/launch.json` now opens the repo as the dev host's workspace.
+
+### Changed
+- `tableToDelimited` (the CSV/TSV clipboard serializer) now skips cells marked `data-mc-ignore`. No Markdown table emits that attribute, so Markdown table copies are unaffected.
+
 ### Planned
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).

@@ -29,6 +29,25 @@ suite('MarkCopy integration', () => {
     assert.strictEqual(cfg.get('syncScroll'), true);
     assert.strictEqual(cfg.get('theme'), 'auto');
     assert.strictEqual(cfg.get('autoPreview'), true);
+    assert.strictEqual(cfg.get('csv.delimiter'), 'auto');
+    assert.strictEqual(cfg.get('csv.headerRow'), true);
+    assert.strictEqual(cfg.get('csv.maxRows'), 5000);
+  });
+
+  // The extension contributes the `csv` and `tsv` language ids itself. If that
+  // contribution ever regressed, `onLanguage:csv` would never fire and the CSV
+  // preview would silently never activate.
+  test('claims the csv and tsv language ids', async () => {
+    const languages = await vscode.languages.getLanguages();
+    assert.ok(languages.includes('csv'), 'csv language id not registered');
+    assert.ok(languages.includes('tsv'), 'tsv language id not registered');
+  });
+
+  test('a .csv file is recognized as the csv language', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'data.csv');
+    fs.writeFileSync(file, 'name,qty\nWidget,3\n');
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    assert.strictEqual(doc.languageId, 'csv');
   });
 
   test('opening the preview creates a preview tab', async () => {
@@ -69,6 +88,23 @@ suite('MarkCopy integration', () => {
     assert.ok(
       labels.some((label) => label === 'Preview auto.md'),
       `expected an auto-opened preview for auto.md, saw: ${JSON.stringify(labels)}`,
+    );
+  });
+
+  test('auto-opens a preview when an on-disk CSV file is focused', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'sales.csv');
+    fs.writeFileSync(file, 'region,units\n"North, America",1284\nEMEA,976\n');
+
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    await vscode.window.showTextDocument(doc);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    const labels = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .map((tab) => tab.label);
+    assert.ok(
+      labels.some((label) => label === 'Preview sales.csv'),
+      `expected an auto-opened preview for sales.csv, saw: ${JSON.stringify(labels)}`,
     );
   });
 });

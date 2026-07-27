@@ -14,9 +14,13 @@ The manual layer exists because the interesting behavior lives inside webviews, 
 
 ## Setting up a manual pass
 
-1. Build and launch: `npm run compile`, then **F5** in VS Code (the Extension Development Host). For a release candidate, test the packaged artifact instead: `npm run vsix`, then `code --install-extension markcopy-<version>.vsix` in a regular window.
+1. Build and launch: `npm run compile`, then **F5** in VS Code (the Extension Development Host). The launch config opens this repo as the dev host's workspace, so the fixtures below are already in its Explorer. For a release candidate, test the packaged artifact instead: `npm run vsix`, then `code --install-extension markcopy-<version>.vsix` in a regular window.
+
+   Changing `package.json` contributions (languages, activation events, menus, settings) only takes effect when the dev host **process** starts. After editing the manifest, close the dev host window and press F5 again; a reload is not always enough.
+
 2. Fixtures:
    - [sample.md](../sample.md) (repo root) exercises the Markdown surface: tables, code, Mermaid, math, images.
+   - [sample.csv](../sample.csv) (repo root) exercises the CSV grid: quoted commas, escaped quotes, a newline inside a cell, currency/percent/negative numbers, a ragged row, and non-ASCII text.
    - `sample.pdf` (repo root, gitignored): generate it once with `node scripts/make-sample-pdf.js`. Twelve pages, each labeled with its page number, so the page indicator and go-to-page are easy to eyeball.
 3. To inspect a webview while testing, run **Developer: Open Webview Developer Tools** from the Command Palette.
 
@@ -55,6 +59,62 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
 - [ ] With sync scroll on, scrolling the editor scrolls the preview to match.
 - [ ] **MarkCopy: Save as PDF** produces a PDF of the document.
+
+## CSV / TSV grid
+
+Open [sample.csv](../sample.csv).
+
+### Rendering
+
+- [ ] ★ The preview auto-opens to the side and shows a grid, not raw text.
+- [ ] The first row is a header; it stays pinned when you scroll down, and the row-number gutter stays pinned when you scroll right.
+- [ ] Rows alternate background color, and hovering a row highlights the whole row including its number.
+- [ ] `units`, `revenue`, `margin` are right-aligned; `product` and `notes` are left-aligned.
+- [ ] Row 2's `product` is `Gadget, deluxe` in one cell (a quoted comma did not split it).
+- [ ] Row 4's `notes` contains `Customer said "finally, one that fits"` with real quotes.
+- [ ] Row 5's `notes` holds both of its lines in a single cell, and the row is still one line tall (clipped with an ellipsis).
+- [ ] Row 9 is short one field; it is padded with empty cells rather than shifting the columns.
+- [ ] Row 10 renders `Café Ünïcode` correctly.
+- [ ] Editing the file in the editor updates the grid live.
+- [ ] All three themes (Auto/Light/Dark, and Green on black) style the grid, including the stripes and the gutter.
+- [ ] Set `markcopy.csv.maxRows` to `3`: only 3 rows render and a note says how many of the total are hidden.
+- [ ] Turn `markcopy.csv.headerRow` off: the first row becomes ordinary data and there is no pinned header.
+- [ ] Open a `.tsv` (or set `markcopy.csv.delimiter` explicitly): the delimiter is picked up correctly.
+
+### Columns
+
+- [ ] ★ Drag a column divider: that column resizes, its neighbors do not, and the cursor stays a resize cursor for the whole drag.
+- [ ] Drag a column very narrow: it stops at a usable minimum instead of collapsing.
+- [ ] Double-click a divider: the column snaps to fit its widest value.
+- [ ] Tab to a divider and use Left/Right (and Shift+Left/Right): the column resizes; Enter auto-fits it.
+- [ ] After resizing, right-click the grid: **Reset Column Widths** appears and restores the original layout. It does not appear on a grid you have not resized.
+
+### Editing
+
+Keep the file open in the editor beside the grid so you can watch the text change.
+
+- [ ] ★ Double-click a cell, type a new value, press **Enter**: the grid and the file both update, and focus lands on the cell below.
+- [ ] ★ **Ctrl+Z** in the text editor undoes the edit, and the grid follows.
+- [ ] Select a cell and just start typing: editing begins with the typed character replacing the old value.
+- [ ] **Enter** on a selected cell opens the editor with the existing value intact (F2 too).
+- [ ] **Tab** commits and moves right; **Escape** discards; **Delete** clears a cell.
+- [ ] **Shift+Enter** inserts a newline inside the cell; committing wraps the value in quotes in the file, and the grid still shows the row one line tall.
+- [ ] Edit a header cell: the first line of the file changes.
+- [ ] Type a value containing a comma (`Gadget, deluxe`): the file gains quotes around it and the grid still shows one cell.
+- [ ] Type a value containing a quote: the file doubles it (`""`) and the grid shows a single quote.
+- [ ] Edit row 2 (whose `product` is already quoted) and check the **other** columns in that line are byte-for-byte unchanged: editing must not reformat the rest of the row.
+- [ ] Edit a cell on row 9 (the short row) past its last field: the row is padded with delimiters rather than shifting other columns.
+- [ ] Edit a cell, then immediately edit the one below: no focus is lost between commits.
+- [ ] Type in the text editor while the grid is open: the grid keeps up, and nothing is corrupted.
+- [ ] Arrow keys move the selection; Tab enters the grid once rather than stepping through every cell.
+
+### Copy and export
+
+- [ ] ★ Right-click the grid -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells, and **no row-number column**.
+- [ ] The pasted data round-trips the tricky rows: the quoted comma, the escaped quotes, and the multi-line cell all come back intact.
+- [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme.
+- [ ] **Copy as** -> **PNG** puts an image of the grid on the clipboard.
+- [ ] **Save as PDF** exports the grid; it flows across pages rather than being clipped to one screen, and the resize handles are absent.
 
 ## PDF viewer
 

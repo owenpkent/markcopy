@@ -46,6 +46,10 @@ Copy as:
 | TSV    | `text/plain` (tab-separated)             | Excel, Google Sheets (as real cells)   |
 | PNG    | `image/png`                              | Slides, chat, anywhere an image works  |
 
+This applies to the CSV/TSV grid too: a previewed `.csv` renders as a real table, so it offers exactly the same actions. Its row-number gutter is viewer chrome (marked `data-mc-ignore`) and is left out of the CSV and TSV output, so what you copy is the data in the file.
+
+A grid you have resized also gets one non-copy row, **Reset Column Widths**, which restores the automatic column sizing.
+
 ### Mermaid diagram
 
 Top level:

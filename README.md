@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown & PDF Preview
+# MarkCopy: Rich Markdown, CSV & PDF Preview
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens PDFs too, so one extension previews both Markdown and PDF.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid and PDFs with a selectable text layer, so one extension previews all three.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -21,6 +21,12 @@ MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark
 
 ![The MarkCopy preview and copy menu in a dark VS Code theme](docs/media/context-menu-dark.png)
 
+Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that stay put as you scroll, alternating row colors, numbers aligned right, and columns you can drag to resize (double-click a divider to fit it to its contents). Cells are editable in place, and edits go straight into the file, so Ctrl+Z undoes them normally.
+
+![A CSV file rendered as a spreadsheet-style grid in the MarkCopy preview](docs/media/csv-preview.png)
+
+![The same CSV grid in a dark VS Code theme](docs/media/csv-preview-dark.png)
+
 ## Compared to the alternatives
 
 |                                          | Built-in | Markdown Preview Enhanced | MarkCopy |
@@ -31,6 +37,8 @@ MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark
 | Diagram as PNG to clipboard              |    No    |      Export to file       | **Yes**  |
 | Copy block as Markdown source            |    No    |            No             | **Yes**  |
 | Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
+| CSV / TSV grid preview                   |    No    |            No             | **Yes**  |
+| Edit CSV cells in the preview            |    No    |            No             | **Yes**  |
 | PDF preview built in                     |    No    |            No             | **Yes**  |
 
 ## Why it exists
@@ -49,14 +57,18 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
 - **Save as PDF.** Export the rendered preview to a self-contained HTML file that opens in your browser and prints to PDF, with equations, diagrams, highlighted code, and local images all intact and text still selectable. Run **MarkCopy: Save as PDF** (Command Palette), click the PDF button in the preview's title bar, or use **Save as PDF…** in the right-click menu.
+- **CSV and TSV preview, with editing.** Open a `.csv` or `.tsv` and it renders as a spreadsheet-style grid instead of a wall of commas: a sticky header row and row-number gutter, alternating row colors, numeric columns aligned right, and long values clipped with an ellipsis so rows stay one line tall. The delimiter is detected automatically (comma, tab, semicolon, or pipe) and quoted fields follow RFC 4180, so commas, quotes, and newlines inside a cell all survive. See [Settings](#settings) for `markcopy.csv.*`.
+  - **Edit cells in place.** Click to select, then double-click, press Enter or F2, or just start typing. **Enter** commits and moves down, **Tab** commits and moves right, **Shift+Enter** puts a newline inside the cell, **Escape** discards, **Delete** clears, and the arrow keys move around. Headers are editable too. Edits go straight into the file, so **Ctrl+Z** undoes them like any other change, and only the edited field is rewritten: the rest of the row keeps its original bytes, quoting and line endings included.
+  - **Resizable columns.** Drag any column divider, double-click one (or press Enter on it) to fit the column to its contents, and right-click for **Reset Column Widths**.
+  - **Copy anything out.** The grid is a real table, so the whole right-click copy menu works on it: **Copy Table** as rich text, or **Copy as** CSV, TSV, or PNG.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
-- **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
+- **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown, CSV, or TSV file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
 - **GitHub-accurate styling** for output that pastes cleanly into docs and email.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview. A **green-on-black** terminal palette is available too (`markcopy.theme: green`, or **Green on black** under **Preferences > Theme**).
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews both Markdown and PDF.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, and PDF.
 - **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
@@ -70,7 +82,7 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 ## Getting started
 
 1. Install the extension (see [Install](#install)).
-2. Open any `.md` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer.
+2. Open any `.md`, `.csv`, or `.tsv` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf` files open straight in the PDF viewer.)
 3. **Right-click inside the preview.** The menu options change based on whether you clicked a code block, table, diagram, plain block, or a text selection.
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a printable PDF via your browser.
@@ -90,14 +102,17 @@ Local images in the document render automatically, and the right-click menu's **
 
 `markcopy.syncScroll`, `markcopy.autoPreview`, `markcopy.math`, and `markcopy.theme` can also be changed live from the preview's right-click **Preferences** submenu or the gear icon in its title bar, not just here.
 
-| Setting                 | Type                                   | Default  | Description                                                                                                                                                            |
-| ----------------------- | -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile` | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                              |
-| `markcopy.syncScroll`   | boolean                                | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                              |
-| `markcopy.autoPreview`  | boolean                                | `true`   | Automatically open the preview beside the editor when you focus a Markdown file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
-| `markcopy.theme`        | `auto` \| `light` \| `dark` \| `green` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.          |
-| `markcopy.mermaid`      | object                                 | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default. |
-| `markcopy.math`         | boolean                                | `true`   | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                   |
+| Setting                  | Type                                   | Default  | Description                                                                                                                                                                         |
+| ------------------------ | -------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markcopy.styleProfile`  | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                                           |
+| `markcopy.syncScroll`    | boolean                                | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                                           |
+| `markcopy.autoPreview`   | boolean                                | `true`   | Automatically open the preview beside the editor when you focus a Markdown, CSV, or TSV file, and keep it targeted on whichever file has focus. Turn off to open previews manually. |
+| `markcopy.theme`         | `auto` \| `light` \| `dark` \| `green` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.                       |
+| `markcopy.mermaid`       | object                                 | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default.              |
+| `markcopy.math`          | boolean                                | `true`   | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                                |
+| `markcopy.csv.delimiter` | `auto` \| `,` \| `\t` \| `;` \| `\|`   | `auto`   | Field separator for the CSV/TSV grid. `auto` picks whichever separator splits the file into the most consistent columns.                                                            |
+| `markcopy.csv.headerRow` | boolean                                | `true`   | Treat the first row of a CSV/TSV file as column headers. Turn off for files that start straight into data.                                                                          |
+| `markcopy.csv.maxRows`   | number                                 | `5000`   | Maximum rows to render. The grid says how many rows it is hiding; raise it to show more, at the cost of a slower preview on very large files.                                       |
 
 ## Install
 
@@ -154,7 +169,8 @@ npm install
 npm run compile     # type-check + build the extension and webview bundles
 npm run watch       # rebuild on change
 npm test            # vitest unit tests
-# press F5 in VS Code to launch the Extension Development Host, then open sample.md
+# press F5 in VS Code to launch the Extension Development Host; it opens this
+# repo, so sample.md, sample.csv, and sample.pdf are ready to preview
 ```
 
 Full details in [CONTRIBUTING.md](.github/CONTRIBUTING.md).

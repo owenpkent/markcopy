@@ -1,0 +1,12 @@
+id,product,category,units,revenue,margin,released,notes
+1,Widget,Hardware,1284,"$412,900",38.2%,2026-03-14,Best seller
+2,"Gadget, deluxe",Hardware,976,"$298,140",41.7%,2026-03-18,"Ships with a 2m cable, adapter included"
+3,Sprocket,Hardware,1502,"$511,375",35.9%,2026-02-27,
+4,Doohickey,Accessories,433,"$121,860",29.4%,2026-04-02,"Customer said ""finally, one that fits"""
+5,Thingamajig,Accessories,1197,"$389,220",40.1%,2026-03-29,"Two-line note:
+second line lives inside one cell"
+6,Whatsit,Software,845,"$264,505",37.6%,2026-04-11,Renewal heavy
+7,Gizmo,Software,1361,"$447,930",39.8%,2026-03-06,-12.5% vs last quarter
+8,Contraption,Services,612,"$178,445",31.2%,2026-04-19,Ragged row follows
+9,Apparatus,Services,704
+10,"Café Ünïcode",Services,318,"$92,110",26.8%,2026-05-01,Non-ASCII check

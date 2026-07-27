@@ -3,6 +3,8 @@ import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited } from './table';
+import { enhanceCsvTables, resetColumnWidths } from './csvTable';
+import { enableCsvEditing } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
 
 // Heavy libraries are loaded lazily on first use so the initial webview bundle
@@ -38,6 +40,10 @@ let mermaidConfig: Record<string, unknown> = {};
 // document can reset scroll to the top (or a linked heading) instead of keeping
 // the previous document's position. Empty until the first render.
 let currentDocKey = '';
+// Version of the document this render was built from. Echoed back with a CSV
+// cell edit so the host can drop it if the document moved on in the meantime,
+// which would put the edit on the wrong row.
+let currentDocVersion = -1;
 
 // Current setting values, refreshed on every `render` message. Read by the
 // context menu's SETTINGS section so it always reflects the host's state.
@@ -87,6 +93,8 @@ window.addEventListener('message', (e: MessageEvent) => {
         Boolean(msg.autoPreview),
         msg.math === undefined ? true : Boolean(msg.math),
         (msg.docKey as string) ?? '',
+        (msg.kind as string) ?? 'markdown',
+        Number(msg.docVersion ?? -1),
         msg.revealFragment as string | undefined,
       );
       break;
@@ -124,11 +132,18 @@ async function render(
   autoPreview: boolean,
   math: boolean,
   docKey: string,
+  // What the host rendered: 'markdown' or 'csv'. Drives the full-width,
+  // self-scrolling grid layout in preview.css; the rest of the webview treats
+  // both the same.
+  kind: string,
+  docVersion: number,
   revealFragment: string | undefined,
 ): Promise<void> {
   const docChanged = docKey !== currentDocKey;
   currentDocKey = docKey;
+  currentDocVersion = docVersion;
   sourceLines = source.split(/\r?\n/);
+  document.body.dataset.mcKind = kind || 'markdown';
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
@@ -152,6 +167,16 @@ async function render(
   // its raw `$...$` / source text before the library finishes importing.
   await renderKatex();
   await renderMermaid();
+  // Hang the drag-to-resize handles off a CSV grid's column headers, and make the
+  // grid's own scroller drive preview -> editor sync (the page itself does not
+  // scroll in the CSV layout, so the window listener never fires there).
+  enhanceCsvTables(content);
+  enableCsvEditing(content, (line, column, value) =>
+    vscode.postMessage({ type: 'editCell', line, column, value, docVersion: currentDocVersion }),
+  );
+  content
+    .querySelectorAll<HTMLElement>('.mc-csv-wrap')
+    .forEach((wrap) => wrap.addEventListener('scroll', syncEditorToPreview, { passive: true }));
   // On a live edit (same document) keep the reader's scroll position, unless the
   // navigation asked for a heading (e.g. a `file.md#sec` link back into the doc
   // already shown). When the preview swaps to a new document, land at the linked
@@ -290,22 +315,24 @@ function nearestElementForLine(line: number): HTMLElement | null {
   return best ?? marked[0] ?? null;
 }
 
-window.addEventListener(
-  'scroll',
-  () => {
-    if (programmaticScroll) {
-      return;
+// Preview -> editor sync: report the first mapped block that is still fully
+// below the top of the viewport. Bound to the window for the Markdown layout,
+// and (in render) to the CSV grid's scroll container, which is what actually
+// scrolls in the CSV layout.
+function syncEditorToPreview(): void {
+  if (programmaticScroll) {
+    return;
+  }
+  const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
+  for (const el of marked) {
+    if (el.getBoundingClientRect().top >= 0) {
+      vscode.postMessage({ type: 'revealLine', line: Number(el.dataset.sourceLine) });
+      break;
     }
-    const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
-    for (const el of marked) {
-      if (el.getBoundingClientRect().top >= 0) {
-        vscode.postMessage({ type: 'revealLine', line: Number(el.dataset.sourceLine) });
-        break;
-      }
-    }
-  },
-  { passive: true },
-);
+  }
+}
+
+window.addEventListener('scroll', syncEditorToPreview, { passive: true });
 
 // ---------------------------------------------------------------------------
 // Context menu
@@ -446,6 +473,18 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
     if (variants.length > 0) {
       entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
     }
+    entries.push({ kind: 'divider' });
+  }
+
+  // Undo any dragging done to the CSV grid's columns. Only offered on a grid the
+  // reader has actually resized, so it never shows up as a dead row.
+  const grid = target.closest<HTMLTableElement>('table.mc-csv');
+  if (grid && grid.dataset.mcFrozen === '1') {
+    entries.push({
+      kind: 'item',
+      label: 'Reset Column Widths',
+      run: () => resetColumnWidths(grid),
+    });
     entries.push({ kind: 'divider' });
   }
 
