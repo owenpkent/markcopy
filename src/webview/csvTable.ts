@@ -113,15 +113,21 @@ function makeGrip(
   // right-click meant for the cell underneath.
   grip.addEventListener('click', (e) => e.stopPropagation());
 
+  // The grip sits inside a cell, so csvEdit.ts's table-level key handling would
+  // otherwise see these too: Enter would auto-fit the column *and* open the cell
+  // editor, and the arrows would resize *and* move the selection. Stop the keys
+  // this grip acts on, and only those, so Escape still reaches the context menu.
   grip.addEventListener('keydown', (e) => {
     const step = e.shiftKey ? NUDGE_COARSE_PX : NUDGE_PX;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
+      e.stopPropagation();
       freeze(table, cols, row);
       const current = parseFloat(cols[index].style.width) || 0;
       setColumnWidth(table, cols, index, current + (e.key === 'ArrowRight' ? step : -step));
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
+      e.stopPropagation();
       autoFit(table, cols, row, index);
     }
   });

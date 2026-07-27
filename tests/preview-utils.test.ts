@@ -104,6 +104,7 @@ describe('classifyLink', () => {
 describe('previewKind', () => {
   it('maps the language ids MarkCopy renders', () => {
     expect(previewKind('markdown')).toBe('markdown');
+    expect(previewKind('mdx')).toBe('markdown');
     expect(previewKind('csv')).toBe('csv');
     expect(previewKind('tsv')).toBe('csv');
   });

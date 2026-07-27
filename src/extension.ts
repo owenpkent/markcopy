@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { createMarkdownIt, escapeHtml } from './render';
 import { PdfEditorProvider } from './pdfEditor';
 import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
-import { cellEdit, renderCsvHtml, sniffDelimiter } from './csv';
+import { cellEdit, delimiterHint, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 
 const VIEW_TYPE = 'markcopy.preview';
@@ -13,6 +13,12 @@ interface PreviewState {
   // A heading id to scroll to on the next render, set when a link navigates to a
   // new document with a `#fragment`. Consumed (and cleared) by the next update().
   pendingReveal?: string;
+  // Line count as of the last render, and the document version at which it last
+  // changed. A CSV cell edit is addressed by source line, so together these say
+  // whether a line number minted at some earlier version still points at the
+  // same row. Reset when the preview retargets to another document.
+  lineCount?: number;
+  lineCountVersion?: number;
 }
 
 let current: PreviewState | undefined;
@@ -82,7 +88,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // Live update the preview when the source document changes.
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (current && e.document.uri.toString() === current.docUri.toString()) {
-        update(current);
+        // Every change is seen here, unlike update(), which is debounced. Note
+        // the version whenever a line appears or disappears: that is the moment
+        // line numbers minted by an earlier render stopped being trustworthy.
+        if (current.lineCount !== undefined && e.document.lineCount !== current.lineCount) {
+          current.lineCountVersion = e.document.version;
+        }
+        current.lineCount = e.document.lineCount;
+        scheduleUpdate(current);
       }
     }),
 
@@ -159,9 +172,9 @@ function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
   if (uri && uri.scheme === 'file') {
     return vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
   }
-  if (active && previewKind(active.document.languageId, active.document.uri.path)) {
-    return active.document;
-  }
+  // Whatever is in front of the reader. `update` decides how to render it, so
+  // there is nothing to gate on here: a document MarkCopy does not recognize is
+  // previewed as Markdown rather than refused.
   return active?.document;
 }
 
@@ -184,6 +197,10 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         });
       }
       current.docUri = doc.uri;
+      // Line tracking belongs to the document that just went away; the new one
+      // gets its own baseline from the render below.
+      current.lineCount = undefined;
+      current.lineCountVersion = undefined;
       // Grant the webview read access to the newly-targeted document's folder so
       // its relative images resolve (localResourceRoots is fixed at creation).
       current.panel.webview.options = {
@@ -261,7 +278,32 @@ function resourceRoots(context: vscode.ExtensionContext, docUri: vscode.Uri): vs
   return roots;
 }
 
+// Coalesce the renders a burst of typing would otherwise trigger. A Markdown
+// document is small, but a CSV costs a delimiter sniff, a full parse, and a
+// string-built grid of up to markcopy.csv.maxRows rows on every keystroke.
+// Short enough to read as live, long enough that holding a key down renders once.
+const UPDATE_DEBOUNCE_MS = 80;
+let updateTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleUpdate(state: PreviewState): void {
+  if (updateTimer !== undefined) {
+    clearTimeout(updateTimer);
+  }
+  updateTimer = setTimeout(() => {
+    updateTimer = undefined;
+    if (current === state) {
+      update(state);
+    }
+  }, UPDATE_DEBOUNCE_MS);
+}
+
 function update(state: PreviewState): void {
+  // A direct update supersedes anything the debounce still has pending, so the
+  // two can never race and render the same document twice.
+  if (updateTimer !== undefined) {
+    clearTimeout(updateTimer);
+    updateTimer = undefined;
+  }
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
   );
@@ -282,13 +324,16 @@ function update(state: PreviewState): void {
   const html =
     kind === 'csv'
       ? renderCsvHtml(source, {
-          delimiter: cfg.get<string>('csv.delimiter', 'auto'),
+          // Resolved here rather than inside renderCsvHtml so the grid and any
+          // cell edit written back to it are guaranteed to agree on it.
+          delimiter: csvDelimiter(doc, source),
           headerRow: cfg.get<boolean>('csv.headerRow', true),
           maxRows: cfg.get<number>('csv.maxRows', 5000),
         }).html
       : md.render(source, {
           resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
         });
+  state.lineCount = doc.lineCount;
   state.panel.title = `Preview ${basename(state.docUri)}`;
   // A one-shot heading reveal, set when a link navigated here. The webview also
   // scrolls a newly-targeted document to the top on its own (docKey change).
@@ -309,6 +354,20 @@ function update(state: PreviewState): void {
     autoPreview: cfg.get<boolean>('autoPreview', true),
     math,
   });
+}
+
+// The delimiter to read a document with: the configured one, or the sniffed one
+// biased by what the document's type already says (a .tsv is tab-separated even
+// when its fields are full of commas). Both the grid and the writeback go
+// through here, so they can never disagree about where a field ends.
+function csvDelimiter(doc: vscode.TextDocument, text: string): string {
+  const configured = vscode.workspace
+    .getConfiguration('markcopy')
+    .get<string>('csv.delimiter', 'auto');
+  if (configured && configured !== 'auto') {
+    return configured;
+  }
+  return sniffDelimiter(text, delimiterHint(doc.languageId, doc.uri.path));
 }
 
 // Write one edited CSV cell back into the document.
@@ -335,28 +394,48 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
     return;
   }
-  if (typeof msg.docVersion === 'number' && msg.docVersion !== doc.version) {
+  if (typeof msg.docVersion === 'number' && !addressable(state, doc, msg.docVersion)) {
     return; // stale grid; the re-render already on its way carries the truth
   }
 
   const text = doc.getText();
-  const configured = vscode.workspace
-    .getConfiguration('markcopy')
-    .get<string>('csv.delimiter', 'auto');
-  const delimiter = !configured || configured === 'auto' ? sniffDelimiter(text) : configured;
-
-  const edit = cellEdit(text, delimiter, line, column, value);
+  const edit = cellEdit(text, csvDelimiter(doc, text), line, column, value);
   if (!edit) {
     return;
   }
 
   const range = new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end));
+  if (doc.getText(range) === edit.text) {
+    return; // nothing to change; applying it would only push a dead undo stop
+  }
   const workspaceEdit = new vscode.WorkspaceEdit();
   workspaceEdit.replace(doc.uri, range, edit.text);
   const applied = await vscode.workspace.applyEdit(workspaceEdit);
   if (!applied) {
     void vscode.window.showWarningMessage('MarkCopy: could not edit this file.');
+    return;
   }
+  // Re-render at once rather than waiting out the debounce, so the grid's notion
+  // of the document version catches up before the next cell edit is committed.
+  update(state);
+}
+
+// Whether a grid rendered at `version` can still address this document by line.
+//
+// An exact version match is the easy case, and not the only safe one. A cell
+// edit rewrites a field inside a single line, so a line number stays valid until
+// something adds or removes a line: `lineCountVersion` is exactly when that last
+// happened. Requiring an exact match instead would silently swallow edits, since
+// MarkCopy's own writeback bumps the version and the grid only learns the new
+// one when the re-render reaches it. Typing across two cells quickly would lose
+// the second. An edit that does move lines (committing a value with a newline in
+// it) pushes lineCountVersion past the grid, and is then correctly refused.
+function addressable(state: PreviewState, doc: vscode.TextDocument, version: number): boolean {
+  return (
+    version === doc.version ||
+    state.lineCountVersion === undefined ||
+    version >= state.lineCountVersion
+  );
 }
 
 // Rewrite a relative/local markdown image src to a webview-safe URI so it loads

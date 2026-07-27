@@ -80,11 +80,20 @@ function setFocus(cell: HTMLTableCellElement, opts: { scroll?: boolean } = {}): 
   });
   cell.classList.add('mc-csv-cell--focus');
   cell.tabIndex = 0;
+  // Record the cell before handing it the focus, not after: .focus() blurs
+  // whatever held it, and an open editor's blur handler commits synchronously
+  // from inside that call. It has to see the cell the reader just moved to.
+  focused = refOf(cell);
   cell.focus({ preventScroll: !opts.scroll });
   if (opts.scroll) {
     cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  focused = refOf(cell);
+}
+
+/** Whether the reader has already moved off `cell` to somewhere else in the grid. */
+function focusMovedOff(cell: HTMLTableCellElement): boolean {
+  const ref = refOf(cell);
+  return !!focused && !!ref && (focused.line !== ref.line || focused.column !== ref.column);
 }
 
 // Step one cell in either axis, staying inside the grid.
@@ -235,10 +244,12 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
     done = true;
     const value = editor.value;
     cell.classList.remove('mc-csv-cell--editing');
-    // Drops the editor and leaves the cell showing its original text. If the
-    // value changed, the host's edit re-renders over this in a moment; if it did
-    // not, this is already the final state and nothing flickers.
-    cell.textContent = original;
+    // Remove only the editor. The cell's own children are untouched underneath
+    // it, so pulling the editor out restores exactly what was there, including
+    // the column's resize grip (csvTable.ts hangs it off this same cell).
+    // Rewriting textContent here would flatten both away, and on Escape or an
+    // unchanged value there is no re-render to put them back.
+    editor.remove();
     if (save && value !== original) {
       commitCell(cell, value, commit, next);
     } else {
@@ -282,7 +293,10 @@ function commitCell(
   }
   if (next.row || next.col) {
     move(cell, next.row, next.col);
-  } else {
+  } else if (!focusMovedOff(cell)) {
+    // Only re-seat the edited cell when the reader is still on it. Clicking
+    // straight onto another cell blurs the editor, which commits from here, and
+    // pulling focus back would drag them off the cell they just picked.
     setFocus(cell);
   }
   restoring = true;

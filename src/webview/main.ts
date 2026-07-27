@@ -40,10 +40,6 @@ let mermaidConfig: Record<string, unknown> = {};
 // document can reset scroll to the top (or a linked heading) instead of keeping
 // the previous document's position. Empty until the first render.
 let currentDocKey = '';
-// Version of the document this render was built from. Echoed back with a CSV
-// cell edit so the host can drop it if the document moved on in the meantime,
-// which would put the edit on the wrong row.
-let currentDocVersion = -1;
 
 // Current setting values, refreshed on every `render` message. Read by the
 // context menu's SETTINGS section so it always reflects the host's state.
@@ -141,7 +137,6 @@ async function render(
 ): Promise<void> {
   const docChanged = docKey !== currentDocKey;
   currentDocKey = docKey;
-  currentDocVersion = docVersion;
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.mcKind = kind || 'markdown';
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
@@ -171,8 +166,13 @@ async function render(
   // grid's own scroller drive preview -> editor sync (the page itself does not
   // scroll in the CSV layout, so the window listener never fires there).
   enhanceCsvTables(content);
+  // `docVersion` is the parameter, deliberately, not a shared latest-render
+  // global: it pins the edit to the version *this* grid was drawn from. Reading
+  // a global here would stamp a grid that a later render had already replaced
+  // with that later version, which is exactly what the host's staleness check
+  // exists to catch.
   enableCsvEditing(content, (line, column, value) =>
-    vscode.postMessage({ type: 'editCell', line, column, value, docVersion: currentDocVersion }),
+    vscode.postMessage({ type: 'editCell', line, column, value, docVersion }),
   );
   content
     .querySelectorAll<HTMLElement>('.mc-csv-wrap')
@@ -639,7 +639,9 @@ function writeClipboard(html: string | null, plain: string): void {
 // preview theme (KaTeX and text inherit their color, so a dark theme would
 // otherwise render invisibly on the white background).
 async function copyPng(el: HTMLElement): Promise<void> {
-  el.classList.add('mc-force-light');
+  // mc-copy-clean hides the viewer's own chrome (the CSV grid's row-number
+  // gutter) for the duration of the capture, so the image is the data.
+  el.classList.add('mc-force-light', 'mc-copy-clean');
   try {
     const { toBlob } = await import('html-to-image');
     const blob = await toBlob(el, { pixelRatio: 2, backgroundColor: '#ffffff' });
@@ -652,7 +654,7 @@ async function copyPng(el: HTMLElement): Promise<void> {
   } catch {
     toast('PNG copy failed');
   } finally {
-    el.classList.remove('mc-force-light');
+    el.classList.remove('mc-force-light', 'mc-copy-clean');
   }
 }
 
@@ -791,6 +793,11 @@ function inlineStyledHtml(source: HTMLElement): string {
     applyInline(srcAll[i], dstAll[i]);
   }
   source.classList.remove('mc-force-light');
+  // After the style walk, which pairs source and clone by index: dropping these
+  // earlier would shear the two lists apart. `data-mc-ignore` marks the viewer's
+  // own chrome (the CSV grid's row-number gutter), which is not part of the
+  // document and has no business on the clipboard.
+  clone.querySelectorAll('[data-mc-ignore]').forEach((el) => el.remove());
   return `<div>${clone.outerHTML}</div>`;
 }
 
