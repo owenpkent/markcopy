@@ -55,6 +55,8 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 | `src/csv.ts`                     | CSV/TSV support on the host: an RFC 4180 parser (quoted fields, embedded delimiters/newlines, BOM, CRLF/LF/CR, per-record source lines, a row cap that still counts what it skipped), delimiter sniffing biased by the document's own type, and the grid HTML. Pure, unit-tested.                                                                                      |
 | `src/webview/main.ts`            | Everything in the preview: rendering the HTML, Mermaid, KaTeX (`renderKatex`), building the Markdown preview's context-menu entry tree (see [Context menu](#context-menu)), all clipboard writes, PNG capture, inline styling, HTML-to-Markdown (Turndown), scroll sync.                                                                                               |
 | `src/webview/menu.ts`            | The shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by both webviews: panel rendering, submenu nesting, and keyboard navigation (see [Context menu](#context-menu)).                                                                                                                                                                     |
+| `src/webview/scrollSync.ts`      | The anchor interpolation behind two-way scroll sync (`offsetForLine`, `lineForOffset`, `sample`). Pure, unit-tested (see [Scroll sync](#scroll-sync)).                                                                                                                                                                                                                 |
+| `src/pdfExport.ts`               | Save as PDF on the host: locating a headless Chromium-family browser, its `--print-to-pdf` command line, running it, and assembling the export page and its print stylesheet. No `vscode` import, so it is unit-testable (see [PDF export](#pdf-export)).                                                                                                              |
 | `src/pdfEditor.ts`               | The read-only custom editor for `.pdf`: builds the webview, reads file bytes, hands them to the PDF webview, and reads/writes the sidecar comments JSON file.                                                                                                                                                                                                          |
 | `src/webview/pdf.ts`             | The PDF preview: virtualised pdf.js rendering (canvas + text layer, zoom, the page indicator with go-to-page, dark/green bitmap recolouring), per-page text extraction, comment pins, the copy actions (page PNG, page text, all text, selection), and building its context-menu entry tree (see [Context menu](#context-menu)).                                       |
 | `src/webview/table.ts`           | CSV/TSV table serialization for the clipboard (RFC 4180). Skips cells marked `data-mc-ignore`, which is how the CSV grid's row-number gutter stays out of copies, and copies a grid's cell text verbatim (a Markdown table's is still trimmed). Pure, unit-tested.                                                                                                     |
@@ -77,8 +79,21 @@ See [PDF preview](#pdf-preview) below for the PDF data flow in detail.
 
 `render.ts` tags top-level block tokens with `data-source-line` (the token's starting line). This attribute powers two features:
 
-- **Scroll sync:** the webview reports the first fully-visible block's line; the host reveals that line in the editor, and vice versa. A `programmaticScroll` flag breaks the feedback loop.
+- **Scroll sync:** see [Scroll sync](#scroll-sync) below.
 - **Block Markdown (the "Markdown" row under Copy as for a block):** for a clicked block, the webview finds its `data-source-line`, finds the next block's line, and slices `sourceLines` between them (verbatim source). The "Markdown" row under Copy as for a selection is different: it converts just the selected HTML to Markdown with Turndown (`turndown` + `turndown-plugin-gfm`), so partial and multi-block selections come through exactly.
+
+### Scroll sync
+
+Both directions map through the same structure: a list of `Anchor`s (`{ line, offset }`) pairing each `data-source-line` block with its offset in the scroll container. `src/webview/scrollSync.ts` holds the arithmetic, free of the DOM and unit-tested: `offsetForLine` and `lineForOffset` interpolate linearly between the two anchors bracketing their argument, so the sync tracks a drag continuously instead of snapping from one block to the next, and round-trips a position back to itself rather than drifting as the two surfaces bounce off each other. A synthetic final anchor pairs the last source line with the container's maximum scroll, so the last screenful maps proportionally too.
+
+Anchors are measured once and cached, because a long document has hundreds of them and re-measuring every scroll frame costs a forced layout each time. The cache is dropped on render, on resize, and whenever the content's height changes underneath it (a late image, font, or diagram settling). Candidates over `MAX_ANCHORS` (600) are thinned by `sample()`: a 5000-row CSV grid contributes one candidate per row, and interpolating across a sampled subset is visually identical. What counts as a candidate differs by layout: Markdown blocks carry `data-source-line`, while a CSV grid carries one for the table as a whole, so its `tbody` rows stand in for the per-line detail. The header row is excluded deliberately, since it is sticky and its position tracks the scroll rather than the content. The CSV layout also scrolls its own `.mc-csv-wrap` rather than the page, which `scroller()` accounts for.
+
+The two surfaces drive each other, so every move one makes returns as a request to move the other. Two symmetric rules break the loop instead of letting them fight:
+
+- The webview does not report a scroll it performed itself (`suppressSync` / `syncSuppressedUntil`), and drops an incoming `scrollToLine` that arrives within `SYNC_ECHO_MS` (250ms) of the reader's own scrolling, since it can only be the echo of what they are already doing.
+- The host does not echo a visible-range change caused by its own `revealRange` (`revealEcho` / `revealedAt` in `extension.ts`).
+
+`markcopy.syncScroll` gates both directions: `syncScrollEnabled()` is checked in the host's visible-ranges listener and again in `revealEditorLine`, so with the setting off neither surface follows the other.
 
 ### Local images
 
@@ -202,7 +217,24 @@ Before reading computed styles, the source is briefly tagged with an `mc-force-l
 - **Inline local images.** `inlineImages()` replaces every webview-hosted `src` with a `data:` URI so the images survive on a plain `file://` page outside the webview; remote `https:` and already-inlined `data:` sources are left alone.
 - **Strip `data-source-line`.** The scroll-sync attributes are preview-only noise in an exported document.
 
-The host (`exportPdf` in `src/extension.ts`) wraps the markup in a standalone HTML page carrying `preview.css` and the KaTeX stylesheet with its fonts inlined (via `buildPdfHtml`), forces the light palette for a clean printout, writes it to the extension's `globalStorageUri`, and opens it in the default browser, where the page auto-invokes the print dialog and the user picks "Save as PDF". Because `globalStorageUri` uses the `vscode-userdata:` scheme, which the OS shell has no handler for, the file is reopened as a plain `file:` URI (`vscode.Uri.file(fileUri.fsPath)`) before `openExternal`, or the browser hand-off fails.
+The host (`exportPdf` in `src/extension.ts`) wraps the markup in a standalone HTML page carrying `preview.css` and the KaTeX stylesheet with its fonts inlined (`buildPdfPage` in `src/pdfExport.ts`), forces the light palette for a clean printout, and renders it to the file the user picked in a save dialog. The rendering is done by a headless Chromium-family browser (`--headless --print-to-pdf`), located by `findBrowser()`: the `markcopy.pdf.browserPath` setting if set, else the usual Edge/Chrome/Chromium/Brave install locations for the platform. The page and the browser's throwaway profile both live in one `mkdtemp` directory, deleted however the render ends, and the finished PDF is handed to the OS with `openExternal`.
+
+Three details of that command line matter (`printArgs`):
+
+- **`--no-pdf-header-footer` and `--print-to-pdf-no-header`** (the current and older spellings; Chromium ignores switches it does not recognize). Without them the output carries the furniture the interactive print dialog adds by default: the document title across the top of every page and the `file://…` URL across the bottom.
+- **`--user-data-dir`** pointed at a fresh directory. Without it, launching a browser the user already has open just hands the URL to the running process, which prints nothing at all.
+- **`--headless`, not `--headless=new`.** Recent Chromium maps the bare flag to the new mode anyway, while builds predating `=new` would fail to parse it and open a visible window instead of printing.
+
+A browser that cannot open the page still exits 0 and still writes a PDF (of its error page), so `renderPdf()` treats a suspiciously small output file as a failure rather than trusting the exit code. If no browser is found, or a render fails, `printViaBrowser()` is the fallback: it writes the page to the extension's `globalStorageUri` and opens it in the default browser with a `window.print()` on load, the pre-0.7 behaviour. Because `globalStorageUri` uses the `vscode-userdata:` scheme, which the OS shell has no handler for, the file is reopened as a plain `file:` URI (`vscode.Uri.file(fileUri.fsPath)`) before `openExternal`, or the browser hand-off fails.
+
+### Print stylesheet
+
+`pdfCss()` layers print rules over `preview.css`. Most of them undo something the on-screen preview needs and paper does not, and the two that matter most are the ones a naive print stylesheet gets wrong:
+
+- **Only atomic things forbid an internal break.** A blanket `pre, table { break-inside: avoid }` cannot be honoured for a block taller than a page; a browser that cannot honour it pushes the block onto a fresh page anyway and leaves the rest of the previous page blank. Tall blocks are allowed to split (`break-inside: auto`) and `thead { display: table-header-group }` repeats a table's header on every page it spans, so a long table reads correctly wherever it breaks. `break-inside: avoid` is kept only for images, diagrams, equations, and table rows.
+- **Nothing may rely on scrolling.** `overflow: auto` on a `pre` or a table is a horizontal scrollbar on screen and a silent clip in print, losing whatever does not fit the page width. Both become `overflow: visible` with wrapping (`white-space: pre-wrap`, `overflow-wrap: anywhere`). Relatedly, the export page's `<body>` deliberately omits `data-mc-kind`: a CSV preview uses it to become a viewport-tall flex column that scrolls internally, and on paper that would clip everything past the first page's worth of rows instead of paginating.
+
+`print-color-adjust: exact` is also set, because Chromium otherwise drops background colours from a print and flattens every code block, table header, and blockquote to plain white.
 
 ## PDF preview
 

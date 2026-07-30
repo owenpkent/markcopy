@@ -117,12 +117,12 @@ Each page has a real pdf.js text layer (transparent, selectable spans over the c
 
 ### Always available
 
-| Action              | Output                     | Goes to                                 |
-| ------------------- | -------------------------- | --------------------------------------- |
-| Copy Whole Document | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs       |
-| Save as PDF…        | Self-contained HTML file   | Your browser, where you print it to PDF |
+| Action              | Output                     | Goes to                           |
+| ------------------- | -------------------------- | --------------------------------- |
+| Copy Whole Document | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
+| Save as PDF…        | A `.pdf` file              | Wherever you save it, then opens  |
 
-Both are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text** and **MarkCopy: Save as PDF**. Save as PDF writes an HTML file (with the preview's CSS, KaTeX fonts, and local images inlined) and opens it in your default browser, so equations, diagrams, and highlighted code all carry over and the text stays selectable; press Ctrl/Cmd+P and choose **Save as PDF**.
+Both are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text** and **MarkCopy: Save as PDF**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
 
 ## Notes
 

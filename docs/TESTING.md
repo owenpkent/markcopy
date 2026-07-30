@@ -4,11 +4,11 @@ How MarkCopy gets verified, from the automated suites to the manual checklist th
 
 ## The three layers
 
-| Layer                  | Runs                             | Covers                                                                                                                                     |
-| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Unit tests (vitest)    | `npm test`, CI on every push     | Pure logic: markdown-it rendering and source-line mapping, CSV/TSV serialization (RFC 4180), HTML-to-Markdown conversion, preview helpers. |
-| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, inside a real downloaded VS Code.                     |
-| Manual (this document) | Before every release, by a human | Everything the webviews do: clipboard writes, the context menu, rendering fidelity, the PDF viewer, paste targets outside VS Code.         |
+| Layer                  | Runs                             | Covers                                                                                                                                                                                                       |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Unit tests (vitest)    | `npm test`, CI on every push     | Pure logic: markdown-it rendering and source-line mapping, CSV/TSV serialization (RFC 4180), HTML-to-Markdown conversion, preview helpers, scroll-sync interpolation, PDF export command line and print CSS. |
+| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, inside a real downloaded VS Code.                                                                                       |
+| Manual (this document) | Before every release, by a human | Everything the webviews do: clipboard writes, the context menu, rendering fidelity, the PDF viewer, paste targets outside VS Code.                                                                           |
 
 The manual layer exists because the interesting behavior lives inside webviews, where the automated harnesses cannot reach: `document.execCommand`/Clipboard API writes, canvas rasterisation, text-layer selection, and how the clipboard flavors actually paste into Word or Gmail.
 
@@ -57,8 +57,16 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
 - [ ] **Sync scroll**, **Auto-open preview**, and **Math** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
-- [ ] With sync scroll on, scrolling the editor scrolls the preview to match.
-- [ ] **MarkCopy: Save as PDF** produces a PDF of the document.
+- [ ] With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
+- [ ] Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
+- [ ] Sync scroll tracks part way through a long block (a big code block or table) rather than snapping between blocks, and reaches the very bottom of the preview when the editor is scrolled to the end.
+- [ ] With **Sync scroll** off, neither direction follows: scrolling the editor leaves the preview alone, and scrolling the preview leaves the editor alone.
+- [ ] **MarkCopy: Save as PDF** asks where to save, writes a `.pdf` there, and opens it. No browser window and no print dialog appear on the way.
+- [ ] The exported pages carry **no filename header and no URL footer**.
+- [ ] Nothing is clipped or shunted onto a page of its own: a code block longer than a page splits across pages, a very long code line wraps instead of being cut off at the right margin, a table taller than a page splits with its header row repeated on each page, and there is no blank page at the end.
+- [ ] Code block, table header, and blockquote backgrounds are present in the PDF (not flattened to white), diagrams and equations are intact, and the text is selectable.
+- [ ] Setting `markcopy.pdf.pageSize` to `A4` changes the exported page size.
+- [ ] Setting `markcopy.pdf.browserPath` to a nonsense path fails with a readable error offering **Print from Browser**, and that fallback opens the preview in the browser with the print dialog.
 
 ## CSV / TSV grid
 

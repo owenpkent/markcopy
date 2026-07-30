@@ -9,6 +9,22 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Changed
+
+- **Save as PDF now writes a PDF.** It used to open the preview in your browser and leave you to work the print dialog, which stamped the filename across the top of every page and the `file://` URL across the bottom. Now it asks where to save, renders the file with a headless Chrome, Edge, or Chromium found on your machine, and opens the result: no browser window, no print dialog, no header or footer. Text stays selectable, and equations, diagrams, highlighted code, and local images carry over as before.
+  - New settings: `markcopy.pdf.pageSize` (`Letter`, `A4`, or `Legal`) and `markcopy.pdf.browserPath` for a browser installed somewhere unusual.
+  - With no Chromium-family browser installed, or if a render fails, the old open-in-your-browser route is still there as a fallback.
+
+### Fixed
+
+- **Stray page breaks in the PDF export.** The print stylesheet asked the browser not to break inside a `pre`, `table`, or `blockquote`. That is impossible to honour for a block taller than a page, and a browser that cannot honour it pushes the block onto a fresh page anyway, leaving the rest of the previous page blank. Tall blocks may now split, a table's header row repeats on every page it spans, and the preview's scroll-past-the-end padding no longer prints as a blank final page. On a test document this went from 13 pages with 3 near-empty ones to 11 full pages.
+- **Content silently cut off in the PDF export.** A wide code block or table scrolls sideways on screen, but in print `overflow: auto` just clips whatever does not fit the page, with nothing to say it had. A 400-character code line came out as 86 characters. Long lines and wide cells now wrap instead.
+- **Code block, table header, and blockquote backgrounds missing from the PDF export.** Chromium drops background colours from a print unless the page opts in; the export now does (`print-color-adjust: exact`).
+- **Sync scroll fought whichever surface you were using.** Editor and preview each drive the other, and neither ignored the echo of its own move, so scrolling the preview revealed a line in the editor, the editor reported its new position, and the preview was yanked to that line's block mid-gesture. Both sides now ignore the echo of a scroll they caused themselves.
+- **Sync scroll snapped between blocks instead of tracking.** The preview reported the first block *below* the top of the viewport, which ran systematically ahead of where the reader actually was, and a long code block or table gave the sync nothing to say until it had scrolled past entirely. Both directions now interpolate between the blocks either side of the current position, and the end of the document maps to the end of the scroll rather than to the last block's top edge.
+- **Sync scroll did nothing in the CSV grid.** The grid scrolls inside its own container rather than scrolling the page, which the sync did not account for; its rows now drive the sync directly.
+- **`markcopy.syncScroll` only turned off half of it.** Turning the setting off stopped the preview following the editor, but the editor still jumped around as you scrolled the preview. It now gates both directions.
+
 ## [0.6.0] - 2026-07-27
 
 ### Added
