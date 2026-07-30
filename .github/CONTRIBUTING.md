@@ -52,7 +52,9 @@ npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
-Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), and HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`).
+Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), and the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`).
+
+Two kinds of logic are deliberately kept in files with no `vscode` import and no DOM dependency, so they can be tested like this: geometry and mapping arithmetic (`scrollSync.ts`), and anything describing a command line or generated document (`pdfExport.ts`). When you find yourself wanting to assert on a string the extension builds, that is the signal to move its construction into such a file.
 
 jsdom has no layout engine, so anything size-dependent is stubbed (see `tests/csvTable.test.ts` for `getBoundingClientRect`). Tests can prove the _mechanism_ that keeps the grid's geometry correct but not the pixels; check those in the Extension Development Host.
 
@@ -83,10 +85,12 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 | Path                             | What lives here                                                                                 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync.                                       |
+| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync, PDF export.                           |
 | `src/render.ts`                  | markdown-it setup and source-line mapping.                                                      |
+| `src/pdfExport.ts`               | Host: Save as PDF (browser discovery, `--print-to-pdf`, export page, print CSS).                |
 | `src/webview/main.ts`            | Markdown webview: rendering, context-menu entry tree, clipboard, PNG, Mermaid.                  |
 | `src/webview/menu.ts`            | Shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by both webviews. |
+| `src/webview/scrollSync.ts`      | Scroll-sync interpolation (pure, unit-tested).                                                  |
 | `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                                                 |
 | `src/webview/pdf.ts`             | PDF webview: pdf.js rendering, page/text copy actions, and its context-menu entry tree.         |
 | `src/csv.ts`                     | Host: CSV/TSV parsing (RFC 4180), delimiter sniffing, grid HTML, and cell edits.                |

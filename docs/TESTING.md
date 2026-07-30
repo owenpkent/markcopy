@@ -66,7 +66,8 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Nothing is clipped or shunted onto a page of its own: a code block longer than a page splits across pages, a very long code line wraps instead of being cut off at the right margin, a table taller than a page splits with its header row repeated on each page, and there is no blank page at the end.
 - [ ] Code block, table header, and blockquote backgrounds are present in the PDF (not flattened to white), diagrams and equations are intact, and the text is selectable.
 - [ ] Setting `markcopy.pdf.pageSize` to `A4` changes the exported page size.
-- [ ] Setting `markcopy.pdf.browserPath` to a nonsense path fails with a readable error offering **Print from Browser**, and that fallback opens the preview in the browser with the print dialog.
+- [ ] Setting `markcopy.pdf.browserPath` to a nonsense path still asks where to save, then fails with a readable error naming that path and offering **Print from Browser**; taking it opens the preview in your browser with the print dialog.
+- [ ] Nothing is left behind in the temp directory after an export, successful or failed (`%TEMP%`/`$TMPDIR`, `markcopy-pdf-*`).
 
 ## CSV / TSV grid
 
@@ -128,7 +129,7 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 - [ ] A field with deliberate leading/trailing spaces keeps them through a **Copy as** -> **CSV** round-trip.
 - [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme, and with **no row-number column**.
 - [ ] **Copy as** -> **PNG** puts an image of the grid on the clipboard, again with no row-number column.
-- [ ] **Save as PDF** exports the grid; it flows across pages rather than being clipped to one screen, and the resize handles are absent.
+- [ ] **Save as PDF** exports the grid; every row is there, it flows across pages rather than being clipped to one screen, the header row repeats on each page, wide cells wrap instead of being cut off at the margin, and the resize handles are absent.
 
 ## PDF viewer
 
