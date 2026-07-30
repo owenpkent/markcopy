@@ -248,7 +248,7 @@ async function renderKatex(): Promise<void> {
 // Editor and preview drive each other, so every move one side makes comes back as
 // a request to move the other. Left alone the two fight: scrolling the preview
 // reveals a line in the editor, the editor reports its new position, and the
-// preview is yanked to that line's block mid-gesture — which reads as sync scroll
+// preview is yanked to that line's block mid-gesture, which reads as sync scroll
 // being broken rather than as a loop.
 //
 // Two rules break it. A scroll we performed ourselves is not reported back (the

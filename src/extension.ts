@@ -605,7 +605,7 @@ let exportingPdf = false;
 // Chromium-family browser renders straight to the destination the user picked. No
 // browser window, no print dialog, and none of the header/footer furniture that
 // dialog adds by default (the document title across the top, the `file://…` URL
-// across the bottom) — see src/pdfExport.ts.
+// across the bottom). See src/pdfExport.ts.
 //
 // Where no such browser can be found, this falls back to the older route: write
 // the page out and open it in the default browser for the user to print by hand.
@@ -679,7 +679,7 @@ async function runExport(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const choice = await vscode.window.showErrorMessage(
-      `MarkCopy: could not export the PDF — ${message}`,
+      `MarkCopy: could not export the PDF: ${message}`,
       'Print from Browser',
     );
     if (choice) {
@@ -728,12 +728,12 @@ async function printViaBrowser(
     if (reason === 'no-browser') {
       void vscode.window.showInformationMessage(
         'MarkCopy: no Chrome, Edge, or Chromium found for a direct PDF export, so the preview ' +
-          'opened in your browser instead — press Ctrl/Cmd+P and choose "Save as PDF". Set ' +
+          'opened in your browser instead. Press Ctrl/Cmd+P and choose "Save as PDF". Set ' +
           '`markcopy.pdf.browserPath` if one is installed somewhere unusual.',
       );
     } else {
       vscode.window.setStatusBarMessage(
-        'MarkCopy: opened in your browser — press Ctrl/Cmd+P and choose "Save as PDF".',
+        'MarkCopy: opened in your browser. Press Ctrl/Cmd+P and choose "Save as PDF".',
         6000,
       );
     }
