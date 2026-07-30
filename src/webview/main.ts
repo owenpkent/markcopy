@@ -786,7 +786,7 @@ async function copyPng(el: HTMLElement): Promise<void> {
 // ---------------------------------------------------------------------------
 // Serialize the already-rendered preview (KaTeX HTML, Mermaid SVG, highlighted
 // code all live in the DOM) and hand it to the host, which wraps it in a
-// standalone HTML file and opens it in the browser for printing to PDF. Local
+// standalone page and renders that to a PDF file (see src/pdfExport.ts). Local
 // images are inlined as data URIs so they survive outside the webview; the host
 // injects preview.css + KaTeX CSS, so we send raw markup and let CSS style it.
 async function exportPdf(): Promise<void> {
@@ -798,7 +798,7 @@ async function exportPdf(): Promise<void> {
     await relightMermaid(clone);
     await inlineImages(clone);
     vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
-    toast('Opening PDF export…');
+    toast('Exporting PDF…');
   } catch {
     toast('PDF export failed');
   }

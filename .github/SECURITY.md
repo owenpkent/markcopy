@@ -2,7 +2,7 @@
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, or PDF you open) into a webview. It can render Mermaid diagrams from fenced code and parses PDFs with pdf.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, and (for CSV only) writing an edited cell back to the file.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, or PDF you open) into a webview. It can render Mermaid diagrams from fenced code and parses PDFs with pdf.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 ## Content Security Policy
 
@@ -31,6 +31,16 @@ Mermaid is initialized with `securityLevel: 'strict'`, which sanitizes diagram-s
 ## PDF preview
 
 PDFs open in a read-only custom editor. The extension host reads the file with `workspace.fs.readFile` and hands the bytes to the webview; pdf.js parses and rasterises them entirely locally, with no network fetch. pdf.js is a large parser and therefore the widest attack surface here, but it runs under the same strict CSP as the rest of the webview: with no `'unsafe-eval'`, pdf.js detects the restriction and disables its eval-based fast paths. Parsing and rasterising run off the main thread in a worker loaded from the bundled `media/pdf.worker.js`. The editor is read-only and never writes back to the PDF.
+
+## PDF export
+
+**Save as PDF** is the one place MarkCopy starts another program: it writes the export page to a temporary directory and runs an installed Chrome, Edge, or Chromium over it with `--headless --print-to-pdf` (see [PDF export](../docs/ARCHITECTURE.md#pdf-export) for the full command line).
+
+- **The executable is not taken from the document.** It is either the `markcopy.pdf.browserPath` setting or one of a fixed list of known install paths for the platform, and it is spawned with an argument array, never through a shell, so nothing in a document can influence the command.
+- **The page carries no scripts.** The exported body is the preview's own DOM, which has already been through DOMPurify, so a `<script>` in the source Markdown is long gone before the export sees it. The one exception is the fallback route (no browser installed), whose page carries a `window.print()` MarkCopy wrote itself.
+- **The browser runs on a throwaway profile** (`--user-data-dir` in a fresh `mkdtemp` directory, plus `--disable-extensions` and `--disable-sync`), so the render touches none of your browsing profile, cookies, or extensions. The directory, page included, is deleted however the render ends.
+- **Remote images in a document are still fetched**, by the headless browser this time rather than the preview, because the export keeps `https:` image sources as they are. This is the same network access the preview already had, but it is worth knowing it happens outside the webview too.
+- **One file is written, where you chose it.** The destination comes from a save dialog; the export never picks a path on your behalf.
 
 ## HTML in Markdown
 

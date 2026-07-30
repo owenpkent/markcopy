@@ -56,7 +56,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Equation (KaTeX): top level copies **PNG**; **Copy as** has **LaTeX**.
   - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
-- **Save as PDF.** Export the rendered preview straight to a PDF file: pick where to save it and MarkCopy writes it, with equations, diagrams, highlighted code, and local images all intact and the text still selectable. No print dialog to work through, and no filename header or URL footer stamped on the pages. Long code blocks and tables flow across pages instead of being clipped or shunted onto one of their own, and a table's header row repeats on every page it spans. Run **MarkCopy: Save as PDF** (Command Palette), click the PDF button in the preview's title bar, or use **Save as PDF…** in the right-click menu. Rendering uses a Chrome, Edge, or Chromium install found on your machine (point `markcopy.pdf.browserPath` at yours if it lives somewhere unusual); with none installed, MarkCopy falls back to opening the preview in your browser to print by hand.
+- **Save as PDF.** Export the rendered preview straight to a PDF file: pick where to save it and MarkCopy writes it, then opens it. No print dialog to work through and no filename header or URL footer on the pages, with equations, diagrams, highlighted code, and local images intact and the text still selectable. See [Save as PDF](#save-as-pdf).
 - **CSV and TSV preview, with editing.** Open a `.csv` or `.tsv` and it renders as a spreadsheet-style grid instead of a wall of commas: a sticky header row and row-number gutter, alternating row colors, numeric columns aligned right, and long values clipped with an ellipsis so rows stay one line tall. The delimiter is detected automatically (comma, tab, semicolon, or pipe, with a `.tsv` always read as tab-separated) and quoted fields follow RFC 4180, so commas, quotes, and newlines inside a cell all survive. See [Settings](#settings) for `markcopy.csv.*`.
   - **Edit cells in place.** Click to select, then double-click, press Enter or F2, or just start typing. **Enter** commits and moves down, **Tab** commits and moves right, **Shift+Enter** puts a newline inside the cell, **Escape** discards, **Delete** clears, and the arrow keys move around. Headers are editable too. Edits go straight into the file, so **Ctrl+Z** undoes them like any other change, and only the edited field is rewritten: the rest of the row keeps its original bytes, quoting and line endings included.
   - **Resizable columns.** Drag any column divider, double-click one (or press Enter on it) to fit the column to its contents, and right-click for **Reset Column Widths**.
@@ -138,6 +138,18 @@ See [RELEASING.md](docs/RELEASING.md) for how releases are cut and published.
 ## How the copy works
 
 `vscode.env.clipboard` is text-only, so rich copy happens **inside the webview**. MarkCopy writes both `text/html` and `text/plain` through a synchronous `copy`-event handler, which is more reliable than the async Clipboard API (that one can be permission-blocked inside the webview iframe). PNG copy uses `html-to-image` plus a `ClipboardItem`. The full rationale, including the Gmail/Outlook inline-styling requirement, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#clipboard).
+
+## Save as PDF
+
+**MarkCopy: Save as PDF** (or the PDF button in the preview's title bar, or **Save as PDF…** in the right-click menu) asks where to save, writes the file, and opens it. What comes out is the preview as you see it: equations, diagrams, highlighted code, and local images intact, and real text rather than a picture of text, so it stays selectable and searchable.
+
+It renders with a headless Chrome, Edge, or Chromium already installed on your machine instead of handing you to a browser's print dialog, which is what keeps the output clean:
+
+- **No header or footer.** A print dialog stamps the document title across the top of every page and the `file://` URL across the bottom by default. Nothing does that here.
+- **No stray page breaks.** A code block or table longer than a page flows across pages instead of being pushed onto one of its own, a table's header row repeats on every page it spans, and long code lines wrap instead of being cut off at the margin.
+- **Backgrounds survive.** Code blocks, table headers, and blockquotes keep their fill, which a browser print drops unless you remember to ask for it.
+
+`markcopy.pdf.pageSize` sets the paper size (Letter, A4, or Legal). If your browser is installed somewhere unusual, point `markcopy.pdf.browserPath` at it. With no Chromium-family browser installed at all, MarkCopy falls back to opening the preview in your default browser for you to print by hand.
 
 ## PDF preview
 
