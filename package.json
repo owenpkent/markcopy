@@ -220,6 +220,21 @@
           "default": 5000,
           "minimum": 1,
           "description": "Maximum number of CSV/TSV rows to render. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large files."
+        },
+        "markcopy.pdf.pageSize": {
+          "type": "string",
+          "enum": [
+            "Letter",
+            "A4",
+            "Legal"
+          ],
+          "default": "Letter",
+          "description": "Paper size for 'Save as PDF'."
+        },
+        "markcopy.pdf.browserPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the Chrome, Edge, or Chromium executable used to render the PDF. Leave empty to detect one automatically; set it if yours is installed somewhere unusual. When no browser can be found, 'Save as PDF' falls back to opening the preview in your default browser to print by hand."
         }
       }
     }

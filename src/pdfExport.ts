@@ -1,0 +1,391 @@
+// Turning the preview into a PDF file, without a browser window or a print dialog.
+//
+// Every Chromium-family browser can render a page straight to a PDF from the
+// command line (`--headless --print-to-pdf`). That path is what the export uses:
+// it writes a real, text-based PDF with no print dialog to dismiss and, crucially,
+// none of the header/footer furniture the interactive print dialog adds by default
+// (the document title on the top-left, the source URL on the bottom-right).
+//
+// Nothing here touches the `vscode` module, so it is all unit-testable.
+import { spawn } from 'node:child_process';
+import { access, mkdtemp, rm, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, posix, win32 } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { escapeHtml } from './render';
+
+// A Chromium build that failed to open the page still exits 0 and still writes a
+// PDF: the error page. A genuine render of even an empty document is comfortably
+// larger than this, so a suspiciously small file means the run did not work.
+const MIN_PDF_BYTES = 1024;
+
+// Long enough for a big document with web fonts and images on a cold browser
+// start, short enough that a wedged process does not hang the export forever.
+const RENDER_TIMEOUT_MS = 90_000;
+
+export type PageSize = 'Letter' | 'A4' | 'Legal';
+
+/**
+ * Chromium-family executables to try, most preferred first.
+ *
+ * Edge leads on Windows because it is always present; Chrome leads elsewhere.
+ * Bare names (Linux) are resolved through PATH by `spawn`, so they are returned
+ * as-is and probed by running them.
+ *
+ * Paths are joined with the separator of the *target* platform rather than the
+ * host's, so the result depends only on the arguments.
+ */
+export function browserCandidates(
+  platform: NodeJS.Platform,
+  env: Record<string, string | undefined>,
+): string[] {
+  if (platform === 'win32') {
+    const roots = [
+      env['ProgramFiles'],
+      env['ProgramFiles(x86)'],
+      env['ProgramW6432'],
+      env['LOCALAPPDATA'],
+    ].filter((r): r is string => Boolean(r));
+    const relative = [
+      ['Microsoft', 'Edge', 'Application', 'msedge.exe'],
+      ['Google', 'Chrome', 'Application', 'chrome.exe'],
+      ['Google', 'Chrome Beta', 'Application', 'chrome.exe'],
+      ['Chromium', 'Application', 'chrome.exe'],
+      ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'],
+    ];
+    const out: string[] = [];
+    for (const rel of relative) {
+      for (const root of roots) {
+        out.push(win32.join(root, ...rel));
+      }
+    }
+    return dedupe(out);
+  }
+
+  if (platform === 'darwin') {
+    const apps = [
+      ['Google Chrome.app', 'Google Chrome'],
+      ['Microsoft Edge.app', 'Microsoft Edge'],
+      ['Chromium.app', 'Chromium'],
+      ['Brave Browser.app', 'Brave Browser'],
+    ];
+    const roots = [
+      '/Applications',
+      env['HOME'] ? posix.join(env['HOME'], 'Applications') : undefined,
+    ];
+    const out: string[] = [];
+    for (const [app, bin] of apps) {
+      for (const root of roots) {
+        if (root) {
+          out.push(posix.join(root, app, 'Contents', 'MacOS', bin));
+        }
+      }
+    }
+    return dedupe(out);
+  }
+
+  // Linux and friends: PATH names, plus the usual absolute locations for the
+  // (common) case of a PATH that a GUI-launched VS Code did not inherit.
+  const names = [
+    'google-chrome',
+    'google-chrome-stable',
+    'chromium',
+    'chromium-browser',
+    'microsoft-edge',
+    'microsoft-edge-stable',
+    'brave-browser',
+  ];
+  return dedupe([...names, ...names.map((n) => `/usr/bin/${n}`)]);
+}
+
+function dedupe(paths: string[]): string[] {
+  return Array.from(new Set(paths));
+}
+
+/**
+ * The command line that renders `htmlPath` to `pdfPath`.
+ *
+ * Both no-header flags are passed on purpose: `--no-pdf-header-footer` is the
+ * current name and `--print-to-pdf-no-header` the older one, and Chromium ignores
+ * switches it does not know. Between them the output carries no title header and
+ * no `file://…` footer on any supported build.
+ *
+ * `--headless` deliberately, not `--headless=new`: recent Chromium maps it to the
+ * new mode anyway, and older builds that predate `=new` would fail to parse it and
+ * launch a visible window instead of printing.
+ */
+export function printArgs(opts: {
+  htmlPath: string;
+  pdfPath: string;
+  userDataDir: string;
+}): string[] {
+  return [
+    '--headless',
+    '--disable-gpu',
+    // A throwaway profile: without it, launching an already-running browser just
+    // hands the URL to the existing process and prints nothing. It also keeps the
+    // user's extensions, sync, and session out of the render.
+    `--user-data-dir=${opts.userDataDir}`,
+    '--disable-extensions',
+    '--disable-sync',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-default-apps',
+    '--no-pdf-header-footer',
+    '--print-to-pdf-no-header',
+    // Let deferred work (web fonts, images, layout) settle before the snapshot,
+    // instead of printing a half-laid-out first frame.
+    '--virtual-time-budget=10000',
+    '--run-all-compositor-stages-before-draw',
+    `--print-to-pdf=${opts.pdfPath}`,
+    pathToFileURL(opts.htmlPath).href,
+  ];
+}
+
+/** Whether `path` exists and is executable by us. */
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Locate a browser able to print the export, or undefined if there is none.
+ *
+ * `configured` (the `markcopy.pdf.browserPath` setting) wins outright, so a user
+ * with a browser in an unusual place can point at it. Absolute candidates are
+ * checked on disk; bare PATH names are taken on trust here and fail later at
+ * spawn time, where the error message can say what went wrong.
+ */
+export async function findBrowser(
+  configured: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): Promise<string | undefined> {
+  const trimmed = configured?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  for (const candidate of browserCandidates(platform, env)) {
+    const bare = !candidate.includes('/') && !candidate.includes('\\');
+    if (bare || (await isExecutable(candidate))) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/** A fresh, empty directory for one export's browser profile. */
+export async function createProfileDir(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'markcopy-pdf-'));
+}
+
+/** Best-effort recursive delete; a leftover temp directory is not worth failing over. */
+export async function removeQuietly(path: string): Promise<void> {
+  try {
+    await rm(path, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Render an HTML file to a PDF file with a headless browser.
+ *
+ * Rejects with a message fit to show the user: a non-zero exit, a timeout, or an
+ * exit that reported success but left no usable PDF behind (which is what a
+ * browser too old for `--print-to-pdf` looks like).
+ */
+export async function renderPdf(opts: {
+  browser: string;
+  htmlPath: string;
+  pdfPath: string;
+  userDataDir: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const args = printArgs(opts);
+  const stderr = await run(opts.browser, args, opts.timeoutMs ?? RENDER_TIMEOUT_MS);
+
+  let size = 0;
+  try {
+    size = (await stat(opts.pdfPath)).size;
+  } catch {
+    throw new Error(`the browser wrote no PDF.${detail(stderr)}`);
+  }
+  if (size < MIN_PDF_BYTES) {
+    throw new Error(`the browser wrote an empty PDF.${detail(stderr)}`);
+  }
+}
+
+// The tail of the browser's stderr, if it said anything worth repeating. Chromium
+// is chatty about harmless GPU and registry warnings on every start, so this is
+// only ever a hint appended to our own message.
+function detail(stderr: string): string {
+  const line = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/bytes written to file/i.test(l))
+    .pop();
+  return line ? ` (${line.slice(0, 200)})` : '';
+}
+
+/**
+ * Assemble the standalone page that gets rendered to PDF.
+ *
+ * It carries the preview's own stylesheet, so the export looks like what the
+ * reader was just looking at, and forces the light palette regardless of the
+ * preview's display theme: nobody wants a black page on paper.
+ *
+ * Note what the body deliberately does *not* carry: `data-mc-kind`. A CSV preview
+ * uses it to become a viewport-tall flex column that scrolls internally, which is
+ * right for a panel and wrong for paper, where there is nothing to scroll and
+ * everything past the first page's worth of rows would be clipped away. Leaving it
+ * off means a grid flows as ordinary content and paginates. Anything added here
+ * that reintroduces the attribute needs a print rule to undo that layout.
+ */
+export function buildPdfPage(opts: {
+  bodyHtml: string;
+  title: string;
+  previewCss: string;
+  katexCss: string;
+  pageSize: PageSize;
+  /** Have the page invoke the print dialog itself; only the manual browser route wants this. */
+  autoPrint: boolean;
+}): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${escapeHtml(opts.title || 'MarkCopy')}</title>
+<style>${opts.previewCss}</style>
+${opts.katexCss ? `<style>${opts.katexCss}</style>` : ''}
+<style>${pdfCss(opts.pageSize)}</style>
+</head>
+<body class="mc-force-light" data-mc-theme="light">
+<div id="content" class="markdown-body">${opts.bodyHtml}</div>
+${opts.autoPrint ? AUTO_PRINT_SCRIPT : ''}
+</body>
+</html>`;
+}
+
+// A headless render prints the page itself, so only the manual route needs this; a
+// `window.print()` racing `--print-to-pdf` would be at best redundant.
+const AUTO_PRINT_SCRIPT = `<script>
+window.addEventListener('load', function () {
+  var print = function () { setTimeout(function () { window.print(); }, 200); };
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(print, print); }
+  else { print(); }
+});
+</script>`;
+
+/**
+ * Print tuning for the export page, layered on top of the preview's stylesheet.
+ *
+ * Grouped by the problem each rule solves rather than by selector, because most of
+ * them undo something the on-screen preview needs and paper does not.
+ */
+export function pdfCss(pageSize: PageSize): string {
+  return `
+@page { size: ${pageSize}; margin: 16mm; }
+
+html, body { background: #ffffff; margin: 0; padding: 0; }
+body {
+  box-sizing: border-box;
+  /* Chromium omits background colours from a print unless the page opts in, which
+     would flatten every code block, table header, and blockquote to plain white. */
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+/* The preview centres its column in the panel and leaves 120px of room to scroll
+   past the end. The @page margin does that job here, and that bottom padding would
+   otherwise print as a blank final page. */
+.markdown-body { max-width: none; margin: 0; padding: 0; }
+
+/* Pagination.
+   Only genuinely atomic things forbid a break inside them. A blanket
+   \`pre, table { break-inside: avoid }\` cannot be honoured for a block taller than
+   the page, and a browser that cannot honour it pushes the block to a fresh page
+   anyway -- leaving the rest of the previous one blank. That is where the stray
+   page breaks came from. Tall blocks may now split, and only the things that would
+   look broken split are protected. */
+h1, h2, h3, h4, h5, h6 { break-inside: avoid; break-after: avoid; }
+p, li, blockquote { orphans: 3; widows: 3; }
+img, .mc-mermaid, .mc-math { break-inside: avoid; }
+tr { break-inside: avoid; }
+/* Repeat a table's header on every page it spans. */
+thead { display: table-header-group; break-inside: avoid; }
+
+/* On screen a code block or a wide table scrolls sideways. There is nowhere to
+   scroll on paper, so \`overflow: auto\` just clips whatever does not fit and the
+   content is silently lost. Wrap it instead. */
+.markdown-body pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  break-inside: auto;
+}
+.markdown-body table {
+  display: table;
+  max-width: 100%;
+  overflow: visible;
+  break-inside: auto;
+}
+.markdown-body th, .markdown-body td { overflow-wrap: anywhere; }
+.markdown-body img { max-width: 100%; height: auto; }
+.mc-mermaid svg { max-width: 100%; height: auto; }
+
+/* Interactive chrome that means nothing in a document. */
+.mc-menu, .mc-toast { display: none !important; }
+`;
+}
+
+function run(command: string, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, { windowsHide: true });
+    } catch (err) {
+      reject(new Error(`could not start ${command} (${String(err)}).`));
+      return;
+    }
+
+    let stderr = '';
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      finish(() => {
+        child.kill();
+        reject(new Error(`the browser did not finish within ${Math.round(timeoutMs / 1000)}s.`));
+      });
+    }, timeoutMs);
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      // Bounded: a wedged browser can log without limit, and only the tail is used.
+      stderr = (stderr + chunk.toString()).slice(-4000);
+    });
+    child.on('error', (err) =>
+      finish(() => reject(new Error(`could not start ${command} (${err.message}).`))),
+    );
+    child.on('close', (code) =>
+      finish(() => {
+        if (code === 0) {
+          resolve(stderr);
+        } else {
+          reject(new Error(`the browser exited with code ${code}.${detail(stderr)}`));
+        }
+      }),
+    );
+  });
+}

@@ -6,6 +6,7 @@ import { tableToDelimited } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
+import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 
 // Heavy libraries are loaded lazily on first use so the initial webview bundle
 // stays small. Each getter caches the module's default export after the first
@@ -34,7 +35,6 @@ const menu = document.getElementById('mc-menu') as HTMLDivElement;
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 let sourceLines: string[] = [];
-let programmaticScroll = false;
 let mermaidConfig: Record<string, unknown> = {};
 // Identity of the document currently shown, so a render that swaps to a new
 // document can reset scroll to the top (or a linked heading) instead of keeping
@@ -177,6 +177,8 @@ async function render(
   content
     .querySelectorAll<HTMLElement>('.mc-csv-wrap')
     .forEach((wrap) => wrap.addEventListener('scroll', syncEditorToPreview, { passive: true }));
+  // Every block just moved, so the measured anchors describe the previous render.
+  invalidateAnchors();
   // On a live edit (same document) keep the reader's scroll position, unless the
   // navigation asked for a heading (e.g. a `file.md#sec` link back into the doc
   // already shown). When the preview swaps to a new document, land at the linked
@@ -243,19 +245,141 @@ async function renderKatex(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Scroll sync
 // ---------------------------------------------------------------------------
-function scrollToLine(line: number): void {
-  const el = nearestElementForLine(line);
+// Editor and preview drive each other, so every move one side makes comes back as
+// a request to move the other. Left alone the two fight: scrolling the preview
+// reveals a line in the editor, the editor reports its new position, and the
+// preview is yanked to that line's block mid-gesture — which reads as sync scroll
+// being broken rather than as a loop.
+//
+// Two rules break it. A scroll we performed ourselves is not reported back (the
+// suppression window), and a request that arrives while the user is actively
+// scrolling the preview is dropped, because it can only be the echo of what they
+// are already doing. The window is generous enough to cover the reveal round-trip
+// through the extension host and short enough to be invisible.
+const SYNC_ECHO_MS = 250;
+
+// Sampling cap for the anchor list; see `sample` in scrollSync.ts.
+const MAX_ANCHORS = 600;
+
+let syncSuppressedUntil = 0;
+let userScrolledAt = 0;
+
+function suppressSync(ms = SYNC_ECHO_MS): void {
+  syncSuppressedUntil = Math.max(syncSuppressedUntil, Date.now() + ms);
+}
+
+function syncSuppressed(): boolean {
+  return Date.now() < syncSuppressedUntil;
+}
+
+// What actually scrolls. A Markdown preview scrolls the page; a CSV preview is a
+// viewport-tall grid that scrolls inside its own wrapper (see preview.css), and the
+// page itself never moves.
+function scroller(): HTMLElement | null {
+  return document.body.dataset.mcKind === 'csv'
+    ? content.querySelector<HTMLElement>('.mc-csv-wrap')
+    : null;
+}
+
+function scrollTop(): number {
+  const el = scroller();
+  return el ? el.scrollTop : window.scrollY;
+}
+
+function setScrollTop(value: number): void {
+  const el = scroller();
   if (el) {
-    programmaticScroll = true;
-    el.scrollIntoView({ block: 'start' });
-    window.setTimeout(() => (programmaticScroll = false), 60);
+    el.scrollTop = value;
+  } else {
+    window.scrollTo(0, value);
   }
 }
 
+function maxScroll(): number {
+  const el = scroller();
+  return el
+    ? Math.max(0, el.scrollHeight - el.clientHeight)
+    : Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+}
+
+// Anchors are measured once and reused: a long document has hundreds of them, and
+// re-measuring on every scroll frame would cost a forced layout each time. The
+// cache is dropped on render, on resize, and whenever the content's height changes
+// under it (a late image, font, or diagram settling).
+let anchorCache: Anchor[] | null = null;
+let anchorCacheHeight = -1;
+
+function invalidateAnchors(): void {
+  anchorCache = null;
+}
+
+function anchors(): Anchor[] {
+  const height = scroller()?.scrollHeight ?? document.documentElement.scrollHeight;
+  if (anchorCache && anchorCacheHeight === height) {
+    return anchorCache;
+  }
+
+  // `data-source-line` marks the Markdown blocks; a CSV grid carries one for the
+  // table as a whole, so its body rows stand in for the per-line detail. The header
+  // row is excluded on purpose: it is sticky, so its position tracks the scroll
+  // rather than the content.
+  const nodes = Array.from(
+    content.querySelectorAll<HTMLElement>('[data-source-line], tbody > tr[data-record-line]'),
+  );
+  const base = scrollTop();
+  const containerTop = scroller()?.getBoundingClientRect().top ?? 0;
+
+  const out: Anchor[] = [];
+  for (const el of sample(nodes, MAX_ANCHORS)) {
+    const line = Number(el.dataset.sourceLine ?? el.dataset.recordLine);
+    if (!Number.isFinite(line)) {
+      continue;
+    }
+    const offset = el.getBoundingClientRect().top - containerTop + base;
+    const prev = out[out.length - 1];
+    // Interpolation needs both keys non-decreasing. Anything that measures out of
+    // order (a float, an absolutely positioned block) is skipped rather than
+    // allowed to invert the mapping.
+    if (prev && (line <= prev.line || offset <= prev.offset)) {
+      continue;
+    }
+    out.push({ line, offset });
+  }
+
+  // Close the list off at the end of the document, so the last screenful maps
+  // proportionally instead of pinning to the final block's top edge.
+  const end = { line: Math.max(0, sourceLines.length - 1), offset: maxScroll() };
+  const last = out[out.length - 1];
+  if (!last || (end.line > last.line && end.offset > last.offset)) {
+    out.push(end);
+  }
+
+  anchorCache = out;
+  anchorCacheHeight = height;
+  return out;
+}
+
+// Editor -> preview.
+function scrollToLine(line: number): void {
+  if (!currentSyncScroll || !Number.isFinite(line)) {
+    return;
+  }
+  // The user's own scrolling wins: this is almost certainly the echo of the reveal
+  // that their preview scroll just caused in the editor.
+  if (Date.now() - userScrolledAt < SYNC_ECHO_MS) {
+    return;
+  }
+  const target = offsetForLine(anchors(), line);
+  if (target === undefined || Math.abs(target - scrollTop()) < 1) {
+    return;
+  }
+  suppressSync();
+  setScrollTop(target);
+}
+
 function scrollToTop(): void {
-  programmaticScroll = true;
-  window.scrollTo(0, 0);
-  window.setTimeout(() => (programmaticScroll = false), 60);
+  suppressSync();
+  setScrollTop(0);
 }
 
 // Scroll to a heading (or named anchor) by its id/name. markdown-it-anchor gives
@@ -273,9 +397,8 @@ function scrollToAnchor(rawId: string): void {
     document.getElementById(rawId) ??
     content.querySelector<HTMLElement>(`a[name="${escaped}"]`);
   if (el) {
-    programmaticScroll = true;
+    suppressSync();
     el.scrollIntoView({ block: 'start' });
-    window.setTimeout(() => (programmaticScroll = false), 60);
   }
 }
 
@@ -301,38 +424,38 @@ content.addEventListener('click', (e) => {
   }
 });
 
-function nearestElementForLine(line: number): HTMLElement | null {
-  const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
-  let best: HTMLElement | null = null;
-  for (const el of marked) {
-    const l = Number(el.dataset.sourceLine);
-    if (l <= line) {
-      best = el;
-    } else {
-      break;
-    }
-  }
-  return best ?? marked[0] ?? null;
-}
+// Preview -> editor: report the source line showing at the top of the viewport,
+// interpolated between the blocks either side of it. Bound to the window for the
+// Markdown layout, and (in render) to the CSV grid's scroll container, which is
+// what actually scrolls in the CSV layout.
+//
+// Throttled to one message per frame: a scroll gesture fires far more events than
+// that, and each one costs a round-trip through the extension host.
+let syncRaf = 0;
 
-// Preview -> editor sync: report the first mapped block that is still fully
-// below the top of the viewport. Bound to the window for the Markdown layout,
-// and (in render) to the CSV grid's scroll container, which is what actually
-// scrolls in the CSV layout.
 function syncEditorToPreview(): void {
-  if (programmaticScroll) {
+  if (syncRaf) {
     return;
   }
-  const marked = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
-  for (const el of marked) {
-    if (el.getBoundingClientRect().top >= 0) {
-      vscode.postMessage({ type: 'revealLine', line: Number(el.dataset.sourceLine) });
-      break;
+  syncRaf = requestAnimationFrame(() => {
+    syncRaf = 0;
+    if (syncSuppressed()) {
+      return; // our own scroll, not the reader's
     }
-  }
+    userScrolledAt = Date.now();
+    if (!currentSyncScroll) {
+      return;
+    }
+    const line = lineForOffset(anchors(), scrollTop());
+    if (line !== undefined) {
+      vscode.postMessage({ type: 'revealLine', line: Math.max(0, Math.floor(line)) });
+    }
+  });
 }
 
 window.addEventListener('scroll', syncEditorToPreview, { passive: true });
+// Offsets move with the panel width; the next sync re-measures.
+window.addEventListener('resize', invalidateAnchors, { passive: true });
 
 // ---------------------------------------------------------------------------
 // Context menu

@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
-import { createMarkdownIt, escapeHtml } from './render';
+import { join } from 'node:path';
+import { createMarkdownIt } from './render';
 import { PdfEditorProvider } from './pdfEditor';
+import {
+  buildPdfPage,
+  createProfileDir,
+  findBrowser,
+  removeQuietly,
+  renderPdf,
+  type PageSize,
+} from './pdfExport';
 import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
 import { cellEdit, delimiterHint, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
@@ -71,10 +80,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    // Export the preview to a self-contained HTML file and open it in the default
-    // browser, where the user prints it to PDF. The webview serializes its already
-    // rendered content (KaTeX, Mermaid, highlighted code) and posts it back as a
-    // `pdfHtml` message, handled in onDidReceiveMessage below.
+    // Export the preview as a PDF. The webview serializes its already rendered
+    // content (KaTeX, Mermaid, highlighted code) and posts it back as a `pdfHtml`
+    // message, handled in onDidReceiveMessage below and rendered by exportPdf.
     vscode.commands.registerCommand('markcopy.saveAsPdf', () => {
       if (current) {
         current.panel.webview.postMessage({ type: 'exportPdf' });
@@ -122,8 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
-      const cfg = vscode.workspace.getConfiguration('markcopy');
-      if (!cfg.get<boolean>('syncScroll', true)) {
+      if (!syncScrollEnabled() || revealEcho()) {
         return;
       }
       if (current && e.textEditor.document.uri.toString() === current.docUri.toString()) {
@@ -507,15 +514,42 @@ async function openLink(
   openPreview(context, doc);
 }
 
+// ---------------------------------------------------------------------------
+// Scroll sync
+// ---------------------------------------------------------------------------
+// Revealing a line moves the editor, which fires onDidChangeTextEditorVisibleRanges,
+// which would push that same position straight back at the preview the reader is
+// still scrolling. This window marks the reveals we caused ourselves so they are
+// not echoed; the preview applies the mirror-image rule (see SYNC_ECHO_MS in
+// src/webview/main.ts).
+const REVEAL_ECHO_MS = 250;
+let revealedAt = 0;
+
+function revealEcho(): boolean {
+  return Date.now() - revealedAt < REVEAL_ECHO_MS;
+}
+
+function syncScrollEnabled(): boolean {
+  return vscode.workspace.getConfiguration('markcopy').get<boolean>('syncScroll', true);
+}
+
+// Preview -> editor. Gated on the same setting as the other direction: with sync
+// scroll off, neither surface follows the other.
 function revealEditorLine(docUri: vscode.Uri, line: number): void {
+  if (!syncScrollEnabled() || !Number.isFinite(line)) {
+    return;
+  }
   const editor = vscode.window.visibleTextEditors.find(
     (e) => e.document.uri.toString() === docUri.toString(),
   );
   if (!editor) {
     return;
   }
-  const range = new vscode.Range(line, 0, line, 0);
-  editor.revealRange(range, vscode.TextEditorRevealType.AtTop);
+  // The webview measures against the render it has, which a fast edit can leave a
+  // line or two behind the document; clamp rather than throw on an out-of-range line.
+  const clamped = Math.min(Math.max(0, Math.floor(line)), editor.document.lineCount - 1);
+  revealedAt = Date.now();
+  editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 
 function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): string {
@@ -561,18 +595,128 @@ function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): s
 </html>`;
 }
 
-// Assemble a self-contained HTML document from the webview's serialized content,
-// write it to the extension's storage folder, and open it in the OS default
-// browser. The page auto-invokes the print dialog, where the user picks
-// "Save as PDF". Reused by both the command and the in-preview menu item.
+// Only one export at a time: each one spawns a browser process, and a second
+// export of the same preview would race it for the same destination file.
+let exportingPdf = false;
+
+// Export the preview as a PDF file.
+//
+// The preview's serialized HTML goes into a standalone page, which a headless
+// Chromium-family browser renders straight to the destination the user picked. No
+// browser window, no print dialog, and none of the header/footer furniture that
+// dialog adds by default (the document title across the top, the `file://…` URL
+// across the bottom) — see src/pdfExport.ts.
+//
+// Where no such browser can be found, this falls back to the older route: write
+// the page out and open it in the default browser for the user to print by hand.
 async function exportPdf(
   context: vscode.ExtensionContext,
   state: PreviewState,
   bodyHtml: string,
 ): Promise<void> {
+  if (exportingPdf) {
+    void vscode.window.showInformationMessage('MarkCopy: a PDF export is already in progress.');
+    return;
+  }
+  exportingPdf = true;
   try {
-    const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab)$/i, '');
-    const html = await buildPdfHtml(context, bodyHtml, name);
+    await runExport(context, state, bodyHtml);
+  } finally {
+    exportingPdf = false;
+  }
+}
+
+async function runExport(
+  context: vscode.ExtensionContext,
+  state: PreviewState,
+  bodyHtml: string,
+): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('markcopy');
+  const pageSize = cfg.get<PageSize>('pdf.pageSize', 'Letter');
+  const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab)$/i, '');
+
+  const browser = await findBrowser(cfg.get<string>('pdf.browserPath', ''));
+  if (!browser) {
+    await printViaBrowser(context, bodyHtml, name, pageSize, 'no-browser');
+    return;
+  }
+
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: defaultPdfUri(state.docUri, name),
+    filters: { 'PDF document': ['pdf'] },
+    saveLabel: 'Export PDF',
+    title: 'Export preview as PDF',
+  });
+  if (!target) {
+    return; // cancelled
+  }
+
+  try {
+    const html = await buildPdfHtml(context, bodyHtml, name, { pageSize, autoPrint: false });
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `MarkCopy: exporting ${basename(target)}…`,
+      },
+      async () => {
+        // One throwaway directory holds both the page and the browser's profile,
+        // so cleaning up is a single delete however the render ends.
+        const dir = await createProfileDir();
+        try {
+          const htmlUri = vscode.Uri.file(join(dir, 'export.html'));
+          await vscode.workspace.fs.writeFile(htmlUri, Buffer.from(html, 'utf8'));
+          await renderPdf({
+            browser,
+            htmlPath: htmlUri.fsPath,
+            pdfPath: target.fsPath,
+            userDataDir: join(dir, 'profile'),
+          });
+        } finally {
+          await removeQuietly(dir);
+        }
+      },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const choice = await vscode.window.showErrorMessage(
+      `MarkCopy: could not export the PDF — ${message}`,
+      'Print from Browser',
+    );
+    if (choice) {
+      await printViaBrowser(context, bodyHtml, name, pageSize, 'fallback');
+    }
+    return;
+  }
+
+  // Hand the finished file to whatever the OS uses for PDFs.
+  void vscode.env.openExternal(target);
+  vscode.window.setStatusBarMessage(`MarkCopy: exported ${basename(target)}.`, 6000);
+}
+
+// Where the save dialog starts: beside the source document, or failing that in the
+// first workspace folder.
+function defaultPdfUri(docUri: vscode.Uri, name: string): vscode.Uri {
+  const safe = `${name.replace(/[^\w.\- ]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy'}.pdf`;
+  if (docUri.scheme === 'file') {
+    return vscode.Uri.joinPath(docUri, '..', safe);
+  }
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  return folder ? vscode.Uri.joinPath(folder.uri, safe) : vscode.Uri.file(safe);
+}
+
+// The manual route, kept for machines with no Chromium-family browser installed
+// and as the escape hatch when a headless render fails: write the page to the
+// extension's storage folder and open it in the default browser, where it invokes
+// the print dialog itself.
+async function printViaBrowser(
+  context: vscode.ExtensionContext,
+  bodyHtml: string,
+  name: string,
+  pageSize: PageSize,
+  reason: 'no-browser' | 'fallback',
+): Promise<void> {
+  try {
+    const html = await buildPdfHtml(context, bodyHtml, name, { pageSize, autoPrint: true });
     const dir = context.globalStorageUri;
     await vscode.workspace.fs.createDirectory(dir);
     const safe = name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
@@ -581,10 +725,18 @@ async function exportPdf(
     // globalStorageUri uses the `vscode-userdata:` scheme, which the OS shell
     // can't open; re-wrap the on-disk path as a `file:` URI for the browser.
     await vscode.env.openExternal(vscode.Uri.file(fileUri.fsPath));
-    vscode.window.setStatusBarMessage(
-      'MarkCopy: opened in your browser — press Ctrl/Cmd+P and choose "Save as PDF".',
-      6000,
-    );
+    if (reason === 'no-browser') {
+      void vscode.window.showInformationMessage(
+        'MarkCopy: no Chrome, Edge, or Chromium found for a direct PDF export, so the preview ' +
+          'opened in your browser instead — press Ctrl/Cmd+P and choose "Save as PDF". Set ' +
+          '`markcopy.pdf.browserPath` if one is installed somewhere unusual.',
+      );
+    } else {
+      vscode.window.setStatusBarMessage(
+        'MarkCopy: opened in your browser — press Ctrl/Cmd+P and choose "Save as PDF".',
+        6000,
+      );
+    }
   } catch (err) {
     void vscode.window.showErrorMessage(`MarkCopy: could not export PDF (${String(err)}).`);
   }
@@ -597,43 +749,18 @@ async function buildPdfHtml(
   context: vscode.ExtensionContext,
   bodyHtml: string,
   title: string,
+  opts: { pageSize: PageSize; autoPrint: boolean },
 ): Promise<string> {
-  const previewCss = await readMedia(context, 'preview.css');
-  // KaTeX CSS is only needed when the document contains math; skip its (font-heavy)
-  // inlining otherwise to keep the export small.
-  const katexCss = /class="(katex|mc-math)/.test(bodyHtml) ? await inlineKatexFonts(context) : '';
-  const printCss = `
-html, body { background: #ffffff; }
-body { padding: 24px 28px; box-sizing: border-box; }
-.markdown-body { max-width: 820px; margin: 0 auto; }
-@page { margin: 16mm; }
-@media print {
-  body { padding: 0; }
-  .markdown-body { max-width: none; }
-  pre, blockquote, table, .mc-mermaid, .mc-math { break-inside: avoid; page-break-inside: avoid; }
-  h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
-}`;
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${escapeHtml(title || 'MarkCopy')}</title>
-<style>${previewCss}</style>
-${katexCss ? `<style>${katexCss}</style>` : ''}
-<style>${printCss}</style>
-</head>
-<body class="mc-force-light" data-mc-theme="light">
-<div id="content" class="markdown-body">${bodyHtml}</div>
-<script>
-window.addEventListener('load', function () {
-  var print = function () { setTimeout(function () { window.print(); }, 200); };
-  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(print, print); }
-  else { print(); }
-});
-</script>
-</body>
-</html>`;
+  return buildPdfPage({
+    bodyHtml,
+    title,
+    previewCss: await readMedia(context, 'preview.css'),
+    // KaTeX CSS is only needed when the document contains math; skip its
+    // (font-heavy) inlining otherwise to keep the export small.
+    katexCss: /class="(katex|mc-math)/.test(bodyHtml) ? await inlineKatexFonts(context) : '',
+    pageSize: opts.pageSize,
+    autoPrint: opts.autoPrint,
+  });
 }
 
 async function readMedia(context: vscode.ExtensionContext, ...segments: string[]): Promise<string> {

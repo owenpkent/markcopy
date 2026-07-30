@@ -407,6 +407,12 @@ body.mc-csv-resizing {
     white-space: normal;
     overflow: visible;
   }
+  /* Sticky positioning has no meaning across printed pages; `table-header-group`
+     (set in the export stylesheet) is what repeats the header instead. */
+  .markdown-body table.mc-csv thead th,
+  .markdown-body table.mc-csv .mc-csv-gutter {
+    position: static;
+  }
   .mc-csv-grip {
     display: none;
   }

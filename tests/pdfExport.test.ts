@@ -1,0 +1,167 @@
+import { describe, it, expect } from 'vitest';
+import { browserCandidates, buildPdfPage, findBrowser, pdfCss, printArgs } from '../src/pdfExport';
+
+describe('browserCandidates', () => {
+  it('finds Edge and Chrome under the Windows program folders', () => {
+    const out = browserCandidates('win32', {
+      ProgramFiles: 'C:\\Program Files',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local',
+    });
+    expect(out).toContain('C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe');
+    expect(out).toContain('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe');
+    expect(out).toContain('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+    expect(out).toContain('C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe');
+  });
+
+  it('tolerates a Windows environment with none of those variables set', () => {
+    expect(browserCandidates('win32', {})).toEqual([]);
+  });
+
+  it('finds the macOS app bundles, including a per-user install', () => {
+    const out = browserCandidates('darwin', { HOME: '/Users/me' });
+    expect(out).toContain('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    expect(out).toContain('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
+    expect(out).toContain('/Users/me/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+  });
+
+  it('offers PATH names and absolute paths elsewhere', () => {
+    const out = browserCandidates('linux', {});
+    expect(out).toContain('google-chrome');
+    expect(out).toContain('chromium');
+    expect(out).toContain('/usr/bin/google-chrome');
+  });
+
+  it('never repeats a candidate', () => {
+    // ProgramW6432 usually duplicates ProgramFiles; probing the same path twice is
+    // wasted syscalls.
+    const out = browserCandidates('win32', {
+      ProgramFiles: 'C:\\Program Files',
+      ProgramW6432: 'C:\\Program Files',
+    });
+    expect(new Set(out).size).toBe(out.length);
+  });
+});
+
+describe('findBrowser', () => {
+  it('takes the configured path verbatim, without probing', async () => {
+    await expect(findBrowser('  /opt/my/chrome  ', 'linux', {})).resolves.toBe('/opt/my/chrome');
+  });
+
+  it('ignores a blank setting', async () => {
+    // Nothing to find on a Windows box with no program folders, so a blank
+    // setting has to fall through to detection rather than be returned as a path.
+    await expect(findBrowser('   ', 'win32', {})).resolves.toBeUndefined();
+  });
+});
+
+describe('printArgs', () => {
+  const args = printArgs({
+    htmlPath: 'C:\\tmp\\mc\\export.html',
+    pdfPath: 'C:\\Users\\me\\out.pdf',
+    userDataDir: 'C:\\tmp\\mc\\profile',
+  });
+
+  it('prints headlessly to the requested file', () => {
+    expect(args).toContain('--headless');
+    expect(args).toContain('--print-to-pdf=C:\\Users\\me\\out.pdf');
+  });
+
+  it('suppresses the header and footer the print dialog would add', () => {
+    // The reason this export exists: no document title across the top, no
+    // `file://…` URL across the bottom. Both spellings, old and current.
+    expect(args).toContain('--no-pdf-header-footer');
+    expect(args).toContain('--print-to-pdf-no-header');
+  });
+
+  it('uses a throwaway profile', () => {
+    // Without this, launching an already-running browser hands the URL to the
+    // existing process and prints nothing at all.
+    expect(args).toContain('--user-data-dir=C:\\tmp\\mc\\profile');
+  });
+
+  it('passes the page as a file URL, last', () => {
+    const url = args[args.length - 1];
+    expect(url.startsWith('file:///')).toBe(true);
+    expect(url).toContain('export.html');
+  });
+
+  it('does not ask for the new headless mode by name', () => {
+    // Builds that predate `--headless=new` would fail to parse it and open a
+    // visible window instead of printing.
+    expect(args).not.toContain('--headless=new');
+  });
+});
+
+describe('pdfCss', () => {
+  it('honours the configured paper size', () => {
+    expect(pdfCss('A4')).toContain('@page { size: A4;');
+    expect(pdfCss('Letter')).toContain('@page { size: Letter;');
+  });
+
+  it('opts into printing background colours', () => {
+    // Chromium drops them otherwise, flattening every code block and table header.
+    expect(pdfCss('Letter')).toContain('print-color-adjust: exact');
+  });
+
+  it('lets tall blocks split across pages', () => {
+    // A `break-inside: avoid` a browser cannot honour is what left half-empty
+    // pages behind the tall code blocks and long tables.
+    const css = pdfCss('Letter');
+    expect(css).toMatch(/\.markdown-body pre \{[^}]*break-inside: auto/);
+    expect(css).toMatch(/\.markdown-body table \{[^}]*break-inside: auto/);
+  });
+
+  it('unclips what the preview would scroll sideways', () => {
+    const css = pdfCss('Letter');
+    expect(css).toMatch(/\.markdown-body pre \{[^}]*overflow: visible/);
+    expect(css).toMatch(/\.markdown-body pre \{[^}]*white-space: pre-wrap/);
+  });
+
+  it('repeats a table header on every page the table spans', () => {
+    expect(pdfCss('Letter')).toContain('display: table-header-group');
+  });
+
+  it('drops the padding the preview keeps for scrolling past the end', () => {
+    expect(pdfCss('Letter')).toMatch(/\.markdown-body \{[^}]*padding: 0/);
+  });
+});
+
+describe('buildPdfPage', () => {
+  const page = (over: Partial<Parameters<typeof buildPdfPage>[0]> = {}) =>
+    buildPdfPage({
+      bodyHtml: '<h1>Hi</h1>',
+      title: 'notes',
+      previewCss: '.markdown-body { color: red }',
+      katexCss: '',
+      pageSize: 'Letter',
+      autoPrint: false,
+      ...over,
+    });
+
+  it('inlines the preview stylesheet and the print rules', () => {
+    const html = page();
+    expect(html).toContain('.markdown-body { color: red }');
+    expect(html).toContain('@page { size: Letter;');
+    expect(html).toContain('<h1>Hi</h1>');
+  });
+
+  it('forces the light palette whatever the preview was showing', () => {
+    expect(page()).toContain('<body class="mc-force-light" data-mc-theme="light">');
+  });
+
+  it('escapes the title', () => {
+    expect(page({ title: '<script>x</script>' })).not.toContain('<script>x</script>');
+  });
+
+  it('omits KaTeX CSS when the document has no math', () => {
+    expect(page()).not.toContain('katex');
+    expect(page({ katexCss: '.katex { font-size: 1.1em }' })).toContain('.katex');
+  });
+
+  it('only self-prints on the manual browser route', () => {
+    // A `window.print()` racing `--print-to-pdf` is at best redundant.
+    expect(page({ autoPrint: false })).not.toContain('window.print()');
+    expect(page({ autoPrint: true })).toContain('window.print()');
+  });
+});
