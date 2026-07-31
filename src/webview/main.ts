@@ -289,13 +289,16 @@ function syncSuppressed(): boolean {
   return Date.now() < syncSuppressedUntil;
 }
 
-// What actually scrolls. A Markdown preview scrolls the page; a CSV preview is a
-// viewport-tall grid that scrolls inside its own wrapper (see preview.css), and the
-// page itself never moves.
+// What actually scrolls. A Markdown preview scrolls the page; a grid preview (CSV
+// or a spreadsheet sheet) is viewport-tall and scrolls inside its own wrapper (see
+// preview.css), and the page itself never moves.
+function isGridKind(): boolean {
+  const kind = document.body.dataset.mcKind;
+  return kind === 'csv' || kind === 'xlsx';
+}
+
 function scroller(): HTMLElement | null {
-  return document.body.dataset.mcKind === 'csv'
-    ? content.querySelector<HTMLElement>('.mc-csv-wrap')
-    : null;
+  return isGridKind() ? content.querySelector<HTMLElement>('.mc-csv-wrap') : null;
 }
 
 function scrollTop(): number {
@@ -389,10 +392,7 @@ function anchors(): Anchor[] {
   // range is showing. Anchoring to it would interpolate the final few pixels
   // across every unrendered row and fling the editor to the end of the file.
   const last = out[out.length - 1];
-  const endLine =
-    document.body.dataset.mcKind === 'csv'
-      ? (last?.line ?? 0) + 1
-      : Math.max(0, sourceLines.length - 1);
+  const endLine = isGridKind() ? (last?.line ?? 0) + 1 : Math.max(0, sourceLines.length - 1);
   const end = { line: endLine, offset: limit };
   if (!last || (end.line > last.line && end.offset > last.offset)) {
     out.push(end);

@@ -107,6 +107,19 @@
           }
         ],
         "priority": "default"
+      },
+      {
+        "viewType": "markcopy.xlsxPreview",
+        "displayName": "MarkCopy Sheet Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.xlsx"
+          },
+          {
+            "filenamePattern": "*.xlsm"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "menus": {
@@ -268,12 +281,15 @@
   },
   "dependencies": {
     "dompurify": "^3.4.12",
+    "fflate": "^0.8.3",
     "highlight.js": "^11.10.0",
     "katex": "^0.18.1",
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-texmath": "^1.0.0",
+    "numfmt": "^3.2.6",
     "pdfjs-dist": "^6.1.200",
+    "saxes": "^6.0.0",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },

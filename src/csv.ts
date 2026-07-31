@@ -360,7 +360,14 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
 
   const parts: string[] = [];
   parts.push('<div class="mc-csv-wrap">');
-  parts.push(`<table class="mc-csv" data-source-line="${records[0].line}">`);
+  // `data-mc-editable` is what makes the grid editable, and it is set here rather
+  // than decided in the webview on purpose. The same markup renders a spreadsheet
+  // sheet (src/xlsx/render.ts), which is read-only because there is no way to write
+  // a cell back into a binary workbook. Keying the editor off the markup means a
+  // sheet cannot become editable through a change to the webview wiring; keying it
+  // off the preview kind would leave that one condition standing between a reader
+  // and an edit that silently goes nowhere.
+  parts.push(`<table class="mc-csv" data-mc-editable="1" data-source-line="${records[0].line}">`);
 
   // An explicit <col> per column is what the resize handles size; without it a
   // width set on one cell only lasts until the browser re-lays out the table.
