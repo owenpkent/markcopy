@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { applyMarkcopySetting } from './settingsScope';
+import { getNonce } from './previewShell';
 
 // A read-only custom editor that renders PDF files with pdf.js in a webview,
 // exposing MarkCopy's copy actions (page as PNG, page text, all text).
@@ -144,13 +145,4 @@ async function writeComments(uri: vscode.Uri, comments: unknown): Promise<void> 
   } catch {
     /* best-effort persistence; a failed write should not crash the editor */
   }
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

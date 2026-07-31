@@ -343,3 +343,37 @@ describe('focus across re-renders', () => {
     expect(cell(0, 0).classList.contains('mc-csv-cell--focus')).toBe(false);
   });
 });
+
+// A spreadsheet sheet renders the same grid markup as a CSV but must never become
+// editable: the document behind it is a binary workbook, and the writeback this
+// module drives rewrites a field in a text document by line and column. Read-only
+// is therefore carried by the markup (`data-mc-editable`), not by a condition in
+// the webview wiring, so that it cannot be lost to a refactor of that wiring.
+describe('read-only grids', () => {
+  const readOnlyGrid = (): void => {
+    document.body.innerHTML = renderCsvHtml(CSV).html;
+    document.querySelector('table.mc-csv')!.removeAttribute('data-mc-editable');
+    enhanceCsvTables(document.body);
+    enableCsvEditing(document.body, commit);
+  };
+
+  it('does not make the cells focusable', () => {
+    readOnlyGrid();
+    expect(cell(0, 0).classList.contains('mc-csv-cell')).toBe(false);
+    expect(cell(0, 0).getAttribute('tabindex')).toBeNull();
+  });
+
+  it('opens no editor and commits nothing', () => {
+    readOnlyGrid();
+    click(cell(0, 0));
+    key(cell(0, 0), 'Enter');
+    expect(editor()).toBeNull();
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('still marks an ordinary CSV grid editable, so the guard is not vacuous', () => {
+    // Without this, removing `data-mc-editable` from src/csv.ts would leave every
+    // test above passing against a grid nobody can edit.
+    expect(renderCsvHtml(CSV).html).toContain('data-mc-editable="1"');
+  });
+});
