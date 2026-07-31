@@ -665,12 +665,25 @@ async function runExport(
         try {
           const htmlUri = vscode.Uri.file(join(dir, 'export.html'));
           await vscode.workspace.fs.writeFile(htmlUri, Buffer.from(html, 'utf8'));
+          // Render to a scratch file inside the throwaway directory, then move the
+          // finished PDF onto the destination. Rendering straight to the user's
+          // chosen path looks simpler and is wrong three ways: `stat` on that path
+          // cannot tell a fresh render from a file that was already sitting there,
+          // so a browser that exits 0 without writing reports success and leaves a
+          // stale export the reader believes is current; a browser sandboxed away
+          // from this directory would still write its error page to a destination
+          // it *can* reach, which no size check can distinguish from a real render;
+          // and a failed render would have already overwritten the previous file
+          // before we raise the error. A scratch path we know was empty makes the
+          // check below sound, and makes a failure a no-op on the reader's disk.
+          const scratch = join(dir, 'export.pdf');
           await renderPdf({
             browser,
             htmlPath: htmlUri.fsPath,
-            pdfPath: target.fsPath,
+            pdfPath: scratch,
             userDataDir: join(dir, 'profile'),
           });
+          await vscode.workspace.fs.copy(vscode.Uri.file(scratch), target, { overwrite: true });
         } finally {
           await removeQuietly(dir);
         }

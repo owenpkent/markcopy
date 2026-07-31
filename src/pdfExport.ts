@@ -15,16 +15,33 @@ import { join, posix, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { escapeHtml } from './render';
 
-// A Chromium build that failed to open the page still exits 0 and still writes a
-// PDF: the error page. A genuine render of even an empty document is comfortably
-// larger than this, so a suspiciously small file means the run did not work.
+// A floor for "the browser created the file but never finished writing it".
+//
+// Deliberately not a check for the browser's error page: measured, a one-paragraph
+// render and Chromium's "file couldn't be accessed" page come out 14 bytes apart
+// (59,731 vs 59,745), because both are dominated by the same embedded fonts. No
+// byte threshold can separate those, so renderPdf does not try. What rules the
+// error page out is rendering to a path inside the throwaway directory: a browser
+// sandboxed away from that directory cannot read the page from it either, so the
+// failure surfaces as a missing file rather than as a plausible-looking PDF.
 const MIN_PDF_BYTES = 1024;
 
 // Long enough for a big document with web fonts and images on a cold browser
 // start, short enough that a wedged process does not hang the export forever.
 const RENDER_TIMEOUT_MS = 90_000;
 
+// How long a killed browser gets to actually exit before we give up waiting. The
+// caller deletes the profile directory as soon as the render settles, and a
+// browser still shutting down holds files open under it, which on Windows fails
+// the delete with EBUSY and strands roughly 2 MB per timed-out export.
+const KILL_GRACE_MS = 2_000;
+
 export type PageSize = 'Letter' | 'A4' | 'Legal';
+
+// The values `markcopy.pdf.pageSize` may take, as data rather than only as a type,
+// so what reaches the export page can be checked at runtime. Keep in step with the
+// `enum` on that setting in package.json.
+const PAGE_SIZES: readonly string[] = ['Letter', 'A4', 'Legal'];
 
 /**
  * Chromium-family executables to try, most preferred first.
@@ -160,6 +177,11 @@ async function isExecutable(path: string): Promise<boolean> {
  * with a browser in an unusual place can point at it. Absolute candidates are
  * checked on disk; bare PATH names are taken on trust here and fail later at
  * spawn time, where the error message can say what went wrong.
+ *
+ * The configured path is deliberately not probed: a setting pointing somewhere
+ * wrong should fail at spawn time with a message naming it, rather than be
+ * silently ignored in favour of a browser the user did not choose. It is also
+ * machine-scoped in package.json, so a workspace cannot set it.
  */
 export async function findBrowser(
   configured: string | undefined,
@@ -184,10 +206,15 @@ export async function createProfileDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'markcopy-pdf-'));
 }
 
-/** Best-effort recursive delete; a leftover temp directory is not worth failing over. */
+/**
+ * Best-effort recursive delete; a leftover temp directory is not worth failing over.
+ *
+ * Retries because a browser that has just been killed may still hold files open
+ * under its profile directory, which Windows reports as EBUSY rather than waiting.
+ */
 export async function removeQuietly(path: string): Promise<void> {
   try {
-    await rm(path, { recursive: true, force: true });
+    await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
     /* ignore */
   }
@@ -199,6 +226,13 @@ export async function removeQuietly(path: string): Promise<void> {
  * Rejects with a message fit to show the user: a non-zero exit, a timeout, or an
  * exit that reported success but left no usable PDF behind (which is what a
  * browser too old for `--print-to-pdf` looks like).
+ *
+ * `pdfPath` must be a path that does not exist yet, inside a directory we made.
+ * That precondition is what makes the check below mean anything: `stat` cannot
+ * tell "the browser just wrote this" from "this was already here", so pointing
+ * this at a file the user chose would report success for a browser that exited 0
+ * without writing, leaving the reader with a stale export they believe is fresh.
+ * Callers render to a scratch path and move the result into place afterwards.
  */
 export async function renderPdf(opts: {
   browser: string;
@@ -207,6 +241,11 @@ export async function renderPdf(opts: {
   userDataDir: string;
   timeoutMs?: number;
 }): Promise<void> {
+  if (await exists(opts.pdfPath)) {
+    // A caller bug, not a user-facing condition: the freshness check below is
+    // only sound on a path that was empty going in.
+    throw new Error('internal error: the PDF scratch path already exists.');
+  }
   const args = printArgs(opts);
   const stderr = await run(opts.browser, args, opts.timeoutMs ?? RENDER_TIMEOUT_MS);
 
@@ -218,6 +257,16 @@ export async function renderPdf(opts: {
   }
   if (size < MIN_PDF_BYTES) {
     throw new Error(`the browser wrote an empty PDF.${detail(stderr)}`);
+  }
+}
+
+/** Whether `path` exists at all. */
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -290,10 +339,17 @@ window.addEventListener('load', function () {
  * them undo something the on-screen preview needs and paper does not.
  */
 export function pdfCss(pageSize: PageSize): string {
+  // `pageSize` reaches us from settings.json, where the package.json `enum` is a
+  // settings-editor hint and not a runtime guarantee: WorkspaceConfiguration.get
+  // returns whatever string is there, so the PageSize type is a compile-time
+  // fiction at the call site. Unchecked, a value carrying `</style>` would close
+  // this element and let the rest parse as markup, and the export page (unlike the
+  // webview) has no CSP to fall back on.
+  const size: PageSize = PAGE_SIZES.includes(pageSize) ? pageSize : 'Letter';
   return `
-@page { size: ${pageSize}; margin: 16mm; }
+@page { size: ${size}; margin: 16mm; }
 
-html, body { background: #ffffff; margin: 0; padding: 0; }
+html, body { background: #ffffff; }
 body {
   box-sizing: border-box;
   /* Chromium omits background colours from a print unless the page opts in, which
@@ -301,10 +357,19 @@ body {
   print-color-adjust: exact;
   -webkit-print-color-adjust: exact;
 }
-/* The preview centres its column in the panel and leaves 120px of room to scroll
-   past the end. The @page margin does that job here, and that bottom padding would
-   otherwise print as a blank final page. */
-.markdown-body { max-width: none; margin: 0; padding: 0; }
+
+/* On screen this page is only ever seen through the print-by-hand fallback, where
+   it is a normal document in a normal window: keep the preview's readable column.
+   The flattening below is what paper needs, and applies only there. */
+body { padding: 24px 28px; }
+.markdown-body { max-width: 820px; margin: 0 auto; }
+@media print {
+  html, body { margin: 0; padding: 0; }
+  /* The preview centres its column in the panel and leaves 120px of room to scroll
+     past the end. The @page margin does that job here, and that bottom padding
+     would otherwise print as a blank final page. */
+  .markdown-body { max-width: none; margin: 0; padding: 0; }
+}
 
 /* Pagination.
    Only genuinely atomic things forbid a break inside them. A blanket
@@ -335,6 +400,17 @@ thead { display: table-header-group; break-inside: avoid; }
   overflow: visible;
   break-inside: auto;
 }
+/* The CSV grid opts out of the rule above: preview.css sizes it \`width: max-content\`
+   at (0,2,1), which outranks the (0,1,1) selector there whatever the source order,
+   so a wide grid would run off the page margin. Dragging a column divider also
+   freezes per-<col> widths as inline styles, which only \`!important\` can reach.
+   Both are undone here so a grid fits the paper and re-flows to it. */
+.markdown-body table.mc-csv {
+  width: 100% !important;
+  max-width: 100% !important;
+  table-layout: auto !important;
+}
+.markdown-body table.mc-csv col { width: auto !important; }
 .markdown-body th, .markdown-body td { overflow-wrap: anywhere; }
 .markdown-body img { max-width: 100%; height: auto; }
 .mc-mermaid svg { max-width: 100%; height: auto; }
@@ -356,19 +432,29 @@ function run(command: string, args: string[], timeoutMs: number): Promise<string
 
     let stderr = '';
     let settled = false;
+    let timedOut = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (fn: () => void) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        clearTimeout(graceTimer);
         fn();
       }
     };
+    const timeoutError = () =>
+      new Error(`the browser did not finish within ${Math.round(timeoutMs / 1000)}s.`);
 
     const timer = setTimeout(() => {
-      finish(() => {
-        child.kill();
-        reject(new Error(`the browser did not finish within ${Math.round(timeoutMs / 1000)}s.`));
-      });
+      if (settled) {
+        return;
+      }
+      // Kill, then let the 'close' handler settle us once the process is really
+      // gone, so the profile directory is unlocked before the caller deletes it.
+      // The grace timer is the backstop for a process that will not die.
+      timedOut = true;
+      child.kill();
+      graceTimer = setTimeout(() => finish(() => reject(timeoutError())), KILL_GRACE_MS);
     }, timeoutMs);
 
     child.stderr?.on('data', (chunk: Buffer) => {
@@ -380,7 +466,9 @@ function run(command: string, args: string[], timeoutMs: number): Promise<string
     );
     child.on('close', (code) =>
       finish(() => {
-        if (code === 0) {
+        if (timedOut) {
+          reject(timeoutError());
+        } else if (code === 0) {
           resolve(stderr);
         } else {
           reject(new Error(`the browser exited with code ${code}.${detail(stderr)}`));

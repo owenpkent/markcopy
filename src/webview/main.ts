@@ -204,7 +204,13 @@ async function renderMermaid(): Promise<void> {
     const code = pre.textContent ?? '';
     const host = document.createElement('div');
     host.className = 'mc-mermaid';
-    host.dataset.sourceLine = pre.dataset.sourceLine ?? '';
+    // Only when there is a real line to carry. markdown-it's fence rule returns the
+    // highlighter's output verbatim when it already starts with `<pre`, which drops
+    // the token's attributes, so this is often absent. Setting it to '' anyway
+    // would hand scroll sync an anchor claiming line 0.
+    if (pre.dataset.sourceLine) {
+      host.dataset.sourceLine = pre.dataset.sourceLine;
+    }
     // Keep the source so the diagram can be re-rendered in a light theme for PDF
     // export (Mermaid bakes theme colors into the SVG, so a dark-theme diagram is
     // unreadable on a forced-light printout).
@@ -319,19 +325,25 @@ function anchors(): Anchor[] {
     return anchorCache;
   }
 
-  // `data-source-line` marks the Markdown blocks; a CSV grid carries one for the
-  // table as a whole, so its body rows stand in for the per-line detail. The header
-  // row is excluded on purpose: it is sticky, so its position tracks the scroll
-  // rather than the content.
-  const nodes = Array.from(
-    content.querySelectorAll<HTMLElement>('[data-source-line], tbody > tr[data-record-line]'),
-  );
+  // `data-source-line` marks the Markdown blocks, and a CSV grid puts one on every
+  // body row (src/csv.ts), so one selector covers both. The grid's header row is
+  // excluded because csv.ts deliberately omits the attribute there: the header is
+  // sticky, so its position tracks the scroll rather than the content.
+  const nodes = Array.from(content.querySelectorAll<HTMLElement>('[data-source-line]'));
   const base = scrollTop();
   const containerTop = scroller()?.getBoundingClientRect().top ?? 0;
 
   const out: Anchor[] = [];
   for (const el of sample(nodes, MAX_ANCHORS)) {
-    const line = Number(el.dataset.sourceLine ?? el.dataset.recordLine);
+    const raw = el.dataset.sourceLine ?? '';
+    // An empty attribute is not line 0. `Number('')` is 0 and passes isFinite, so
+    // an element carrying `data-source-line=""` would anchor the top of the
+    // document to itself: see the Mermaid host below, whose source line markdown-it
+    // does not always supply.
+    if (raw.trim() === '') {
+      continue;
+    }
+    const line = Number(raw);
     if (!Number.isFinite(line)) {
       continue;
     }
@@ -348,8 +360,29 @@ function anchors(): Anchor[] {
 
   // Close the list off at the end of the document, so the last screenful maps
   // proportionally instead of pinning to the final block's top edge.
-  const end = { line: Math.max(0, sourceLines.length - 1), offset: maxScroll() };
+  //
+  // Measured anchors at or past the end of the scroll range go first. Without
+  // that, the synthetic anchor below almost never qualifies: the preview leaves
+  // 120px of room to scroll past the end, so a closing paragraph of 20-40px sits
+  // beyond `maxScroll()` and the `offset` comparison fails on nearly every
+  // document. Dropping them rather than loosening the comparison keeps `offset`
+  // strictly increasing, which the binary search in scrollSync.ts depends on.
+  const limit = maxScroll();
+  if (limit > 0) {
+    while (out.length > 0 && out[out.length - 1].offset >= limit) {
+      out.pop();
+    }
+  }
+  // A grid truncated by markcopy.csv.maxRows renders far fewer rows than the file
+  // has lines, so the document's last line is not what the bottom of the scroll
+  // range is showing. Anchoring to it would interpolate the final few pixels
+  // across every unrendered row and fling the editor to the end of the file.
   const last = out[out.length - 1];
+  const endLine =
+    document.body.dataset.mcKind === 'csv'
+      ? (last?.line ?? 0) + 1
+      : Math.max(0, sourceLines.length - 1);
+  const end = { line: endLine, offset: limit };
   if (!last || (end.line > last.line && end.offset > last.offset)) {
     out.push(end);
   }
@@ -432,6 +465,12 @@ content.addEventListener('click', (e) => {
 // Throttled to one message per frame: a scroll gesture fires far more events than
 // that, and each one costs a round-trip through the extension host.
 let syncRaf = 0;
+// Set when a scroll arrives inside the echo-suppression window. A gesture that
+// both starts and ends in that window would otherwise be dropped outright, and
+// nothing would ever resend it: the host only pushes on an *editor* move, so the
+// editor would sit on the old line until the reader scrolled again. Re-checked
+// once the window closes.
+let syncPending = 0;
 
 function syncEditorToPreview(): void {
   if (syncRaf) {
@@ -440,7 +479,18 @@ function syncEditorToPreview(): void {
   syncRaf = requestAnimationFrame(() => {
     syncRaf = 0;
     if (syncSuppressed()) {
-      return; // our own scroll, not the reader's
+      // Our own scroll, not the reader's, or at least indistinguishable from it.
+      // Come back when the window has closed and decide then.
+      if (!syncPending) {
+        syncPending = window.setTimeout(
+          () => {
+            syncPending = 0;
+            syncEditorToPreview();
+          },
+          Math.max(0, syncSuppressedUntil - Date.now()) + 1,
+        );
+      }
+      return;
     }
     userScrolledAt = Date.now();
     if (!currentSyncScroll) {

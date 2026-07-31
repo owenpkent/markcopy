@@ -234,7 +234,8 @@
         "markcopy.pdf.browserPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the Chrome, Edge, or Chromium executable used to render the PDF. Leave empty to detect one automatically; set it if yours is installed somewhere unusual. When no browser can be found, 'Save as PDF' falls back to opening the preview in your default browser to print by hand."
+          "scope": "machine",
+          "markdownDescription": "Path to the Chrome, Edge, or Chromium executable used to render the PDF. Leave empty to detect one automatically; set it if yours is installed somewhere unusual. When no browser can be found, 'Save as PDF' falls back to opening the preview in your default browser to print by hand.\n\nThis setting is machine-scoped: it can only be set in your own user settings, never by a workspace, because its value is launched as a program."
         }
       }
     }

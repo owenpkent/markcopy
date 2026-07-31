@@ -32,6 +32,12 @@ suite('MarkCopy integration', () => {
     assert.strictEqual(cfg.get('csv.delimiter'), 'auto');
     assert.strictEqual(cfg.get('csv.headerRow'), true);
     assert.strictEqual(cfg.get('csv.maxRows'), 5000);
+    // Reading these through the real configuration is what catches a contribution
+    // key that does not match the key the code reads: `cfg.get('pdf.pageSize')`
+    // would just keep returning its hardcoded default, and every unit test would
+    // still pass while the setting did nothing.
+    assert.strictEqual(cfg.get('pdf.pageSize'), 'Letter');
+    assert.strictEqual(cfg.get('pdf.browserPath'), '');
   });
 
   // The extension contributes the `csv` and `tsv` language ids itself. If that
