@@ -20,7 +20,7 @@ Copy as:
 | -------- | ------------------------------ | ------------------------------------ |
 | Markdown | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
 
-This takes over from "Copy Table" / "Copy Block" below whenever there's an active selection. If the selection sits inside a table, the **Copy as** submenu splits into headed sections, one for the selection and one for the table it's in (for example `SELECTION > Markdown` and `TABLE > Rich Text, CSV, TSV, PNG`), so every format for both contexts stays reachable.
+This takes over from "Copy Table" / "Copy Block" below whenever there's an active selection. If the selection sits inside a table, the **Copy as** submenu splits into headed sections, one for the selection and one for the table it's in (for example `SELECTION > Markdown` and `TABLE > Rich Text, Markdown, CSV, TSV, PNG`), so every format for both contexts stays reachable.
 
 ### Code block
 
@@ -40,11 +40,12 @@ Top level:
 
 Copy as:
 
-| Format | Clipboard flavor                         | Pastes well into                       |
-| ------ | ---------------------------------------- | -------------------------------------- |
-| CSV    | `text/plain` (comma-separated, RFC 4180) | Excel, Google Sheets, any CSV importer |
-| TSV    | `text/plain` (tab-separated)             | Excel, Google Sheets (as real cells)   |
-| PNG    | `image/png`                              | Slides, chat, anywhere an image works  |
+| Format   | Clipboard flavor                         | Pastes well into                       |
+| -------- | ---------------------------------------- | -------------------------------------- |
+| Markdown | `text/plain` (GFM table)                 | Any editor, chat, another `.md` file   |
+| CSV      | `text/plain` (comma-separated, RFC 4180) | Excel, Google Sheets, any CSV importer |
+| TSV      | `text/plain` (tab-separated)             | Excel, Google Sheets (as real cells)   |
+| PNG      | `image/png`                              | Slides, chat, anywhere an image works  |
 
 This applies to the CSV/TSV grid too: a previewed `.csv` renders as a real table, so it offers exactly the same actions. Its row-number gutter is viewer chrome (marked `data-mc-ignore`) and is left out of every format, rich text and PNG included, so what you copy is the data in the file. Grid cell text is copied verbatim, so leading and trailing spaces inside a field survive; a Markdown table's cell whitespace is incidental to rendering and is still trimmed.
 

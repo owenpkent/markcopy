@@ -1,7 +1,19 @@
 import * as vscode from 'vscode';
+import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { renderWorkbookHtml, WorkbookError } from './xlsx';
+
+const { basename } = posix;
+
+// The settings a sheet is drawn from. Anything outside this list cannot change
+// what the grid looks like, so it must not cost a re-read and a re-parse.
+const REDRAW_SETTINGS = [
+  'markcopy.theme',
+  'markcopy.xlsx.maxRows',
+  'markcopy.xlsx.maxColumns',
+  'markcopy.styleProfile',
+];
 
 /** Hand the finished export page back to the host's PDF pipeline. */
 export type ExportPdf = (docUri: vscode.Uri, bodyHtml: string) => void;
@@ -67,11 +79,20 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
         source: '',
         docKey: document.uri.toString(),
         docVersion: -1,
-        syncScroll: false,
+        // The user's own setting values. These drive the Preferences submenu,
+        // which reads them as what the user has chosen and writes the opposite
+        // back when clicked. Describing this surface here instead reported Sync
+        // scroll, Auto-open preview and Math as off no matter what the user had
+        // set, and every click on one wrote a value they had not asked for.
+        syncScroll: cfg.get<boolean>('syncScroll', true),
+        autoPreview: cfg.get<boolean>('autoPreview', true),
+        math: cfg.get<boolean>('math', true),
+        // What this surface does, which is a different question from what the
+        // user has enabled. A sheet has no TextDocument to reveal into.
+        supportsSync: false,
         theme: cfg.get<string>('theme', 'auto'),
         styleProfile: cfg.get<string>('styleProfile', 'github'),
         mermaidConfig: {},
-        math: false,
       });
     };
 
@@ -103,17 +124,38 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     // Re-read the workbook when it changes on disk. The PDF viewer has no
     // equivalent and shows a stale document forever.
-    const watcher = vscode.workspace.createFileSystemWatcher(document.uri.fsPath);
+    //
+    // createFileSystemWatcher takes a GlobPattern, not a path. Handing it an
+    // fsPath produced a watcher that matched nothing, so this never fired: on
+    // Windows the separators read as glob escapes, and an absolute path is not a
+    // pattern anywhere. A RelativePattern rooted at the containing folder is the
+    // documented way to watch one file.
+    //
+    // onDidCreate matters as much as onDidChange here, because a spreadsheet
+    // application saves by writing a temporary file and renaming it over the
+    // original, which arrives as a delete followed by a create.
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(
+        vscode.Uri.joinPath(document.uri, '..'),
+        basename(document.uri.path),
+      ),
+    );
     disposables.push(
       watcher,
       watcher.onDidChange(() => void draw()),
+      watcher.onDidCreate(() => void draw()),
     );
 
     // Follow markcopy.* changes the way the Markdown preview does, so the theme
     // and the row cap take effect without reopening the workbook.
+    //
+    // Narrowed to the settings a sheet actually renders from. `markcopy` as a
+    // whole includes the Markdown-only keys, and every one of them was re-reading
+    // the file from disk and re-parsing the whole workbook to redraw a grid that
+    // could not have changed.
     disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('markcopy', document.uri)) {
+        if (REDRAW_SETTINGS.some((key) => e.affectsConfiguration(key, document.uri))) {
           void draw();
         }
       }),
