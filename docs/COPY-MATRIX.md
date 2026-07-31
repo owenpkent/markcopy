@@ -143,4 +143,6 @@ Three differences are worth stating explicitly.
 - **Cells copy as displayed, not as stored.** A date copies as `2023-03-15`, not as the serial `45000`, and a percentage as `15.3%`, not `0.153`. That is what the reader is looking at, and what a spreadsheet or document receiving the paste will interpret correctly.
 - **Copy Whole Document and Save as PDF cover the active sheet only.** Both serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
 
+**Copy as Markdown** deserves a note of its own, because a sheet needs reshaping that a Markdown table does not. A GFM table cannot be headerless, and a sheet is one once its column letters are stripped: Turndown's table rule sees no header, declines the table, and returns the raw HTML. So `prepareTableForMarkdown` (`src/webview/table.ts`) promotes the first body row to the header and pads it out to the widest row, which matters when row 1 is a merged title spanning the sheet.
+
 There is no cell editing, so no equivalent of the CSV grid's writeback: the document behind a sheet is a binary workbook, and MarkCopy never writes to it.

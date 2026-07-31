@@ -82,7 +82,7 @@ Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden)
 - [ ] `SUM` shows its stored result, `11110.75`. `AVERAGE`, which has no stored result, shows a muted marker rather than an empty cell, and hovering it explains why.
 - [ ] The tab strip shows **Summary** and **Notes** but not **Scratch**, which is hidden. Clicking **Notes** switches sheets and the tab strip follows.
 - [ ] Right-click the grid -> **Copy as** -> **CSV**, paste into a spreadsheet: real cells, **no row-number column and no A/B/C header row**, and the first pasted row is the sheet's own first row.
-- [ ] Right-click -> **Copy as** -> **Markdown**: a Markdown table.
+- [ ] Right-click -> **Copy as** -> **Markdown**: a real Markdown table (pipes and a `| --- |` separator line), not raw `<table>` HTML. The merged title row is padded to the full width, and there is no A/B/C row and no row-number column.
 - [ ] Cells cannot be edited: clicking one and typing does nothing, and there is no edit caret. (A workbook is read-only in MarkCopy by design.)
 - [ ] All four `markcopy.theme` values render the grid and the tab strip legibly, green included.
 - [ ] **Save as PDF** from the right-click menu exports the active sheet, with no tab strip and no row-number gutter on the page.
