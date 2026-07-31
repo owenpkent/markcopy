@@ -39,6 +39,8 @@ Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that
 | Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
 | CSV / TSV grid preview                   |    No    |            No             | **Yes**  |
 | Edit CSV cells in the preview            |    No    |            No             | **Yes**  |
+| Excel (.xlsx) preview                    |    No    |            No             | **Yes**  |
+| Copy a spreadsheet range as Markdown     |    No    |            No             | **Yes**  |
 | PDF preview built in                     |    No    |            No             | **Yes**  |
 
 ## Why it exists
@@ -57,6 +59,10 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
 - **Save as PDF.** Export the rendered preview straight to a PDF file: pick where to save it and MarkCopy writes it, then opens it. No print dialog to work through and no filename header or URL footer on the pages, with equations, diagrams, highlighted code, and local images intact and the text still selectable. See [Save as PDF](#save-as-pdf).
+- **Excel preview.** Open an `.xlsx` or `.xlsm` and it renders as a grid, with sheet tabs along the top and the column letters and row numbers a spreadsheet shows. Values appear the way the workbook formats them, so a date is a date and not `45000`, a percentage is `15.3%` and not `0.153`, and a formula shows its stored result. Merged cells stay merged, and anything the author hid (rows, columns, or whole sheets) stays hidden. Then right-click and take the whole sheet out as rich text, Markdown, CSV, TSV, or PNG.
+
+  The preview is **read-only by design**: MarkCopy never writes to your workbook, so it cannot corrupt one. See [Settings](#settings) for `markcopy.xlsx.*`.
+
 - **CSV and TSV preview, with editing.** Open a `.csv` or `.tsv` and it renders as a spreadsheet-style grid instead of a wall of commas: a sticky header row and row-number gutter, alternating row colors, numeric columns aligned right, and long values clipped with an ellipsis so rows stay one line tall. The delimiter is detected automatically (comma, tab, semicolon, or pipe, with a `.tsv` always read as tab-separated) and quoted fields follow RFC 4180, so commas, quotes, and newlines inside a cell all survive. See [Settings](#settings) for `markcopy.csv.*`.
   - **Edit cells in place.** Click to select, then double-click, press Enter or F2, or just start typing. **Enter** commits and moves down, **Tab** commits and moves right, **Shift+Enter** puts a newline inside the cell, **Escape** discards, **Delete** clears, and the arrow keys move around. Headers are editable too. Edits go straight into the file, so **Ctrl+Z** undoes them like any other change, and only the edited field is rewritten: the rest of the row keeps its original bytes, quoting and line endings included.
   - **Resizable columns.** Drag any column divider, double-click one (or press Enter on it) to fit the column to its contents, and right-click for **Reset Column Widths**.
@@ -113,6 +119,8 @@ Local images in the document render automatically, and the right-click menu's **
 | `markcopy.csv.delimiter`   | `auto` \| `,` \| `\t` \| `;` \| `\|`   | `auto`   | Field separator for the CSV/TSV grid. `auto` picks whichever separator splits the file into the most consistent columns, except that a `.tsv` or `.tab` file is always read as tab-separated. |
 | `markcopy.csv.headerRow`   | boolean                                | `true`   | Treat the first row of a CSV/TSV file as column headers. Turn off for files that start straight into data.                                                                                    |
 | `markcopy.csv.maxRows`     | number                                 | `5000`   | Maximum rows to render. The grid says how many rows it is hiding; raise it to show more, at the cost of a slower preview on very large files.                                                 |
+| `markcopy.xlsx.maxRows`    | number                                 | `5000`   | Maximum rows to render from a spreadsheet sheet. The grid says how many rows it is hiding.                                                                                                    |
+| `markcopy.xlsx.maxColumns` | number                                 | `200`    | Maximum columns to render from a spreadsheet sheet.                                                                                                                                           |
 | `markcopy.pdf.pageSize`    | `Letter` \| `A4` \| `Legal`            | `Letter` | Paper size for **Save as PDF**.                                                                                                                                                               |
 | `markcopy.pdf.browserPath` | string                                 | `""`     | Path to the Chrome, Edge, or Chromium executable used to render the PDF. Empty detects one automatically.                                                                                     |
 

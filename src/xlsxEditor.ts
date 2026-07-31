@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
+import { renderWorkbookHtml, WorkbookError } from './xlsx';
 
 /** Hand the finished export page back to the host's PDF pipeline. */
 export type ExportPdf = (docUri: vscode.Uri, bodyHtml: string) => void;
@@ -119,37 +120,26 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
     );
   }
 
-  // Placeholder for the spike: proves the custom editor can drive the shared
-  // preview bundle and that a grid built from the CSV markup inherits the copy
-  // menu, the themes, and Save as PDF. Replaced by the real OOXML reader.
   private async renderWorkbook(uri: vscode.Uri, sheetIndex: number): Promise<string> {
+    const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     const bytes = await vscode.workspace.fs.readFile(uri);
-    const rows = [
-      ['file', uri.path.substring(uri.path.lastIndexOf('/') + 1)],
-      ['bytes', String(bytes.length)],
-      ['sheet', String(sheetIndex)],
-    ];
-    const body = rows
-      .map(
-        (r, i) =>
-          `<tr><th class="mc-csv-gutter" data-mc-ignore="1" scope="row">${i + 1}</th>` +
-          r.map((c) => `<td>${c}</td>`).join('') +
-          `</tr>`,
-      )
-      .join('');
-    return (
-      `<div class="mc-csv-wrap"><table class="mc-csv"><colgroup>` +
-      `<col class="mc-csv-gutter-col" /><col /><col /></colgroup>` +
-      `<thead><tr><th class="mc-csv-gutter" data-mc-ignore="1" aria-hidden="true"></th>` +
-      `<th scope="col"><span>key</span></th><th scope="col"><span>value</span></th>` +
-      `</tr></thead><tbody>${body}</tbody></table></div>`
-    );
+    return renderWorkbookHtml(bytes, {
+      sheetIndex,
+      maxRows: cfg.get<number>('xlsx.maxRows', 5000),
+      maxColumns: cfg.get<number>('xlsx.maxColumns', 200),
+    }).html;
   }
 }
 
+// A workbook we cannot read becomes a readable notice in the panel, never a blank
+// one. WorkbookError messages are written to be shown; anything else is a bug and
+// gets a generic lead-in so the panel does not present a stack trace as content.
 function errorHtml(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  return `<div class="mc-csv-wrap"><p class="mc-csv-note">MarkCopy could not read this workbook: ${escapeText(message)}</p></div>`;
+  const message =
+    err instanceof WorkbookError
+      ? err.message
+      : `something went wrong reading it (${err instanceof Error ? err.message : String(err)}).`;
+  return `<div class="mc-csv-wrap"><p class="mc-csv-note">MarkCopy could not preview this workbook: ${escapeText(message)}</p></div>`;
 }
 
 function escapeText(value: string): string {

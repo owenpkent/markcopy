@@ -9,6 +9,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Added
+
+- **Spreadsheet preview.** Open an `.xlsx` or `.xlsm` workbook and it renders as a grid, with sheet tabs, the column letters and row numbers a spreadsheet shows, and the same right-click **Copy as** menu the CSV grid has: rich text, Markdown, CSV, TSV, or PNG. Numbers, dates, percentages, and currency are shown the way the workbook formats them rather than as raw serial numbers, merged cells stay merged, and rows, columns, and sheets the author hid stay hidden.
+  - The preview is read-only, deliberately: MarkCopy will not write to your workbook, so it cannot damage one.
+  - New settings: `markcopy.xlsx.maxRows` (5000) and `markcopy.xlsx.maxColumns` (200).
+  - A formula the file stores without a calculated result (which openpyxl and xlsxwriter both produce) is marked rather than shown as an empty cell.
+
 ### Changed
 
 - **Save as PDF now writes a PDF.** It used to open the preview in your browser and leave you to work the print dialog, which stamped the filename across the top of every page and the `file://` URL across the bottom. Now it asks where to save, renders the file with a headless Chrome, Edge, or Chromium found on your machine, and opens the result: no browser window, no print dialog, no header or footer. Text stays selectable, and equations, diagrams, highlighted code, and local images carry over as before.

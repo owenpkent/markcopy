@@ -71,6 +71,24 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Exporting over an existing PDF that then fails leaves the old file intact: point `markcopy.pdf.browserPath` at a nonsense path, export onto a PDF you already have, dismiss the error, and confirm the original still opens and is unchanged.
 - [ ] Exporting a CSV grid wider than the page fits every column onto the paper rather than cutting off the right-hand ones, including after dragging a column divider to widen it in the preview first.
 
+## Spreadsheet preview (.xlsx)
+
+Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden), a merged title, dates, currency, a percentage, a formula with a stored result, and a formula without one.
+
+- [ ] It opens as a grid, not as binary junk or an error, with sheet tabs along the top.
+- [ ] The column headers are letters (A, B, C) and the row numbers are the sheet's own: the sample jumps from row 1 to row 3, and the gutter shows that rather than renumbering.
+- [ ] Dates read as `2023-03-15`, currency as `1,234.50`, and the margin as `15.3%`. None of them appear as raw numbers like `45000` or `0.153`.
+- [ ] The title in row 1 spans three columns (a merged cell).
+- [ ] `SUM` shows its stored result, `11110.75`. `AVERAGE`, which has no stored result, shows a muted marker rather than an empty cell, and hovering it explains why.
+- [ ] The tab strip shows **Summary** and **Notes** but not **Scratch**, which is hidden. Clicking **Notes** switches sheets and the tab strip follows.
+- [ ] Right-click the grid -> **Copy as** -> **CSV**, paste into a spreadsheet: real cells, **no row-number column and no A/B/C header row**, and the first pasted row is the sheet's own first row.
+- [ ] Right-click -> **Copy as** -> **Markdown**: a Markdown table.
+- [ ] Cells cannot be edited: clicking one and typing does nothing, and there is no edit caret. (A workbook is read-only in MarkCopy by design.)
+- [ ] All four `markcopy.theme` values render the grid and the tab strip legibly, green included.
+- [ ] **Save as PDF** from the right-click menu exports the active sheet, with no tab strip and no row-number gutter on the page.
+- [ ] Editing the workbook in a spreadsheet application and saving re-renders the open preview.
+- [ ] Renaming a `.txt` to `.xlsx` and opening it gives a readable message, not a blank panel.
+
 ## CSV / TSV grid
 
 Open [sample.csv](../sample.csv).

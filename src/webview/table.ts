@@ -11,16 +11,25 @@ export function tableToDelimited(table: HTMLElement, delimiter: string): string 
   // that is otherwise a faithful round-trip. In a Markdown table the same
   // whitespace is incidental rendering, so it still goes.
   const verbatim = table.classList.contains('mc-csv');
-  return Array.from(table.querySelectorAll('tr'))
-    .map((tr) =>
-      Array.from(tr.querySelectorAll('th:not([data-mc-ignore]),td:not([data-mc-ignore])'))
-        .map((c) => {
-          const text = c.textContent ?? '';
-          return escapeField(verbatim ? text : text.trim(), delimiter);
-        })
-        .join(delimiter),
-    )
-    .join('\r\n');
+  return (
+    Array.from(table.querySelectorAll('tr'))
+      .map((tr) =>
+        Array.from(tr.querySelectorAll('th:not([data-mc-ignore]),td:not([data-mc-ignore])')).map(
+          (c) => {
+            const text = c.textContent ?? '';
+            return escapeField(verbatim ? text : text.trim(), delimiter);
+          },
+        ),
+      )
+      // A row that contributes no data cells is entirely chrome, so it should not
+      // become a blank line. A spreadsheet sheet has one: its header is the column
+      // letters A, B, C, which label the grid rather than being part of it. A
+      // Markdown table's empty row is unaffected, since its cells are real (empty)
+      // cells and still serialize as delimiters.
+      .filter((cells) => cells.length > 0)
+      .map((cells) => cells.join(delimiter))
+      .join('\r\n')
+  );
 }
 
 export function escapeField(value: string, delimiter: string): string {
