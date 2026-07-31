@@ -2,7 +2,7 @@ import type MermaidApi from 'mermaid';
 import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
-import { tableToDelimited } from './table';
+import { prepareTableForMarkdown, tableToDelimited } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
@@ -605,6 +605,11 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
       noun: 'Table',
       actions: [
         { label: 'Rich Text', run: () => copyRichText(table) },
+        // A spreadsheet sheet and a CSV grid are both tables by the time they get
+        // here, so this is also how a range of cells leaves as a Markdown table:
+        // the thing no other extension offers and the reason someone reaches for
+        // MarkCopy over a viewer.
+        { label: 'Markdown', run: () => void copyTableMarkdown(table) },
         { label: 'CSV', run: () => copyText(tableToDelimited(table, ',')) },
         { label: 'TSV', run: () => copyText(tableToDelimited(table, '\t')) },
         { label: 'PNG', run: () => copyPng(table) },
@@ -794,6 +799,26 @@ async function selectionMarkdown(): Promise<string> {
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
   const md = (await htmlToMarkdown(wrapper.innerHTML)).trim();
   return md || sel.toString();
+}
+
+/**
+ * Copy a rendered table as a Markdown table.
+ *
+ * Turndown's GFM plugin does the conversion, so this works for a Markdown table,
+ * a CSV grid, and a spreadsheet sheet alike. Chrome the viewer added has to go
+ * first, though: the row-number gutter and a sheet's A/B/C header row are marked
+ * `data-mc-ignore` and would otherwise become real columns in the output, which
+ * is the same reason tableToDelimited skips them.
+ */
+async function copyTableMarkdown(table: HTMLElement): Promise<void> {
+  // The reshaping lives in table.ts, next to the other serializer and away from
+  // the clipboard, so it can be unit-tested against real grid markup.
+  const md = (await htmlToMarkdown(prepareTableForMarkdown(table).outerHTML)).trim();
+  if (md && md.includes('|')) {
+    copyText(md);
+  } else {
+    toast('Nothing to copy');
+  }
 }
 
 // ---------------------------------------------------------------------------

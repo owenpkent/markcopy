@@ -32,6 +32,68 @@ export function tableToDelimited(table: HTMLElement, delimiter: string): string 
   );
 }
 
+/**
+ * A copy of `table` reshaped into something Turndown will emit as a GFM table.
+ *
+ * Three things have to happen, and none of them are cosmetic:
+ *
+ *  1. Drop the viewer's chrome (`data-mc-ignore`): the row-number gutter, and a
+ *     spreadsheet sheet's A/B/C header, which labels the grid rather than being
+ *     part of the document. Either one left in shifts every column.
+ *  2. Give the table a header. A GFM table cannot be headerless, and a sheet is
+ *     one once its letters are stripped. Turndown's table rule sees no header,
+ *     declines the table, and returns the raw HTML, so without this "Copy as
+ *     Markdown" pastes `<table class=...>` into the reader's document. The first
+ *     body row is promoted, which is what the first row of a sheet usually is.
+ *  3. Pad that header out to the widest row. A merged title cell promoted from
+ *     row 1 is one cell wide against a three-column body, and a GFM table with
+ *     fewer header cells than body cells renders with the extra columns dropped.
+ *
+ * Returns a detached clone; the live table is never touched.
+ */
+export function prepareTableForMarkdown(table: HTMLElement): HTMLElement {
+  const doc = table.ownerDocument;
+  const clone = table.cloneNode(true) as HTMLElement;
+
+  clone.querySelectorAll('[data-mc-ignore]').forEach((n) => n.remove());
+  clone.querySelectorAll('tr').forEach((tr) => {
+    if ((tr as HTMLTableRowElement).cells.length === 0) {
+      tr.remove();
+    }
+  });
+
+  const head = clone.querySelector('thead');
+  if (head && head.querySelectorAll('th,td').length === 0) {
+    head.remove();
+  }
+  if (!clone.querySelector('thead')) {
+    const first = clone.querySelector('tbody > tr') as HTMLTableRowElement | null;
+    if (first) {
+      // Cells become <th>: a first row of <td> renders without the separator line
+      // that makes it a table rather than a run of pipes.
+      Array.from(first.children).forEach((cell) => {
+        const th = doc.createElement('th');
+        th.textContent = cell.textContent;
+        first.replaceChild(th, cell);
+      });
+      first.remove();
+      const created = doc.createElement('thead');
+      created.appendChild(first);
+      clone.insertBefore(created, clone.firstChild);
+    }
+  }
+
+  const rows = Array.from(clone.querySelectorAll('tr')) as HTMLTableRowElement[];
+  const widest = rows.reduce((max, tr) => Math.max(max, tr.cells.length), 0);
+  const headerRow = clone.querySelector('thead tr') as HTMLTableRowElement | null;
+  if (headerRow) {
+    for (let i = headerRow.cells.length; i < widest; i++) {
+      headerRow.appendChild(doc.createElement('th'));
+    }
+  }
+  return clone;
+}
+
 export function escapeField(value: string, delimiter: string): string {
   if (delimiter === '\t') {
     return value.replace(/[\t\r\n]+/g, ' ');

@@ -6,6 +6,8 @@
 // custom editor, so these tests stand in for the manual pass and pin the parts a
 // refactor of main.ts could silently break.
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { renderWorkbookHtml } from '../src/xlsx';
+import { buildXlsx, row, sheetData } from './xlsx/fixture';
 
 const posted: unknown[] = [];
 
@@ -48,13 +50,22 @@ async function renderSheet(html: string): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-const SHEET =
-  '<div class="mc-csv-wrap"><table class="mc-csv">' +
-  '<colgroup><col class="mc-csv-gutter-col" /><col /><col /></colgroup>' +
-  '<thead><tr><th class="mc-csv-gutter" data-mc-ignore="1" aria-hidden="true"></th>' +
-  '<th scope="col"><span>name</span></th><th scope="col"><span>qty</span></th></tr></thead>' +
-  '<tbody><tr><th class="mc-csv-gutter" data-mc-ignore="1" scope="row">1</th>' +
-  '<td>Widget</td><td class="mc-csv-num">3</td></tr></tbody></table></div>';
+// Produced by the real reader rather than hand-written, so this cannot drift away
+// from what src/xlsx/render.ts actually emits. A hand-copied fixture is how a
+// contract test quietly stops testing the contract: an earlier version of this one
+// omitted `data-mc-ignore` from the header and its "no A/B/C column" assertion
+// passed for the wrong reason.
+const SHEET = renderWorkbookHtml(
+  buildXlsx({
+    sheets: [
+      {
+        name: 'Sheet1',
+        xml: sheetData([row(1, '<c r="A1" t="s"><v>0</v></c><c r="B1"><v>3</v></c>')]),
+      },
+    ],
+    sharedStrings: ['<t>Widget</t>'],
+  }),
+).html;
 
 describe('xlsx render contract', () => {
   it('renders the sheet into the shared preview bundle', async () => {
@@ -90,6 +101,13 @@ describe('xlsx render contract', () => {
     '<tbody><tr>',
     '<tbody><tr data-record-line="1">',
   );
+  // Matches whatever classes the renderer emits, rather than a literal that goes
+  // stale the moment render.ts adds one (it added `mc-xlsx`, and this silently
+  // stopped adding the attribute, which made the positive control fail).
+  const editable = addressable.replace(
+    /<table class="([^"]*)"/,
+    '<table class="$1" data-mc-editable="1"',
+  );
 
   it('leaves the sheet read-only even when its rows are addressable', async () => {
     await renderSheet(addressable);
@@ -101,9 +119,7 @@ describe('xlsx render contract', () => {
   it('would wire that very same markup if it were marked editable', async () => {
     // The positive control. Without it, deleting the enableCsvEditing call from
     // render() outright would leave "read-only" green while breaking CSV editing.
-    await renderSheet(
-      addressable.replace('<table class="mc-csv"', '<table class="mc-csv" data-mc-editable="1"'),
-    );
+    await renderSheet(editable);
     const cell = document.querySelector('tbody td')!;
     expect(cell.classList.contains('mc-csv-cell')).toBe(true);
   });
@@ -119,3 +135,39 @@ describe('xlsx render contract', () => {
     expect(posted.filter((m) => (m as { type: string }).type === 'revealLine')).toHaveLength(0);
   });
 });
+
+// Copying a sheet as a Markdown table is the thing no other extension offers, and
+// the reason to reach for MarkCopy over a spreadsheet viewer. What makes it work
+// is that the viewer's chrome is excluded: the row-number gutter and the A/B/C
+// header both carry data-mc-ignore, and either one leaking in shifts every column.
+describe('sheet to Markdown', () => {
+  it('produces a real Markdown table, not the raw HTML Turndown declines', async () => {
+    await renderSheet(SHEET);
+    const md = await copyTableMarkdownFor(document.querySelector('table.mc-csv')!);
+
+    expect(md).toContain('Widget');
+    // A GFM table needs a header row and a separator line. Without the header
+    // promotion, Turndown returns the table's HTML verbatim and this is the
+    // assertion that catches it.
+    expect(md).toContain('|');
+    expect(md).not.toContain('<table');
+    expect(md).toMatch(/\|\s*-+/);
+  });
+
+  it('leaves the viewer’s chrome out of the table', async () => {
+    await renderSheet(SHEET);
+    const md = await copyTableMarkdownFor(document.querySelector('table.mc-csv')!);
+    // The A/B/C letters label the grid rather than being part of the document,
+    // and the row number is not a column of data. Either leaking in shifts every
+    // column of the pasted table.
+    expect(md).not.toMatch(/\|\s*A\s*\|\s*B\s*\|/);
+    expect(md.split(/\r?\n/)[0]).not.toMatch(/^\|\s*1\s*\|/);
+  });
+});
+
+/** The exact transform main.ts applies before handing a table to Turndown. */
+async function copyTableMarkdownFor(table: HTMLElement): Promise<string> {
+  const { htmlToMarkdown } = await import('../src/webview/markdownConvert');
+  const { prepareTableForMarkdown } = await import('../src/webview/table');
+  return (await htmlToMarkdown(prepareTableForMarkdown(table).outerHTML)).trim();
+}
