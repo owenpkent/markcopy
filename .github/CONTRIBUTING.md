@@ -64,7 +64,7 @@ jsdom has no layout engine, so anything size-dependent is stubbed (see `tests/cs
 npm run test:integration   # downloads VS Code and runs the extension inside it
 ```
 
-Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, and that the preview panel opens (for both Markdown and CSV). On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
+Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, and that the preview panel opens (for both Markdown and CSV). Spreadsheets are not covered there: they open through a custom editor rather than a text document, and the reader itself is exercised by `tests/xlsx/`. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
 
 ### Manual testing
 
@@ -96,7 +96,10 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/csv.ts`                     | Host: CSV/TSV parsing (RFC 4180), delimiter sniffing, grid HTML, and cell edits.                |
 | `src/webview/csvTable.ts`        | CSV grid: drag-to-resize columns.                                                               |
 | `src/webview/csvEdit.ts`         | CSV grid: cell selection, navigation, and inline editing.                                       |
-| `src/webview/table.ts`           | CSV/TSV clipboard serialization (pure, unit-tested).                                            |
+| `src/webview/table.ts`           | CSV/TSV clipboard serialization and the Markdown-table reshaping (pure, unit-tested).           |
+| `src/previewShell.ts`            | Host: the HTML shell served to every webview that hosts the shared preview bundle.              |
+| `src/xlsxEditor.ts`              | Host: read-only custom editor for `.xlsx` / `.xlsm` files.                                      |
+| `src/xlsx/`                      | Host: the OOXML reader (zip, XML, workbook, styles, sheet, grid HTML). Pure, unit-tested.       |
 | `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                              |
 | `tests/`                         | Vitest unit tests.                                                                              |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                      |
