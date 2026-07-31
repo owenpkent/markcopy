@@ -270,8 +270,19 @@ const MAX_ANCHORS = 600;
 let syncSuppressedUntil = 0;
 let userScrolledAt = 0;
 
+// Where our own last programmatic scroll left the scroller, so the deferred
+// re-check below can tell that scroll from the reader's. -1 means there is
+// nothing of ours to disown.
+let suppressedOffset = -1;
+
 function suppressSync(ms = SYNC_ECHO_MS): void {
   syncSuppressedUntil = Math.max(syncSuppressedUntil, Date.now() + ms);
+}
+
+/** Suppress, and remember the offset we are about to move to. */
+function suppressSyncTo(offset: number): void {
+  suppressSync();
+  suppressedOffset = offset;
 }
 
 function syncSuppressed(): boolean {
@@ -406,12 +417,12 @@ function scrollToLine(line: number): void {
   if (target === undefined || Math.abs(target - scrollTop()) < 1) {
     return;
   }
-  suppressSync();
+  suppressSyncTo(target);
   setScrollTop(target);
 }
 
 function scrollToTop(): void {
-  suppressSync();
+  suppressSyncTo(0);
   setScrollTop(0);
 }
 
@@ -432,6 +443,10 @@ function scrollToAnchor(rawId: string): void {
   if (el) {
     suppressSync();
     el.scrollIntoView({ block: 'start' });
+    // scrollIntoView picks the offset itself, and it is synchronous, so this is
+    // where it landed. Recorded for the same reason as the other two: so the
+    // scroll it just fired is not reported back to the host as the reader's.
+    suppressedOffset = scrollTop();
   }
 }
 
@@ -492,6 +507,18 @@ function syncEditorToPreview(): void {
       }
       return;
     }
+    // The window has closed. If the scroller is still sitting where the host put
+    // it, nothing happened here except the host's own move, and reporting it back
+    // as a revealLine is a pure echo: the editor jumps to wherever the round trip
+    // rounds to, and userScrolledAt below would then mute the next genuine
+    // editor-to-preview sync for the length of the window. A reader who moved
+    // during the window has left the scroller somewhere else, which is the case
+    // the deferral exists to catch, and that still reports.
+    if (suppressedOffset >= 0 && Math.abs(scrollTop() - suppressedOffset) < 1) {
+      suppressedOffset = -1;
+      return;
+    }
+    suppressedOffset = -1;
     userScrolledAt = Date.now();
     if (!currentSyncScroll) {
       return;
@@ -845,6 +872,9 @@ async function exportPdf(): Promise<void> {
     clone
       .querySelectorAll('[data-source-line]')
       .forEach((el) => el.removeAttribute('data-source-line'));
+    // The viewer's own furniture is not part of the document, so it does not
+    // belong in a printed copy of it. Same rule the copy paths follow.
+    stripViewerChrome(clone);
     await relightMermaid(clone);
     await inlineImages(clone);
     vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
@@ -967,11 +997,25 @@ function inlineStyledHtml(source: HTMLElement): string {
   }
   source.classList.remove('mc-force-light');
   // After the style walk, which pairs source and clone by index: dropping these
-  // earlier would shear the two lists apart. `data-mc-ignore` marks the viewer's
-  // own chrome (the CSV grid's row-number gutter), which is not part of the
-  // document and has no business on the clipboard.
-  clone.querySelectorAll('[data-mc-ignore]').forEach((el) => el.remove());
+  // earlier would shear the two lists apart.
+  stripViewerChrome(clone);
   return `<div>${clone.outerHTML}</div>`;
+}
+
+/**
+ * Remove the viewer's own furniture from a detached copy of the preview.
+ *
+ * `data-mc-ignore` marks chrome rather than document content: the CSV grid's
+ * row-number gutter, and in a sheet the A/B/C column header. None of it belongs
+ * on the clipboard or in an exported PDF.
+ *
+ * The gutter's `<col>` goes with it. Dropping the cells alone leaves the
+ * colgroup one entry longer than every row, which renders as a blank column down
+ * the left edge of the copy.
+ */
+function stripViewerChrome(root: HTMLElement): void {
+  root.querySelectorAll('[data-mc-ignore]').forEach((el) => el.remove());
+  root.querySelectorAll('col.mc-csv-gutter-col').forEach((el) => el.remove());
 }
 
 function applyInline(src: HTMLElement, dst: HTMLElement): void {
