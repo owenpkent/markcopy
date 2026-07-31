@@ -1,7 +1,17 @@
 # XLSX preview: design note
 
-Research for adding `.xlsx` preview to MarkCopy. Written before implementation, on
-`feat/xlsx-preview`. Nothing here is built yet.
+**Status: implemented.** This is the research and design note written _before_ the
+feature was built, kept as the record of why it is shaped the way it is. It is not
+maintained as a description of the current code: see
+[Spreadsheet preview](ARCHITECTURE.md#spreadsheet-preview) for that, and treat any
+file or line reference below as of its time of writing.
+
+Two things changed in the building. Relationship targets resolve against the part a
+`.rels` file describes rather than the `_rels` folder, which the plan did not call
+out and which every sheet path depended on. And the sheet header is the column
+letters rather than the first row of data, since a sheet does not declare whether
+it has one; that made `data-mc-ignore` cover the whole header row and required
+`tableToDelimited` to drop rows contributing no data cells.
 
 ## Verdict
 
