@@ -1,6 +1,6 @@
 # Architecture
 
-MarkCopy is a custom-webview VS Code extension that previews three kinds of document through two webviews. Markdown and CSV/TSV share one: the Node extension host renders each to HTML (`markdown-it` and `src/csv.ts` respectively) and the webview displays it. PDF has its own: the host only supplies bytes and pdf.js renders in the webview. In all of them, interaction (context menu, clipboard, Mermaid, PNG capture, CSV cell editing) happens in the webview. This split is deliberate: the webview is a browser context, and the clipboard operations we need (writing `text/html`, capturing PNGs) only exist there.
+MarkCopy is a custom-webview VS Code extension that previews four kinds of document through two webviews. Markdown, CSV/TSV, and spreadsheets share one: the Node extension host renders each to HTML (`markdown-it`, `src/csv.ts`, and `src/xlsx/` respectively) and the webview displays it. PDF has its own: the host only supplies bytes and pdf.js renders in the webview. In all of them, interaction (context menu, clipboard, Mermaid, PNG capture, CSV cell editing) happens in the webview. This split is deliberate: the webview is a browser context, and the clipboard operations we need (writing `text/html`, capturing PNGs) only exist there.
 
 ## Big picture
 
@@ -17,12 +17,15 @@ MarkCopy is a custom-webview VS Code extension that previews three kinds of docu
         (esbuild.js, node)                                   (esbuild.web.js, browser)
 ```
 
-Both document kinds take the same path. The host decides how to turn the open
-document into HTML (`markdown-it` for Markdown, `src/csv.ts` for CSV/TSV) and
-sends it in the same `render` message with a `kind` field; the webview sanitizes
-the HTML, picks its layout from `kind`, and otherwise treats the two identically.
-That is why the context menu, the clipboard actions, the themes, the PDF export,
-and scroll sync all work on a CSV grid without knowing it is one.
+All three take the same path. The host decides how to turn the open document into
+HTML (`markdown-it` for Markdown, `src/csv.ts` for CSV/TSV, `src/xlsx/` for a
+workbook) and sends it in the same `render` message with a `kind` field; the
+webview sanitizes the HTML, picks its layout from `kind`, and otherwise treats
+them identically. That is why the context menu, the clipboard actions, the themes,
+the PDF export, and scroll sync all work on a CSV grid or a spreadsheet sheet
+without knowing what it is. A workbook reaches that same webview from a custom
+editor rather than from `update()`, because it is binary and never becomes a
+TextDocument (see [Spreadsheet preview](#spreadsheet-preview)).
 
 The PDF preview uses the same host/webview split with its own custom editor and bundle:
 
@@ -157,7 +160,10 @@ Webview to host:
 | `updateSetting` | `key`, `value`                          | Persist a `markcopy.*` setting from the in-preview menu, written to the scope where the setting is already defined (a WorkspaceFolder or Workspace override if present, else Global User scope) so a workspace value isn't shadowed by a Global write (`applySetting` / `settingTarget` in `extension.ts`); the config-change listener then re-renders. |
 | `openSettings`  | none                                    | Run `markcopy.openSettings`, opening the native Settings UI scoped to the extension.                                                                                                                                                                                                                                                                    |
 | `pdfHtml`       | `bodyHtml`                              | Serialized preview markup for [PDF export](#pdf-export); the host wraps it in a standalone page and renders that to a PDF file.                                                                                                                                                                                                                         |
+| `selectSheet`   | `index`                                 | Show another sheet of a workbook. The host re-reads and re-renders; the webview holds no workbook state of its own, exactly as it holds no Markdown or CSV state. Sent only by the spreadsheet preview (see [Spreadsheet preview](#spreadsheet-preview)).                                                                                               |
 | `editCell`      | `line`, `column`, `value`, `docVersion` | One edited CSV cell. The host rewrites that field in the document (see [CSV editing](#csv-editing)); `docVersion` is the version this grid was rendered from, and the edit is refused if lines have moved since, so a stale grid cannot edit the wrong row.                                                                                             |
+
+The spreadsheet preview uses this same protocol rather than one of its own, which is the point of the design: `XlsxEditorProvider` posts the same `render` message (with `kind: 'xlsx'`, `source: ''`, and `syncScroll: false`, since there is no source text and no editor to sync with) and handles `ready`, `pdfHtml`, `updateSetting`, `openSettings`, and `toast` exactly as `extension.ts` does. `selectSheet` is the only addition. It does not handle `revealLine` or `editCell`: a workbook has no visible text editor to reveal into, and no addressable lines to write a cell back to.
 
 The PDF preview uses its own message protocol: the webview posts `ready`, and the host replies with `load` (`data`: the file bytes as a base64 string, `workerSrc`: the pdf.js worker URI, `comments`: the parsed sidecar comments array). The bytes are base64-encoded because a `Uint8Array` does not survive `postMessage` serialization to the webview; `pdf.ts` decodes it back to a `Uint8Array` before handing it to pdf.js. Most copy actions run entirely in the webview with no further host round-trip. Two messages are the exception. Comments: the webview posts `saveComments` (`comments`: the full current array) back to the host whenever a pin is added, edited, or deleted, and `pdfEditor.ts` writes that array to the sidecar JSON file, deleting the file when the array is empty. The Preferences > Theme submenu: picking a theme posts `updateSetting` (`key`, `value`) so the host persists `markcopy.theme`, written the same scope-aware way as the Markdown preview (a WorkspaceFolder or Workspace override if present, else Global), so the setting is shared with the Markdown preview rather than being PDF-only.
 

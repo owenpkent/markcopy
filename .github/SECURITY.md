@@ -2,7 +2,7 @@
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, or PDF you open) into a webview. It can render Mermaid diagrams from fenced code and parses PDFs with pdf.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, or PDF you open) into a webview. It can render Mermaid diagrams from fenced code and parses PDFs with pdf.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 ## Content Security Policy
 
@@ -57,6 +57,16 @@ Cell editing is the one place MarkCopy writes to a file rather than only reading
 - Edits are applied as a `WorkspaceEdit`, so they are ordinary undoable editor changes and respect read-only files rather than writing to disk directly.
 - The render carries a document version that the grid echoes back; a mismatch drops the edit instead of applying it against stale line numbers.
 - Only the edited field's own source span is replaced, so an edit cannot rewrite or reformat any other part of the file.
+
+## Spreadsheet preview
+
+An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before a single tag is parsed. `src/xlsx/` reads it in the extension host, never in the webview, and the resulting HTML goes through the same DOMPurify sanitize and the same CSP as everything else.
+
+- **Decompression is bounded.** A few hundred kilobytes on disk can inflate to gigabytes in memory, so `zip.ts` caps the file size before unzipping (25 MB), the entry count, the size of any single inflated part, and the running total across all of them. Nothing is ever written to disk, so a malicious entry name (`../../etc/passwd`, an absolute path) has nothing to act on: names are only ever map keys.
+- **External relationships are refused.** A workbook can point outside its own package at another workbook on a share, a remote image, or a DDE/OLE link. Following one turns opening a file into a network fetch, which on Windows can hand your credentials to whatever host it names. Any relationship marked `TargetMode="External"` is dropped.
+- **Entity expansion cannot happen.** The parser (saxes) resolves the five predefined XML entities and never expands entities declared in a DTD, so the classic billion-laughs expansion and XXE are inert here structurally rather than by a check that could be forgotten. A test pins this, so replacing the parser with one that does expand them fails the suite rather than the extension host.
+- **The preview is read-only.** MarkCopy never writes to a workbook, so it cannot corrupt one. There is no equivalent of the CSV grid's cell writeback.
+- **Formulas are never evaluated.** A cell showing a formula's result is showing the value the file already had cached; MarkCopy does not compute anything.
 
 ## Clipboard
 
