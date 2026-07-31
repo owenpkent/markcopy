@@ -38,11 +38,18 @@ async function renderSheet(html: string): Promise<void> {
         source: '',
         docKey: 'file:///book.xlsx',
         docVersion: -1,
-        syncScroll: false,
+        // Mirrors what src/xlsxEditor.ts posts: the user's real setting values,
+        // deliberately all on, plus the surface flag that says a sheet does not
+        // take part in scroll sync. Sending syncScroll:false here instead is how
+        // the sync assertion below used to pass for the wrong reason, proving
+        // only that the harness had switched the feature off.
+        syncScroll: true,
+        autoPreview: true,
+        math: true,
+        supportsSync: false,
         theme: 'auto',
         styleProfile: 'github',
         mermaidConfig: {},
-        math: false,
       },
     }),
   );
@@ -127,8 +134,10 @@ describe('xlsx render contract', () => {
   it('stays out of scroll sync, which has no editor to reveal into', async () => {
     posted.length = 0;
     await renderSheet(SHEET);
-    // No row carries data-source-line, so there is nothing for the sync to anchor
-    // to and nothing is ever reported back to a text editor that does not exist.
+    // The harness has markcopy.syncScroll on, so this can only be the surface
+    // flag doing the work. No row carries data-source-line either, so there is
+    // nothing to anchor to and nothing is ever reported back to a text editor
+    // that does not exist.
     expect(document.querySelectorAll('[data-source-line]')).toHaveLength(0);
     window.dispatchEvent(new Event('scroll'));
     await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -165,9 +174,16 @@ describe('sheet to Markdown', () => {
   });
 });
 
-/** The exact transform main.ts applies before handing a table to Turndown. */
+/**
+ * The exact call main.ts makes to copy a table as Markdown.
+ *
+ * Deliberately the real entry point rather than a reassembly of its steps: this
+ * used to inline prepareTableForMarkdown + htmlToMarkdown, which stopped being
+ * what main.ts does the moment pipe escaping moved into tableToMarkdown, and a
+ * contract test that rebuilds the transform stops testing the contract.
+ */
 async function copyTableMarkdownFor(table: HTMLElement): Promise<string> {
   const { htmlToMarkdown } = await import('../src/webview/markdownConvert');
-  const { prepareTableForMarkdown } = await import('../src/webview/table');
-  return (await htmlToMarkdown(prepareTableForMarkdown(table).outerHTML)).trim();
+  const { tableToMarkdown } = await import('../src/webview/table');
+  return (await tableToMarkdown(table, htmlToMarkdown)).trim();
 }
