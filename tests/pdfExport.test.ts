@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { browserCandidates, buildPdfPage, findBrowser, pdfCss, printArgs } from '../src/pdfExport';
 
 describe('browserCandidates', () => {
@@ -56,15 +59,48 @@ describe('findBrowser', () => {
 
   // The two cases above both short-circuit on `configured`, so neither reaches the
   // detection loop. That loop is what decides whether a whole platform gets the
-  // headless export or drops to printing by hand, and swapping its `bare ||` for a
-  // bare `isExecutable(candidate)` would silently strand every Linux user with the
-  // suite still green.
-  it('accepts a bare PATH name without touching the filesystem', async () => {
-    // No absolute Linux candidate is expected to exist on the machine running
-    // these tests, so returning `google-chrome` can only come from the bare-name
-    // branch, not from a probe that happened to succeed.
-    await expect(findBrowser(undefined, 'linux', {})).resolves.toBe('google-chrome');
+  // headless export or drops to printing by hand, so the cases below drive it with
+  // a PATH built for the test rather than whatever the machine happens to have.
+  // The regression this guards: taking bare names on trust returns the first entry
+  // of the Linux list to every caller, so `google-chrome` wins on a machine that
+  // has only Chromium, and the six other names plus every /usr/bin fallback below
+  // them become unreachable. Chromium sits third on that list, so resolving to it
+  // proves both halves: the two names above it were probed and skipped, and the
+  // one that is installed was found. Answering from a PATH built here rather than
+  // the machine's keeps it from depending on what the runner has installed, and
+  // returning before any /usr/bin candidate is reached keeps it off the disk.
+  it('never hands back an unprobed bare name', async () => {
+    // The bug in one assertion, and the only form of it that can be checked on
+    // every host: with nothing on PATH, the old loop still answered with the
+    // literal string 'google-chrome'. Whatever is found now has to have been
+    // probed, so it is either an absolute path or nothing at all. This stays true
+    // on a CI runner that really does have /usr/bin/chromium.
+    const found = await findBrowser(undefined, 'linux', { PATH: '' });
+    expect(found === undefined || found.startsWith('/')).toBe(true);
   });
+
+  // Resolution itself needs a real directory on PATH, and a Windows temp path
+  // ('C:\...') cannot appear in a POSIX PATH string without its drive colon
+  // reading as the separator. So the full assertion runs on POSIX only, and the
+  // host-independent half above carries the regression on Windows.
+  it.skipIf(process.platform === 'win32')(
+    'skips preferred names that are not installed and resolves the one that is',
+    async () => {
+      // Chromium sits third on the Linux list, so resolving to it proves both
+      // halves: the two names above it were probed and skipped, and the one that
+      // is installed was found. It returns before any /usr/bin candidate is
+      // reached, so the machine's own browsers cannot change the answer.
+      const dir = await mkdtemp(join(tmpdir(), 'markcopy-path-'));
+      try {
+        const chromium = join(dir, 'chromium');
+        await writeFile(chromium, '');
+        await chmod(chromium, 0o755);
+        await expect(findBrowser(undefined, 'linux', { PATH: dir })).resolves.toBe(chromium);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('probes absolute candidates and rejects the ones that are not there', async () => {
     // Every Windows candidate is derived from these variables, so pointing them at

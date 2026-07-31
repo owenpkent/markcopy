@@ -171,12 +171,48 @@ async function isExecutable(path: string): Promise<boolean> {
 }
 
 /**
+ * Resolve a bare command name against PATH, or undefined if it is not there.
+ *
+ * Returns the absolute path rather than the name, so the caller hands `spawn`
+ * something unambiguous and a failure names a real file.
+ */
+async function resolveOnPath(
+  name: string,
+  platform: NodeJS.Platform,
+  env: Record<string, string | undefined>,
+): Promise<string | undefined> {
+  // Windows spells the variable inconsistently depending on who set it, and its
+  // candidates are all absolute anyway, so this only really runs on Unix.
+  const raw = env['PATH'] ?? env['Path'] ?? env['path'];
+  if (!raw) {
+    return undefined;
+  }
+  const path = platform === 'win32' ? win32 : posix;
+  for (const dir of raw.split(platform === 'win32' ? ';' : ':')) {
+    if (dir === '') {
+      continue;
+    }
+    const full = path.join(dir, name);
+    if (await isExecutable(full)) {
+      return full;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Locate a browser able to print the export, or undefined if there is none.
  *
  * `configured` (the `markcopy.pdf.browserPath` setting) wins outright, so a user
  * with a browser in an unusual place can point at it. Absolute candidates are
- * checked on disk; bare PATH names are taken on trust here and fail later at
- * spawn time, where the error message can say what went wrong.
+ * checked on disk, and bare names (the Linux list) are looked up on PATH.
+ *
+ * Both halves have to actually probe. Accepting a bare name unprobed returns the
+ * first one on the list to every caller, which is `google-chrome`: the six other
+ * names and every `/usr/bin` fallback below them become unreachable, and a machine
+ * with only Chromium installed is told Chrome is missing instead of printing. When
+ * nothing is found, returning undefined is what lets the caller fall back to
+ * opening the preview in the user's own browser, which is the documented behaviour.
  *
  * The configured path is deliberately not probed: a setting pointing somewhere
  * wrong should fail at spawn time with a message naming it, rather than be
@@ -194,8 +230,13 @@ export async function findBrowser(
   }
   for (const candidate of browserCandidates(platform, env)) {
     const bare = !candidate.includes('/') && !candidate.includes('\\');
-    if (bare || (await isExecutable(candidate))) {
-      return candidate;
+    const found = bare
+      ? await resolveOnPath(candidate, platform, env)
+      : (await isExecutable(candidate))
+        ? candidate
+        : undefined;
+    if (found !== undefined) {
+      return found;
     }
   }
   return undefined;
