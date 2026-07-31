@@ -472,6 +472,17 @@ content.addEventListener('click', (e) => {
   }
 });
 
+// Sheet tabs, in a workbook preview. The host re-renders with the chosen sheet;
+// the webview holds no workbook state of its own, exactly as it holds no Markdown
+// or CSV state.
+content.addEventListener('click', (e) => {
+  const tab = (e.target as HTMLElement).closest?.<HTMLElement>('[data-mc-sheet]');
+  if (!tab) {
+    return;
+  }
+  vscode.postMessage({ type: 'selectSheet', index: Number(tab.dataset.mcSheet) });
+});
+
 // Preview -> editor: report the source line showing at the top of the viewport,
 // interpolated between the blocks either side of it. Bound to the window for the
 // Markdown layout, and (in render) to the CSV grid's scroll container, which is

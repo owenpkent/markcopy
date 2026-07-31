@@ -181,14 +181,16 @@ body {
 
 /* A CSV document is nothing but the grid, so give it the whole panel and let the
    grid, not the page, do the scrolling. That is what lets the header stick. */
-body[data-mc-kind='csv'] .markdown-body {
+body[data-mc-kind='csv'] .markdown-body,
+body[data-mc-kind='xlsx'] .markdown-body {
   max-width: none;
   padding: 16px 18px;
   height: 100vh;
   display: flex;
   flex-direction: column;
 }
-body[data-mc-kind='csv'] .mc-csv-wrap {
+body[data-mc-kind='csv'] .mc-csv-wrap,
+body[data-mc-kind='xlsx'] .mc-csv-wrap {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -926,4 +928,55 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   border-radius: 20px;
   font-size: 13px;
   z-index: 1100;
+}
+
+/* ---------------------------------------------------------------------------
+   Spreadsheet sheets
+   ---------------------------------------------------------------------------
+   A sheet renders as the CSV grid (same markup, same striping, same resize
+   handles), plus a strip of sheet tabs above it. Both the strip and the grid's
+   row-number gutter carry `data-mc-ignore`, so neither reaches the clipboard or
+   the PDF export. */
+
+.mc-xlsx-tabs {
+  /* Fixed height above the viewport-tall scroller, so the grid keeps the rest. */
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.mc-xlsx-tab {
+  flex: 0 0 auto;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--mc-code-bg);
+  color: var(--mc-fg);
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.mc-xlsx-tab:hover {
+  border-color: var(--mc-fg-muted);
+}
+
+.mc-xlsx-tab--active {
+  background: var(--mc-bg);
+  border-color: var(--mc-fg-muted);
+  font-weight: 600;
+}
+
+/* A formula the file stored without a cached result (openpyxl and xlsxwriter do
+   this). The cell really is empty, so mark it rather than let it read as data
+   MarkCopy lost. */
+.mc-xlsx-nocalc::after {
+  content: '\2026';
+  opacity: 0.45;
 }

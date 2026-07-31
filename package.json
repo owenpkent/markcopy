@@ -234,6 +234,18 @@
           "minimum": 1,
           "description": "Maximum number of CSV/TSV rows to render. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large files."
         },
+        "markcopy.xlsx.maxRows": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1,
+          "description": "Maximum number of rows to render from a spreadsheet sheet. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large sheets."
+        },
+        "markcopy.xlsx.maxColumns": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Maximum number of columns to render from a spreadsheet sheet."
+        },
         "markcopy.pdf.pageSize": {
           "type": "string",
           "enum": [
