@@ -53,7 +53,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Per-element right-click copy**, with a short top-level menu that names whatever you clicked and a **Copy as** submenu for every other format:
   - Selection: top level copies **Rich Text**; **Copy as** has **Markdown**.
   - Code block: top level copies **Plain Text**.
-  - Table: top level copies **Rich Text**; **Copy as** has **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), and **PNG**.
+  - Table: top level copies **Rich Text**; **Copy as** has **Markdown**, **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), and **PNG**. This is also how a spreadsheet sheet leaves as a Markdown table.
   - Mermaid diagram: top level copies **PNG**; **Copy as** has **SVG**.
   - Equation (KaTeX): top level copies **PNG**; **Copy as** has **LaTeX**.
   - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.

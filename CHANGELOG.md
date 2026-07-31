@@ -16,6 +16,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - New settings: `markcopy.xlsx.maxRows` (5000) and `markcopy.xlsx.maxColumns` (200).
   - A formula the file stores without a calculated result (which openpyxl and xlsxwriter both produce) is marked rather than shown as an empty cell.
 
+- **Copy any table as Markdown.** Right-click a table, a CSV grid, or a spreadsheet sheet and **Copy as** now offers **Markdown**, so a range of cells lands in a document as a real Markdown table. The viewer's own chrome (the row-number gutter, and a sheet's A/B/C column letters) is left out, and a sheet's first row becomes the table header.
+
 ### Changed
 
 - **Save as PDF now writes a PDF.** It used to open the preview in your browser and leave you to work the print dialog, which stamped the filename across the top of every page and the `file://` URL across the bottom. Now it asks where to save, renders the file with a headless Chrome, Edge, or Chromium found on your machine, and opens the result: no browser window, no print dialog, no header or footer. Text stays selectable, and equations, diagrams, highlighted code, and local images carry over as before.
