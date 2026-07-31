@@ -236,6 +236,22 @@ export function readSheet(xml: string, ctx: SheetContext): Sheet {
     rows.push({ cells, hidden: rowHidden, index: rowIndex });
   }
 
+  // A merge routinely reaches past the last cell holding a value, because the
+  // cells it covers are empty by definition: a title merged across A1:C1 stores
+  // one cell. The grid is widened to the ranges so those columns exist, or the
+  // clamp in applyMerges would cut the merge back to the content and drop the
+  // span. The column cap still applies, so a range naming the whole sheet widens
+  // the grid to the cap and no further.
+  for (const m of merges) {
+    const right = Math.min(m.right, ctx.limits.maxColumns - 1);
+    if (right + 1 > columns) {
+      columns = right + 1;
+    }
+    if (m.right > ctx.limits.maxColumns - 1) {
+      columnsTruncated = true;
+    }
+  }
+
   applyMerges(rows, merges, columns);
 
   return { rows, widths, hiddenColumns, columns, dropped, columnsTruncated };
@@ -304,18 +320,49 @@ function applyMerges(
   merges: { top: number; left: number; bottom: number; right: number }[],
   columns: number,
 ): void {
+  // A merge ref names absolute sheet rows, but `rows` holds only the <row>
+  // elements the file actually contains. A sheet whose data starts at row 3, or
+  // that has a gap anywhere above the merge, or that hit the row cap, makes the
+  // two disagree, and indexing `rows` by sheet row number then lands the merge on
+  // the wrong row: the anchor gets a span it should not have, and the cells the
+  // merge blanks are real values somewhere else in the sheet. `index` is the
+  // 1-based sheet row, so the map is keyed 0-based to match the parsed refs.
+  const positionOf = new Map<number, number>();
+  rows.forEach((row, i) => positionOf.set(row.index - 1, i));
+
   for (const m of merges) {
-    if (m.top >= rows.length || m.left >= columns) {
+    const top = positionOf.get(m.top);
+    if (top === undefined || m.left >= columns) {
       continue;
     }
-    const anchorRow = rows[m.top];
+    // Ranges come from the file, so one can name the whole sheet (A1:XFD1048576).
+    // Clamping to the grid that was actually built is what keeps the loops below
+    // bounded: unclamped, a single <mergeCell> covers 16384 columns on every row
+    // and allocates a covered-position entry for each one.
+    const right = Math.max(m.left, Math.min(m.right, columns - 1));
+    let bottom = top;
+    while (bottom + 1 < rows.length && rows[bottom + 1].index - 1 <= m.bottom) {
+      bottom++;
+    }
+
+    const anchorRow = rows[top];
     const anchor = anchorRow.cells[m.left] ?? { text: '', numeric: false };
-    anchor.colspan = m.right - m.left + 1;
-    anchor.rowspan = m.bottom - m.top + 1;
+    // Spans are counted in rendered rows rather than sheet rows: the rows between
+    // may be missing from the file, and the renderer drops hidden ones before it
+    // emits anything, so a sheet-row count would overshoot the table.
+    let visible = 0;
+    for (let r = top; r <= bottom; r++) {
+      if (!rows[r].hidden) {
+        visible++;
+      }
+    }
+    anchor.colspan = right - m.left + 1;
+    anchor.rowspan = Math.max(1, visible);
     anchorRow.cells[m.left] = anchor;
-    for (let r = m.top; r <= Math.min(m.bottom, rows.length - 1); r++) {
-      for (let c = m.left; c <= m.right; c++) {
-        if (r === m.top && c === m.left) {
+
+    for (let r = top; r <= bottom; r++) {
+      for (let c = m.left; c <= right; c++) {
+        if (r === top && c === m.left) {
           continue;
         }
         rows[r].cells[c] = undefined;
