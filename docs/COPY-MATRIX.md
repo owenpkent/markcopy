@@ -132,3 +132,15 @@ Both are also available without the preview focused, via the Command Palette: **
 - **PNG copy needs clipboard image support.** It uses the async Clipboard API with a `ClipboardItem`. If the host blocks image writes you get a toast saying so, never a silent failure.
 - **Selection vs block Markdown.** "Copy Selection > Markdown" converts exactly the selected HTML back to Markdown (Turndown), so partial paragraphs and multi-block selections come through faithfully, though delimiters may be normalized (for example `*` for emphasis). "Copy Block > Markdown" instead returns the verbatim source of the whole block.
 - **Everything else (Preferences, Theme, sync scroll, and so on) lives under the "Preferences" submenu**, not in this matrix; see the [README](../README.md#features) and [Architecture](ARCHITECTURE.md#context-menu) for those.
+
+## Spreadsheet sheets (.xlsx / .xlsm)
+
+A sheet renders as the CSV grid's markup, so every row in the CSV grid section above applies to it unchanged: the same **Copy as** flavors, the same right-click targets, the same exclusion of the row-number gutter from what lands on the clipboard.
+
+Three differences are worth stating explicitly.
+
+- **The header row is chrome, not data.** A CSV grid's header is the file's own first row, so it copies. A sheet's header is the column letters A, B, C, which label the grid rather than being part of it, so the whole row is marked `data-mc-ignore` and drops out of every copy. What you copy is the cells, starting at the sheet's first row.
+- **Cells copy as displayed, not as stored.** A date copies as `2023-03-15`, not as the serial `45000`, and a percentage as `15.3%`, not `0.153`. That is what the reader is looking at, and what a spreadsheet or document receiving the paste will interpret correctly.
+- **Copy Whole Document and Save as PDF cover the active sheet only.** Both serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
+
+There is no cell editing, so no equivalent of the CSV grid's writeback: the document behind a sheet is a binary workbook, and MarkCopy never writes to it.
