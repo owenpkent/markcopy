@@ -25,7 +25,12 @@ let focused: CellRef | undefined;
 let restoring = false;
 
 export function enableCsvEditing(root: ParentNode, commit: CommitCell): void {
-  const tables = Array.from(root.querySelectorAll<HTMLTableElement>('table.mc-csv'));
+  // Only grids the renderer marked editable. A spreadsheet sheet uses this same
+  // markup but is read-only, because a cell edit has nowhere to go: the document
+  // behind it is a binary workbook, not the text file this writeback assumes.
+  const tables = Array.from(
+    root.querySelectorAll<HTMLTableElement>('table.mc-csv[data-mc-editable="1"]'),
+  );
   for (const table of tables) {
     wireTable(table, commit);
   }

@@ -13,6 +13,8 @@ import {
 import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
 import { cellEdit, delimiterHint, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
+import { htmlShell } from './previewShell';
+import { XlsxEditorProvider } from './xlsxEditor';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -46,6 +48,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       PdfEditorProvider.viewType,
       new PdfEditorProvider(context),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Workbooks open in the MarkCopy sheet preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      XlsxEditorProvider.viewType,
+      new XlsxEditorProvider(
+        context,
+        (docUri, bodyHtml) =>
+          // Injected rather than imported, so xlsxEditor.ts does not have to import
+          // this module back and close a cycle.
+          void exportPdf(context, docUri, bodyHtml),
+      ),
       {
         supportsMultipleEditorsPerDocument: false,
         webviewOptions: { retainContextWhenHidden: true },
@@ -251,7 +269,7 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
       } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
         void openLink(context, state, msg.href);
       } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
-        void exportPdf(context, state, msg.bodyHtml);
+        void exportPdf(context, state.docUri, msg.bodyHtml);
       } else if (msg?.type === 'editCell') {
         void applyCellEdit(state, msg);
       }
@@ -552,49 +570,6 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
   editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 
-function htmlShell(context: vscode.ExtensionContext, webview: vscode.Webview): string {
-  const nonce = getNonce();
-  const scriptUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js'),
-  );
-  const styleUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'media', 'preview.css'),
-  );
-  const katexStyleUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'media', 'katex', 'katex.min.css'),
-  );
-  const csp = [
-    `default-src 'none'`,
-    `img-src ${webview.cspSource} https: data: blob:`,
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `font-src ${webview.cspSource} data:`,
-    // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
-    // copying an equation as an image (see .github/SECURITY.md).
-    `connect-src ${webview.cspSource}`,
-    // 'strict-dynamic' lets the nonce'd entry module import its code-split
-    // sibling chunks (media/chunk-*.js) without each needing its own nonce.
-    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
-  ].join('; ');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link href="${styleUri}" rel="stylesheet" />
-<link href="${katexStyleUri}" rel="stylesheet" />
-<title>MarkCopy Preview</title>
-</head>
-<body data-vscode-context='{"webviewId":"markcopy.preview","preventDefaultContextMenuItems":true}'>
-  <div id="content" class="markdown-body"></div>
-  <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
-  <div id="mc-toast" class="mc-toast" hidden></div>
-  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
-</body>
-</html>`;
-}
-
 // Only one export at a time: each one spawns a browser process, and a second
 // export of the same preview would race it for the same destination file.
 let exportingPdf = false;
@@ -609,9 +584,9 @@ let exportingPdf = false;
 //
 // Where no such browser can be found, this falls back to the older route: write
 // the page out and open it in the default browser for the user to print by hand.
-async function exportPdf(
+export async function exportPdf(
   context: vscode.ExtensionContext,
-  state: PreviewState,
+  docUri: vscode.Uri,
   bodyHtml: string,
 ): Promise<void> {
   if (exportingPdf) {
@@ -620,7 +595,7 @@ async function exportPdf(
   }
   exportingPdf = true;
   try {
-    await runExport(context, state, bodyHtml);
+    await runExport(context, docUri, bodyHtml);
   } finally {
     exportingPdf = false;
   }
@@ -628,12 +603,12 @@ async function exportPdf(
 
 async function runExport(
   context: vscode.ExtensionContext,
-  state: PreviewState,
+  docUri: vscode.Uri,
   bodyHtml: string,
 ): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('markcopy');
   const pageSize = cfg.get<PageSize>('pdf.pageSize', 'Letter');
-  const name = basename(state.docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab)$/i, '');
+  const name = basename(docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab|xlsx|xlsm)$/i, '');
 
   const browser = await findBrowser(cfg.get<string>('pdf.browserPath', ''));
   if (!browser) {
@@ -642,7 +617,7 @@ async function runExport(
   }
 
   const target = await vscode.window.showSaveDialog({
-    defaultUri: defaultPdfUri(state.docUri, name),
+    defaultUri: defaultPdfUri(docUri, name),
     filters: { 'PDF document': ['pdf'] },
     saveLabel: 'Export PDF',
     title: 'Export preview as PDF',
@@ -805,13 +780,4 @@ async function inlineKatexFonts(context: vscode.ExtensionContext): Promise<strin
 function basename(uri: vscode.Uri): string {
   const p = uri.path;
   return p.substring(p.lastIndexOf('/') + 1);
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }
