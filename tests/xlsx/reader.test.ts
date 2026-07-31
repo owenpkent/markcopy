@@ -167,6 +167,65 @@ describe('structure', () => {
     expect(cells(html)[0]).toEqual(['wide']);
   });
 
+  it('anchors a merge on the sheet row it names, not the nth row present', () => {
+    // Rows are sparse, so the row a merge names and its position in the array of
+    // <row> elements are different numbers as soon as the sheet does not start at
+    // row 1. Indexing by position put the span on the wrong row and blanked
+    // whatever real cells it covered there, which is silent data loss: the value
+    // vanishes from the preview with nothing to say it ever existed.
+    const html = render(
+      `<mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells>` +
+        sheetData([
+          row(3, '<c r="A3" t="inlineStr"><is><t>TITLE</t></is></c>'),
+          row(4, '<c r="A4" t="inlineStr"><is><t>a</t></is></c>'),
+          row(
+            5,
+            '<c r="A5" t="inlineStr"><is><t>c</t></is></c>' +
+              '<c r="B5" t="inlineStr"><is><t>KEEPME</t></is></c>',
+          ),
+        ]),
+    );
+    // The merge names row 3, which sits at position 0. Reading position 2 instead
+    // lands on row 5: it spans the wrong cell and clears B5 on the way.
+    const rows = cells(html);
+    expect(rows[0]).toEqual(['TITLE']);
+    expect(rows[2]).toEqual(['c', 'KEEPME']);
+    expect(html).toContain('colspan="2"');
+    // The span belongs to the title, not to a value two rows down.
+    expect(/<td colspan="2">TITLE<\/td>/.test(html)).toBe(true);
+  });
+
+  it('clamps a merge that names more of the sheet than the grid has', () => {
+    // A range is attacker-controlled. Unclamped, A1:XFD1048576 made the covering
+    // loop walk 16384 columns for every row and allocate a covered-position entry
+    // for each, which is gigabytes from a file of a few hundred bytes. The column
+    // cap is the bound, so the grid widens to it and no further.
+    const html = render(
+      `<mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells>` +
+        sheetData([row(1, '<c r="A1" t="inlineStr"><is><t>wide</t></is></c>')]),
+      {},
+    );
+    const colspan = /colspan="(\d+)"/.exec(html);
+    expect(colspan).not.toBeNull();
+    expect(Number(colspan?.[1])).toBeLessThanOrEqual(200);
+    // The grid is capped, so the reader says so rather than pretending it is whole.
+    expect(html).toContain('markcopy.xlsx.maxColumns');
+  });
+
+  it('counts a merge rowspan in rendered rows, not sheet rows', () => {
+    // A1:A3 over a sheet that holds rows 1 and 3 only: the table has two rows, so
+    // a span of 3 would reach past the end of it.
+    const html = render(
+      `<mergeCells count="1"><mergeCell ref="A1:A3"/></mergeCells>` +
+        sheetData([
+          row(1, '<c r="A1" t="inlineStr"><is><t>tall</t></is></c>'),
+          row(3, '<c r="B3" t="inlineStr"><is><t>b3</t></is></c>'),
+        ]),
+    );
+    expect(html).toContain('rowspan="2"');
+    expect(html).toContain('b3');
+  });
+
   it('hides rows, columns, and sheets the author hid', () => {
     const hiddenRow = render(
       sheetData([
@@ -249,6 +308,31 @@ describe('hostile and malformed input', () => {
     big[0] = 0x50;
     big[1] = 0x4b;
     expect(() => renderWorkbookHtml(big)).toThrow(/larger than/);
+  });
+
+  it('refuses an entry on its declared size, before it is inflated', () => {
+    // The size limits used to be checked on the result of unzipSync, which is one
+    // step too late: by then the whole archive is already in memory, which is
+    // exactly what the limit exists to prevent.
+    //
+    // Patching the headers to claim 2 GB while the payload stays a few bytes is
+    // what makes that observable without building a real bomb. fflate hands the
+    // declared size to the filter before inflating and then grows its output as
+    // it goes, so the old post-inflate check measured the real 80 bytes and let
+    // this through. Refusing it can only come from reading the header.
+    const bytes = buildXlsx({ sheets: [{ name: 'S', xml: sheetData([row(1, '<c r="A1"/>')]) }] });
+    const buf = Buffer.from(bytes);
+    const FAKE = 0x7f000000; // ~2 GB
+    for (let i = 0; i + 4 <= buf.length; i++) {
+      const sig = buf.readUInt32LE(i);
+      if (sig === 0x04034b50) {
+        buf.writeUInt32LE(FAKE, i + 22); // local header, uncompressed size
+      } else if (sig === 0x02014b50) {
+        buf.writeUInt32LE(FAKE, i + 24); // central directory, uncompressed size
+      }
+    }
+    expect(() => renderWorkbookHtml(new Uint8Array(buf))).toThrow(WorkbookError);
+    expect(() => renderWorkbookHtml(new Uint8Array(buf))).toThrow(/too large to preview/);
   });
 
   it('does not expand entities, so a billion-laughs payload stays inert', () => {
