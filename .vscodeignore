@@ -12,6 +12,7 @@ tsconfig.json
 sample.md
 sample.pdf
 sample.pdf.mccomments.json
+sample.xlsx
 *.vsix
 .github/**
 docs/**

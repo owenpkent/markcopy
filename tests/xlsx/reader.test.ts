@@ -353,13 +353,29 @@ describe('hostile and malformed input', () => {
     });
     // Either it renders the unexpanded reference or it refuses. What it must not
     // do is expand to a gigabyte.
-    let html = '';
+    //
+    // Both outcomes are fine, but one of them has to actually be checked. The
+    // previous version returned from inside the catch, and saxes does reject the
+    // undefined entity, so on the path this test really takes no expect() ran at
+    // all: it would have stayed green against a renderWorkbookHtml replaced by a
+    // function that unconditionally throws.
+    let html: string | undefined;
+    let thrown: unknown;
     try {
       html = renderWorkbookHtml(bytes).html;
-    } catch {
-      return; // refusing is an acceptable outcome
+    } catch (err) {
+      thrown = err;
     }
-    expect(html.length).toBeLessThan(100_000);
+
+    if (thrown !== undefined) {
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).toMatch(/entity/i);
+    } else {
+      expect(html).toBeDefined();
+      expect(html!.length).toBeLessThan(100_000);
+      // The reference is inert, not expanded into its payload.
+      expect(html!).not.toMatch(/lollollollol/);
+    }
   });
 
   it('ignores an external relationship rather than reaching off the machine', () => {

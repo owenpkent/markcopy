@@ -48,6 +48,11 @@ let currentSyncScroll = true;
 let currentAutoPreview = true;
 let currentMath = true;
 
+// Whether the surface on screen participates in scroll sync. Separate from
+// currentSyncScroll, which is the user's setting: the menu shows the setting,
+// this decides whether anything is wired up.
+let surfaceSyncs = true;
+
 // The preview is dark when the theme is forced dark, or (in auto mode) when VS
 // Code is in a dark/high-contrast theme. Mirrors the CSS in preview.css.
 function isDark(): boolean {
@@ -86,6 +91,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         msg.theme as string,
         (msg.mermaidConfig as Record<string, unknown>) ?? {},
         Boolean(msg.syncScroll),
+        msg.supportsSync === undefined ? true : Boolean(msg.supportsSync),
         Boolean(msg.autoPreview),
         msg.math === undefined ? true : Boolean(msg.math),
         (msg.docKey as string) ?? '',
@@ -125,6 +131,10 @@ async function render(
   theme: string,
   config: Record<string, unknown>,
   syncScroll: boolean,
+  // Whether this surface takes part in scroll sync at all, which is not the same
+  // as whether the user has the setting on. A sheet preview has no TextDocument
+  // behind it, so there is nothing to reveal into however the setting is set.
+  supportsSync: boolean,
   autoPreview: boolean,
   math: boolean,
   docKey: string,
@@ -145,6 +155,7 @@ async function render(
   mermaidConfig = config;
   currentTheme = theme || 'auto';
   currentSyncScroll = syncScroll;
+  surfaceSyncs = supportsSync;
   currentAutoPreview = autoPreview;
   currentMath = math;
   // Defense in depth. The host renders Markdown with `html: true`, so raw HTML
@@ -405,7 +416,7 @@ function anchors(): Anchor[] {
 
 // Editor -> preview.
 function scrollToLine(line: number): void {
-  if (!currentSyncScroll || !Number.isFinite(line)) {
+  if (!currentSyncScroll || !surfaceSyncs || !Number.isFinite(line)) {
     return;
   }
   // The user's own scrolling wins: this is almost certainly the echo of the reveal
@@ -531,7 +542,7 @@ function syncEditorToPreview(): void {
     }
     suppressedOffset = -1;
     userScrolledAt = Date.now();
-    if (!currentSyncScroll) {
+    if (!currentSyncScroll || !surfaceSyncs) {
       return;
     }
     const line = lineForOffset(anchors(), scrollTop());
