@@ -2,7 +2,7 @@ import type MermaidApi from 'mermaid';
 import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
-import { prepareTableForMarkdown, tableToDelimited } from './table';
+import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
@@ -812,8 +812,10 @@ async function selectionMarkdown(): Promise<string> {
  */
 async function copyTableMarkdown(table: HTMLElement): Promise<void> {
   // The reshaping lives in table.ts, next to the other serializer and away from
-  // the clipboard, so it can be unit-tested against real grid markup.
-  const md = (await htmlToMarkdown(prepareTableForMarkdown(table).outerHTML)).trim();
+  // the clipboard, so it can be unit-tested against real grid markup. It also
+  // owns the round trip for pipes in the data, which have to survive Turndown as
+  // a placeholder, so the conversion is handed to it rather than called here.
+  const md = (await tableToMarkdown(table, htmlToMarkdown)).trim();
   if (md && md.includes('|')) {
     copyText(md);
   } else {
