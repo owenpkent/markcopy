@@ -15,6 +15,7 @@ import { cellEdit, delimiterHint, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { XlsxEditorProvider } from './xlsxEditor';
+import { StlEditorProvider } from './stlEditor';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -64,6 +65,16 @@ export function activate(context: vscode.ExtensionContext): void {
           // this module back and close a cycle.
           void exportPdf(context, docUri, bodyHtml),
       ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // STL files open in the MarkCopy STL preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      StlEditorProvider.viewType,
+      new StlEditorProvider(context),
       {
         supportsMultipleEditorsPerDocument: false,
         webviewOptions: { retainContextWhenHidden: true },

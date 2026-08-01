@@ -13,6 +13,7 @@ export default tseslint.config(
       'media/chunk-*.js',
       'media/pdf.js',
       'media/pdf.worker.js',
+      'media/stl.js',
       '**/*.map',
     ],
   },
@@ -43,7 +44,7 @@ export default tseslint.config(
   },
   {
     // Extension host code runs in Node.
-    files: ['src/extension.ts', 'src/render.ts', 'src/pdfEditor.ts'],
+    files: ['src/extension.ts', 'src/render.ts', 'src/pdfEditor.ts', 'src/stlEditor.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
   {

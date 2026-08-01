@@ -38,6 +38,39 @@ suite('MarkCopy integration', () => {
     // still pass while the setting did nothing.
     assert.strictEqual(cfg.get('pdf.pageSize'), 'Letter');
     assert.strictEqual(cfg.get('pdf.browserPath'), '');
+    assert.strictEqual(cfg.get('stl.showGrid'), true);
+    assert.strictEqual(cfg.get('stl.meshColor'), '#8ab4f8');
+  });
+
+  // Opening the file is what proves the custom editor is actually wired to
+  // *.stl: a viewType registered in code but missing from the `customEditors`
+  // contribution (or spelled differently there) would leave VS Code opening the
+  // file as binary, with nothing else in the suite noticing.
+  test('a .stl file opens in the MarkCopy STL preview', async () => {
+    // A one-triangle binary STL: 80-byte header, uint32 LE count, then 50 bytes
+    // per triangle. Zeroed floats make a degenerate triangle, which is fine here
+    // (the assertion is about which editor claimed the file, not the geometry).
+    const stl = Buffer.alloc(84 + 50);
+    stl.writeUInt32LE(1, 80);
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'cube.stl');
+    fs.writeFileSync(file, stl);
+
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const tab = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .find((t) => t.label === 'cube.stl');
+    assert.ok(tab, 'expected a tab for cube.stl');
+    assert.ok(
+      tab.input instanceof vscode.TabInputCustom,
+      'cube.stl did not open in a custom editor',
+    );
+    assert.strictEqual(
+      (tab.input as vscode.TabInputCustom).viewType,
+      'markcopy.stlPreview',
+      'cube.stl opened in some other custom editor',
+    );
   });
 
   // The extension contributes the `csv` and `tsv` language ids itself. If that
