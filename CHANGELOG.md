@@ -18,6 +18,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **Copy any table as Markdown.** Right-click a table, a CSV grid, or a spreadsheet sheet and **Copy as** now offers **Markdown**, so a range of cells lands in a document as a real Markdown table. The viewer's own chrome (the row-number gutter, and a sheet's A/B/C column letters) is left out, and a sheet's first row becomes the table header.
 
+- **Automated tests for the preview itself.** The context menu and the clipboard used to be checked only by hand, on the grounds that nothing automated could reach inside a webview. A new suite (`tests/e2e/`) boots the real preview bundle and drives it the way a reader does: right-click, walk the menu, read what came out. It covers the copy flavors on all three table surfaces, the spreadsheet grid and its tab strip, and sync scroll in both directions. The VS Code integration suite now also checks that a `.xlsx`, `.xlsm`, or `.pdf` opens in its own editor rather than as text. What still needs a human is what needs a real browser: PNG copy, the PDF viewer, and how a flavor pastes into Word.
+
 ### Changed
 
 - **Save as PDF now writes a PDF.** It used to open the preview in your browser and leave you to work the print dialog, which stamped the filename across the top of every page and the `file://` URL across the bottom. Now it asks where to save, renders the file with a headless Chrome, Edge, or Chromium found on your machine, and opens the result: no browser window, no print dialog, no header or footer. Text stays selectable, and equations, diagrams, highlighted code, and local images carry over as before.
@@ -38,6 +40,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Sync scroll stalled if you scrolled during the moment after a synced move.** A gesture landing inside the 250ms echo-suppression window was dropped and never resent, so the editor sat on the old line until you scrolled again.
 - **The end of a long document mapped to the wrong place.** The synthetic end-of-document anchor was almost never added, because the preview's scroll-past-the-end padding put the closing block beyond the end of the scroll range, so the last screenful stopped tracking. In a CSV grid truncated by `markcopy.csv.maxRows` it also aimed at the file's last line rather than the last row actually rendered, which flung the editor to the end of the file.
 - **A wide CSV grid was clipped at the page margin in the PDF export**, and a column whose width you had dragged kept that width in the export. Grids now fit the paper.
+- **`sample.csv` shipped inside the extension.** The other test fixtures were excluded from the package; that one was not, so every install carried a file only the repo needs.
 
 ## [0.6.0] - 2026-07-27
 

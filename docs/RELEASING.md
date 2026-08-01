@@ -79,9 +79,9 @@ With `.env` loaded, the publish steps below are just `npm run publish:vsce` and 
 Everything here happens **before** Phase 1 below; nothing in it is destructive, so it can be redone freely until it all passes.
 
 - [ ] `main` is green in CI and your working tree is clean (`git status`).
-- [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`.
+- [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`. (`npm test` is the unit suite and the webview E2E suite together.)
 - [ ] Integration tests pass: `npm run test:integration` (on Linux: `xvfb-run -a npm run test:integration`).
-- [ ] The manual pass in [docs/TESTING.md](TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**.
+- [ ] The manual pass in [docs/TESTING.md](TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**. Rows marked ☑ are covered by the two commands above and want a glance rather than a careful pass, provided both actually ran green.
 - [ ] [CHANGELOG.md](../CHANGELOG.md) `[Unreleased]` matches what actually shipped since the last tag (`git log v<last>..HEAD --oneline` is the ground truth), and user-facing changes are reflected in [README.md](../README.md) and `docs/`.
 - [ ] If visuals changed, assets are regenerated and committed: `npm run icon` and `npm run screenshot`.
 - [ ] The version bump you intend (patch / minor / major) matches the changelog contents.
