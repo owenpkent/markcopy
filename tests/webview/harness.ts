@@ -29,6 +29,16 @@ export interface Posted {
 /** SYNC_ECHO_MS in src/webview/main.ts. Pinned by the shell contract test. */
 const ECHO_WINDOW_MS = 250;
 
+/** Consecutive silent ticks that count as the bundle having finished. */
+const QUIET_TICKS = 3;
+
+/**
+ * Ceiling on settle()'s quiescence loop. Only reached when the bundle never goes
+ * quiet, so hitting it should surface as the assertion failing on stale state
+ * rather than as a suite that hangs until the runner's own timeout.
+ */
+const MAX_SETTLE_TICKS = 50;
+
 /** What `src/previewShell.ts` serves. Pinned by the shell contract test. */
 const SHELL =
   '<div id="content" class="markdown-body"></div>' +
@@ -99,6 +109,15 @@ export interface FakeLayout {
   topOfBlock(index: number): number;
   /** The furthest the preview can scroll. */
   maxOffset(): number;
+  /**
+   * Put jsdom's own layout back.
+   *
+   * Optional in practice: the next `fakeLayout()` unwinds this one first, and
+   * Vitest isolates per file. Worth calling from an `afterEach` in any file that
+   * mixes sync tests with tests that want real (zero) measurements, where a
+   * stale stand-in would answer for elements it has never seen.
+   */
+  restore(): void;
 }
 
 export interface LayoutOptions {
@@ -149,7 +168,10 @@ export interface Harness {
   fakeLayout(options?: LayoutOptions): FakeLayout;
 }
 
-let booted: Harness | undefined;
+// The in-flight or finished boot, not the resolved harness: `bootOnce` awaits a
+// dynamic import part way through, so storing the result would let two callers
+// that both arrive before that await resolves import the bundle twice.
+let booted: Promise<Harness> | undefined;
 
 /**
  * Boot the bundle. Call once per test file, from `beforeAll`.
@@ -158,11 +180,14 @@ let booted: Harness | undefined;
  * be imported once per module registry and the DOM it captured has to outlive
  * every test in the file. Tests re-`render()` instead of rebuilding the shell.
  */
-export async function boot(): Promise<Harness> {
-  if (booted) {
-    return booted;
+export function boot(): Promise<Harness> {
+  if (!booted) {
+    booted = bootOnce();
   }
+  return booted;
+}
 
+async function bootOnce(): Promise<Harness> {
   const posted: Posted[] = [];
   const clips: Clip[] = [];
 
@@ -218,21 +243,49 @@ export async function boot(): Promise<Harness> {
 
   const content = () => document.getElementById('content') as HTMLElement;
 
+  // Anything the bundle writes to the DOM, counted. Together with `posted` and
+  // `clips` this is every observable the bundle has, which is what lets settle()
+  // ask "has it stopped doing things" instead of guessing how many ticks it
+  // needed. MutationObserver delivers on the microtask queue, so the count is
+  // current by the time the next macrotask runs.
+  let domWrites = 0;
+  new MutationObserver((records) => {
+    domWrites += records.length;
+  }).observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+
   const settle = async (): Promise<void> => {
-    // Three ticks: the render's own awaits, then the dynamic import a copy
-    // action makes (Turndown, html-to-image), then whatever that resolves into.
-    for (let i = 0; i < 3; i++) {
+    // Tick until the bundle has been quiet for QUIET_TICKS in a row.
+    //
+    // A copy action awaits its own render, then a dynamic import (Turndown,
+    // html-to-image), then whatever that import resolves into, and each lands a
+    // tick apart. A fixed tick count is a guess at how deep that chain is, and
+    // guessing low is the worst failure this layer can have: `lastClip()` comes
+    // back empty and reads as a copy action that stopped being wired up, which
+    // is the exact bug the suite exists to catch. Waiting on quiescence instead
+    // survives a chain that grows a step.
+    let quiet = 0;
+    for (let i = 0; i < MAX_SETTLE_TICKS && quiet < QUIET_TICKS; i++) {
+      const before = `${posted.length}:${clips.length}:${domWrites}`;
       await new Promise((resolve) => setTimeout(resolve, 0));
+      quiet = before === `${posted.length}:${clips.length}:${domWrites}` ? quiet + 1 : 0;
     }
   };
 
   const settleSync = async (): Promise<void> => {
+    // The echo window is a real timer in the bundle, so this one has to be real
+    // time; quiescence cannot tell "still muted" from "finished and said
+    // nothing", which is precisely the distinction the echo tests assert on.
     await new Promise((resolve) => setTimeout(resolve, ECHO_WINDOW_MS + 60));
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     await settle();
   };
 
-  booted = {
+  const harness: Harness = {
     posted,
     clips,
     lastClip: () => clips[clips.length - 1],
@@ -271,8 +324,11 @@ export async function boot(): Promise<Harness> {
     },
   };
 
-  return booted;
+  return harness;
 }
+
+/** The layout currently patched over jsdom's, if any. */
+let activeLayout: FakeLayout | undefined;
 
 /**
  * Stack the blocks of the current render into a synthetic page.
@@ -284,6 +340,11 @@ export async function boot(): Promise<Harness> {
  * interpolation and testing that 0 equals 0.
  */
 function installLayout(content: HTMLElement, options: LayoutOptions): FakeLayout {
+  // A previous layout's patches are still on the prototypes, and capturing those
+  // as "the originals" would make restore() reinstate a stand-in. Unwind first,
+  // so what gets saved below is always jsdom's own.
+  activeLayout?.restore();
+
   const blockHeight = options.blockHeight ?? 100;
   // Deliberately shorter than the content by several blocks. `anchors()` drops
   // every anchor at or past `maxScroll()`, so a viewport close to the document
@@ -303,16 +364,30 @@ function installLayout(content: HTMLElement, options: LayoutOptions): FakeLayout
 
   let offset = 0;
 
-  Object.defineProperty(window, 'scrollY', { configurable: true, get: () => offset });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, get: () => viewport });
-  Object.defineProperty(document.documentElement, 'scrollHeight', {
-    configurable: true,
-    get: () => documentHeight,
-  });
-  window.scrollTo = ((...args: unknown[]) => {
+  // Everything below is a global. Saved so restore() can put jsdom back rather
+  // than leaving a stranded closure answering getBoundingClientRect for elements
+  // from a render that is three tests out of date.
+  const patched: (() => void)[] = [];
+  const patch = (target: object, key: string, descriptor: PropertyDescriptor): void => {
+    const original = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, ...descriptor });
+    patched.push(() => {
+      if (original) {
+        Object.defineProperty(target, key, original);
+      } else {
+        delete (target as Record<string, unknown>)[key];
+      }
+    });
+  };
+
+  patch(window, 'scrollY', { get: () => offset });
+  patch(window, 'innerHeight', { get: () => viewport });
+  patch(document.documentElement, 'scrollHeight', { get: () => documentHeight });
+  const fakeScrollTo = ((...args: unknown[]) => {
     const y = typeof args[0] === 'object' ? (args[0] as ScrollToOptions).top : args[1];
     offset = Math.max(0, Math.min(documentHeight - viewport, Number(y ?? 0)));
   }) as unknown as typeof window.scrollTo;
+  patch(window, 'scrollTo', { value: fakeScrollTo, writable: true });
 
   // The bundle measures a block as `getBoundingClientRect().top`, which is
   // viewport-relative, and adds the scroll offset back. Mirroring that here
@@ -333,14 +408,14 @@ function installLayout(content: HTMLElement, options: LayoutOptions): FakeLayout
       y: top,
     } as DOMRect;
   };
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
-    configurable: true,
+  patch(HTMLElement.prototype, 'getBoundingClientRect', {
+    writable: true,
     value(this: HTMLElement) {
       return rectFor(this);
     },
   });
 
-  return {
+  const layout: FakeLayout = {
     scrollTo(next: number): void {
       offset = Math.max(0, Math.min(documentHeight - viewport, next));
       window.dispatchEvent(new Event('scroll'));
@@ -348,7 +423,18 @@ function installLayout(content: HTMLElement, options: LayoutOptions): FakeLayout
     offset: () => offset,
     topOfBlock: (index: number) => tops[index],
     maxOffset: () => Math.max(0, documentHeight - viewport),
+    restore(): void {
+      if (activeLayout !== layout) {
+        return;
+      }
+      for (const undo of patched.reverse()) {
+        undo();
+      }
+      activeLayout = undefined;
+    },
   };
+  activeLayout = layout;
+  return layout;
 }
 
 /** Panels on screen, root first. A hidden root means no menu at all. */
@@ -359,7 +445,7 @@ function panels(): HTMLElement[] {
 }
 
 function rowText(el: Element): string {
-  return (el.textContent ?? '').replace('▸', '').replace('✓', '').trim();
+  return (el.textContent ?? '').replaceAll('▸', '').replaceAll('✓', '').trim();
 }
 
 function menuDriver(settle: () => Promise<void>): MenuDriver {
