@@ -9,6 +9,7 @@ tsconfig.json
 .env
 .env.*
 **/*.map
+sample.csv
 sample.md
 sample.pdf
 sample.pdf.mccomments.json

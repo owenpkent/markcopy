@@ -58,17 +58,35 @@ Two kinds of logic are deliberately kept in files with no `vscode` import and no
 
 jsdom has no layout engine, so anything size-dependent is stubbed (see `tests/csvTable.test.ts` for `getBoundingClientRect`). Tests can prove the _mechanism_ that keeps the grid's geometry correct but not the pixels; check those in the Extension Development Host.
 
+### Webview E2E (vitest)
+
+Also run by `npm test`. `tests/e2e/` drives the preview webview the way a reader does, through `tests/webview/harness.ts`: the harness boots the real bundle (`src/webview/main.ts`) in jsdom against the host's own renderers, then a test right-clicks an element, walks the context menu, and reads what landed on the clipboard.
+
+The point is that nothing in it reassembles the bundle's steps. A unit test can prove `tableToMarkdown` is correct while the menu row that calls it has been deleted; an E2E test cannot. Reach for this layer whenever a change is about _wiring_ rather than about a transform, and for a unit test when it is the other way round.
+
+Three things jsdom does not supply are stood in for, and each one is a trap if you forget it exists:
+
+- **The clipboard.** No `execCommand`, no `ClipboardEvent`. The harness stands in for both, so the bundle's own copy handler runs and the flavors it sets are readable as `h.lastClip()`.
+- **Layout.** Every box measures zero, which would make scroll sync interpolate everything to line 0 and pass. `h.fakeLayout()` stacks the blocks into a synthetic page with real offsets.
+- **The echo window.** The bundle mutes scroll sync for `SYNC_ECHO_MS` after moving the preview itself, then re-decides on a timer. Assert before that timer fires and you read silence as correctness; never wait at all and the deferred message leaks into the next test. `await h.settleSync()` is the fix for both.
+
+Two values the harness copies from the host (the shell HTML from `src/previewShell.ts`, and `SYNC_ECHO_MS`) are pinned against their sources by `tests/e2e/harnessContract.e2e.test.ts`, because a harness that drifts turns every suite built on it green for the wrong reason. If you rename an element in the shell, that test is what tells you.
+
+What stays out of reach here is whatever needs a real browser: canvas (so `Copy as PNG` and the PDF viewer), `innerText` (so the plain-text half of a rich-text copy), and any question about whether a palette is legible rather than merely applied.
+
 ### Integration tests (VS Code)
 
 ```bash
 npm run test:integration   # downloads VS Code and runs the extension inside it
 ```
 
-Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, and that the preview panel opens (for both Markdown and CSV). Spreadsheets are not covered there: they open through a custom editor rather than a text document, and the reader itself is exercised by `tests/xlsx/`. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored). Webview-internal behavior (clipboard writes, the context menu) is still best exercised by hand in the Extension Development Host (F5).
+Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, that the preview panel opens (for both Markdown and CSV), and which editor claims a file: a `.xlsx`, `.xlsm`, or `.pdf` has to land in its custom editor rather than in the text editor, and a file that is not really a workbook has to open far enough to say so. That last group is worth having here specifically because it is contributed entirely through `package.json` — a selector that stops matching leaves a workbook opening as binary junk while every test outside VS Code still passes.
+
+On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored).
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)), and the place to start when verifying a webview change by hand. Its fixtures are `sample.md` and `sample.csv` (both committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, and `sample.xlsx` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
@@ -102,6 +120,8 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/xlsx/`                      | Host: the OOXML reader (zip, XML, workbook, styles, sheet, grid HTML). Pure, unit-tested.       |
 | `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                              |
 | `tests/`                         | Vitest unit tests.                                                                              |
+| `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                        |
+| `tests/e2e/`                     | Webview E2E: the menu, the copy flavors, the sheet grid, scroll sync.                           |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                      |
 | `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                   |
 | `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).                                      |

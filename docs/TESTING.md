@@ -2,15 +2,24 @@
 
 How MarkCopy gets verified, from the automated suites to the manual checklist that gates a release. The automated layers run on every push; the manual checklist below is what "tested" means before publishing (see the [pre-release checklist](RELEASING.md#pre-release-checklist) in RELEASING.md).
 
-## The three layers
+## The four layers
 
 | Layer                  | Runs                             | Covers                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Unit tests (vitest)    | `npm test`, CI on every push     | Pure logic: markdown-it rendering and source-line mapping, CSV/TSV serialization (RFC 4180), HTML-to-Markdown conversion, preview helpers, scroll-sync interpolation, PDF export command line and print CSS, the OOXML reader (number formats, date serials, merges, hidden rows, malformed and hostile workbooks), and the spreadsheet preview's contract with the shared webview bundle. |
-| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, inside a real downloaded VS Code.                                                                                                                                                                                                                                                                     |
-| Manual (this document) | Before every release, by a human | Everything the webviews do: clipboard writes, the context menu, rendering fidelity, the PDF viewer, paste targets outside VS Code.                                                                                                                                                                                                                                                         |
+| Webview E2E (vitest)   | `npm test`, CI on every push     | The preview bundle itself, booted in jsdom and driven through its own context menu: which rows the menu offers, what each copy action puts on the clipboard, the sheet grid and its tab strip, and scroll sync in both directions. See [the webview E2E layer](#the-webview-e2e-layer).                                                                                                    |
+| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, and which editor claims a `.xlsx`/`.xlsm`/`.pdf`, inside a real downloaded VS Code.                                                                                                                                                                                                                   |
+| Manual (this document) | Before every release, by a human | What none of the above can see: rendering fidelity, theme legibility, the PDF viewer's canvas, and how the clipboard flavors actually paste into Word or Gmail.                                                                                                                                                                                                                            |
 
-The manual layer exists because the interesting behavior lives inside webviews, where the automated harnesses cannot reach: `document.execCommand`/Clipboard API writes, canvas rasterisation, text-layer selection, and how the clipboard flavors actually paste into Word or Gmail.
+The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. Everything else about the webviews is now driven automatically.
+
+### The webview E2E layer
+
+`tests/webview/harness.ts` boots the real bundle (`src/webview/main.ts`) in jsdom against the host's own renderers, and hands a test the same surface a reader has: right-click an element, walk the menu, read what landed on the clipboard. Nothing in it reassembles the bundle's steps, so a copy action that stops being wired to its menu row fails there and passes every unit test.
+
+Two things it stands in for are copies of the host's own values, and both are pinned by `tests/e2e/harnessContract.e2e.test.ts` so they cannot drift: the shell HTML from `src/previewShell.ts`, and `SYNC_ECHO_MS` from the bundle.
+
+Its blind spots are jsdom's: no layout (scroll sync runs against a synthetic one), no canvas (`Copy as PNG` is untested), and no `innerText` (the plain-text half of a rich-text copy is unreadable). Rows below that depend on those stay manual, and are marked.
 
 ## Setting up a manual pass
 
@@ -25,6 +34,8 @@ The manual layer exists because the interesting behavior lives inside webviews, 
 3. To inspect a webview while testing, run **Developer: Open Webview Developer Tools** from the Command Palette.
 
 Work through the checklists below. A **patch** release needs the sections touched by the change plus the smoke rows marked ★. A **minor or major** release needs the full pass.
+
+Rows marked ☑ are covered by an automated layer and are worth a glance rather than a careful pass: a green CI run has already checked them. They stay on the list because an automated layer can only see what it was told to look at, and because a release is the moment to notice the thing nobody wrote a test for.
 
 ## Markdown preview
 
@@ -42,7 +53,8 @@ Work through the checklists below. A **patch** release needs the sections touche
 Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COPY-MATRIX.md).
 
 - [ ] ★ Right-click a table, **Copy Table** (top-level), paste into Word or Google Docs: a real table arrives, not Markdown source.
-- [ ] Right-click a table -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells.
+- [ ] ☑ Right-click a table -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells.
+- [ ] ☑ Right-click a table -> **Copy as** -> **Markdown**: a real Markdown table, with any literal `|` in a cell escaped rather than splitting the row.
 - [ ] Right-click a paragraph -> **Copy as** -> **PNG**, paste into a chat or slide: an image arrives.
 - [ ] Right-click a Mermaid diagram, **Copy Diagram** (top-level): an image arrives.
 - [ ] Select some text, right-click -> **Copy as** -> **Markdown**: the original Markdown source comes back.
@@ -57,10 +69,10 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
 - [ ] **Sync scroll**, **Auto-open preview**, and **Math** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
-- [ ] With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
-- [ ] Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
-- [ ] Sync scroll tracks part way through a long block (a big code block or table) rather than snapping between blocks, and reaches the very bottom of the preview when the editor is scrolled to the end.
-- [ ] With **Sync scroll** off, neither direction follows: scrolling the editor leaves the preview alone, and scrolling the preview leaves the editor alone.
+- [ ] ☑ With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
+- [ ] ☑ Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
+- [ ] ☑ Sync scroll tracks part way through a long block (a big code block or table) rather than snapping between blocks, and reaches the very bottom of the preview when the editor is scrolled to the end.
+- [ ] ☑ With **Sync scroll** off, neither direction follows: scrolling the editor leaves the preview alone, and scrolling the preview leaves the editor alone.
 - [ ] **MarkCopy: Save as PDF** asks where to save, writes a `.pdf` there, and opens it. No browser window and no print dialog appear on the way.
 - [ ] The exported pages carry **no filename header and no URL footer**.
 - [ ] Nothing is clipped or shunted onto a page of its own: a code block longer than a page splits across pages, a very long code line wraps instead of being cut off at the right margin, a table taller than a page splits with its header row repeated on each page, and there is no blank page at the end.
@@ -75,19 +87,19 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 
 Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden), a merged title, dates, currency, a percentage, a formula with a stored result, and a formula without one.
 
-- [ ] It opens as a grid, not as binary junk or an error, with sheet tabs along the top.
-- [ ] The column headers are letters (A, B, C) and the row numbers are the sheet's own: the sample jumps from row 1 to row 3, and the gutter shows that rather than renumbering.
-- [ ] Dates read as `2023-03-15`, currency as `1,234.50`, and the margin as `15.3%`. None of them appear as raw numbers like `45000` or `0.153`.
-- [ ] The title in row 1 spans three columns (a merged cell).
-- [ ] `SUM` shows its stored result, `11110.75`. `AVERAGE`, which has no stored result, shows a muted marker rather than an empty cell, and hovering it explains why.
-- [ ] The tab strip shows **Summary** and **Notes** but not **Scratch**, which is hidden. Clicking **Notes** switches sheets and the tab strip follows.
-- [ ] Right-click the grid -> **Copy as** -> **CSV**, paste into a spreadsheet: real cells, **no row-number column and no A/B/C header row**, and the first pasted row is the sheet's own first row.
-- [ ] Right-click -> **Copy as** -> **Markdown**: a real Markdown table (pipes and a `| --- |` separator line), not raw `<table>` HTML. The merged title row is padded to the full width, and there is no A/B/C row and no row-number column.
-- [ ] Cells cannot be edited: clicking one and typing does nothing, and there is no edit caret. (A workbook is read-only in MarkCopy by design.)
+- [ ] ☑ It opens as a grid, not as binary junk or an error, with sheet tabs along the top.
+- [ ] ☑ The column headers are letters (A, B, C) and the row numbers are the sheet's own: the sample jumps from row 1 to row 3, and the gutter shows that rather than renumbering.
+- [ ] ☑ Dates read as `2023-03-15`, currency as `1,234.50`, and the margin as `15.3%`. None of them appear as raw numbers like `45000` or `0.153`.
+- [ ] ☑ The title in row 1 spans three columns (a merged cell).
+- [ ] ☑ `SUM` shows its stored result, `11110.75`. `AVERAGE`, which has no stored result, shows a muted marker rather than an empty cell, and hovering it explains why.
+- [ ] ☑ The tab strip shows **Summary** and **Notes** but not **Scratch**, which is hidden. Clicking **Notes** switches sheets and the tab strip follows. (Automated as far as the click asking the host to switch; that the host then re-reads the workbook is manual.)
+- [ ] ☑ Right-click the grid -> **Copy as** -> **CSV**, paste into a spreadsheet: real cells, **no row-number column and no A/B/C header row**, and the first pasted row is the sheet's own first row.
+- [ ] ☑ Right-click -> **Copy as** -> **Markdown**: a real Markdown table (pipes and a `| --- |` separator line), not raw `<table>` HTML. The merged title row is padded to the full width, and there is no A/B/C row and no row-number column.
+- [ ] ☑ Cells cannot be edited: clicking one and typing does nothing, and there is no edit caret. (A workbook is read-only in MarkCopy by design.)
 - [ ] All four `markcopy.theme` values render the grid and the tab strip legibly, green included.
-- [ ] **Save as PDF** from the right-click menu exports the active sheet, with no tab strip and no row-number gutter on the page.
+- [ ] ☑ **Save as PDF** from the right-click menu exports the active sheet, with no tab strip and no row-number gutter on the page. (Automated as far as what the webview hands the host to print; the page itself is manual, because the export drives a real browser through a save dialog.)
 - [ ] Editing the workbook in a spreadsheet application and saving re-renders the open preview.
-- [ ] Renaming a `.txt` to `.xlsx` and opening it gives a readable message, not a blank panel.
+- [ ] ☑ Renaming a `.txt` to `.xlsx` and opening it gives a readable message, not a blank panel.
 
 ## CSV / TSV grid
 
@@ -144,7 +156,7 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 
 ### Copy and export
 
-- [ ] ★ Right-click the grid -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells, and **no row-number column**.
+- [ ] ★ ☑ Right-click the grid -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells, and **no row-number column**.
 - [ ] The pasted data round-trips the tricky rows: the quoted comma, the escaped quotes, and the multi-line cell all come back intact.
 - [ ] A field with deliberate leading/trailing spaces keeps them through a **Copy as** -> **CSV** round-trip.
 - [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme, and with **no row-number column**.

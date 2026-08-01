@@ -190,9 +190,10 @@ The file is read by the extension host and handed to the webview as bytes, so no
 npm install
 npm run compile     # type-check + build the extension and webview bundles
 npm run watch       # rebuild on change
-npm test            # vitest unit tests
+npm test            # vitest: unit tests plus the webview E2E suite
+npm run test:integration   # runs the extension inside a real VS Code
 # press F5 in VS Code to launch the Extension Development Host; it opens this
-# repo, so sample.md, sample.csv, and sample.pdf are ready to preview
+# repo, so sample.md, sample.csv, sample.xlsx, and sample.pdf are ready to preview
 ```
 
 Full details in [CONTRIBUTING.md](.github/CONTRIBUTING.md).
