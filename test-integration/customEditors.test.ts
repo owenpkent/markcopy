@@ -14,6 +14,28 @@ import * as vscode from 'vscode';
 
 const XLSX_VIEW = 'markcopy.xlsxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
+const STL_VIEW = 'markcopy.stlPreview';
+
+/**
+ * Poll `probe` until it returns something, or give up.
+ *
+ * `vscode.open` resolves before the tab is necessarily in `tabGroups`. Waiting
+ * on the condition rather than on a stopwatch is what keeps a loaded CI runner
+ * from failing a test that is only ever about a filename selector.
+ */
+async function waitFor<T>(probe: () => T | undefined, timeoutMs = 5000): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = probe();
+    if (value !== undefined) {
+      return value;
+    }
+    if (Date.now() >= deadline) {
+      return undefined;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
 
 /** A copy of a repo fixture in a temp dir, so a test never edits the original. */
 function fixture(name: string): vscode.Uri {
@@ -106,6 +128,28 @@ suite('MarkCopy custom editors', () => {
       customTabs().some((tab) => tab.viewType === XLSX_VIEW && tab.uri === uri.toString()),
       'expected the sheet preview to claim the tab and report the problem itself',
     );
+  });
+
+  test('a .stl file opens in the STL preview rather than as binary', async () => {
+    // A one-triangle binary STL: 80-byte header, uint32 LE count, then 50 bytes
+    // per triangle. Zeroed floats make a degenerate triangle, which is fine here
+    // (the assertion is about which editor claimed the file, not the geometry).
+    const stl = Buffer.alloc(84 + 50);
+    stl.writeUInt32LE(1, 80);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const uri = vscode.Uri.file(path.join(dir, 'cube.stl'));
+    fs.writeFileSync(uri.fsPath, stl);
+
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.ok(
+      tab,
+      `expected a custom-editor tab for cube.stl, saw: ${JSON.stringify(customTabs())}`,
+    );
+    assert.strictEqual(tab.viewType, STL_VIEW, 'cube.stl opened in some other custom editor');
   });
 
   test('the sheet preview has its own row and column limits', () => {
