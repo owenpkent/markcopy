@@ -39,6 +39,16 @@ const QUIET_TICKS = 3;
  */
 const MAX_SETTLE_TICKS = 50;
 
+/**
+ * How long a menu action gets to produce a clipboard write or a posted message.
+ *
+ * Only ever reached when an action produces neither, which no action currently
+ * does, so this is the cost of a genuine failure rather than of a passing run.
+ * Generous because the thing being waited on is a cold dynamic import on a CI
+ * runner that may be sharing a core with three other jobs.
+ */
+const ACTION_TIMEOUT_MS = 5000;
+
 /** What `src/previewShell.ts` serves. Pinned by the shell contract test. */
 const SHELL =
   '<div id="content" class="markdown-body"></div>' +
@@ -276,6 +286,23 @@ async function bootOnce(): Promise<Harness> {
     }
   };
 
+  // Wait for a menu action to actually land, rather than for the queue to go
+  // quiet. Every action either writes a clipboard flavor or posts to the host,
+  // so one of the two counters moves; polling real time is what survives a
+  // dynamic import that a loaded CI runner takes its time over. Returns as soon
+  // as something happens, so a passing test pays nothing for this.
+  const awaitAction = async (clipsBefore: number, postedBefore: number): Promise<void> => {
+    const deadline = Date.now() + ACTION_TIMEOUT_MS;
+    while (
+      clips.length === clipsBefore &&
+      posted.length === postedBefore &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await settle();
+  };
+
   const settleSync = async (): Promise<void> => {
     // The echo window is a real timer in the bundle, so this one has to be real
     // time; quiescence cannot tell "still muted" from "finished and said
@@ -316,7 +343,10 @@ async function bootOnce(): Promise<Harness> {
 
     rightClick(target: Element): MenuDriver {
       target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      return menuDriver(settle);
+      return menuDriver(settle, awaitAction, () => ({
+        clips: clips.length,
+        posted: posted.length,
+      }));
     },
 
     fakeLayout(options: LayoutOptions = {}): FakeLayout {
@@ -448,7 +478,11 @@ function rowText(el: Element): string {
   return (el.textContent ?? '').replaceAll('▸', '').replaceAll('✓', '').trim();
 }
 
-function menuDriver(settle: () => Promise<void>): MenuDriver {
+function menuDriver(
+  settle: () => Promise<void>,
+  awaitAction: (clipsBefore: number, postedBefore: number) => Promise<void>,
+  counts: () => { clips: number; posted: number },
+): MenuDriver {
   const deepest = (): HTMLElement | undefined => panels()[panels().length - 1];
 
   return {
@@ -472,8 +506,23 @@ function menuDriver(settle: () => Promise<void>): MenuDriver {
           const seen = Array.from(panel?.querySelectorAll('.mc-menu-item') ?? []).map(rowText);
           throw new Error(`no menu row "${label}"; the open panel has: ${JSON.stringify(seen)}`);
         }
+        const before = counts();
+        const panelsBefore = panels().length;
         row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
         await settle();
+
+        // A submenu row just opened a panel; there is nothing further to wait
+        // for. An action row is the case that needs more than quiescence: a
+        // copy that goes through a dynamic import (Turndown for Markdown,
+        // html-to-image for PNG) sits several macrotasks between the click and
+        // the clipboard write, and does nothing observable while it waits. Tick
+        // counting reads that silence as "finished", and the test then asserts
+        // on an empty clipboard, which is indistinguishable from the copy action
+        // having been unwired. That is the one failure this whole layer exists
+        // to report accurately, so it is worth waiting on the effect itself.
+        if (panels().length <= panelsBefore) {
+          await awaitAction(before.clips, before.posted);
+        }
       }
     },
   };
