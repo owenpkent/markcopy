@@ -9,6 +9,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.7.0] - 2026-08-01
+
 ### Added
 
 - **STL 3D preview.** Open an `.stl` file and it renders in a Three.js viewer instead of opening as binary. Mouse-only controls (left-drag to orbit, right-drag to pan, scroll to zoom), the camera fitted to the model on load, a toolbar for **Fit view** / wireframe / grid, and an overlay reporting the triangle count and bounding-box dimensions. Binary and ASCII STL are both read, and the viewport background follows `markcopy.theme` like the other previews.
@@ -35,6 +37,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
+- **A corrupt or hostile STL is refused before it is read, not after.** The guards against a binary header over-claiming its triangle count ran in the webview, which meant the file had already been read whole, base64-encoded, and sent across before anything asked whether it should have been opened. The size is now checked in the extension host first, and the triangle-count limit is derived from what the transport can actually carry, so a file cannot pass every check and then fail while being encoded.
 - **Stray page breaks in the PDF export.** The print stylesheet asked the browser not to break inside a `pre`, `table`, or `blockquote`. That is impossible to honour for a block taller than a page, and a browser that cannot honour it pushes the block onto a fresh page anyway, leaving the rest of the previous page blank. Tall blocks may now split, a table's header row repeats on every page it spans, and the preview's scroll-past-the-end padding no longer prints as a blank final page. On a test document this went from 13 pages with 3 near-empty ones to 11 full pages.
 - **Content silently cut off in the PDF export.** A wide code block or table scrolls sideways on screen, but in print `overflow: auto` just clips whatever does not fit the page, with nothing to say it had. A 400-character code line came out as 86 characters. Long lines and wide cells now wrap instead.
 - **Code block, table header, and blockquote backgrounds missing from the PDF export.** Chromium drops background colours from a print unless the page opts in; the export now does (`print-color-adjust: exact`).
@@ -174,7 +177,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/owenpkent/markcopy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/owenpkent/markcopy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/owenpkent/markcopy/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/owenpkent/markcopy/compare/v0.3.0...v0.4.0
