@@ -17,6 +17,13 @@ updates:
       # unpin when the project's Node floor moves.
       - dependency-name: 'jsdom'
         update-types: ['version-update:semver-major']
+      # typescript-eslint 8 peers on `typescript >=4.8.4 <6.1.0`, so a bump to 7
+      # cannot install at all: npm ci fails with ERESOLVE and both CI jobs die
+      # before running a test. TypeScript 6 installs but cannot see @types/node
+      # under this tsconfig. Both want a deliberate PR that moves the linter and
+      # the tsconfig together, not an automated bump.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
     groups:
       dev-dependencies:
         dependency-type: development
