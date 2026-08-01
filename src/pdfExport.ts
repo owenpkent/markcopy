@@ -290,7 +290,10 @@ export async function renderPdf(opts: {
   const args = printArgs(opts);
   const stderr = await run(opts.browser, args, opts.timeoutMs ?? RENDER_TIMEOUT_MS);
 
-  let size = 0;
+  // No initializer: the catch always throws, so the only way past this block is
+  // with `size` assigned. Seeding it with 0 would be a value nothing can read,
+  // and would quietly become the fallback if the catch ever stopped throwing.
+  let size: number;
   try {
     size = (await stat(opts.pdfPath)).size;
   } catch {
