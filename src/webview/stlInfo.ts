@@ -7,17 +7,33 @@ export interface StlSniffResult {
   triangles: number | null;
 }
 
-// Safe upper bound on triangles for a viewer. A binary STL header can declare up
-// to ~4.29B triangles (a uint32), and STLLoader allocates Float32Arrays sized
-// from that value (faces * 9 floats), so an ~84-byte crafted file could request
-// tens of GB and hang the webview. checkStl() gates parsing on this.
-export const MAX_TRIANGLES = 10_000_000;
+// The largest STL the preview will open, and the limit every other bound here
+// is derived from.
+//
+// The ceiling is the transport, not the renderer. The host ships the file to the
+// webview as base64 (see src/stlEditor.ts), and base64 of N bytes is a JS string
+// of 4*ceil(N/3) characters. Node's maximum string length is 536,870,888, so
+// Buffer.toString('base64') throws ERR_STRING_TOO_LONG above ~384 MiB of input.
+// A limit above that would let a file pass every check here and then die in the
+// host with "Cannot create a string longer than 0x1fffffe8 characters", which
+// the user reads as MarkCopy failing to read a file it just said was fine.
+//
+// 256 MiB leaves room under that for the decoded copies the webview makes (the
+// atob string is UTF-16, so ~2x again) and is far past any STL anyone opens to
+// look at: a binary STL this size is over 5 million triangles.
+export const MAX_STL_BYTES = 256 * 1024 * 1024;
 
-// The largest payload worth reconstructing: 80-byte header, uint32 count, then
-// MAX_TRIANGLES triangles of 50 bytes. A payload claiming more than this is
-// corrupt, and sizing an allocation from a corrupt length is how a bad message
-// becomes an out-of-memory crash instead of an error message.
-const MAX_PAYLOAD_BYTES = 84 + MAX_TRIANGLES * 50;
+// Safe upper bound on triangles, derived so it can never disagree with the byte
+// cap. A binary STL header can declare up to ~4.29B triangles (a uint32), and
+// STLLoader allocates Float32Arrays sized from that value (faces * 9 floats), so
+// an ~84-byte crafted file could request tens of GB and hang the webview.
+// checkStl() gates parsing on this.
+export const MAX_TRIANGLES = Math.floor((MAX_STL_BYTES - 84) / 50);
+
+// A payload claiming more than the file cap is corrupt, and sizing an allocation
+// from a corrupt length is how a bad message becomes an out-of-memory crash
+// instead of an error message.
+const MAX_PAYLOAD_BYTES = MAX_STL_BYTES;
 
 // Normalize the extension host's postMessage payload back to a Uint8Array.
 //
@@ -118,13 +134,29 @@ export function sniffStl(bytes: Uint8Array): StlSniffResult {
   return { format: 'binary', triangles: binaryTriangleCount(bytes) };
 }
 
+// How far in to look for the "facet" that confirms an ASCII file. The first
+// facet follows the solid name, which is one line in every exporter anyone has
+// seen, but 1 KiB was tight enough that a long name pushed a perfectly good
+// ASCII file onto the binary path, where its text got read as a uint32 count and
+// it was rejected as "possibly corrupt or malicious". 64 KiB costs one decode of
+// at most that much and removes the class of false accusation.
+const ASCII_SNIFF_BYTES = 64 * 1024;
+
 // ASCII STL files start with "solid" and, within the same header region,
 // contain a "facet" keyword introducing the first triangle. Binary STL files
 // can technically start with the bytes "solid" too (the 80-byte header is
 // free-form text), so requiring "facet" nearby as well avoids misclassifying
 // those as ASCII.
 function looksAscii(bytes: Uint8Array): boolean {
-  const head = decodeLatin1(bytes.subarray(0, Math.min(bytes.length, 1024)));
+  // A file whose length is exactly what its own header's triangle count implies
+  // is binary, whatever that header spells. Checked first because the header is
+  // free-form text, "solid" is a common thing for an exporter to write there,
+  // and this is the one signal that cannot be a coincidence in a real file.
+  const declared = binaryTriangleCount(bytes);
+  if (declared !== null && 84 + declared * 50 === bytes.byteLength) {
+    return false;
+  }
+  const head = decodeLatin1(bytes.subarray(0, Math.min(bytes.length, ASCII_SNIFF_BYTES)));
   return /^\s*solid\b/i.test(head) && /facet/i.test(head);
 }
 
@@ -139,6 +171,10 @@ function binaryTriangleCount(bytes: Uint8Array): number | null {
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return view.getUint32(80, true);
+}
+
+function formatMib(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
 }
 
 function decodeLatin1(bytes: Uint8Array): string {
@@ -156,13 +192,32 @@ export interface StlCheck {
   triangles: number | null;
 }
 
-// Decide whether `bytes` is safe to hand to STLLoader.parse(). For binary STL we
-// reject when the header's declared triangle count needs more bytes than the
-// file actually holds (the small-file / huge-count amplification that drives a
-// giant allocation) or when it exceeds `maxTriangles`. ASCII STL is parsed
-// facet-by-facet, bounded by the real file length, so it is always allowed here.
-export function checkStl(bytes: Uint8Array, maxTriangles = MAX_TRIANGLES): StlCheck {
+// Decide whether `bytes` is safe to hand to STLLoader.parse().
+//
+// Three rejections, in the order they can be decided cheaply:
+//
+//  - Over the byte cap. Applies to both formats. ASCII STL is parsed
+//    facet-by-facet so it cannot amplify the way a binary header can, but
+//    "bounded by the file" is not the same as "bounded": a 2 GB ASCII file is
+//    still a frozen webview, and without this the documented cap would silently
+//    not apply to half the format.
+//  - The header's declared triangle count needs more bytes than the file
+//    actually holds. This is the small-file / huge-count amplification.
+//  - The count is honest but still above `maxTriangles`.
+export function checkStl(
+  bytes: Uint8Array,
+  maxTriangles = MAX_TRIANGLES,
+  maxBytes = MAX_STL_BYTES,
+): StlCheck {
   const { format, triangles } = sniffStl(bytes);
+  if (bytes.byteLength > maxBytes) {
+    return {
+      ok: false,
+      reason: `File is ${formatMib(bytes.byteLength)}, above MarkCopy's ${formatMib(maxBytes)} limit for STL previews.`,
+      format,
+      triangles,
+    };
+  }
   if (format === 'ascii') {
     return { ok: true, format, triangles };
   }

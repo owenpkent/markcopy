@@ -25,7 +25,15 @@ interface ThemeMessage {
   value: string;
 }
 
-type HostMessage = LoadMessage | ThemeMessage;
+// The host refused the file before sending it (too large, or checkStl said no).
+// It carries the reason so the viewport can say what happened instead of sitting
+// blank while the explanation goes to a notification toast.
+interface ErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+type HostMessage = LoadMessage | ThemeMessage | ErrorMessage;
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
@@ -65,6 +73,16 @@ let gridHelper: THREE.GridHelper | null = null;
 let mesh: THREE.Mesh | null = null;
 let boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1);
 let showGridSetting = true;
+let wireframeActive = false;
+
+// Set by anything that changes what a frame would look like. The render loop
+// otherwise repaints an unchanging scene forever, which on a laptop is a GPU
+// spinning on a tab nobody is looking at.
+let needsRender = true;
+
+function invalidate(): void {
+  needsRender = true;
+}
 
 function aspect(): number {
   return viewportEl.clientWidth / Math.max(1, viewportEl.clientHeight);
@@ -87,6 +105,7 @@ function syncBackground(): void {
     // back rather than lose the model over a theme value.
     renderer.setClearColor(new THREE.Color('#1e1e1e'), 1);
   }
+  invalidate();
 }
 
 function setGridVisible(visible: boolean): void {
@@ -94,6 +113,7 @@ function setGridVisible(visible: boolean): void {
     gridHelper.visible = visible;
   }
   btnGrid.classList.toggle('active', visible);
+  invalidate();
 }
 
 function rebuildGrid(footprint: number): void {
@@ -119,10 +139,21 @@ function fitView(): void {
   camera.updateProjectionMatrix();
   controls.target.copy(boundingSphere.center);
   controls.update();
+  invalidate();
 }
 
 function showError(message: string): void {
   statsEl.textContent = message;
+  // Wrap: an error sentence under `white-space: pre` would otherwise run off the
+  // side of the viewport. The stats readout still needs pre for its own newline.
+  statsEl.style.whiteSpace = 'pre-wrap';
+  statsEl.style.maxWidth = 'calc(100vw - 32px)';
+}
+
+function showStats(text: string): void {
+  statsEl.textContent = text;
+  statsEl.style.whiteSpace = 'pre';
+  statsEl.style.maxWidth = '';
 }
 
 function loadModel(msg: LoadMessage): void {
@@ -188,12 +219,12 @@ function loadModel(msg: LoadMessage): void {
   fitView();
 
   const triangles = geometry.attributes.position.count / 3;
-  statsEl.textContent =
+  showStats(
     `${triangles.toLocaleString()} triangles\n` +
-    `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`;
+      `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`,
+  );
+  invalidate();
 }
-
-let wireframeActive = false;
 
 btnFit.addEventListener('click', () => {
   if (mesh) {
@@ -207,6 +238,7 @@ btnWireframe.addEventListener('click', () => {
   if (mesh) {
     (mesh.material as THREE.MeshStandardMaterial).wireframe = wireframeActive;
   }
+  invalidate();
 });
 
 btnGrid.addEventListener('click', () => {
@@ -221,6 +253,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
   } else if (msg?.type === 'setTheme') {
     document.body.dataset.mcTheme = msg.value;
     syncBackground();
+  } else if (msg?.type === 'error') {
+    showError(msg.message);
   }
 });
 
@@ -228,12 +262,17 @@ window.addEventListener('resize', () => {
   camera.aspect = aspect();
   camera.updateProjectionMatrix();
   renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
+  invalidate();
 });
 
 function animate(): void {
   requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
+  // OrbitControls returns true while damping is still easing the camera, so the
+  // loop keeps painting through the tail of a drag and then stops.
+  if (controls.update() || needsRender) {
+    renderer.render(scene, camera);
+    needsRender = false;
+  }
 }
 animate();
 

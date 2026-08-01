@@ -5,6 +5,7 @@ coverage
 media/webview.js
 media/pdf.js
 media/pdf.worker.js
+media/stl.js
 node_modules
 *.vsix
 package-lock.json

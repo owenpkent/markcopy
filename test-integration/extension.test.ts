@@ -6,6 +6,27 @@ import * as vscode from 'vscode';
 
 const EXT_ID = 'OwenPKent.markcopy';
 
+/**
+ * Poll `probe` until it returns something, or give up.
+ *
+ * Opening an editor resolves before the tab is necessarily in `tabGroups`, so
+ * something has to wait. Waiting on the condition rather than on a stopwatch is
+ * what keeps a slow runner from failing a test about a filename selector.
+ */
+async function waitFor<T>(probe: () => T | undefined, timeoutMs = 5000): Promise<T | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = probe();
+    if (value !== undefined) {
+      return value;
+    }
+    if (Date.now() >= deadline) {
+      return undefined;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 suite('MarkCopy integration', () => {
   suiteSetup(async () => {
     const ext = vscode.extensions.getExtension(EXT_ID);
@@ -55,17 +76,24 @@ suite('MarkCopy integration', () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'cube.stl');
     fs.writeFileSync(file, stl);
 
-    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file));
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    const uri = vscode.Uri.file(file);
+    await vscode.commands.executeCommand('vscode.open', uri);
 
-    const tab = vscode.window.tabGroups.all
-      .flatMap((group) => group.tabs)
-      .find((t) => t.label === 'cube.stl');
-    assert.ok(tab, 'expected a tab for cube.stl');
-    assert.ok(
-      tab.input instanceof vscode.TabInputCustom,
-      'cube.stl did not open in a custom editor',
+    // Poll rather than sleep a fixed 800ms. A fixed wait is a bet on how loaded
+    // the CI runner is: too short and this fails for a reason that has nothing
+    // to do with the selector under test, too long and every run pays for the
+    // worst case. Matching on the URI rather than the tab label also keeps a
+    // second tab that happens to be called cube.stl from answering for this one.
+    const tab = await waitFor(() =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find(
+          (t) =>
+            t.input instanceof vscode.TabInputCustom && t.input.uri.toString() === uri.toString(),
+        ),
     );
+
+    assert.ok(tab, 'cube.stl did not open in a custom editor');
     assert.strictEqual(
       (tab.input as vscode.TabInputCustom).viewType,
       'markcopy.stlPreview',

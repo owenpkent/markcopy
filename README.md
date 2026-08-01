@@ -185,7 +185,7 @@ MarkCopy registers as the editor for `.stl` files, so opening one renders the mo
 
 Both binary and ASCII STL are handled. The model is centered in X and Z and rested on the y = 0 plane, so the grid always sits directly under it. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.showGrid` and `markcopy.stl.meshColor` set the grid and mesh color.
 
-Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, or any model above 10 million triangles, shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
+Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. The size is checked before the file is read, not after. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
 
 There are no copy actions in this viewer, by design: an STL is a triangle soup with no text, tables, or images to put on a clipboard.
 

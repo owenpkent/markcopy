@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getNonce } from './previewShell';
+import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 
 // A read-only custom editor that renders STL files with Three.js in a webview.
 // Mouse-only orbit/pan/zoom; see media/stl.js (built from src/webview/stl.ts).
@@ -43,7 +44,36 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
         return;
       }
       try {
+        // Size first, off stat, before a byte is read. Every guard used to live
+        // in the webview, which meant a hostile file was read whole, base64'd
+        // (1.33x, as a string), serialized through postMessage, and decoded on
+        // the other side before anything asked whether it should have been
+        // opened. The allocation the guards exist to prevent had already
+        // happened five times over by then, in the extension host, where it
+        // takes the whole window down rather than one preview.
+        const stat = await vscode.workspace.fs.stat(document.uri);
+        if (stat.size > MAX_STL_BYTES) {
+          void webview.postMessage({
+            type: 'error',
+            message: `${basename(document.uri)} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_STL_BYTES)} limit for STL previews.`,
+          });
+          return;
+        }
+
         const bytes = await vscode.workspace.fs.readFile(document.uri);
+
+        // Cheap to run here and it saves base64-encoding a file that is about to
+        // be refused. The webview checks again on arrival: this one is about not
+        // doing pointless work, that one is the actual guard on the allocation.
+        const check = checkStl(bytes);
+        if (!check.ok) {
+          void webview.postMessage({
+            type: 'error',
+            message: check.reason ?? `Could not load ${basename(document.uri)}.`,
+          });
+          return;
+        }
+
         const cfg = vscode.workspace.getConfiguration('markcopy', document.uri);
         void webview.postMessage({
           type: 'load',
@@ -58,6 +88,13 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
           meshColor: cfg.get<string>('stl.meshColor', '#8ab4f8'),
         });
       } catch (err) {
+        // Into the viewport as well as the toast: a blank 3D canvas with the
+        // explanation in a notification that has already faded is how someone
+        // concludes the preview is broken rather than the file.
+        void webview.postMessage({
+          type: 'error',
+          message: `Could not read ${basename(document.uri)} (${String(err)}).`,
+        });
         void vscode.window.showErrorMessage(
           `MarkCopy: could not read ${basename(document.uri)} (${String(err)}).`,
         );
@@ -164,4 +201,8 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 function basename(uri: vscode.Uri): string {
   const p = uri.path;
   return p.substring(p.lastIndexOf('/') + 1);
+}
+
+function mib(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
 }

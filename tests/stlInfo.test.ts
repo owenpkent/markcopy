@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkStl, MAX_TRIANGLES, sniffStl, toBytes } from '../src/webview/stlInfo';
+import { checkStl, MAX_STL_BYTES, MAX_TRIANGLES, sniffStl, toBytes } from '../src/webview/stlInfo';
 
 // Build a minimal binary STL buffer: 80-byte header + uint32 LE triangle count
 // + `count` triangles of 50 bytes each (12 floats + a uint16 attribute count).
@@ -41,6 +41,25 @@ describe('sniffStl', () => {
   it('detects an ASCII STL by its "solid" header and "facet" body', () => {
     const bytes = new TextEncoder().encode(makeAsciiStl());
     expect(sniffStl(bytes)).toEqual({ format: 'ascii', triangles: null });
+  });
+
+  it('still detects ASCII when a long solid name pushes "facet" past 1 KiB', () => {
+    // The old sniff window was 1 KiB, so a file like this fell through to the
+    // binary path, had its own text read as a uint32 triangle count, and got
+    // refused as "possibly corrupt or malicious".
+    const ascii = makeAsciiStl().replace('solid cube', `solid ${'n'.repeat(4096)}`);
+    expect(sniffStl(new TextEncoder().encode(ascii))).toEqual({
+      format: 'ascii',
+      triangles: null,
+    });
+  });
+
+  it('reads a binary file whose header spells "solid ... facet" as binary', () => {
+    // The 80-byte header is free-form text, so an exporter can write anything
+    // there. A length that exactly matches the declared count settles it.
+    const bytes = makeBinaryStl(2);
+    new Uint8Array(bytes.buffer).set(new TextEncoder().encode('solid facet'), 0);
+    expect(sniffStl(bytes)).toEqual({ format: 'binary', triangles: 2 });
   });
 
   it('treats empty input as binary with no readable triangle count', () => {
@@ -178,12 +197,44 @@ describe('checkStl', () => {
     expect(checkStl(new Uint8Array(5)).ok).toBe(false);
   });
 
-  it('allows ASCII STL (allocation bounded by file length)', () => {
+  it('allows ASCII STL within the byte cap', () => {
     const bytes = new TextEncoder().encode(makeAsciiStl());
     expect(checkStl(bytes)).toMatchObject({ ok: true, format: 'ascii' });
   });
 
+  it('applies the byte cap to ASCII too, which cannot amplify but can still hang', () => {
+    // The amplification guard is binary-only, because an ASCII parse is bounded
+    // by the real file length. Bounded is not the same as small: without this
+    // the documented limit would quietly not apply to half the format.
+    const bytes = new TextEncoder().encode(makeAsciiStl());
+    const r = checkStl(bytes, MAX_TRIANGLES, 8);
+    expect(r.ok).toBe(false);
+    expect(r.format).toBe('ascii');
+    expect(r.reason).toMatch(/above MarkCopy's/i);
+  });
+
+  it('applies the byte cap to binary before looking at the triangle count', () => {
+    const r = checkStl(makeBinaryStl(10), MAX_TRIANGLES, 84);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/above MarkCopy's/i);
+  });
+
   it('exposes a positive default triangle cap', () => {
     expect(MAX_TRIANGLES).toBeGreaterThan(0);
+  });
+
+  it('keeps the triangle cap and the byte cap consistent', () => {
+    // These two disagreeing is how a file passes every check here and then dies
+    // in the host encoding it. The triangle cap is derived from the byte cap so
+    // the largest file the count permits is one the transport can carry.
+    expect(84 + MAX_TRIANGLES * 50).toBeLessThanOrEqual(MAX_STL_BYTES);
+  });
+
+  it('keeps the byte cap under what Buffer.toString(base64) can return', () => {
+    // Node's maximum string length. base64 of N bytes is 4*ceil(N/3) characters,
+    // and exceeding this throws ERR_STRING_TOO_LONG in the extension host, which
+    // surfaces to the user as MarkCopy failing to read a file it just accepted.
+    const NODE_MAX_STRING_LENGTH = 536_870_888;
+    expect(4 * Math.ceil(MAX_STL_BYTES / 3)).toBeLessThan(NODE_MAX_STRING_LENGTH);
   });
 });

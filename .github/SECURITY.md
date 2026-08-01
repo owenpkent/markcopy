@@ -77,9 +77,12 @@ A binary STL is an 80-byte header, a uint32 triangle count, then 50 bytes per tr
 `checkStl()` in `src/webview/stlInfo.ts` runs before any allocation and refuses two shapes:
 
 - **A count the file cannot back.** If `84 + triangles * 50` exceeds the actual byte length, the file is corrupt or crafted and is rejected with a message in the panel. This is the amplification case above.
-- **A count above `MAX_TRIANGLES` (10 million).** A self-consistent 500 MB model is not an attack, but it is not something to hand a WebGL context either.
+- **A count above `MAX_TRIANGLES` (~5.4 million).** A self-consistent 256 MB model is not an attack, but it is not something to hand a WebGL context either.
+- **A file above `MAX_STL_BYTES` (256 MiB).** This one applies to ASCII as well as binary. ASCII STL cannot amplify, because it is parsed facet by facet and bounded by the real file length, but bounded is not the same as small: a multi-gigabyte ASCII file is still a frozen webview. `MAX_TRIANGLES` is derived from this cap so the two can never drift apart.
 
-ASCII STL needs no cap: it is parsed facet by facet, bounded by the real file length, so it cannot claim to be larger than it is.
+The size check runs in the extension host, off `stat`, before the file is read. Everything else runs on the bytes the host has read, still in the host, before they are base64-encoded and sent. The webview re-checks on arrival: the host-side pass is about not doing pointless work, the webview-side pass is the actual guard on the allocation.
+
+The byte cap is set by the transport, not the renderer. The host ships the file as base64, and Node's maximum string length (536,870,888) means `Buffer.toString('base64')` throws above roughly 384 MiB of input. A cap above that would let a file pass every check and then fail in the host with a string-length error, which reads to the user as MarkCopy refusing a file it had just accepted.
 
 The message payload is treated as untrusted too, separately from the file. The host sends base64 rather than a `Uint8Array` because `webview.postMessage` JSON-encodes, and JSON turns a typed array into a numeric-keyed object roughly 13x the size. `toBytes()` decodes it, and its fallback branches never size an allocation from an unvalidated `length`: a bare `{length: n}` is refused rather than expanded into `n` zero bytes, and a numeric key past the payload cap returns empty rather than throwing `RangeError` or reserving gigabytes.
 

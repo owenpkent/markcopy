@@ -14,7 +14,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **STL 3D preview.** Open an `.stl` file and it renders in a Three.js viewer instead of opening as binary. Mouse-only controls (left-drag to orbit, right-drag to pan, scroll to zoom), the camera fitted to the model on load, a toolbar for **Fit view** / wireframe / grid, and an overlay reporting the triangle count and bounding-box dimensions. Binary and ASCII STL are both read, and the viewport background follows `markcopy.theme` like the other previews.
   - Ported from [MeshView](https://github.com/owenpkent/meshview), which this supersedes. If you have both installed they will compete for `.stl`; uninstall MeshView.
   - The viewer has no copy actions, deliberately: a triangle soup has nothing meaningful to put on a clipboard.
-  - A binary STL whose header claims more triangles than the file can hold, or any model above 10 million triangles, is refused with a message rather than hanging the viewer on a multi-gigabyte allocation.
+  - A binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB is refused with a message rather than hanging the viewer on a multi-gigabyte allocation. The size is checked in the extension host before the file is read.
   - New settings: `markcopy.stl.showGrid` (`true`) and `markcopy.stl.meshColor` (`#8ab4f8`).
   - Three.js is bundled as its own `media/stl.js` entry point (~547 KB minified), so it is only loaded when an `.stl` file is opened and costs the Markdown, CSV, and PDF previews nothing.
 
