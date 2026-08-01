@@ -14,6 +14,7 @@ sample.md
 sample.pdf
 sample.pdf.mccomments.json
 sample.xlsx
+sample.stl
 *.vsix
 .github/**
 docs/**

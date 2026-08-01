@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel & PDF Preview",
-  "description": "One-stop Markdown, CSV, Excel, and PDF preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF & STL Preview",
+  "description": "One-stop Markdown, CSV, Excel, PDF, and STL preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
   "version": "0.6.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -33,6 +33,11 @@
     "csv",
     "csv viewer",
     "tsv",
+    "stl",
+    "stl viewer",
+    "3d",
+    "mesh",
+    "three.js",
     "preview",
     "copy",
     "rich text",
@@ -121,6 +126,19 @@
           },
           {
             "filenamePattern": "*.xlsm"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "markcopy.stlPreview",
+        "displayName": "MarkCopy STL Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.stl"
+          },
+          {
+            "filenamePattern": "*.STL"
           }
         ],
         "priority": "default"
@@ -250,6 +268,16 @@
           "minimum": 1,
           "description": "Maximum number of columns to render from a spreadsheet sheet."
         },
+        "markcopy.stl.showGrid": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a grid under the model in the STL preview."
+        },
+        "markcopy.stl.meshColor": {
+          "type": "string",
+          "default": "#8ab4f8",
+          "description": "Color of the mesh material in the STL preview."
+        },
         "markcopy.pdf.pageSize": {
           "type": "string",
           "enum": [
@@ -306,6 +334,7 @@
     "numfmt": "^3.2.6",
     "pdfjs-dist": "^6.2.108",
     "saxes": "^6.0.0",
+    "three": "^0.185.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
@@ -315,6 +344,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",
+    "@types/three": "^0.185.1",
     "@types/turndown": "^5.0.6",
     "@types/vscode": "^1.90.0",
     "@vscode/test-cli": "^0.0.10",

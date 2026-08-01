@@ -4,12 +4,12 @@ How MarkCopy gets verified, from the automated suites to the manual checklist th
 
 ## The four layers
 
-| Layer                  | Runs                             | Covers                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Unit tests (vitest)    | `npm test`, CI on every push     | Pure logic: markdown-it rendering and source-line mapping, CSV/TSV serialization (RFC 4180), HTML-to-Markdown conversion, preview helpers, scroll-sync interpolation, PDF export command line and print CSS, the OOXML reader (number formats, date serials, merges, hidden rows, malformed and hostile workbooks), and the spreadsheet preview's contract with the shared webview bundle. |
-| Webview E2E (vitest)   | `npm test`, CI on every push     | The preview bundle itself, booted in jsdom and driven through its own context menu: which rows the menu offers, what each copy action puts on the clipboard, the sheet grid and its tab strip, and scroll sync in both directions. See [the webview E2E layer](#the-webview-e2e-layer).                                                                                                    |
-| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, and which editor claims a `.xlsx`/`.xlsm`/`.pdf`, inside a real downloaded VS Code.                                                                                                                                                                                                                   |
-| Manual (this document) | Before every release, by a human | What none of the above can see: rendering fidelity, theme legibility, the PDF viewer's canvas, and how the clipboard flavors actually paste into Word or Gmail.                                                                                                                                                                                                                            |
+| Layer                  | Runs                             | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit tests (vitest)    | `npm test`, CI on every push     | Pure logic: markdown-it rendering and source-line mapping, CSV/TSV serialization (RFC 4180), HTML-to-Markdown conversion, preview helpers, scroll-sync interpolation, PDF export command line and print CSS, the OOXML reader (number formats, date serials, merges, hidden rows, malformed and hostile workbooks), STL sniffing and its pre-allocation guards, and the spreadsheet preview's contract with the shared webview bundle. |
+| Webview E2E (vitest)   | `npm test`, CI on every push     | The preview bundle itself, booted in jsdom and driven through its own context menu: which rows the menu offers, what each copy action puts on the clipboard, the sheet grid and its tab strip, and scroll sync in both directions. See [the webview E2E layer](#the-webview-e2e-layer).                                                                                                                                                |
+| Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, and which editor claims a `.xlsx`/`.xlsm`/`.pdf`/`.stl`, inside a real downloaded VS Code.                                                                                                                                                                                                                                                        |
+| Manual (this document) | Before every release, by a human | What none of the above can see: rendering fidelity, theme legibility, the PDF viewer's canvas, the STL viewer's WebGL output and orbit feel, and how the clipboard flavors actually paste into Word or Gmail.                                                                                                                                                                                                                          |
 
 The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. Everything else about the webviews is now driven automatically.
 
@@ -31,6 +31,7 @@ Its blind spots are jsdom's: no layout (scroll sync runs against a synthetic one
    - [sample.md](../sample.md) (repo root) exercises the Markdown surface: tables, code, Mermaid, math, images.
    - [sample.csv](../sample.csv) (repo root) exercises the CSV grid: quoted commas, escaped quotes, a newline inside a cell, currency/percent/negative numbers, a ragged row, and non-ASCII text.
    - `sample.pdf` (repo root, gitignored): generate it once with `node scripts/make-sample-pdf.js`. Twelve pages, each labeled with its page number, so the page indicator and go-to-page are easy to eyeball.
+   - [sample.stl](../sample.stl) (repo root) exercises the STL viewer: a 12-triangle binary unit cube, small enough that a wrong scale, a mis-fitted camera, or a grid drawn in the wrong plane is obvious at a glance.
 3. To inspect a webview while testing, run **Developer: Open Webview Developer Tools** from the Command Palette.
 
 Work through the checklists below. A **patch** release needs the sections touched by the change plus the smoke rows marked ★. A **minor or major** release needs the full pass.
@@ -201,6 +202,45 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Right-click -> **Preferences**, the **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
 - [ ] Changing the theme from a Markdown preview (or settings.json) re-tints an already-open PDF.
 - [ ] Scrollbars are always visible and styled.
+
+## STL viewer
+
+Open [sample.stl](../sample.stl). It is a unit cube, so every check below has an obviously right answer.
+
+### Loading and framing
+
+- [ ] ★ The file opens in MarkCopy's 3D viewer, not as binary, and the cube is visible and centered without touching anything.
+- [ ] ★ The stats overlay (bottom-left) reads `12 triangles` and `1.00 x 1.00 x 1.00`.
+- [ ] The cube sits **on** the grid, not through it or floating above it. (The model is rested on the y = 0 plane; a regression here shows as the grid slicing the model in half.)
+- [ ] An ASCII STL loads as well as a binary one. Both variants live in the [MeshView repo](https://github.com/owenpkent/meshview/tree/main/samples) if you need one.
+
+### Controls
+
+- [ ] ★ Left-drag orbits, right-drag pans, the scroll wheel zooms. All three work with the mouse alone, no modifier keys.
+- [ ] Orbiting has a little inertia and settles rather than stopping dead (damping is on).
+- [ ] Zoom in close, then click **Fit view**: the camera returns to framing the whole model.
+- [ ] Resizing the panel (drag the editor split) keeps the model undistorted; the aspect ratio follows.
+
+### Toolbar
+
+- [ ] The wireframe button toggles the mesh to edges-only and highlights while active.
+- [ ] The grid button hides and shows the grid and highlights while active.
+- [ ] Both buttons are reachable by Tab and activate with Enter.
+
+### Theming and settings
+
+- [ ] ★ With `markcopy.theme` on Auto, switching the VS Code color theme between a light and a dark one changes the viewport background to match.
+- [ ] Forcing `markcopy.theme` to `light`, `dark`, or `green` tints the viewport to white, `#0d1117`, and black respectively, and changing it from an open Markdown or PDF preview re-tints an already-open STL viewer without reopening it.
+- [ ] Setting `markcopy.stl.meshColor` to something obvious (`#ff0000`) and reopening the file recolors the mesh; `markcopy.stl.showGrid: false` opens with the grid already off.
+
+### Bad input
+
+The guards here are what stop a crafted file hanging the window, so these are worth doing by hand at least once per minor release.
+
+- [ ] Truncate a binary STL (copy `sample.stl` and delete the last 200 bytes): the panel shows a "more than the file can hold" message instead of loading or hanging.
+- [ ] An 84-byte file of `0xFF` is refused the same way, promptly, with no memory spike. Build one with `node -e "require('fs').writeFileSync('bad.stl', Buffer.alloc(84, 0xff))"`.
+- [ ] An empty `.stl` reports that it received no data, rather than blaming the file's format.
+- [ ] Right-click the tab -> **Reopen Editor With...** -> a text or hex editor still opens the raw bytes.
 
 ## Paste-target pass
 

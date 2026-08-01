@@ -1,7 +1,8 @@
-// Bundles the browser-side webview code. Three outputs:
+// Bundles the browser-side webview code. Four outputs:
 //   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
+//   media/stl.js         STL preview (esm, bundles Three.js)
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
@@ -62,6 +63,14 @@ async function main() {
         { in: 'src/webview/pdf.ts', out: 'pdf' },
         { in: 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs', out: 'pdf.worker' },
       ],
+      format: 'esm',
+      outdir: 'media',
+    }),
+    // STL preview: its own entry point rather than a chunk of the Markdown
+    // bundle, so Three.js is only fetched when an .stl file is opened.
+    run({
+      ...shared,
+      entryPoints: [{ in: 'src/webview/stl.ts', out: 'stl' }],
       format: 'esm',
       outdir: 'media',
     }),

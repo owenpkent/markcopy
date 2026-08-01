@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel & PDF Preview
+# MarkCopy: Rich Markdown, CSV, Excel, PDF & STL Preview
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid and PDFs with a selectable text layer, so one extension previews all three.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid, PDFs with a selectable text layer, and STL models in a 3D viewer, so one extension previews them all.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -42,6 +42,7 @@ Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that
 | Excel (.xlsx) preview                    |    No    |            No             | **Yes**  |
 | Copy a spreadsheet range as Markdown     |    No    |            No             | **Yes**  |
 | PDF preview built in                     |    No    |            No             | **Yes**  |
+| STL 3D model preview                     |    No    |            No             | **Yes**  |
 
 ## Why it exists
 
@@ -74,7 +75,8 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, and PDF.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page) and zooms from 50 to 400 percent while keeping pages crisp, a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, PDF, and STL.
+- **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
 - **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
@@ -88,7 +90,7 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 ## Getting started
 
 1. Install the extension (see [Install](#install)).
-2. Open any `.md`, `.csv`, or `.tsv` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf` files open straight in the PDF viewer.)
+2. Open any `.md`, `.csv`, or `.tsv` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf` and `.stl` files open straight in their own viewers.)
 3. **Right-click inside the preview.** The menu options change based on whether you clicked a code block, table, diagram, plain block, or a text selection.
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a PDF file.
@@ -108,21 +110,23 @@ Local images in the document render automatically, and the right-click menu's **
 
 `markcopy.syncScroll`, `markcopy.autoPreview`, `markcopy.math`, and `markcopy.theme` can also be changed live from the preview's right-click **Preferences** submenu or the gear icon in its title bar, not just here.
 
-| Setting                    | Type                                   | Default  | Description                                                                                                                                                                                   |
-| -------------------------- | -------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `markcopy.styleProfile`    | `github`                               | `github` | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                                                     |
-| `markcopy.syncScroll`      | boolean                                | `true`   | Keep the preview scroll position in sync with the editor.                                                                                                                                     |
-| `markcopy.autoPreview`     | boolean                                | `true`   | Automatically open the preview beside the editor when you focus a Markdown, CSV, or TSV file, and keep it targeted on whichever file has focus. Turn off to open previews manually.           |
-| `markcopy.theme`           | `auto` \| `light` \| `dark` \| `green` | `auto`   | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.                                 |
-| `markcopy.mermaid`         | object                                 | `{}`     | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default.                        |
-| `markcopy.math`            | boolean                                | `true`   | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                                          |
-| `markcopy.csv.delimiter`   | `auto` \| `,` \| `\t` \| `;` \| `\|`   | `auto`   | Field separator for the CSV/TSV grid. `auto` picks whichever separator splits the file into the most consistent columns, except that a `.tsv` or `.tab` file is always read as tab-separated. |
-| `markcopy.csv.headerRow`   | boolean                                | `true`   | Treat the first row of a CSV/TSV file as column headers. Turn off for files that start straight into data.                                                                                    |
-| `markcopy.csv.maxRows`     | number                                 | `5000`   | Maximum rows to render. The grid says how many rows it is hiding; raise it to show more, at the cost of a slower preview on very large files.                                                 |
-| `markcopy.xlsx.maxRows`    | number                                 | `5000`   | Maximum rows to render from a spreadsheet sheet. The grid says how many rows it is hiding.                                                                                                    |
-| `markcopy.xlsx.maxColumns` | number                                 | `200`    | Maximum columns to render from a spreadsheet sheet.                                                                                                                                           |
-| `markcopy.pdf.pageSize`    | `Letter` \| `A4` \| `Legal`            | `Letter` | Paper size for **Save as PDF**.                                                                                                                                                               |
-| `markcopy.pdf.browserPath` | string                                 | `""`     | Path to the Chrome, Edge, or Chromium executable used to render the PDF. Empty detects one automatically.                                                                                     |
+| Setting                    | Type                                   | Default   | Description                                                                                                                                                                                   |
+| -------------------------- | -------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `markcopy.styleProfile`    | `github`                               | `github`  | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                                                     |
+| `markcopy.syncScroll`      | boolean                                | `true`    | Keep the preview scroll position in sync with the editor.                                                                                                                                     |
+| `markcopy.autoPreview`     | boolean                                | `true`    | Automatically open the preview beside the editor when you focus a Markdown, CSV, or TSV file, and keep it targeted on whichever file has focus. Turn off to open previews manually.           |
+| `markcopy.theme`           | `auto` \| `light` \| `dark` \| `green` | `auto`    | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.                                 |
+| `markcopy.mermaid`         | object                                 | `{}`      | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default.                        |
+| `markcopy.math`            | boolean                                | `true`    | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                                          |
+| `markcopy.csv.delimiter`   | `auto` \| `,` \| `\t` \| `;` \| `\|`   | `auto`    | Field separator for the CSV/TSV grid. `auto` picks whichever separator splits the file into the most consistent columns, except that a `.tsv` or `.tab` file is always read as tab-separated. |
+| `markcopy.csv.headerRow`   | boolean                                | `true`    | Treat the first row of a CSV/TSV file as column headers. Turn off for files that start straight into data.                                                                                    |
+| `markcopy.csv.maxRows`     | number                                 | `5000`    | Maximum rows to render. The grid says how many rows it is hiding; raise it to show more, at the cost of a slower preview on very large files.                                                 |
+| `markcopy.xlsx.maxRows`    | number                                 | `5000`    | Maximum rows to render from a spreadsheet sheet. The grid says how many rows it is hiding.                                                                                                    |
+| `markcopy.xlsx.maxColumns` | number                                 | `200`     | Maximum columns to render from a spreadsheet sheet.                                                                                                                                           |
+| `markcopy.pdf.pageSize`    | `Letter` \| `A4` \| `Legal`            | `Letter`  | Paper size for **Save as PDF**.                                                                                                                                                               |
+| `markcopy.pdf.browserPath` | string                                 | `""`      | Path to the Chrome, Edge, or Chromium executable used to render the PDF. Empty detects one automatically.                                                                                     |
+| `markcopy.stl.showGrid`    | boolean                                | `true`    | Show a grid under the model in the STL preview.                                                                                                                                               |
+| `markcopy.stl.meshColor`   | string                                 | `#8ab4f8` | Color of the mesh material in the STL preview.                                                                                                                                                |
 
 ## Install
 
@@ -175,6 +179,16 @@ A floating toolbar in the bottom-right corner shows the current page (for exampl
 
 The file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network. To open a PDF as raw bytes instead, use **Reopen Editor With...** from the editor title menu.
 
+## STL preview
+
+MarkCopy registers as the editor for `.stl` files, so opening one renders the model inline in a Three.js viewer. Controls are mouse-only, no keyboard required: **left-drag** to orbit, **right-drag** to pan, **scroll wheel** to zoom. The camera fits itself to the model on load, and the toolbar in the top-left offers **Fit view**, a **wireframe** toggle, and a **grid** toggle. An overlay in the bottom-left reports the triangle count and the bounding box as X x Y x Z.
+
+Both binary and ASCII STL are handled. The model is centered in X and Z and rested on the y = 0 plane, so the grid always sits directly under it. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.showGrid` and `markcopy.stl.meshColor` set the grid and mesh color.
+
+Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. The size is checked before the file is read, not after. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
+
+There are no copy actions in this viewer, by design: an STL is a triangle soup with no text, tables, or images to put on a clipboard.
+
 ## Documentation
 
 - [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
@@ -193,7 +207,8 @@ npm run watch       # rebuild on change
 npm test            # vitest: unit tests plus the webview E2E suite
 npm run test:integration   # runs the extension inside a real VS Code
 # press F5 in VS Code to launch the Extension Development Host; it opens this
-# repo, so sample.md, sample.csv, sample.xlsx, and sample.pdf are ready to preview
+# repo, so sample.md, sample.csv, sample.pdf, sample.xlsx, and sample.stl are
+# ready to preview
 ```
 
 Full details in [CONTRIBUTING.md](.github/CONTRIBUTING.md).

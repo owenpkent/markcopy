@@ -38,7 +38,12 @@ suite('MarkCopy integration', () => {
     // still pass while the setting did nothing.
     assert.strictEqual(cfg.get('pdf.pageSize'), 'Letter');
     assert.strictEqual(cfg.get('pdf.browserPath'), '');
+    assert.strictEqual(cfg.get('stl.showGrid'), true);
+    assert.strictEqual(cfg.get('stl.meshColor'), '#8ab4f8');
   });
+
+  // Which editor claims a .stl lives in customEditors.test.ts, with the rest of
+  // the filename-selector assertions.
 
   // The extension contributes the `csv` and `tsv` language ids itself. If that
   // contribution ever regressed, `onLanguage:csv` would never fire and the CSV
