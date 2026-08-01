@@ -31,7 +31,7 @@ body:
   - type: dropdown
     id: action
     attributes:
-      label: Which copy action
+      label: Which action or surface
       options:
         - Copy as Rich Text (document or block)
         - Copy Selection as Rich Text
@@ -40,6 +40,9 @@ body:
         - Copy Diagram (PNG / SVG)
         - Copy as Markdown
         - Preview rendering or scroll sync
+        - Spreadsheet preview (.xlsx / .xlsm)
+        - PDF viewer
+        - STL 3D viewer
         - Other / not sure
     validations:
       required: true

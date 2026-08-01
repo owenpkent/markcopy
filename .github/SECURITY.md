@@ -2,7 +2,7 @@
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, or PDF you open) into a webview. It can render Mermaid diagrams from fenced code and parses PDFs with pdf.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 ## Content Security Policy
 
@@ -23,6 +23,8 @@ script-src 'nonce-${nonce}';
 - All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`, and `localResourceRoots` is limited to the extension's `media` folder.
 
 The PDF preview uses the same policy plus `worker-src ${cspSource} blob:` (for the pdf.js worker) and `connect-src ${cspSource} blob: data:`. It does not add `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
+
+The STL preview is the most restrictive of the three: `default-src 'none'`, a nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src` and no `connect-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch.
 
 ## Mermaid
 
@@ -68,10 +70,25 @@ An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before 
 - **The preview is read-only.** MarkCopy never writes to a workbook, so it cannot corrupt one. There is no equivalent of the CSV grid's cell writeback.
 - **Formulas are never evaluated.** A cell showing a formula's result is showing the value the file already had cached; MarkCopy does not compute anything.
 
+## STL preview
+
+A binary STL is an 80-byte header, a uint32 triangle count, then 50 bytes per triangle. The count is the file telling the parser how much memory to allocate, and Three.js's `STLLoader` believes it: it sizes its `Float32Array`s from that number without checking the file is large enough to hold that many triangles. An 84-byte file declaring `0xFFFFFFFF` triangles therefore asks for tens of gigabytes, which is a denial of service against the whole window from a file small enough to arrive in an email.
+
+`checkStl()` in `src/webview/stlInfo.ts` runs before any allocation and refuses two shapes:
+
+- **A count the file cannot back.** If `84 + triangles * 50` exceeds the actual byte length, the file is corrupt or crafted and is rejected with a message in the panel. This is the amplification case above.
+- **A count above `MAX_TRIANGLES` (10 million).** A self-consistent 500 MB model is not an attack, but it is not something to hand a WebGL context either.
+
+ASCII STL needs no cap: it is parsed facet by facet, bounded by the real file length, so it cannot claim to be larger than it is.
+
+The message payload is treated as untrusted too, separately from the file. The host sends base64 rather than a `Uint8Array` because `webview.postMessage` JSON-encodes, and JSON turns a typed array into a numeric-keyed object roughly 13x the size. `toBytes()` decodes it, and its fallback branches never size an allocation from an unvalidated `length`: a bare `{length: n}` is refused rather than expanded into `n` zero bytes, and a numeric key past the payload cap returns empty rather than throwing `RangeError` or reserving gigabytes.
+
+Both guards are pure functions with no DOM or Three.js dependency, unit-tested in `tests/stlInfo.test.ts`, which is why they can be asserted at all. As with the PDF viewer, the editor is read-only, the bytes come from `workspace.fs.readFile`, and nothing is fetched over the network.
+
 ## Clipboard
 
-Copy actions only ever write to the clipboard, and only in response to a user action (a menu click or command). MarkCopy never reads the clipboard.
+Copy actions only ever write to the clipboard, and only in response to a user action (a menu click or command). MarkCopy never reads the clipboard. The STL viewer has no copy actions at all: a triangle soup has nothing meaningful to put on a clipboard.
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing `.md` or `.pdf`, and the observed behavior. You will get an acknowledgement and a fix timeline.
+Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.xlsx`, `.pdf`, or `.stl`), and the observed behavior. You will get an acknowledgement and a fix timeline.

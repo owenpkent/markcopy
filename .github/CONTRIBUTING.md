@@ -24,7 +24,7 @@ npm run watch       # rebuild the extension host and webviews on change
 
 1. `check-types` (`tsc --noEmit`) type-checks the whole tree without emitting.
 2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js`.
-3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview.
+3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview and `media/stl.js` (Three.js bundled in) for the STL preview.
 
 See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for why there are separate bundles.
 
@@ -80,19 +80,19 @@ What stays out of reach here is whatever needs a real browser: canvas (so `Copy 
 npm run test:integration   # downloads VS Code and runs the extension inside it
 ```
 
-Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, that the preview panel opens (for both Markdown and CSV), and which editor claims a file: a `.xlsx`, `.xlsm`, or `.pdf` has to land in its custom editor rather than in the text editor, and a file that is not really a workbook has to open far enough to say so. That last group is worth having here specifically because it is contributed entirely through `package.json` — a selector that stops matching leaves a workbook opening as binary junk while every test outside VS Code still passes.
+Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, that the preview panel opens (for both Markdown and CSV), and which editor claims a file: a `.xlsx`, `.xlsm`, `.pdf`, or `.stl` has to land in its custom editor rather than in the text editor, and a file that is not really a workbook has to open far enough to say so. That last group is worth having here specifically because it is contributed entirely through `package.json` — a selector that stops matching leaves a workbook opening as binary junk while every test outside VS Code still passes.
 
 On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored).
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, and `sample.xlsx` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, and `sample.stl` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).
 2. Press **F5** in VS Code. This launches the Extension Development Host with MarkCopy loaded (the `.vscode/launch.json` config runs `npm: compile` first, and opens this repo as the dev host's workspace so the fixtures are to hand).
-3. In the new window, open `sample.md` or `sample.csv`; the preview opens beside it automatically, or run **MarkCopy: Open Rich Preview to the Side**.
+3. In the new window, open `sample.md` or `sample.csv`; the preview opens beside it automatically, or run **MarkCopy: Open Rich Preview to the Side**. `sample.xlsx`, `sample.pdf`, and `sample.stl` open straight into their own custom editors.
 4. Right-click around the preview to exercise the copy paths.
 
 Changes to `package.json` contributions (languages, activation events, menus, settings) are only read when the dev host **process** starts, so close the window and press F5 again rather than reloading it.
@@ -118,6 +118,9 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/previewShell.ts`            | Host: the HTML shell served to every webview that hosts the shared preview bundle.              |
 | `src/xlsxEditor.ts`              | Host: read-only custom editor for `.xlsx` / `.xlsm` files.                                      |
 | `src/xlsx/`                      | Host: the OOXML reader (zip, XML, workbook, styles, sheet, grid HTML). Pure, unit-tested.       |
+| `src/stlEditor.ts`               | Host: read-only custom editor for `.stl` files.                                                 |
+| `src/webview/stl.ts`             | STL webview: the Three.js scene, orbit controls, and the toolbar.                               |
+| `src/webview/stlInfo.ts`         | STL sniffing and the pre-allocation guards (pure, unit-tested).                                 |
 | `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                              |
 | `tests/`                         | Vitest unit tests.                                                                              |
 | `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                        |
