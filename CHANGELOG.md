@@ -10,6 +10,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - What still autolinks: any URL written with a scheme (`https://example.com`) and any email address.
   - What no longer does: schemeless text such as `github.com` or `www.example.com`. To link one, give it a scheme: `<http://www.example.com>` or `[www.example.com](http://www.example.com)`. Note that a bare `<www.example.com>` is not a Markdown autolink and never was; it renders as literal text.
 
+- **The Markdown engine is now markdown-it 15**, up from 14.3, alongside KaTeX 0.18.4 and DOMPurify 3.4.13. Beyond the autolinking change above and the alt-text fix below, the upgrade is internal: rendering this repo's own Markdown under both versions turned up no other visible difference. markdown-it 15 also bundles its own TypeScript types, so the separate `@types/markdown-it` dependency is gone.
+
+### Fixed
+
+- **Inline code inside image alt text is no longer dropped.** ``![the `render.ts` file](x.png)`` produced `alt="the "`, losing everything from the backtick on; it now produces `alt="the render.ts file"`. Fixed upstream in markdown-it 15.
+- **A couple of LaTeX edge cases**, via KaTeX 0.18.4: delimiter-sizing commands accept braced arguments (`\big{(}`), and an unrecognized environment now reports a clear `No such environment` parse error.
+
 ### Planned
 
 - PlantUML support.
