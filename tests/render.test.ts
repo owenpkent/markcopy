@@ -29,13 +29,6 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('<th>A</th>');
   });
 
-  it('autolinks schemeless URLs and emails', () => {
-    const html = md.render('See www.example.com, example.com, and mail@example.com.\n');
-    expect(html).toContain('<a href="http://www.example.com">www.example.com</a>');
-    expect(html).toContain('<a href="http://example.com">example.com</a>');
-    expect(html).toContain('<a href="mailto:mail@example.com">mail@example.com</a>');
-  });
-
   it('turns inline $...$ into a non-display math placeholder', () => {
     const html = md.render('Euler: $e^{i\\pi}+1=0$ done.\n');
     expect(html).toContain('<span class="mc-math" data-display="0">');
@@ -74,6 +67,37 @@ describe('createMarkdownIt', () => {
   it('leaves image src unchanged when no resolver is supplied', () => {
     const html = md.render('![alt](media/x.png)');
     expect(html).toContain('src="media/x.png"');
+  });
+
+  it('autolinks URLs that carry a scheme, and emails', () => {
+    expect(md.render('See https://example.com/a for more.\n')).toContain(
+      '<a href="https://example.com/a">',
+    );
+    expect(md.render('Mail bob@example.com today.\n')).toContain(
+      '<a href="mailto:bob@example.com">',
+    );
+  });
+
+  it('leaves schemeless text alone so filenames do not become dead links', () => {
+    // linkify-it 6 (markdown-it 15) dropped fuzzy links. `.md`, `.io` and `.ts`
+    // are real TLDs, so fuzzy matching used to render a bare filename mention as
+    // `http://RELEASING.md` -- a link openExternal would fire at a dead domain.
+    for (const src of ['RELEASING.md', 'see README.md first', 'src/render.ts']) {
+      expect(md.render(`${src}\n`)).not.toContain('<a href=');
+    }
+    // Bare hostnames are plain text too; this is the cost of the rule above.
+    expect(md.render('Visit github.com today.\n')).not.toContain('<a href=');
+    expect(md.render('Visit www.example.com today.\n')).not.toContain('<a href=');
+  });
+
+  it('links a schemeless host once the author supplies a scheme', () => {
+    // The escape hatch for authors who want the link back. A bare `<www.foo.com>`
+    // is NOT one: CommonMark autolinks require a scheme, so it stays literal text.
+    expect(md.render('<http://www.example.com>\n')).toContain('<a href="http://www.example.com">');
+    expect(md.render('[www.example.com](http://www.example.com)\n')).toContain(
+      '<a href="http://www.example.com">',
+    );
+    expect(md.render('<www.example.com>\n')).toContain('&lt;www.example.com&gt;');
   });
 });
 
