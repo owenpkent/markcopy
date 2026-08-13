@@ -324,11 +324,11 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "fflate": "^0.8.3",
     "highlight.js": "^11.10.0",
-    "katex": "^0.18.1",
-    "markdown-it": "^14.1.0",
+    "katex": "^0.18.4",
+    "markdown-it": "^15.0.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-texmath": "^1.0.0",
     "numfmt": "^3.2.6",
