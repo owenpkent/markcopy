@@ -324,11 +324,11 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "fflate": "^0.8.3",
     "highlight.js": "^11.10.0",
-    "katex": "^0.18.1",
-    "markdown-it": "^14.1.0",
+    "katex": "^0.18.4",
+    "markdown-it": "^15.0.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-texmath": "^1.0.0",
     "numfmt": "^3.2.6",
@@ -341,7 +341,6 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/katex": "^0.16.8",
-    "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",
     "@types/three": "^0.185.1",
