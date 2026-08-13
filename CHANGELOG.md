@@ -4,6 +4,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Bare text that merely looks like a domain is no longer turned into a link.** Upgrading the Markdown engine to markdown-it 15 (and with it linkify-it 6) drops "fuzzy" autolinking, and MarkCopy keeps that new default rather than restoring the old behavior. Previously any word ending in something that happens to be a real top-level domain was linkified, so a plain mention of `RELEASING.md`, `README.md`, or `src/render.ts` became a link to `http://RELEASING.md`, which, when clicked, handed a nonexistent domain to your browser. Since a preview of developer documentation mentions filenames constantly, this misfired far more often than it helped, and the bad link was carried along by **Copy as → Rich Text** into whatever you pasted it into.
+  - What still autolinks: any URL written with a scheme (`https://example.com`) and any email address.
+  - What no longer does: schemeless text such as `github.com` or `www.example.com`. To link one, give it a scheme: `<http://www.example.com>` or `[www.example.com](http://www.example.com)`. Note that a bare `<www.example.com>` is not a Markdown autolink and never was; it renders as literal text.
+
 ### Planned
 
 - PlantUML support.

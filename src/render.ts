@@ -1,3 +1,5 @@
+// markdown-it 15 ships its own types and its default export is a callable value,
+// not a class, so the instance type has to be imported separately by name.
 import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from 'markdown-it';
 import anchor from 'markdown-it-anchor';
 import texmath from 'markdown-it-texmath';
@@ -15,6 +17,12 @@ export interface MarkdownItOptions {
 export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownItInstance {
   const md = new MarkdownIt({
     html: true,
+    // Autolinks URLs that carry a scheme, plus emails. Since markdown-it 15 this
+    // no longer covers schemeless text like `github.com`, because linkify-it 6
+    // dropped fuzzy links -- kept deliberately, since `.md`/`.io`/`.ts` are real
+    // TLDs and fuzzy matching turned bare filename mentions into dead
+    // `http://RELEASING.md` links that openExternal then fired at the OS.
+    // tests/render.test.ts pins the behavior and the author-side escape hatch.
     linkify: true,
     typographer: true,
     breaks: false,
@@ -35,11 +43,10 @@ export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownItInstan
     },
   });
 
-  // linkify-it 6 (markdown-it 15) stopped autolinking schemeless URLs by default.
-  // Keep `www.example.com` and bare domains clickable, as they were before and as
-  // they are on GitHub.
-  md.linkify.set({ fuzzyLink: true });
-
+  // No `permalink` key: anchor types it as a generator function and treats its
+  // absence as "no permalink", which is what we want. Passing `permalink: false`
+  // rendered the same but only type-checked because markdown-it 14 declared
+  // `use(plugin, ...params: any[])` and never validated plugin options.
   md.use(anchor, { tabIndex: false });
 
   if (opts.math !== false) {
@@ -89,6 +96,8 @@ function rewriteImageSrc(md: MarkdownItInstance): void {
       const token = tokens[idx];
       const i = token.attrIndex('src');
       if (i >= 0 && token.attrs) {
+        // markdown-it 15 types an attribute value as `string | number`. A parsed
+        // image src is always a string, so this only keeps the resolver's contract.
         token.attrs[i][1] = resolve(String(token.attrs[i][1]));
       }
     }
