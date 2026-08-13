@@ -1,4 +1,4 @@
-import MarkdownIt from 'markdown-it';
+import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from 'markdown-it';
 import anchor from 'markdown-it-anchor';
 import texmath from 'markdown-it-texmath';
 import hljs from 'highlight.js';
@@ -12,7 +12,7 @@ export interface MarkdownItOptions {
 // A single shared markdown-it instance configured for GitHub-flavored output.
 // Rendering happens in the extension host; the resulting HTML is shipped to the
 // webview, which handles interaction (context menu, clipboard, mermaid, math, PNG).
-export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownIt {
+export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownItInstance {
   const md = new MarkdownIt({
     html: true,
     linkify: true,
@@ -35,7 +35,12 @@ export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownIt {
     },
   });
 
-  md.use(anchor, { permalink: false, tabIndex: false });
+  // linkify-it 6 (markdown-it 15) stopped autolinking schemeless URLs by default.
+  // Keep `www.example.com` and bare domains clickable, as they were before and as
+  // they are on GitHub.
+  md.linkify.set({ fuzzyLink: true });
+
+  md.use(anchor, { tabIndex: false });
 
   if (opts.math !== false) {
     addMath(md);
@@ -53,7 +58,7 @@ export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownIt {
 // DOMPurify runs, matching how the `mermaid-src` placeholder is handled.
 const NO_RENDER_ENGINE = { renderToString: (): string => '' };
 
-function addMath(md: MarkdownIt): void {
+function addMath(md: MarkdownItInstance): void {
   md.use(texmath, { engine: NO_RENDER_ENGINE, delimiters: 'dollars' });
 
   // Inline: `$...$` (and single-line `$$...$$`, which texmath tags as display).
@@ -76,7 +81,7 @@ function addMath(md: MarkdownIt): void {
 // Route every image `src` through an optional `env.resolveImage` hook so the
 // extension host can rewrite relative/local paths to webview-safe URIs. When no
 // hook is provided (e.g. plain unit tests) the src is emitted unchanged.
-function rewriteImageSrc(md: MarkdownIt): void {
+function rewriteImageSrc(md: MarkdownItInstance): void {
   const original = md.renderer.rules.image;
   md.renderer.rules.image = (tokens, idx, options, env, self) => {
     const resolve = env?.resolveImage as ((src: string) => string) | undefined;
@@ -84,7 +89,7 @@ function rewriteImageSrc(md: MarkdownIt): void {
       const token = tokens[idx];
       const i = token.attrIndex('src');
       if (i >= 0 && token.attrs) {
-        token.attrs[i][1] = resolve(token.attrs[i][1]);
+        token.attrs[i][1] = resolve(String(token.attrs[i][1]));
       }
     }
     return original
@@ -95,7 +100,7 @@ function rewriteImageSrc(md: MarkdownIt): void {
 
 // Tag top-level block tokens with data-source-line so the webview can sync scroll
 // to the editor and copy the underlying Markdown for a given element.
-function addSourceLineMapping(md: MarkdownIt): void {
+function addSourceLineMapping(md: MarkdownItInstance): void {
   const rules = [
     'paragraph_open',
     'heading_open',

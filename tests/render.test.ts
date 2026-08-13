@@ -29,6 +29,13 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('<th>A</th>');
   });
 
+  it('autolinks schemeless URLs and emails', () => {
+    const html = md.render('See www.example.com, example.com, and mail@example.com.\n');
+    expect(html).toContain('<a href="http://www.example.com">www.example.com</a>');
+    expect(html).toContain('<a href="http://example.com">example.com</a>');
+    expect(html).toContain('<a href="mailto:mail@example.com">mail@example.com</a>');
+  });
+
   it('turns inline $...$ into a non-display math placeholder', () => {
     const html = md.render('Euler: $e^{i\\pi}+1=0$ done.\n');
     expect(html).toContain('<span class="mc-math" data-display="0">');

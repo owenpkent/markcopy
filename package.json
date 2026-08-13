@@ -341,7 +341,6 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/katex": "^0.16.8",
-    "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",
     "@types/three": "^0.185.1",
