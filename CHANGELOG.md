@@ -9,6 +9,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.8.1] - 2026-08-19
+
 ### Fixed
 
 - **A CSV cell you are editing now behaves like the text box it is.** Once the editor was open, every click inside it landed on the cell underneath and ended the edit, so the caret could not be moved, no part of a value could be selected by dragging, and right-clicking closed the editor before its menu appeared. Clicks inside an open editor now belong to the editor.
@@ -211,7 +213,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/owenpkent/markcopy/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/owenpkent/markcopy/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/owenpkent/markcopy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/owenpkent/markcopy/compare/v0.5.0...v0.6.0
