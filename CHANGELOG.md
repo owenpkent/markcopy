@@ -4,9 +4,16 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.8.0] - 2026-08-18
+
 ### Added
 
-- **A fit-width button in the PDF toolbar**, carrying the same page-with-a-double-headed-arrow icon as [folio](https://github.com/owenpkent/folio). It sizes the page to the width of the editor pane, landing on whatever percentage that takes rather than the nearest preset. It stays on once clicked, so dragging the pane wider or narrower re-fits the pages instead of leaving them the wrong size; any manual zoom (the buttons, `Ctrl`/`Cmd` + `+`/`-`/`0`, `Ctrl`/`Cmd` + scroll, or clicking the percentage) turns it back off. From a fitted percentage the plus and minus buttons step to the neighbouring preset level.
+- **A fit-width button in the PDF toolbar**, carrying the same page-with-a-double-headed-arrow icon as [folio](https://github.com/owenpkent/folio). It sizes the page to the width of the editor pane, landing on whatever percentage that takes rather than the nearest preset. It stays on once clicked, so dragging the pane wider or narrower re-fits the pages instead of leaving them the wrong size; clicking it again turns it off, leaving the pages at the size they have and simply stopping them chasing the pane. Any manual zoom (the buttons, `Ctrl`/`Cmd` + `+`/`-`/`0`, `Ctrl`/`Cmd` + scroll, or clicking the percentage) also turns it off. From a fitted percentage the plus and minus buttons step to the neighbouring preset level. In a PDF whose pages are not all the same size, the fit follows the page you are reading and re-fits as you scroll between a portrait page and a landscape one.
 
 ### Changed
 
@@ -22,11 +29,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **Inline code inside image alt text is no longer dropped.** ``![the `render.ts` file](x.png)`` produced `alt="the "`, losing everything from the backtick on; it now produces `alt="the render.ts file"`. Fixed upstream in markdown-it 15.
 - **A couple of LaTeX edge cases**, via KaTeX 0.18.4: delimiter-sizing commands accept braced arguments (`\big{(}`), and an unrecognized environment now reports a clear `No such environment` parse error.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.7.0] - 2026-08-01
 
@@ -196,7 +198,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/owenpkent/markcopy/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/owenpkent/markcopy/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/owenpkent/markcopy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/owenpkent/markcopy/compare/v0.4.0...v0.5.0
