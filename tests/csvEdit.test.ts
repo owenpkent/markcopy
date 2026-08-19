@@ -2,11 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderCsvHtml } from '../src/csv';
 import { enableCsvEditing } from '../src/webview/csvEdit';
 import { enhanceCsvTables } from '../src/webview/csvTable';
+import { createMenu, type MenuController } from '../src/webview/menu';
 
 // name,qty  /  Widget,3  /  Gadget,12: header on line 0, body on lines 1 and 2.
 const CSV = 'name,qty\nWidget,3\nGadget,12';
 
 let commit: ReturnType<typeof vi.fn>;
+// The real context menu, not a stand-in. Whether an open editor survives a
+// right-click comes down to the two modules agreeing on which one holds the
+// focus; a hand-built panel would only ever agree with the test that built it.
+let menu: MenuController;
+// The grid's container, so a test can re-render it the way the host does
+// without taking the menu's own root down with it.
+let grid: HTMLDivElement;
 
 // jsdom implements no layout, so scrolling a cell into view is missing. The
 // grid calls it whenever focus moves; stub it out (as the resize tests do for
@@ -16,17 +24,28 @@ beforeEach(() => {
 });
 
 beforeEach(() => {
+  document.body.innerHTML = '';
+  grid = document.createElement('div');
+  const menuRoot = document.createElement('div');
+  menuRoot.hidden = true;
+  document.body.append(grid, menuRoot);
+  menu = createMenu(menuRoot);
   // The module remembers the focused cell across renders (that is how focus
   // survives the re-render a commit triggers). Wiring an empty container clears
   // it, so each test starts from a known state.
-  enableCsvEditing(document.createElement('div'), () => {});
+  enableCsvEditing(document.createElement('div'), () => {}, menu);
   commit = vi.fn();
-  document.body.innerHTML = renderCsvHtml(CSV).html;
-  // Wire the grid the way main.ts does. The resize handles live inside the same
-  // cells the editor covers, so editing has to be exercised with them present.
-  enhanceCsvTables(document.body);
-  enableCsvEditing(document.body, commit);
+  renderGrid();
 });
+
+/** Draw the grid and wire it the way main.ts does on every render. */
+function renderGrid(csv = CSV): void {
+  grid.innerHTML = renderCsvHtml(csv).html;
+  // The resize handles live inside the same cells the editor covers, so editing
+  // has to be exercised with them present.
+  enhanceCsvTables(grid);
+  enableCsvEditing(grid, commit, menu);
+}
 
 const rows = (): HTMLTableRowElement[] =>
   Array.from(document.querySelectorAll('tr[data-record-line]'));
@@ -276,6 +295,110 @@ describe('editing a cell', () => {
   });
 });
 
+// Once the editor is open it is an ordinary text field, and the grid has to stop
+// treating clicks inside it as clicks on the cell underneath. Every gesture here
+// used to end the edit before it could do anything, because focusing the cell
+// blurs the textarea and blur commits.
+describe('working with the text inside an open editor', () => {
+  const openEditor = (): HTMLTextAreaElement => {
+    click(cell(0, 0), 'dblclick');
+    return editor()!;
+  };
+
+  /**
+   * Open the real context menu over the grid, the way main.ts does on a
+   * right-click. `show` hands its first row the keyboard, and that is what takes
+   * the focus off the editor.
+   */
+  function openMenu(): void {
+    menu.show(0, 0, [{ kind: 'item', label: 'Copy Cell', run: () => {} }]);
+  }
+
+  it('survives a click inside the value being edited', () => {
+    const input = openEditor();
+    click(input);
+    expect(editor()).toBe(input);
+  });
+
+  it('survives a right-click inside the value being edited', () => {
+    const input = openEditor();
+    input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2 }));
+    expect(editor()).toBe(input);
+  });
+
+  it('selects the whole value on a second double-click', () => {
+    const input = openEditor();
+    click(input, 'dblclick');
+    expect(input.value.slice(input.selectionStart, input.selectionEnd)).toBe('Widget');
+  });
+
+  it('does not reopen a fresh editor over the one already there', () => {
+    const input = openEditor();
+    input.value = 'Edited';
+    click(input, 'dblclick');
+    expect(editor()).toBe(input);
+    expect(editor()!.value).toBe('Edited');
+  });
+
+  it('keeps the edit alive while the context menu holds the focus', () => {
+    const input = openEditor();
+    openMenu();
+    // The selection the menu's copy rows read is still on screen, and nothing
+    // has been written to the document yet.
+    expect(editor()).toBe(input);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  // Dismissing the menu (Escape, or picking a row) has to leave the reader back
+  // in the editor. Without this the textarea is still on screen with nothing
+  // focused: typing goes nowhere, and Escape can no longer discard the edit.
+  it('takes the caret back when the menu closes over it', () => {
+    const input = openEditor();
+    openMenu();
+    expect(document.activeElement).not.toBe(input);
+
+    menu.hide();
+
+    expect(editor()).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(commit).not.toHaveBeenCalled();
+    // And Escape still discards, because the editor is once again what the
+    // keyboard is pointed at.
+    key(input, 'Escape');
+    expect(editor()).toBeNull();
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('ends the edit when the menu closes with the focus somewhere else', () => {
+    const input = openEditor();
+    openMenu();
+    input.value = 'Sprocket';
+    // The reader clicked another cell: that press takes the focus, and the click
+    // behind it is what closes the menu. No further blur is coming from the
+    // editor, so the close is what has to stand in for one.
+    click(cell(1, 1));
+    menu.hide();
+
+    expect(editor()).toBeNull();
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+  });
+
+  // A render replaces the grid wholesale, editor included. The edit that was
+  // open described a cell that no longer exists, and the value in it is a
+  // version behind whatever the document now holds, so it must not be written.
+  it('commits nothing when the grid is re-rendered under an open menu', () => {
+    const input = openEditor();
+    openMenu();
+    input.value = 'Stale';
+
+    renderGrid();
+    expect(input.isConnected).toBe(false);
+    menu.hide();
+
+    expect(commit).not.toHaveBeenCalled();
+  });
+});
+
 // The resize grip is a child of the very cell the editor covers, and it sits in
 // the bubble path of the grid's own key handling. Both are easy to break from
 // the other module, so pin them from here, where the two are wired together.
@@ -322,8 +445,7 @@ describe('focus across re-renders', () => {
     key(editor()!, 'Enter');
 
     // The host applies the edit, the document changes, the preview re-renders.
-    document.body.innerHTML = renderCsvHtml('name,qty\nWidget,3\nGadget,9').html;
-    enableCsvEditing(document.body, commit);
+    renderGrid('name,qty\nWidget,3\nGadget,9');
 
     expect(document.activeElement).toBe(cell(1, 1));
   });
@@ -351,10 +473,10 @@ describe('focus across re-renders', () => {
 // the webview wiring, so that it cannot be lost to a refactor of that wiring.
 describe('read-only grids', () => {
   const readOnlyGrid = (): void => {
-    document.body.innerHTML = renderCsvHtml(CSV).html;
-    document.querySelector('table.mc-csv')!.removeAttribute('data-mc-editable');
-    enhanceCsvTables(document.body);
-    enableCsvEditing(document.body, commit);
+    grid.innerHTML = renderCsvHtml(CSV).html;
+    grid.querySelector('table.mc-csv')!.removeAttribute('data-mc-editable');
+    enhanceCsvTables(grid);
+    enableCsvEditing(grid, commit, menu);
   };
 
   it('does not make the cells focusable', () => {

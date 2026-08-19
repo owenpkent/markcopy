@@ -119,6 +119,81 @@ describe('copy a CSV grid', () => {
   });
 });
 
+// Copying out of a cell you are editing. The grid's own tests cover the editor;
+// what only shows up here is the menu the right-click opens over it, which has to
+// offer the value being typed rather than the table around it: a textarea's
+// selection is invisible to window.getSelection(), so the generic Selection rows
+// come out empty exactly when there is something selected.
+describe('copy from a CSV cell being edited', () => {
+  beforeEach(async () => {
+    await h.render({ html: CSV_TABLE, source: CSV_TEXT, kind: 'csv' });
+  });
+
+  // The rows every menu ends with, whatever was right-clicked. An open editor
+  // swaps out the copy rows above them; it does not take the place of the menu.
+  const DOCUMENT_ROWS = ['Copy Whole Document', 'Save as PDF…', 'Preferences'];
+
+  /** Double-click the first data cell, the way a reader starts editing. */
+  function edit(): HTMLTextAreaElement {
+    h.find('tbody td').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    return h.find('.mc-csv-input') as HTMLTextAreaElement;
+  }
+
+  it('offers the value, not the table around it', () => {
+    // Nothing is selected yet, so there is no selection row to offer: an edit
+    // opens with the caret at the end of the value.
+    const menu = h.rightClick(edit());
+    expect(menu.labels()).toEqual(['Copy Cell', 'Select All', ...DOCUMENT_ROWS]);
+  });
+
+  it('copies part of a cell', async () => {
+    const editor = edit();
+    editor.setSelectionRange(0, 3);
+    const menu = h.rightClick(editor);
+    expect(menu.labels()).toEqual(['Copy Selection', 'Copy Cell', 'Select All', ...DOCUMENT_ROWS]);
+    await menu.click('Copy Selection');
+    expect(h.lastClip()?.plain).toBe('Wid');
+  });
+
+  it('takes the whole value on a second double-click', async () => {
+    const editor = edit();
+    editor.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const menu = h.rightClick(editor);
+    // Selecting everything makes "Copy Cell" the same action under a second
+    // name, so the menu drops it.
+    expect(menu.labels()).toEqual(['Copy Selection', 'Select All', ...DOCUMENT_ROWS]);
+    await menu.click('Copy Selection');
+    expect(h.lastClip()?.plain).toBe('Widget');
+  });
+
+  // An empty field has nothing to copy and nothing to select. Offering three
+  // rows that all do nothing is worse than offering none: the menu still has to
+  // be good for the things that have no connection to the textarea.
+  it('offers no dead copy rows for an empty cell, and still opens a usable menu', () => {
+    const editor = edit();
+    editor.value = '';
+    const menu = h.rightClick(editor);
+    expect(menu.labels()).toEqual(DOCUMENT_ROWS);
+  });
+
+  it('still reaches the document rows from inside an editor', async () => {
+    const menu = h.rightClick(edit());
+    await menu.click('Copy Whole Document');
+    // The HTML flavour, not the plain one: the plain text comes from innerText,
+    // which jsdom does not implement.
+    expect(h.lastClip()?.html).toContain('Widget');
+  });
+
+  it('leaves the edit open, and the document untouched, to copy from', async () => {
+    const editor = edit();
+    const menu = h.rightClick(editor);
+    await menu.click('Copy Cell');
+    expect(h.lastClip()?.plain).toBe('Widget');
+    expect(editor.isConnected).toBe(true);
+    expect(h.posted.filter((m) => m.type === 'editCell')).toHaveLength(0);
+  });
+});
+
 describe('copy a sheet', () => {
   beforeEach(async () => {
     await h.render({ html: SHEET_TABLE, kind: 'xlsx', supportsSync: false });
