@@ -28,11 +28,17 @@ const inFlight = new Set<number>();
 const visible = new Set<number>(); // pages currently near the viewport
 const pageText = new Map<number, string>();
 
-// Zoom is stepped through fixed levels so the label reads cleanly (100 %, 125 %…)
-// and never runs away.
+// Zoom steps through fixed levels so the label reads cleanly (100 %, 125 %…)
+// and never runs away. Fit width can land between two levels, so the source of
+// truth is `scale` itself rather than an index into this list, and a step from a
+// fitted scale moves to the neighbouring level by value.
 const ZOOM_LEVELS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
-let zoomIndex = ZOOM_LEVELS.indexOf(1);
-let scale = ZOOM_LEVELS[zoomIndex];
+const MIN_SCALE = ZOOM_LEVELS[0];
+const MAX_SCALE = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+// Slack for the by-value level search: a fitted scale can sit a rounding error
+// away from a preset, and stepping should then move past it, not back onto it.
+const SCALE_EPSILON = 1e-4;
+let scale = 1;
 
 // Cap the rasterised canvas so it never exceeds the browser's limit (past which
 // it gets downscaled -> blurry) or exhausts memory. Roughly 4096x4096.
@@ -299,13 +305,56 @@ function teardown(n: number): void {
 // ---------------------------------------------------------------------------
 // Zoom
 // ---------------------------------------------------------------------------
-function setZoomIndex(i: number): void {
-  const clamped = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, i));
-  if (clamped === zoomIndex) {
+// Where the viewport centre sits inside a page, held as fractions of that page's
+// box so the point survives a resize.
+interface ZoomAnchor {
+  page: number;
+  yFrac: number;
+  xFrac: number;
+}
+
+// Record the point the reader is looking at, before the pages change size.
+function captureZoomAnchor(): ZoomAnchor | null {
+  if (!wrappers.length) {
+    return null;
+  }
+  const page = pageAtViewportCenter();
+  const rect = wrappers[page - 1].getBoundingClientRect();
+  if (!rect.height || !rect.width) {
+    return null;
+  }
+  // The centre can land in the gap between two pages, and gaps are fixed
+  // padding that does not scale. Clamping anchors to the page edge instead, so
+  // the gap stays a gap rather than being stretched by the zoom factor.
+  const frac = (v: number): number => Math.min(1, Math.max(0, v));
+  return {
+    page,
+    yFrac: frac((window.innerHeight / 2 - rect.top) / rect.height),
+    xFrac: frac((window.innerWidth / 2 - rect.left) / rect.width),
+  };
+}
+
+// Put the anchored point back under the viewport centre. Without this the scroll
+// offset keeps its pixel value while every page above it grows or shrinks, so a
+// zoom silently carries the reader to a different page. Reading the rect flushes
+// the pending layout, so the deltas are measured against the new page sizes.
+function restoreZoomAnchor(anchor: ZoomAnchor | null): void {
+  if (!anchor) {
     return;
   }
-  zoomIndex = clamped;
-  scale = ZOOM_LEVELS[zoomIndex];
+  const rect = wrappers[anchor.page - 1].getBoundingClientRect();
+  const s = scroller();
+  s.scrollTop += rect.top + anchor.yFrac * rect.height - window.innerHeight / 2;
+  s.scrollLeft += rect.left + anchor.xFrac * rect.width - window.innerWidth / 2;
+}
+
+function setScale(next: number): void {
+  const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
+  if (clamped === scale) {
+    return;
+  }
+  const anchor = captureZoomAnchor();
+  scale = clamped;
   updateZoomLabel();
 
   // Resize placeholders immediately (keeps scroll layout correct), then
@@ -314,27 +363,87 @@ function setZoomIndex(i: number): void {
     renderTasks.get(n)?.cancel();
     layoutPage(n);
   }
+  restoreZoomAnchor(anchor);
   renderedScale.clear();
   inFlight.clear();
   window.clearTimeout(zoomTimer);
   zoomTimer = window.setTimeout(() => {
     refresh();
-    // Page heights changed under a fixed scroll position, so the midline may
-    // now land on a different page without any scroll event firing.
+    // The anchor holds the page in place, but at the very top or bottom of the
+    // document the browser clamps the scroll offset and the midline can still
+    // shift; resync the label with wherever the view actually ended up.
     currentPage = pageAtViewportCenter();
     updatePageLabel();
   }, 120);
 }
 
+// The three manual controls drop fit width: the user has asked for a specific
+// size, so the pages should stop chasing the pane's width.
 function zoomIn(): void {
-  setZoomIndex(zoomIndex + 1);
+  setFitWidth(false);
+  setScale(ZOOM_LEVELS.find((z) => z > scale + SCALE_EPSILON) ?? MAX_SCALE);
 }
 function zoomOut(): void {
-  setZoomIndex(zoomIndex - 1);
+  setFitWidth(false);
+  const below = ZOOM_LEVELS.filter((z) => z < scale - SCALE_EPSILON);
+  setScale(below.length ? below[below.length - 1] : MIN_SCALE);
 }
 function zoomReset(): void {
-  setZoomIndex(ZOOM_LEVELS.indexOf(1));
+  setFitWidth(false);
+  setScale(1);
 }
+
+// ---------------------------------------------------------------------------
+// Fit width
+// ---------------------------------------------------------------------------
+// Fit width is a mode, not a one-shot: while it is on, resizing the editor pane
+// re-fits instead of leaving the pages at a size that no longer matches. Any
+// manual zoom turns it off again.
+let fitWidth = false;
+let fitTimer = 0;
+// Breathing room either side of the paper, so a fitted page does not butt
+// against the pane edges or trip a horizontal scrollbar on a rounding error.
+const FIT_WIDTH_MARGIN = 32;
+
+// Pages within one PDF can differ in size, so fit whichever page is being read
+// (the one under the midline) rather than the first or the widest.
+function fitWidthScale(): number | null {
+  const base = baseSize[currentPage - 1];
+  if (!base?.w) {
+    return null;
+  }
+  // clientWidth excludes the vertical scrollbar, so the fitted page accounts for
+  // the gutter the scrollbar already occupies.
+  const avail = scroller().clientWidth - FIT_WIDTH_MARGIN;
+  return avail > 0 ? avail / base.w : null;
+}
+
+function setFitWidth(on: boolean): void {
+  if (fitWidth === on) {
+    return;
+  }
+  fitWidth = on;
+  document.getElementById('mc-fit-width')?.setAttribute('aria-pressed', String(on));
+}
+
+function applyFitWidth(): void {
+  const next = fitWidthScale();
+  if (next === null) {
+    return;
+  }
+  setFitWidth(true);
+  setScale(next);
+}
+
+// Debounced: a pane drag fires resize continuously, and each fit re-lays out
+// every page.
+window.addEventListener('resize', () => {
+  if (!fitWidth) {
+    return;
+  }
+  window.clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(applyFitWidth, 120);
+});
 
 function updateZoomLabel(): void {
   const label = document.getElementById('mc-zoom-label');
@@ -344,7 +453,7 @@ function updateZoomLabel(): void {
 }
 
 // Ctrl/Cmd + wheel zooms one level per notch. preventDefault stops the browser's
-// own page zoom; the debounce in setZoomIndex keeps rapid notches cheap.
+// own page zoom; the debounce in setScale keeps rapid notches cheap.
 document.addEventListener(
   'wheel',
   (e) => {
@@ -911,7 +1020,21 @@ function buildToolbar(): void {
     '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
     '<button type="button" data-act="out" title="Zoom out (Ctrl -)">−</button>' +
     '<button type="button" id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</button>' +
-    '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>';
+    '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>' +
+    '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
+    // Folio's fit-width icon (src/components/common/Icon.tsx there): a page with
+    // a double-headed arrow across it, stroked in currentColor so it follows the
+    // toolbar's foreground in every theme. The icon carries no meaning to a
+    // screen reader, so the button gets an explicit label; the title is the
+    // sighted equivalent.
+    '<button type="button" id="mc-fit-width" data-act="fit" aria-pressed="false" ' +
+    'aria-label="Fit page width" title="Fit page width">' +
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+    'focusable="false">' +
+    '<rect x="3" y="5" width="18" height="14" rx="2" />' +
+    '<path d="M8 12h8" /><path d="M10 9l-3 3 3 3" /><path d="M14 9l3 3-3 3" />' +
+    '</svg></button>';
   bar.addEventListener('pointerdown', (e) => e.stopPropagation());
   bar.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
@@ -926,6 +1049,7 @@ function buildToolbar(): void {
     const act = target.closest('button')?.dataset.act;
     if (act === 'in') zoomIn();
     else if (act === 'out') zoomOut();
+    else if (act === 'fit') applyFitWidth();
   });
   document.body.appendChild(bar);
 }
