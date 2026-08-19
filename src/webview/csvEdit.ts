@@ -136,16 +136,34 @@ function wireTable(table: HTMLTableElement, commit: CommitCell): void {
   }
 
   table.addEventListener('mousedown', (e) => {
-    const cell = cellFrom(e.target);
+    const target = e.target as HTMLElement;
+    // An open editor handles its own pointer: clicking into it places the caret,
+    // dragging selects part of the value, right-clicking opens the menu over it.
+    // Re-focusing the cell here would blur the textarea, and blur ends the edit,
+    // so every one of those gestures used to close the editor on the way down.
+    if (editorIn(target)) {
+      return;
+    }
+    const cell = cellFrom(target);
     // Ignore the resize grips, which sit inside the header cells.
-    if (cell && !(e.target as HTMLElement).classList?.contains('mc-csv-grip')) {
+    if (cell && !target.classList?.contains('mc-csv-grip')) {
       setFocus(cell);
     }
   });
 
   table.addEventListener('dblclick', (e) => {
-    const cell = cellFrom(e.target);
-    if (cell && !(e.target as HTMLElement).classList?.contains('mc-csv-grip')) {
+    const target = e.target as HTMLElement;
+    // Double-clicking again, now inside the editor the first one opened, takes
+    // the whole value. A cell holds one short field far more often than a
+    // sentence, so select-all is what that gesture is reaching for here, whether
+    // the value is about to be replaced or copied. Dragging still takes a part.
+    const open = editorIn(target);
+    if (open) {
+      open.select();
+      return;
+    }
+    const cell = cellFrom(target);
+    if (cell && !target.classList?.contains('mc-csv-grip')) {
       e.preventDefault();
       beginEdit(cell, commit);
     }
@@ -204,6 +222,16 @@ function cellFrom(target: EventTarget | null): HTMLTableCellElement | undefined 
   );
 }
 
+/** The open cell editor `node` sits in, if it is inside one. */
+function editorIn(node: EventTarget | Node | null): HTMLTextAreaElement | undefined {
+  return (node as HTMLElement)?.closest?.<HTMLTextAreaElement>('.mc-csv-input') ?? undefined;
+}
+
+/** Whether `node` is part of MarkCopy's context menu, which opens over the grid. */
+function inMenu(node: EventTarget | Node | null): boolean {
+  return !!(node as HTMLElement)?.closest?.('.mc-menu');
+}
+
 // Lay a textarea over the cell holding the same value. A textarea rather than an
 // input because a CSV field may legitimately contain newlines, and an <input>
 // would silently strip them.
@@ -247,6 +275,7 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
       return;
     }
     done = true;
+    document.removeEventListener('mousedown', onPressOutside, true);
     const value = editor.value;
     cell.classList.remove('mc-csv-cell--editing');
     // Remove only the editor. The cell's own children are untouched underneath
@@ -267,6 +296,19 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
     }
   };
 
+  // The stand-in for the blur that never comes while the context menu holds the
+  // keyboard (see the blur handler below). Anything pressed outside both the
+  // editor and the menu means the reader has moved on, so end the edit the way
+  // losing focus would have; a press back inside either is the same interaction
+  // still going.
+  const onPressOutside = (e: Event): void => {
+    const target = e.target as Node | null;
+    if (editor.contains(target) || inMenu(target)) {
+      return;
+    }
+    finish(true, { row: 0, col: 0 });
+  };
+
   editor.addEventListener('keydown', (e) => {
     e.stopPropagation(); // never let cell navigation see the editor's keys
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -281,7 +323,17 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
     }
   });
   // Clicking away keeps the edit, matching every spreadsheet.
-  editor.addEventListener('blur', () => finish(true, { row: 0, col: 0 }));
+  editor.addEventListener('blur', (e) => {
+    // Except when what took the focus is MarkCopy's own context menu, which
+    // grabs it so its rows can be arrowed through. Right-clicking a value is not
+    // leaving the cell: keep the edit open underneath the menu, so the selection
+    // is still on screen and still there for the menu's copy rows to read.
+    if (inMenu((e as FocusEvent).relatedTarget) || inMenu(document.activeElement)) {
+      document.addEventListener('mousedown', onPressOutside, true);
+      return;
+    }
+    finish(true, { row: 0, col: 0 });
+  });
 }
 
 // Send the new value to the host and park focus where the reader is heading, so

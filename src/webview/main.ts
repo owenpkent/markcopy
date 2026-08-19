@@ -674,6 +674,15 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
 }
 
 function buildMenu(target: HTMLElement): MenuEntry[] {
+  // A CSV cell being edited is a text field, not a slice of the document. The
+  // rows below would offer to copy the table around it and never the value being
+  // typed: window.getSelection() cannot see inside a textarea, so the Selection
+  // group comes out empty exactly when the reader has something selected.
+  const cellEditor = target.closest<HTMLTextAreaElement>('.mc-csv-input');
+  if (cellEditor) {
+    return buildCellEditorMenu(cellEditor);
+  }
+
   const entries: MenuEntry[] = [];
   const groups = copyGroups(target);
 
@@ -720,6 +729,52 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   entries.push({ kind: 'divider' });
   entries.push({ kind: 'submenu', label: 'Preferences', entries: buildSettingsEntries() });
+  return entries;
+}
+
+// What you can do with the value in an open CSV cell editor. Read now, when the
+// menu is built, rather than when a row is clicked: the edit can end in between
+// (anything that commits it takes the textarea out of the DOM with it), and a
+// row that read a detached editor would copy nothing.
+function buildCellEditorMenu(editor: HTMLTextAreaElement): MenuEntry[] {
+  const value = editor.value;
+  const selected = value.slice(editor.selectionStart ?? 0, editor.selectionEnd ?? 0);
+  // Hand the caret back before copying, not after. The menu took the focus to
+  // open and the edit is still live underneath it, so this both leaves the
+  // reader where they were and gives `document.execCommand('copy')` a focused
+  // field with a live selection to run against, rather than a menu row.
+  const resume = (): void => editor.focus();
+  const entries: MenuEntry[] = [];
+  if (selected) {
+    entries.push({
+      kind: 'item',
+      label: 'Copy Selection',
+      run: () => {
+        resume();
+        copyText(selected);
+      },
+    });
+  }
+  // Dropped when the selection already is the whole value, where it would be the
+  // same action under a second name.
+  if (selected !== value) {
+    entries.push({
+      kind: 'item',
+      label: 'Copy Cell',
+      run: () => {
+        resume();
+        copyText(value);
+      },
+    });
+  }
+  entries.push({
+    kind: 'item',
+    label: 'Select All',
+    run: () => {
+      resume();
+      editor.select();
+    },
+  });
   return entries;
 }
 

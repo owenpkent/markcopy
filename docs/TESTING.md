@@ -152,6 +152,9 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 - [ ] Edit a cell, then immediately edit the one below: no focus is lost between commits.
 - [ ] Edit two cells in quick succession, committing each with Enter: **both** land in the file. (The second must not be dropped for being one document version behind.)
 - [ ] Start editing a cell, then click straight onto a different cell: the edit is kept and focus stays on the cell you clicked, rather than snapping back.
+- [ ] ☑ Double-click a cell to start editing, then click inside the value: the caret lands where you clicked and the editor stays open. Drag across part of the value: it selects, and still nothing closes.
+- [ ] ☑ Double-click again inside an open editor: the whole value is selected, so typing replaces it.
+- [ ] ☑ Right-click inside an open editor: the edit stays open with its selection visible, and the menu offers **Copy Selection** / **Copy Cell** / **Select All** rather than the table's copy rows. Paste what you copied somewhere: it is the text that was selected. **Ctrl+C**, **Ctrl+X**, **Ctrl+V** and **Ctrl+A** work in the editor too.
 - [ ] Type in the text editor while the grid is open: the grid keeps up, and nothing is corrupted.
 - [ ] Arrow keys move the selection; Tab enters the grid once rather than stepping through every cell.
 

@@ -276,6 +276,85 @@ describe('editing a cell', () => {
   });
 });
 
+// Once the editor is open it is an ordinary text field, and the grid has to stop
+// treating clicks inside it as clicks on the cell underneath. Every gesture here
+// used to end the edit before it could do anything, because focusing the cell
+// blurs the textarea and blur commits.
+describe('working with the text inside an open editor', () => {
+  const openEditor = (): HTMLTextAreaElement => {
+    click(cell(0, 0), 'dblclick');
+    return editor()!;
+  };
+
+  /** The context menu, as previewShell.ts serves it, plus one row to focus. */
+  function openMenu(): HTMLElement {
+    const panel = document.createElement('div');
+    panel.className = 'mc-menu';
+    const row = document.createElement('div');
+    row.className = 'mc-menu-item';
+    row.tabIndex = 0;
+    panel.appendChild(row);
+    document.body.appendChild(panel);
+    // The menu hands its first row the keyboard as it opens, which is what takes
+    // the focus off the editor.
+    row.focus();
+    return panel;
+  }
+
+  it('survives a click inside the value being edited', () => {
+    const input = openEditor();
+    click(input);
+    expect(editor()).toBe(input);
+  });
+
+  it('survives a right-click inside the value being edited', () => {
+    const input = openEditor();
+    input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2 }));
+    expect(editor()).toBe(input);
+  });
+
+  it('selects the whole value on a second double-click', () => {
+    const input = openEditor();
+    click(input, 'dblclick');
+    expect(input.value.slice(input.selectionStart, input.selectionEnd)).toBe('Widget');
+  });
+
+  it('does not reopen a fresh editor over the one already there', () => {
+    const input = openEditor();
+    input.value = 'Edited';
+    click(input, 'dblclick');
+    expect(editor()).toBe(input);
+    expect(editor()!.value).toBe('Edited');
+  });
+
+  it('keeps the edit alive while the context menu holds the focus', () => {
+    const input = openEditor();
+    openMenu();
+    // The selection the menu's copy rows read is still on screen, and nothing
+    // has been written to the document yet.
+    expect(editor()).toBe(input);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('ends the edit on the next press outside the menu', () => {
+    const input = openEditor();
+    openMenu();
+    input.value = 'Sprocket';
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    // No further blur is coming (the menu already took the focus), so this press
+    // is what has to stand in for one.
+    expect(editor()).toBeNull();
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+  });
+
+  it('leaves the edit alone when the press lands in the menu', () => {
+    const input = openEditor();
+    const panel = openMenu();
+    panel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(editor()).toBe(input);
+  });
+});
+
 // The resize grip is a child of the very cell the editor covers, and it sits in
 // the bubble path of the grid's own key handling. Both are easy to break from
 // the other module, so pin them from here, where the two are wired together.

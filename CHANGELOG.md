@@ -9,6 +9,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Fixed
+
+- **A CSV cell you are editing now behaves like the text box it is.** Once the editor was open, every click inside it landed on the cell underneath and ended the edit, so the caret could not be moved, no part of a value could be selected by dragging, and right-clicking closed the editor before its menu appeared. Clicks inside an open editor now belong to the editor.
+  - Double-clicking again inside an open editor selects the whole value, so it can be replaced or copied in one gesture.
+  - Right-clicking inside one keeps the edit and its selection on screen, and offers **Copy Selection**, **Copy Cell** and **Select All** in place of the copy-the-whole-table rows, which could never see a selection inside a text box in the first place. The usual **Ctrl+C** / **Ctrl+X** / **Ctrl+V** / **Ctrl+A** work there as well.
+
 ## [0.8.0] - 2026-08-18
 
 ### Added
