@@ -19,6 +19,20 @@ export interface MenuController {
   show(pageX: number, pageY: number, entries: MenuEntry[]): void;
   /** Close the menu and every open submenu. */
   hide(): void;
+  /** Whether `node` is inside one of this menu's open panels, root or submenu. */
+  owns(node: EventTarget | Node | null): boolean;
+  /** Whether any panel is on screen. */
+  isOpen(): boolean;
+  /**
+   * Call `listener` every time the menu closes completely; returns a function
+   * that removes it again.
+   *
+   * Anything that stays open underneath the menu needs this. While the menu
+   * holds the keyboard, no further blur is coming, so the close is the only
+   * moment such a thing can learn whether the reader came back to it or moved
+   * on. The open CSV cell editor is the case this exists for.
+   */
+  onClose(listener: () => void): () => void;
 }
 
 // Grace period before a submenu closes once the pointer leaves the row that
@@ -41,6 +55,14 @@ export function createMenu(root: HTMLDivElement): MenuController {
   const anchorOf = new WeakMap<HTMLDivElement, HTMLElement>();
   // A hover-out close waiting on HOVER_CLOSE_MS, if one is queued.
   let pendingClose: number | undefined;
+  // Whatever held the keyboard when the menu opened, so closing can hand it
+  // back. A menu is a detour, not a destination.
+  let invoker: HTMLElement | undefined;
+  const closeListeners = new Set<() => void>();
+
+  function owns(node: EventTarget | Node | null): boolean {
+    return panels.some((panel) => panel === node || panel.contains(node as Node | null));
+  }
 
   function cancelPendingClose(): void {
     if (pendingClose !== undefined) {
@@ -61,6 +83,11 @@ export function createMenu(root: HTMLDivElement): MenuController {
   function closeFrom(depth: number): void {
     // An explicit close supersedes whatever the pointer had queued.
     cancelPendingClose();
+    // Both read before the teardown: taking a panel out of the document blurs
+    // whatever inside it held the focus, so afterwards there is no telling
+    // whether the menu was what had it.
+    const wasOpen = panels.length > 0;
+    const heldFocus = owns(document.activeElement);
     while (panels.length > depth) {
       const panel = panels.pop() as HTMLDivElement;
       const anchor = anchorOf.get(panel);
@@ -75,6 +102,24 @@ export function createMenu(root: HTMLDivElement): MenuController {
       } else {
         panel.remove();
       }
+    }
+    if (depth > 0 || !wasOpen) {
+      return; // a submenu closing, or a close of something already closed
+    }
+
+    // Hand the keyboard back to whoever opened the menu, so the reader ends up
+    // where they were rather than on <body> with nothing focused. Only when the
+    // menu is what holds the focus: a click elsewhere closes the menu too, and
+    // the browser has already given that click's target the focus by now.
+    const returnTo = invoker;
+    invoker = undefined;
+    if (heldFocus && returnTo?.isConnected) {
+      returnTo.focus();
+    }
+    // Walked over a copy: a listener watching one interaction unsubscribes
+    // itself as it runs, and must not disturb the walk doing so.
+    for (const listener of [...closeListeners]) {
+      listener();
     }
   }
 
@@ -267,7 +312,11 @@ export function createMenu(root: HTMLDivElement): MenuController {
 
   return {
     show(pageX, pageY, entries) {
+      // Read before closeFrom, which hands the focus back when a menu is
+      // already open and would otherwise decide this for us.
+      const opener = document.activeElement;
       closeFrom(0);
+      invoker = opener instanceof HTMLElement && opener !== document.body ? opener : undefined;
       panels.push(root);
       render(root, entries, 0);
       root.style.left = `${pageX}px`;
@@ -290,6 +339,16 @@ export function createMenu(root: HTMLDivElement): MenuController {
     },
     hide() {
       closeFrom(0);
+    },
+    owns,
+    isOpen() {
+      return panels.length > 0;
+    },
+    onClose(listener) {
+      closeListeners.add(listener);
+      return () => {
+        closeListeners.delete(listener);
+      };
     },
   };
 }

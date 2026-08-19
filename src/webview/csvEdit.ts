@@ -11,6 +11,8 @@
 // remembered by (record line, column) rather than by element, and restored after
 // the re-render that a commit triggers.
 
+import type { MenuController } from './menu';
+
 /** Which cell the reader is on. Survives the re-render caused by a commit. */
 interface CellRef {
   line: number;
@@ -19,12 +21,39 @@ interface CellRef {
 
 export type CommitCell = (line: number, column: number, value: string) => void;
 
+// The class the open cell editor's textarea carries, and the selector that finds
+// it. Named once: main.ts, the grid's own pointer handling and the editor
+// teardown all have to agree on what an open editor looks like.
+const EDITOR_CLASS = 'mc-csv-input';
+const EDITOR_SELECTOR = `.${EDITOR_CLASS}`;
+
 let focused: CellRef | undefined;
 // True while a commit is in flight, so the re-render it causes restores focus
 // to the cell the reader moved to rather than fighting them for it.
 let restoring = false;
 
-export function enableCsvEditing(root: ParentNode, commit: CommitCell): void {
+// The context menu, which opens over the grid and takes the keyboard with it.
+// Handed in rather than looked up: the editor asks the menu whether it is the
+// thing that just took the focus, instead of string-matching its markup.
+let contextMenu: MenuController | undefined;
+
+// The open editor's subscription to that menu closing, if one is armed. At most
+// one cell editor exists at a time, and a render replaces the grid wholesale, so
+// a single module-level slot both bounds this to one live listener and gives the
+// re-render an unambiguous place to drop it.
+let menuWatch: (() => void) | undefined;
+
+function dropMenuWatch(): void {
+  menuWatch?.();
+  menuWatch = undefined;
+}
+
+export function enableCsvEditing(root: ParentNode, commit: CommitCell, menu: MenuController): void {
+  contextMenu = menu;
+  // Any editor that was watching the menu belonged to the grid this render is
+  // replacing. Left armed, it would fire against a detached textarea and write
+  // that dead edit's value over whatever the document holds by then.
+  dropMenuWatch();
   // Only grids the renderer marked editable. A spreadsheet sheet uses this same
   // markup but is read-only, because a cell edit has nowhere to go: the document
   // behind it is a binary workbook, not the text file this writeback assumes.
@@ -171,7 +200,7 @@ function wireTable(table: HTMLTableElement, commit: CommitCell): void {
 
   table.addEventListener('keydown', (e) => {
     const cell = cellFrom(e.target);
-    if (!cell || cell.querySelector('.mc-csv-input')) {
+    if (!cell || cell.querySelector(EDITOR_SELECTOR)) {
       return; // the textarea handles its own keys
     }
     switch (e.key) {
@@ -222,14 +251,30 @@ function cellFrom(target: EventTarget | null): HTMLTableCellElement | undefined 
   );
 }
 
-/** The open cell editor `node` sits in, if it is inside one. */
-function editorIn(node: EventTarget | Node | null): HTMLTextAreaElement | undefined {
-  return (node as HTMLElement)?.closest?.<HTMLTextAreaElement>('.mc-csv-input') ?? undefined;
+/**
+ * The open cell editor `node` sits in, if it is inside one.
+ *
+ * Exported because the context menu asks the same question from main.ts: a
+ * right-click inside an open editor has to offer the value being typed rather
+ * than the table around it.
+ */
+export function editorIn(node: EventTarget | Node | null): HTMLTextAreaElement | undefined {
+  return (node as HTMLElement)?.closest?.<HTMLTextAreaElement>(EDITOR_SELECTOR) ?? undefined;
 }
 
-/** Whether `node` is part of MarkCopy's context menu, which opens over the grid. */
-function inMenu(node: EventTarget | Node | null): boolean {
-  return !!(node as HTMLElement)?.closest?.('.mc-menu');
+/**
+ * Whether the blur that just fired handed the keyboard to the context menu.
+ *
+ * `relatedTarget` is the only direct signal available here: `document
+ * .activeElement` is still <body> this early in the dispatch, in both Chromium
+ * and jsdom, so testing it would be dead code. When the engine reports no
+ * related target at all, the menu being on screen is what stands in for it.
+ */
+function menuTookFocus(e: FocusEvent): boolean {
+  if (!contextMenu) {
+    return false;
+  }
+  return e.relatedTarget ? contextMenu.owns(e.relatedTarget) : contextMenu.isOpen();
 }
 
 // Lay a textarea over the cell holding the same value. A textarea rather than an
@@ -241,12 +286,12 @@ function inMenu(node: EventTarget | Node | null): boolean {
 // keeps its text underneath. Emptying the cell would collapse the row to nothing
 // while it was being edited.
 function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string): void {
-  if (cell.querySelector('.mc-csv-input')) {
+  if (cell.querySelector(EDITOR_SELECTOR)) {
     return;
   }
   const original = cell.textContent ?? '';
   const editor = document.createElement('textarea');
-  editor.className = 'mc-csv-input';
+  editor.className = EDITOR_CLASS;
   editor.value = seed ?? original;
   editor.rows = 1;
   // A textarea's intrinsic width comes from `cols`; keep it at the floor so the
@@ -275,7 +320,7 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
       return;
     }
     done = true;
-    document.removeEventListener('mousedown', onPressOutside, true);
+    dropMenuWatch();
     const value = editor.value;
     cell.classList.remove('mc-csv-cell--editing');
     // Remove only the editor. The cell's own children are untouched underneath
@@ -297,16 +342,29 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
   };
 
   // The stand-in for the blur that never comes while the context menu holds the
-  // keyboard (see the blur handler below). Anything pressed outside both the
-  // editor and the menu means the reader has moved on, so end the edit the way
-  // losing focus would have; a press back inside either is the same interaction
-  // still going.
-  const onPressOutside = (e: Event): void => {
-    const target = e.target as Node | null;
-    if (editor.contains(target) || inMenu(target)) {
-      return;
+  // keyboard (see the blur handler below). No blur is coming, so the menu
+  // closing is the moment this edit's fate is decided: either the menu hands the
+  // caret back and the edit carries on, or the reader has moved on and it ends
+  // the way losing focus would have.
+  const watchMenu = (): void => {
+    if (menuWatch) {
+      return; // already watching this same interaction
     }
-    finish(true, { row: 0, col: 0 });
+    menuWatch = contextMenu?.onClose(() => {
+      dropMenuWatch();
+      // A render can replace the grid while the menu is up, taking the editor
+      // with it. There is then nothing left to commit: the value in this closure
+      // describes a cell that no longer exists, and writing it would land on
+      // whatever now occupies that line and column.
+      if (!editor.isConnected) {
+        done = true;
+        return;
+      }
+      if (document.activeElement === editor) {
+        return;
+      }
+      finish(true, { row: 0, col: 0 });
+    });
   };
 
   editor.addEventListener('keydown', (e) => {
@@ -328,8 +386,8 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
     // grabs it so its rows can be arrowed through. Right-clicking a value is not
     // leaving the cell: keep the edit open underneath the menu, so the selection
     // is still on screen and still there for the menu's copy rows to read.
-    if (inMenu((e as FocusEvent).relatedTarget) || inMenu(document.activeElement)) {
-      document.addEventListener('mousedown', onPressOutside, true);
+    if (menuTookFocus(e as FocusEvent)) {
+      watchMenu();
       return;
     }
     finish(true, { row: 0, col: 0 });

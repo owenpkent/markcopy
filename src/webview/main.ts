@@ -4,7 +4,7 @@ import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
-import { enableCsvEditing } from './csvEdit';
+import { enableCsvEditing, editorIn } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 
@@ -32,6 +32,10 @@ declare function acquireVsCodeApi(): VsCodeApi;
 const vscode = acquireVsCodeApi();
 const content = document.getElementById('content') as HTMLDivElement;
 const menu = document.getElementById('mc-menu') as HTMLDivElement;
+// Built here rather than beside its handlers further down, because `render`
+// hands it to the CSV grid: an editor left open underneath the menu asks it
+// whether it is the thing that took the keyboard, and when it gives it back.
+const contextMenu = createMenu(menu);
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 let sourceLines: string[] = [];
@@ -182,8 +186,11 @@ async function render(
   // a global here would stamp a grid that a later render had already replaced
   // with that later version, which is exactly what the host's staleness check
   // exists to catch.
-  enableCsvEditing(content, (line, column, value) =>
-    vscode.postMessage({ type: 'editCell', line, column, value, docVersion }),
+  enableCsvEditing(
+    content,
+    (line, column, value) =>
+      vscode.postMessage({ type: 'editCell', line, column, value, docVersion }),
+    contextMenu,
   );
   content
     .querySelectorAll<HTMLElement>('.mc-csv-wrap')
@@ -559,8 +566,6 @@ window.addEventListener('resize', invalidateAnchors, { passive: true });
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
-const contextMenu = createMenu(menu);
-
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   contextMenu.show(e.pageX, e.pageY, buildMenu(e.target as HTMLElement));
@@ -674,42 +679,18 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
 }
 
 function buildMenu(target: HTMLElement): MenuEntry[] {
-  // A CSV cell being edited is a text field, not a slice of the document. The
-  // rows below would offer to copy the table around it and never the value being
-  // typed: window.getSelection() cannot see inside a textarea, so the Selection
-  // group comes out empty exactly when the reader has something selected.
-  const cellEditor = target.closest<HTMLTextAreaElement>('.mc-csv-input');
-  if (cellEditor) {
-    return buildCellEditorMenu(cellEditor);
-  }
-
   const entries: MenuEntry[] = [];
-  const groups = copyGroups(target);
-
-  if (groups.length > 0) {
-    const [first, ...rest] = groups;
-    entries.push({ kind: 'item', label: `Copy ${first.noun}`, run: first.actions[0].run });
-
-    // Everything the primary row didn't cover: the clicked thing's other
-    // formats, then every format of the less specific things around it.
-    const sections = [{ noun: first.noun, actions: first.actions.slice(1) }, ...rest].filter(
-      (group) => group.actions.length > 0,
-    );
-    const variants: MenuEntry[] = [];
-    for (const group of sections) {
-      // Only head the sections when more than one contributes, so the common
-      // single-context case reads as a bare list of formats.
-      if (sections.length > 1) {
-        variants.push({ kind: 'label', label: group.noun });
-      }
-      for (const action of group.actions) {
-        variants.push({ kind: 'item', label: action.label, run: action.run });
-      }
-    }
-    if (variants.length > 0) {
-      entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
-    }
-    entries.push({ kind: 'divider' });
+  // A CSV cell being edited is a text field, not a slice of the document, so the
+  // copy rows are the ones that change: the generic ones would offer the table
+  // around it and never the value being typed, because window.getSelection()
+  // cannot see inside a textarea and so comes out empty exactly when the reader
+  // has something selected. Only that group is swapped. Everything below it is
+  // about the grid or the document, has nothing to do with the textarea, and the
+  // menu is the only route to most of it.
+  const cellEditor = editorIn(target);
+  const copies = cellEditor ? buildCellEditorEntries(cellEditor) : buildCopyEntries(target);
+  if (copies.length > 0) {
+    entries.push(...copies, { kind: 'divider' });
   }
 
   // Undo any dragging done to the CSV grid's columns. Only offered on a grid the
@@ -732,11 +713,46 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   return entries;
 }
 
+// The copy rows for whatever was clicked: the primary "Copy X" for the most
+// specific thing under the pointer, then a "Copy as" submenu holding its other
+// formats and every format of the less specific things around it.
+function buildCopyEntries(target: HTMLElement): MenuEntry[] {
+  const groups = copyGroups(target);
+  if (groups.length === 0) {
+    return [];
+  }
+  const [first, ...rest] = groups;
+  const entries: MenuEntry[] = [
+    { kind: 'item', label: `Copy ${first.noun}`, run: first.actions[0].run },
+  ];
+
+  // Everything the primary row didn't cover: the clicked thing's other
+  // formats, then every format of the less specific things around it.
+  const sections = [{ noun: first.noun, actions: first.actions.slice(1) }, ...rest].filter(
+    (group) => group.actions.length > 0,
+  );
+  const variants: MenuEntry[] = [];
+  for (const group of sections) {
+    // Only head the sections when more than one contributes, so the common
+    // single-context case reads as a bare list of formats.
+    if (sections.length > 1) {
+      variants.push({ kind: 'label', label: group.noun });
+    }
+    for (const action of group.actions) {
+      variants.push({ kind: 'item', label: action.label, run: action.run });
+    }
+  }
+  if (variants.length > 0) {
+    entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
+  }
+  return entries;
+}
+
 // What you can do with the value in an open CSV cell editor. Read now, when the
 // menu is built, rather than when a row is clicked: the edit can end in between
 // (anything that commits it takes the textarea out of the DOM with it), and a
 // row that read a detached editor would copy nothing.
-function buildCellEditorMenu(editor: HTMLTextAreaElement): MenuEntry[] {
+function buildCellEditorEntries(editor: HTMLTextAreaElement): MenuEntry[] {
   const value = editor.value;
   const selected = value.slice(editor.selectionStart ?? 0, editor.selectionEnd ?? 0);
   // Hand the caret back before copying, not after. The menu took the focus to
@@ -745,6 +761,12 @@ function buildCellEditorMenu(editor: HTMLTextAreaElement): MenuEntry[] {
   // field with a live selection to run against, rather than a menu row.
   const resume = (): void => editor.focus();
   const entries: MenuEntry[] = [];
+  // An empty field has nothing to copy and nothing to select. Every row below
+  // would be a no-op under a confident label, so offer none of them and let the
+  // menu fall through to what the reader can actually do.
+  if (!value) {
+    return entries;
+  }
   if (selected) {
     entries.push({
       kind: 'item',

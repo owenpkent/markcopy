@@ -13,7 +13,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **A CSV cell you are editing now behaves like the text box it is.** Once the editor was open, every click inside it landed on the cell underneath and ended the edit, so the caret could not be moved, no part of a value could be selected by dragging, and right-clicking closed the editor before its menu appeared. Clicks inside an open editor now belong to the editor.
   - Double-clicking again inside an open editor selects the whole value, so it can be replaced or copied in one gesture.
-  - Right-clicking inside one keeps the edit and its selection on screen, and offers **Copy Selection**, **Copy Cell** and **Select All** in place of the copy-the-whole-table rows, which could never see a selection inside a text box in the first place. The usual **Ctrl+C** / **Ctrl+X** / **Ctrl+V** / **Ctrl+A** work there as well.
+  - Right-clicking inside one keeps the edit and its selection on screen, and offers **Copy Selection**, **Copy Cell** and **Select All** in place of the copy-the-whole-table rows, which could never see a selection inside a text box in the first place. The usual **Ctrl+C** / **Ctrl+X** / **Ctrl+V** / **Ctrl+A** work there as well. Those rows replace only the copy rows: **Reset Column Widths**, **Copy Whole Document**, **Save as PDF…** and **Preferences** stay where they always are, because none of them has anything to do with the cell being typed into and the menu is the only way to reach most of them.
+  - An empty cell offers none of the three, rather than three rows that would copy and select nothing.
+  - **Dismissing that menu puts the caret back in the cell.** Closing it with **Escape**, or by picking a row, used to leave the editor on screen with nothing focused: typing went nowhere and Escape could no longer discard the edit, so the next click anywhere wrote the half-typed value to the file.
+  - **An edit left open while the preview re-renders is dropped rather than written back.** Typing in the text editor beside the grid redraws it, taking the open cell editor with it. What was in that editor described the document as it stood before those keystrokes, and it could still be committed afterwards, silently overwriting the newer text in that field.
+
+### Changed
+
+- **Closing a context menu returns the keyboard to wherever it came from**, in both the Markdown and PDF previews, instead of dropping it on the page. This is what lets an open CSV cell editor survive its own right-click, and it also means arrowing through a menu and pressing Escape leaves you where you started.
 
 ## [0.8.0] - 2026-08-18
 
