@@ -401,6 +401,10 @@ function zoomReset(): void {
 // manual zoom turns it off again.
 let fitWidth = false;
 let fitTimer = 0;
+// Base width of the page the live fit was computed from. Pages within one PDF
+// can differ in size, so a scroll onto a differently sized page has to re-fit;
+// comparing widths keeps the usual uniform document from re-fitting at all.
+let fittedBaseWidth = 0;
 // Breathing room either side of the paper, so a fitted page does not butt
 // against the pane edges or trip a horizontal scrollbar on a rounding error.
 const FIT_WIDTH_MARGIN = 32;
@@ -423,6 +427,10 @@ function setFitWidth(on: boolean): void {
     return;
   }
   fitWidth = on;
+  // A queued re-fit must not outlive the mode. Its callback is applyFitWidth,
+  // which turns fit width straight back on, so a manual zoom landing inside the
+  // debounce window would otherwise be undone and the button would relight.
+  window.clearTimeout(fitTimer);
   document.getElementById('mc-fit-width')?.setAttribute('aria-pressed', String(on));
 }
 
@@ -432,17 +440,42 @@ function applyFitWidth(): void {
     return;
   }
   setFitWidth(true);
+  fittedBaseWidth = baseSize[currentPage - 1].w;
   setScale(next);
+}
+
+// Turning the mode off leaves the pages at the size they already have and just
+// stops them chasing the pane, which is what the pressed state describes.
+function toggleFitWidth(): void {
+  if (fitWidth) {
+    setFitWidth(false);
+  } else {
+    applyFitWidth();
+  }
 }
 
 // Debounced: a pane drag fires resize continuously, and each fit re-lays out
 // every page.
+function queueFitWidth(): void {
+  window.clearTimeout(fitTimer);
+  fitTimer = window.setTimeout(applyFitWidth, 120);
+}
+
+// Called when the midline moves onto another page. The fit is computed from the
+// page being read, so a mixed portrait/landscape document has to re-fit as the
+// reader crosses between the two; an equal width means there is nothing to do.
+function refitForCurrentPage(): void {
+  if (!fitWidth || baseSize[currentPage - 1]?.w === fittedBaseWidth) {
+    return;
+  }
+  queueFitWidth();
+}
+
 window.addEventListener('resize', () => {
   if (!fitWidth) {
     return;
   }
-  window.clearTimeout(fitTimer);
-  fitTimer = window.setTimeout(applyFitWidth, 120);
+  queueFitWidth();
 });
 
 function updateZoomLabel(): void {
@@ -933,6 +966,7 @@ window.addEventListener(
       if (n !== currentPage) {
         currentPage = n;
         updatePageLabel();
+        refitForCurrentPage();
       }
     });
   },
@@ -953,6 +987,7 @@ function goToPage(n: number): void {
   pageJumpScrollPending = s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft;
   currentPage = clamped;
   updatePageLabel();
+  refitForCurrentPage();
 }
 
 // Swap the "3 / 12" label for a number input; Enter jumps, Escape/blur cancels.
@@ -1049,7 +1084,7 @@ function buildToolbar(): void {
     const act = target.closest('button')?.dataset.act;
     if (act === 'in') zoomIn();
     else if (act === 'out') zoomOut();
-    else if (act === 'fit') applyFitWidth();
+    else if (act === 'fit') toggleFitWidth();
   });
   document.body.appendChild(bar);
 }
