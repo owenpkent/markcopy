@@ -182,7 +182,11 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 
 - [ ] ★ Minus/plus buttons, Ctrl+plus / Ctrl+minus / Ctrl+0, and Ctrl+mouse-wheel all step the zoom (50 to 400 percent); pages re-rasterise crisp, not scaled-blurry.
 - [ ] Clicking the percentage resets to 100 percent.
+- [ ] ★ Scroll deep into the document, then zoom in and out several steps: the page under the middle of the window stays there, and the page indicator does not drift.
 - [ ] After a zoom step, the page indicator settles on whatever page actually sits under the midline.
+- [ ] ★ The fit-width button (rightmost, a page with a double-headed arrow) sizes the page to the pane (a percentage between the presets is fine) and stays lit; dragging the pane's edge re-fits it. Its tooltip and screen-reader name both read "Fit page width", and the icon is centred in its button and follows the toolbar's foreground colour in every theme.
+- [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
+- [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
 ### Tools, selection, and copy
 

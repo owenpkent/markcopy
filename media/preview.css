@@ -799,6 +799,34 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
 #mc-toolbar button:hover {
   background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
 }
+/* Fit width is a mode rather than a one-shot action, so it stays lit while it is
+   on; the inset ring carries the state where the theme's active background is
+   too close to the toolbar's own. */
+#mc-toolbar button[aria-pressed='true'] {
+  background: var(--vscode-inputOption-activeBackground, rgba(255, 255, 255, 0.24));
+  color: var(--vscode-inputOption-activeForeground, inherit);
+  box-shadow: inset 0 0 0 1px var(--vscode-inputOption-activeBorder, currentColor);
+}
+/* The rule above ties with `#mc-toolbar button:hover` on specificity and is
+   declared later, so without this the pressed button would stop responding to
+   the pointer altogether. Restate the hover background; the inset ring and the
+   active foreground still carry the pressed state.  */
+#mc-toolbar button[aria-pressed='true']:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
+}
+/* An inline SVG is inline-level, so it would otherwise sit on the text baseline
+   with descender space beneath it and ride high in the button. Centre it in both
+   axes instead, and drop the horizontal padding the text buttons need so the
+   icon keeps the same 26px footprint as the minus/plus buttons beside it. */
+#mc-toolbar #mc-fit-width {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+#mc-toolbar #mc-fit-width svg {
+  display: block;
+}
 /* Both labels are <button>s (keyboard-focusable), so the shared `#mc-toolbar
    button` rule above styles them too; the extra #mc-toolbar scope here outweighs
    it, or its `font: inherit` and 26px min-width would win on specificity. */

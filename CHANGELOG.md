@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **A fit-width button in the PDF toolbar**, carrying the same page-with-a-double-headed-arrow icon as [folio](https://github.com/owenpkent/folio). It sizes the page to the width of the editor pane, landing on whatever percentage that takes rather than the nearest preset. It stays on once clicked, so dragging the pane wider or narrower re-fits the pages instead of leaving them the wrong size; any manual zoom (the buttons, `Ctrl`/`Cmd` + `+`/`-`/`0`, `Ctrl`/`Cmd` + scroll, or clicking the percentage) turns it back off. From a fitted percentage the plus and minus buttons step to the neighbouring preset level.
+
 ### Changed
 
 - **Bare text that merely looks like a domain is no longer turned into a link.** Upgrading the Markdown engine to markdown-it 15 (and with it linkify-it 6) drops "fuzzy" autolinking, and MarkCopy keeps that new default rather than restoring the old behavior. Previously any word ending in something that happens to be a real top-level domain was linkified, so a plain mention of `RELEASING.md`, `README.md`, or `src/render.ts` became a link to `http://RELEASING.md`, which, when clicked, handed a nonexistent domain to your browser. Since a preview of developer documentation mentions filenames constantly, this misfired far more often than it helped, and the bad link was carried along by **Copy as → Rich Text** into whatever you pasted it into.
@@ -13,6 +17,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **The Markdown engine is now markdown-it 15**, up from 14.3, alongside KaTeX 0.18.4 and DOMPurify 3.4.13. Beyond the autolinking change above and the alt-text fix below, the upgrade is internal: rendering this repo's own Markdown under both versions turned up no other visible difference. markdown-it 15 also bundles its own TypeScript types, so the separate `@types/markdown-it` dependency is gone.
 
 ### Fixed
+
+- **Zooming a PDF no longer moves you to a different page.** Every zoom step resized the pages while leaving the scroll offset at its old pixel value, so the pages above the viewport grew or shrank underneath it and the view slid away from what you were reading, further the deeper into the document you were. Zoom now anchors on the point at the centre of the viewport and holds it there, so the page (and your place on it) stays put whether you use the toolbar buttons, `Ctrl`/`Cmd` + `+`/`-`, `Ctrl`/`Cmd` + `0`, or `Ctrl`/`Cmd` + scroll.
 
 - **Inline code inside image alt text is no longer dropped.** ``![the `render.ts` file](x.png)`` produced `alt="the "`, losing everything from the backtick on; it now produces `alt="the render.ts file"`. Fixed upstream in markdown-it 15.
 - **A couple of LaTeX edge cases**, via KaTeX 0.18.4: delimiter-sizing commands accept braced arguments (`\big{(}`), and an unrecognized environment now reports a clear `No such environment` parse error.
