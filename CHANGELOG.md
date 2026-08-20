@@ -9,6 +9,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Security
+
+- **A fenced block of C or C++ can no longer hang the preview.** Syntax highlighting matched the run of type tokens in front of a function name with a regex that could backtrack exponentially, so an unusual (or deliberately hostile) block of C in a document you only opened to read could lock the preview up. Bounded upstream in highlight.js 11.12.0.
+
 ## [0.8.1] - 2026-08-19
 
 ### Fixed
