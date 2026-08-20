@@ -351,7 +351,7 @@
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.1",
-    "globals": "^17.9.0",
+    "globals": "^17.11.0",
     "html-to-image": "^1.11.11",
     "jsdom": "^29.1.1",
     "mermaid": "^11.16.1",
