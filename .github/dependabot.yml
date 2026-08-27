@@ -12,6 +12,13 @@ updates:
       # there at runtime. Raise this deliberately when engines.vscode moves.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      # @types/vscode is pinned to the engine floor, not the newest VS Code that
+      # exists. `vsce package` compares the *range* in package.json against
+      # engines.vscode and refuses to build when it is higher, so any bump here
+      # fails CI at the packaging step even though tsc is happy. Every update
+      # type is ignored: 1.90 -> 1.134 is only a minor, and it still breaks.
+      # Raise this together with engines.vscode, never on its own.
+      - dependency-name: '@types/vscode'
       # jsdom 30 requires Node 22 or newer; the test job runs Node 20, where it
       # fails at worker startup on a missing undici internal. Same reasoning:
       # unpin when the project's Node floor moves.
