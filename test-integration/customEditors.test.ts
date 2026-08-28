@@ -15,6 +15,7 @@ import * as vscode from 'vscode';
 const XLSX_VIEW = 'markcopy.xlsxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
+const VIDEO_VIEW = 'markcopy.videoPreview';
 
 /**
  * Poll `probe` until it returns something, or give up.
@@ -150,6 +151,46 @@ suite('MarkCopy custom editors', () => {
       `expected a custom-editor tab for cube.stl, saw: ${JSON.stringify(customTabs())}`,
     );
     assert.strictEqual(tab.viewType, STL_VIEW, 'cube.stl opened in some other custom editor');
+  });
+
+  test('a .mov file opens in the video preview rather than as binary', async () => {
+    // sample.mov is a real two-second H.264 clip, so this also proves the file
+    // survives the round trip through a resource root outside the workspace.
+    const uri = fixture('sample.mov');
+
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.ok(
+      tab,
+      `expected a custom-editor tab for sample.mov, saw: ${JSON.stringify(customTabs())}`,
+    );
+    assert.strictEqual(tab.viewType, VIDEO_VIEW, 'sample.mov opened in some other custom editor');
+  });
+
+  test('.mp4 opens in the video preview, ahead of the built-in one', async () => {
+    // VS Code ships its own video preview for *.{mp4,webm} at priority
+    // "builtin", which "default" outranks. If MarkCopy's entry were ever
+    // downgraded, this file would silently open in the built-in player instead
+    // and every other test here would still pass.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const uri = vscode.Uri.file(path.join(dir, 'clip.mp4'));
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.mov'), uri.fsPath);
+
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.strictEqual(tab?.viewType, VIDEO_VIEW, 'clip.mp4 did not open in the MarkCopy player');
+  });
+
+  test('the video preview has its own playback settings', () => {
+    const cfg = vscode.workspace.getConfiguration('markcopy');
+    assert.strictEqual(cfg.get('video.autoplay'), false);
+    assert.strictEqual(cfg.get('video.loop'), false);
   });
 
   test('the sheet preview has its own row and column limits', () => {

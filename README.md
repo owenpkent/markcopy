@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel, PDF & STL Preview
+# MarkCopy: Rich Markdown, CSV, Excel, PDF, STL & Video Preview
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid, PDFs with a selectable text layer, and STL models in a 3D viewer, so one extension previews them all.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid, PDFs with a selectable text layer, STL models in a 3D viewer, and `.mov` / `.mp4` video in a player you can grab a frame from, so one extension previews them all.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -43,6 +43,8 @@ Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that
 | Copy a spreadsheet range as Markdown     |    No    |            No             | **Yes**  |
 | PDF preview built in                     |    No    |            No             | **Yes**  |
 | STL 3D model preview                     |    No    |            No             | **Yes**  |
+| QuickTime (.mov) video preview           |    No    |            No             | **Yes**  |
+| Copy a video frame as PNG                |    No    |            No             | **Yes**  |
 
 ## Why it exists
 
@@ -77,6 +79,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
 - **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, PDF, and STL.
 - **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
+- **Video preview with frame grabs.** Open a `.mov`, `.mp4`, or `.m4v` and it plays inline with full transport controls, rather than opening as binary or not at all: VS Code ships no preview for QuickTime files. Right-click for **Copy Frame as PNG** and **Save Frame as PNG…**, so a still from a screen recording goes straight into a bug report. A **Playback** submenu sets looping and speed, `,` and `.` step a frame at a time to line the shot up, and a file VS Code cannot decode (ProRes, DNxHD, most HEVC) says so and offers to hand it to your default player. See [Video preview](#video-preview).
 - **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
@@ -90,7 +93,7 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 ## Getting started
 
 1. Install the extension (see [Install](#install)).
-2. Open any `.md`, `.csv`, or `.tsv` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf` and `.stl` files open straight in their own viewers.)
+2. Open any `.md`, `.csv`, or `.tsv` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf`, `.stl`, and video files open straight in their own viewers.)
 3. **Right-click inside the preview.** The menu options change based on whether you clicked a code block, table, diagram, plain block, or a text selection.
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a PDF file.
@@ -127,6 +130,8 @@ Local images in the document render automatically, and the right-click menu's **
 | `markcopy.pdf.browserPath` | string                                 | `""`      | Path to the Chrome, Edge, or Chromium executable used to render the PDF. Empty detects one automatically.                                                                                     |
 | `markcopy.stl.showGrid`    | boolean                                | `true`    | Show a grid under the model in the STL preview.                                                                                                                                               |
 | `markcopy.stl.meshColor`   | string                                 | `#8ab4f8` | Color of the mesh material in the STL preview.                                                                                                                                                |
+| `markcopy.video.autoplay`  | boolean                                | `false`   | Start playing as soon as a video preview opens. Autoplay always starts muted, the only kind a browser engine will start without a click.                                                      |
+| `markcopy.video.loop`      | boolean                                | `false`   | Repeat a video when it reaches the end. Also toggled from the preview's right-click **Playback** menu.                                                                                        |
 
 ## Install
 
@@ -189,6 +194,24 @@ Corrupt and hostile files are rejected rather than loaded: a binary STL whose he
 
 There are no copy actions in this viewer, by design: an STL is a triangle soup with no text, tables, or images to put on a clipboard.
 
+## Video preview
+
+MarkCopy registers as the editor for `.mov`, `.mp4`, and `.m4v`, so a video opens as a player instead of as binary. VS Code's built-in preview covers `.mp4` and `.webm` only, and nothing at all opens a QuickTime `.mov`, which is what a Mac screen recording, a phone clip, and most camera footage arrive as.
+
+The player has the standard transport controls plus a few shortcuts: **space** plays and pauses wherever the focus is, **`,`** and **`.`** step back and forward roughly a frame, **m** mutes, **f** goes fullscreen. A readout under the video gives the file name, pixel dimensions, duration, and size.
+
+Right-click for the copy actions:
+
+- **Copy Frame as PNG** puts the frame currently on screen on the clipboard at the video's true resolution, not the on-screen size.
+- **Save Frame as PNG…** writes it to disk, defaulting to the video's own folder with the timecode in the name (`clip-1m23.400s.png`), so successive grabs never overwrite each other.
+- **Copy as** gives the file name or full path.
+- **Playback** sets looping (persisted to `markcopy.video.loop`) and speed from 0.25x to 2x.
+- **Preferences → Theme** shares the setting with every other MarkCopy preview.
+
+Unlike the PDF and STL viewers, the file is streamed rather than read: the webview is handed a resource URI and the player pulls ranges off disk as it plays, so a multi-gigabyte clip opens as fast as a small one and costs no more memory. Nothing is fetched over the network.
+
+**On codecs.** QuickTime is a container, not a codec. VS Code's Chromium decodes H.264 video with AAC audio, which covers screen recordings, phone footage, and most `.mov` files you are handed. It cannot decode ProRes, DNxHD, or (on most builds) HEVC, which is what a `.mov` straight out of a professional camera or editor usually holds. Those show a message naming the likely cause and an **Open in Default App** button, rather than a black rectangle.
+
 ## Documentation
 
 - [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
@@ -207,7 +230,8 @@ npm run watch       # rebuild on change
 npm test            # vitest: unit tests plus the webview E2E suite
 npm run test:integration   # runs the extension inside a real VS Code
 # press F5 in VS Code to launch the Extension Development Host; it opens this
-# repo, so sample.md, sample.csv, sample.pdf, sample.xlsx, and sample.stl are
+# repo, so sample.md, sample.csv, sample.pdf, sample.xlsx, sample.stl, and
+# sample.mov are
 # ready to preview
 ```
 

@@ -16,6 +16,7 @@ import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { XlsxEditorProvider } from './xlsxEditor';
 import { StlEditorProvider } from './stlEditor';
+import { VideoEditorProvider } from './videoEditor';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -77,6 +78,18 @@ export function activate(context: vscode.ExtensionContext): void {
       new StlEditorProvider(context),
       {
         supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Video files open in the MarkCopy video preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      VideoEditorProvider.viewType,
+      new VideoEditorProvider(context),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        // Without this, switching tabs tears the webview down and playback
+        // restarts from zero on the way back.
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),

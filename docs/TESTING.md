@@ -32,6 +32,7 @@ Its blind spots are jsdom's: no layout (scroll sync runs against a synthetic one
    - [sample.csv](../sample.csv) (repo root) exercises the CSV grid: quoted commas, escaped quotes, a newline inside a cell, currency/percent/negative numbers, a ragged row, and non-ASCII text.
    - `sample.pdf` (repo root, gitignored): generate it once with `node scripts/make-sample-pdf.js`. Twelve pages, each labeled with its page number, so the page indicator and go-to-page are easy to eyeball.
    - [sample.stl](../sample.stl) (repo root) exercises the STL viewer: a 12-triangle binary unit cube, small enough that a wrong scale, a mis-fitted camera, or a grid drawn in the wrong plane is obvious at a glance.
+   - [sample.mov](../sample.mov) (repo root) exercises the video player: two seconds of the ffmpeg test pattern with a 440 Hz tone, H.264/AAC in a QuickTime container at 320x240, 15fps. The moving pattern makes a wrong frame grab obvious, and the tone makes a muted-autoplay regression audible. Regenerate with `ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -f lavfi -i sine=frequency=440:duration=2 -c:v libx264 -pix_fmt yuv420p -profile:v baseline -c:a aac -shortest sample.mov`.
 3. To inspect a webview while testing, run **Developer: Open Webview Developer Tools** from the Command Palette.
 
 Work through the checklists below. A **patch** release needs the sections touched by the change plus the smoke rows marked ★. A **minor or major** release needs the full pass.
@@ -251,6 +252,48 @@ The guards here are what stop a crafted file hanging the window, so these are wo
 - [ ] An 84-byte file of `0xFF` is refused the same way, promptly, with no memory spike. Build one with `node -e "require('fs').writeFileSync('bad.stl', Buffer.alloc(84, 0xff))"`.
 - [ ] An empty `.stl` reports that it received no data, rather than blaming the file's format.
 - [ ] Right-click the tab -> **Reopen Editor With...** -> a text or hex editor still opens the raw bytes.
+
+## Video player
+
+Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with a tone, so a frozen frame, a silent track, and a wrong grab are all visible or audible at once.
+
+### Loading and playback
+
+- [ ] ★ The file opens in MarkCopy's player, not as binary and not in VS Code's built-in preview, and the first frame is on screen.
+- [ ] ★ A `.mp4` copy of the same file also opens in MarkCopy's player, not the built-in one. (Both claim `.mp4`; MarkCopy's `"default"` priority is what wins, and only this check notices if that changes.)
+- [ ] The readout under the video gives the file name, `320x240`, `0:02`, and a size in KB.
+- [ ] Play, pause, seek, and volume all work from the control bar, and the tone is audible.
+- [ ] Clicking the picture itself toggles play/pause; clicking the control bar does not do it twice.
+- [ ] The video is letterboxed and fully visible at any pane width, and never pushes the controls off-screen. Try a very narrow split and a very short one.
+- [ ] Switching to another tab and back keeps the playback position instead of restarting.
+
+### Keyboard
+
+- [ ] **Space** plays and pauses without first clicking a control.
+- [ ] **`,`** and **`.`** step backward and forward by about a frame while paused.
+- [ ] **m** mutes and unmutes; **f** enters fullscreen and **Esc** leaves it.
+
+### Frame grabs
+
+- [ ] ★ Right-click -> **Copy Frame as PNG**, then paste into Paint or a document: you get the frame that was on screen, at 320x240, not a black rectangle and not the on-screen size.
+- [ ] ★ Right-click -> **Save Frame as PNG…** offers a name like `sample-01.234s.png` in the video's own folder, and the saved file matches the frame.
+- [ ] Grab two frames a step apart: the suggested names differ, so neither overwrites the other.
+- [ ] **Copy as** -> **File Name** and **Full Path** put the expected text on the clipboard.
+
+### Playback menu and settings
+
+- [ ] Right-click -> **Playback** -> **Loop** starts looping, shows a checkmark next time the menu opens, and persists to `markcopy.video.loop` in settings.
+- [ ] **Playback** -> a speed other than Normal changes the rate and shows the radio mark on reopening the menu.
+- [ ] Setting `markcopy.video.autoplay` to `true` and reopening starts playback immediately, **muted**. (An unmuted autoplay is refused by the browser engine, and would look like a broken setting.)
+- [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
+
+### Bad input and codecs
+
+- [ ] ★ A ProRes or HEVC `.mov` (or any file VS Code cannot decode) shows the "cannot play" message naming ProRes and the default player, not a black rectangle or an empty tab. Make one with `ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -c:v prores_ks prores.mov`.
+- [ ] **Open in Default App**, on that message and in the right-click menu, opens the file in the OS player.
+- [ ] A truncated or garbage `.mov` (`node -e "require('fs').writeFileSync('bad.mov', Buffer.alloc(2048, 0xff))"`) reports that it cannot be played rather than hanging or showing nothing.
+- [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
+- [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.
 
 ## Paste-target pass
 
