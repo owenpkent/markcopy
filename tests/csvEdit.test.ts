@@ -562,3 +562,84 @@ describe('parked focus', () => {
     expect(cell(0, 0).textContent).toBe('Widget');
   });
 });
+
+describe('an edit the reader walks away from', () => {
+  // `blur` carries the ordinary ways out of a cell and is tested above. These
+  // are the ways out that fire no blur at all, where the value would otherwise
+  // sit in a textarea nobody asks about again and vanish with the next render.
+  const startEditing = (value: string): void => {
+    click(cell(0, 0), 'dblclick');
+    editor()!.value = value;
+  };
+
+  it('commits a press on the page outside the grid', () => {
+    startEditing('Sprocket');
+    click(document.body);
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+    expect(editor()).toBeNull();
+  });
+
+  it('commits when the panel is hidden by a tab switch', () => {
+    startEditing('Sprocket');
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden',
+      configurable: true,
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+  });
+
+  it('commits when the webview goes away entirely', () => {
+    startEditing('Sprocket');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+  });
+
+  it('commits when focus leaves the window', () => {
+    startEditing('Sprocket');
+    window.dispatchEvent(new Event('blur'));
+    expect(commit).toHaveBeenCalledWith(1, 0, 'Sprocket');
+  });
+
+  it('leaves the edit alone while the context menu holds the keyboard', () => {
+    // The menu opens over the cell and takes the focus with it, which is not
+    // leaving the cell: the value has to still be there for the menu's own copy
+    // rows to read, and for a second Escape to discard.
+    startEditing('Sprocket');
+    editor()!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    menu.show(0, 0, [{ kind: 'item', label: 'Copy Cell', run: () => {} }]);
+    click(document.body);
+    expect(commit).not.toHaveBeenCalled();
+    expect(editor()).not.toBeNull();
+  });
+
+  it('does not commit a press that only places the caret', () => {
+    startEditing('Sprocket');
+    click(editor()!);
+    expect(commit).not.toHaveBeenCalled();
+    expect(editor()).not.toBeNull();
+  });
+
+  it('lets a column drag carry on over an open header editor', () => {
+    // The grip suppresses the focus change so the header can be widened while
+    // its own name is being typed; the safety net must not undo that.
+    click(cell(-1, 0), 'dblclick');
+    editor()!.value = 'label';
+    const grip = document.querySelector('.mc-csv-grip') as HTMLElement;
+    click(grip);
+    expect(commit).not.toHaveBeenCalled();
+    expect(editor()).not.toBeNull();
+  });
+
+  it('commits only once when a press both strands and blurs the editor', () => {
+    // Chromium moves focus to <body> as the default action of the same press
+    // this net handles, so in a real webview both paths run against one edit.
+    // jsdom performs no such default action, so the blur is dispatched by hand:
+    // what is under test is that the second path finds nothing left to do.
+    startEditing('Sprocket');
+    const open = editor()!;
+    click(document.body);
+    open.dispatchEvent(new FocusEvent('blur'));
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+});

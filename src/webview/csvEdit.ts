@@ -48,12 +48,92 @@ function dropMenuWatch(): void {
   menuWatch = undefined;
 }
 
+// How to end the open cell edit from outside it, or undefined when no cell is
+// being edited. One slot, for the same reason menuWatch is one slot: at most one
+// editor exists at a time. See endStrandedEdit for why this is needed at all.
+let closeOpenEdit: ((save: boolean) => void) | undefined;
+
+// Whether the document-level safety net below has been installed.
+let netInstalled = false;
+
+/**
+ * Commit an edit whose reader has left without the textarea ever being blurred.
+ *
+ * `blur` carries almost every way out of a cell, and where it fires it is the
+ * better signal, because it knows what took the focus. But it is not guaranteed
+ * to fire at all:
+ *
+ * - A press on something unfocusable (the padding around the grid, the
+ *   row-number gutter, the page background under a short file) moves focus in
+ *   Chromium but not in every engine, and a handler that calls preventDefault on
+ *   the way down suppresses the focus change everywhere.
+ * - A webview hidden by a tab switch is torn down without a blur.
+ *
+ * In both, the value the reader typed is sitting in a textarea nobody will ever
+ * ask about again, and removing the grid drops it. Every spreadsheet keeps that
+ * edit, so keep it.
+ */
+function endStrandedEdit(): void {
+  // Except while the context menu holds the keyboard. Right-clicking a value is
+  // not leaving the cell, and the menu's own close handler already decides that
+  // edit's fate (see watchMenu); committing from here would end the edit out
+  // from under a menu whose copy rows are still reading it.
+  if (contextMenu?.isOpen()) {
+    return;
+  }
+  closeOpenEdit?.(true);
+}
+
+/**
+ * Arm the safety net once, on the document rather than the grid, because the
+ * presses it exists to catch are the ones that land outside the grid.
+ *
+ * Deliberately on the bubble phase: the table's own mousedown handler runs
+ * first, and a press that lands on another cell is already committed by the
+ * focus change it causes. By the time this runs, `closeOpenEdit` is cleared and
+ * there is nothing left to do, so the ordinary path keeps its `relatedTarget`
+ * and this only ever sees presses that path did not handle.
+ */
+function installStrandedEditNet(): void {
+  if (netInstalled || typeof document === 'undefined') {
+    return;
+  }
+  netInstalled = true;
+
+  document.addEventListener('mousedown', (e) => {
+    const target = e.target as HTMLElement | null;
+    // A press inside the editor is placing the caret, not leaving the cell, and
+    // a press on a resize grip is a drag the header's editor deliberately
+    // survives (csvTable.ts suppresses the focus change for exactly that).
+    if (editorIn(target) || target?.classList?.contains('mc-csv-grip')) {
+      return;
+    }
+    endStrandedEdit();
+  });
+
+  // Leaving the webview entirely: another editor tab, another window, or a
+  // reload. `pagehide` rather than `unload`, which Chromium no longer fires
+  // reliably, and `visibilitychange` for the tab switch that hides the panel
+  // without unloading it.
+  window.addEventListener('blur', endStrandedEdit);
+  window.addEventListener('pagehide', endStrandedEdit);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      endStrandedEdit();
+    }
+  });
+}
+
 export function enableCsvEditing(root: ParentNode, commit: CommitCell, menu: MenuController): void {
   contextMenu = menu;
+  installStrandedEditNet();
   // Any editor that was watching the menu belonged to the grid this render is
   // replacing. Left armed, it would fire against a detached textarea and write
-  // that dead edit's value over whatever the document holds by then.
+  // that dead edit's value over whatever the document holds by then. The same
+  // goes for the safety net's handle on it: this render has already taken the
+  // textarea out of the document, so there is no longer an edit to strand.
   dropMenuWatch();
+  closeOpenEdit = undefined;
   // Only grids the renderer marked editable. A spreadsheet sheet uses this same
   // markup but is read-only, because a cell edit has nowhere to go: the document
   // behind it is a binary workbook, not the text file this writeback assumes.
@@ -388,6 +468,7 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
     }
     done = true;
     dropMenuWatch();
+    closeOpenEdit = undefined;
     const value = editor.value;
     cell.classList.remove('mc-csv-cell--editing');
     // Remove only the editor. The cell's own children are untouched underneath
@@ -407,6 +488,11 @@ function beginEdit(cell: HTMLTableCellElement, commit: CommitCell, seed?: string
       }
     }
   };
+
+  // The handle the safety net ends this edit through when no blur ever arrives.
+  // Set after `finish` exists and cleared inside it, so the slot holds an edit
+  // that is genuinely still open and nothing else.
+  closeOpenEdit = (save) => finish(save, { row: 0, col: 0 });
 
   // The stand-in for the blur that never comes while the context menu holds the
   // keyboard (see the blur handler below). No blur is coming, so the menu
