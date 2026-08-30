@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
+  applyCsvEdits,
   cellEdit,
   formatField,
   gridEdits,
   isGridOp,
   parseDelimited,
   type CsvCellEdit,
+  type GridOp,
 } from '../src/csv';
 
 // Apply an edit the way the host does, so these tests assert on the document
@@ -326,6 +328,25 @@ describe('gridEdits: columns', () => {
     ).toBe('a,b,c,\nd\ne,f,g,');
   });
 
+  // A record takes part only if it reaches the column being addressed. Rows that
+  // stop short of it have no field next to the new one, so there is nothing to
+  // shift and nothing to append: they keep their bytes.
+  it('leaves a row that stops one short of the new column alone', () => {
+    const ragged = 'a,b,c\nd,e\n';
+    expect(
+      applyAll(ragged, gridEdits(ragged, ',', 'insertColumnLeft', { line: 0, column: 2 })),
+    ).toBe('a,b,,c\nd,e\n');
+  });
+
+  it('appends to a short row only where the new column is next to a field it has', () => {
+    // Column 1 is the last field of the short row, so a column to its right does
+    // belong to it; the row of one field never reaches column 1 at all.
+    const ragged = 'a,b,c\nd,e\nf\n';
+    expect(
+      applyAll(ragged, gridEdits(ragged, ',', 'insertColumnRight', { line: 0, column: 1 })),
+    ).toBe('a,b,,c\nd,e,\nf\n');
+  });
+
   it('reaches every row of the file, not just the one addressed', () => {
     const many = Array.from({ length: 50 }, (_, i) => `${i},x`).join('\n');
     const out = applyAll(many, gridEdits(many, ',', 'insertColumnLeft', { line: 0, column: 0 }));
@@ -380,6 +401,34 @@ describe('gridEdits: columns', () => {
 
   it('does nothing to an empty document', () => {
     expect(gridEdits('', ',', 'insertColumnLeft', { line: 0, column: 0 })).toEqual([]);
+  });
+});
+
+// The host folds a very large operation into one whole-document replacement
+// rather than handing applyEdit a range per record. That is only safe if
+// applying the edits here gives byte-for-byte what applying them one at a time
+// would, so each case is checked against applyAll, which works back to front
+// from the other end and shares no code with it.
+describe('applyCsvEdits', () => {
+  const cases: Array<[string, GridOp, { line: number; column: number }]> = [
+    ['a,b,c\nd,e,f\ng,h,i\n', 'insertColumnLeft', { line: 0, column: 1 }],
+    ['a,b,c\nd,e,f\ng,h,i\n', 'insertColumnRight', { line: 0, column: 2 }],
+    ['a,b,c\nd,e,f\ng,h,i\n', 'deleteColumn', { line: 0, column: 1 }],
+    ['a,b,c\nd,e,f\ng,h,i\n', 'deleteColumn', { line: 0, column: 2 }],
+    ['a,b,c\r\nd,e,f\r\n', 'deleteRow', { line: 1, column: 0 }],
+    ['a,b,c\nd\ne,f,g', 'insertColumnRight', { line: 0, column: 1 }],
+    ['"a,1",b\n"x""y",d\n', 'insertColumnLeft', { line: 0, column: 1 }],
+  ];
+
+  for (const [text, op, ref] of cases) {
+    it(`agrees with applying ${op} one edit at a time`, () => {
+      const edits = gridEdits(text, ',', op, ref);
+      expect(applyCsvEdits(text, edits)).toBe(applyAll(text, edits));
+    });
+  }
+
+  it('returns the text untouched when there is nothing to do', () => {
+    expect(applyCsvEdits('a,b\n', [])).toBe('a,b\n');
   });
 });
 

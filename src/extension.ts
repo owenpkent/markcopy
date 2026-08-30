@@ -11,7 +11,15 @@ import {
   type PageSize,
 } from './pdfExport';
 import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
-import { cellEdit, delimiterHint, gridEdits, isGridOp, renderCsvHtml, sniffDelimiter } from './csv';
+import {
+  applyCsvEdits,
+  cellEdit,
+  delimiterHint,
+  gridEdits,
+  isGridOp,
+  renderCsvHtml,
+  sniffDelimiter,
+} from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { XlsxEditorProvider } from './xlsxEditor';
@@ -471,6 +479,13 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   update(state);
 }
 
+// How many ranges a single WorkspaceEdit is worth carrying. A grid operation
+// above this is sent as one whole-document replacement instead (see
+// applyGridOp). Comfortably above any file a reader scrolls through by hand,
+// and far below the point where the per-range bookkeeping starts to cost real
+// time.
+const MAX_GRANULAR_EDITS = 2000;
+
 // Insert or delete a whole row or column.
 //
 // Written the same way a cell edit is: the grid posts what it wants done and
@@ -506,14 +521,29 @@ async function applyGridOp(state: PreviewState, msg: Record<string, unknown>): P
   }
 
   const workspaceEdit = new vscode.WorkspaceEdit();
-  for (const edit of edits) {
-    // Every offset was measured against this same unedited text and no two of
-    // the ranges overlap, so they can all be handed over together.
+  if (edits.length > MAX_GRANULAR_EDITS) {
+    // A column operation is not bounded by markcopy.csv.maxRows: it reaches
+    // every record in the file, so a big CSV can produce hundreds of thousands
+    // of ranges, and handing all of them to applyEdit one at a time freezes the
+    // window for as long as it takes. Past this many, the same edits are folded
+    // here and go over as a single whole-document replacement. Identical text,
+    // still one undo stop; what it gives up is a fine-grained diff for the
+    // editor, on files where nobody could read one anyway.
     workspaceEdit.replace(
       doc.uri,
-      new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
-      edit.text,
+      new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)),
+      applyCsvEdits(text, edits),
     );
+  } else {
+    for (const edit of edits) {
+      // Every offset was measured against this same unedited text and no two of
+      // the ranges overlap, so they can all be handed over together.
+      workspaceEdit.replace(
+        doc.uri,
+        new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
+        edit.text,
+      );
+    }
   }
   const applied = await vscode.workspace.applyEdit(workspaceEdit);
   if (!applied) {

@@ -545,9 +545,20 @@ describe('parked focus', () => {
     expect(cell(0, 0).textContent).toBe('Gadget');
   });
 
-  it('leaves focus alone when the parked square is gone', () => {
+  it('falls back to the nearest surviving row when the parked square is gone', () => {
+    // Deleting the last row of a file leaves nothing below to slide up, so the
+    // square itself goes. Landing on the row that is now last keeps the reader
+    // in the grid; dropping them on <body> would leave the arrow keys dead.
     parkFocus({ line: 9, column: 0 });
     renderGrid();
-    expect(document.activeElement).toBe(document.body);
+    expect(document.activeElement).toBe(cell(1, 0));
+  });
+
+  it('clamps to the widest column the surviving row has', () => {
+    // The same, for a delete that took the column rather than the row.
+    parkFocus({ line: 1, column: 5 });
+    renderGrid('name\nWidget\nGadget');
+    expect(document.activeElement).toBe(cell(0, 0));
+    expect(cell(0, 0).textContent).toBe('Widget');
   });
 });

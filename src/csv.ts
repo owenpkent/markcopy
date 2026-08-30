@@ -448,17 +448,39 @@ function columnEdits(
   // The index the new empty field takes; every field from there on shifts right.
   const at = op === 'insertColumnLeft' ? column : column + 1;
   return records.flatMap((record) => {
-    // Past the end of a short row there is nothing to shift: its trailing
-    // columns are already empty, and padding it out with delimiters would
-    // rewrite rows the reader never touched. The row that is exactly `at` wide
-    // is the exception, and is how a column gets appended to the right of the
-    // last one at all: there the field is made by a trailing delimiter.
-    if (at > record.spans.length) {
+    // A record takes part only if it reaches the column being addressed, the
+    // same test deleteColumn makes above. A short row that stops before it has
+    // nothing to shift and no field next to the new one, and padding it out
+    // with delimiters would rewrite a row the reader never touched.
+    if (column >= record.spans.length) {
       return [];
     }
+    // Inserting to the right of a record's last field has nothing to shift
+    // either, but the new column does belong to this record, so it is made by a
+    // trailing delimiter. That is also how a column is appended past the last
+    // one in the file at all. `insertColumnLeft` never lands here: it puts the
+    // new field at `column` itself, which the test above just proved exists.
     const offset = at < record.spans.length ? record.spans[at].start : recordEnd(record);
     return [{ start: offset, end: offset, text: delimiter }];
   });
+}
+
+/**
+ * Apply edits that are non-overlapping and in document order, which is what
+ * `gridEdits` returns, and hand back the resulting text.
+ *
+ * The host uses this to fold an operation too large to hand over range by range
+ * into a single whole-document replacement; the tests use it to check what an
+ * operation actually produces.
+ */
+export function applyCsvEdits(text: string, edits: readonly CsvCellEdit[]): string {
+  let out = '';
+  let at = 0;
+  for (const edit of edits) {
+    out += text.slice(at, edit.start) + edit.text;
+    at = edit.end;
+  }
+  return out + text.slice(at);
 }
 
 export interface CsvHtmlOptions {
