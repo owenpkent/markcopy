@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  describeCodec,
   describeMediaError,
   formatBytes,
   formatDuration,
   frameFileName,
+  proxyDisabled,
+  proxyFailed,
+  proxyOffer,
+  proxyProgress,
+  proxyUnavailable,
   timecodeSlug,
 } from '../src/webview/videoInfo';
 
@@ -110,5 +116,62 @@ describe('describeMediaError', () => {
   it('distinguishes a damaged file from an unsupported one', () => {
     expect(describeMediaError(3, 'clip.mov')).toMatch(/damaged/);
     expect(describeMediaError(2, 'clip.mov')).toMatch(/read from disk/);
+  });
+});
+
+describe('the messages behind an unplayable file', () => {
+  it('names the codec when a probe found one', () => {
+    // "It supports H.264; ProRes, DNxHD, and most HEVC need your default player"
+    // makes the reader work out which of those they have. A probe already knows.
+    expect(describeCodec('clip.mov', 'ProRes 4444')).toBe(
+      'clip.mov is ProRes 4444, which VS Code cannot play.',
+    );
+  });
+
+  it('falls back to naming nothing rather than guessing', () => {
+    expect(describeCodec('clip.mov', '')).toBe('VS Code cannot play clip.mov.');
+  });
+
+  it('says the original is safe when offering to transcode', () => {
+    // The one thing someone handed an unexpected "build a copy" button wants to
+    // know before pressing it.
+    expect(proxyOffer('clip.mov', 'ProRes 4444')).toContain('without touching the original');
+  });
+
+  it('offers the free way out before the one that costs an install', () => {
+    const message = proxyUnavailable('clip.mov');
+    expect(message.indexOf('default player')).toBeLessThan(message.indexOf('Install ffmpeg'));
+  });
+
+  it('does not push ffmpeg at someone who turned transcoding off', () => {
+    const message = proxyDisabled('clip.mov');
+    expect(message).not.toContain('Install');
+    // Named so the way back is findable.
+    expect(message).toContain('markcopy.video.transcode');
+  });
+
+  it('keeps what ffmpeg itself said about a failure', () => {
+    expect(proxyFailed('clip.mov', 'Unknown encoder libx264')).toContain('Unknown encoder libx264');
+  });
+
+  it('still says something useful when ffmpeg said nothing', () => {
+    expect(proxyFailed('clip.mov', '   ')).toBe(
+      'ffmpeg could not build a playable copy of clip.mov.',
+    );
+  });
+
+  it('reports a percentage only against a duration it has', () => {
+    expect(proxyProgress(2.5, 5)).toBe('Building a playable copy… 50%');
+  });
+
+  it('reports elapsed output time when the container gave no duration', () => {
+    // A percentage against an unknown total either sticks at 0 or runs past 100.
+    expect(proxyProgress(83, 0)).toBe('Building a playable copy… 1:23 in');
+    expect(proxyProgress(0, 0)).toBe('Building a playable copy…');
+  });
+
+  it('never reports past the end', () => {
+    // ffmpeg's last position can overshoot a duration the container rounded.
+    expect(proxyProgress(5.2, 5)).toBe('Building a playable copy… 100%');
   });
 });

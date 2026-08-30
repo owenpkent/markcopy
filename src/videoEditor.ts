@@ -1,6 +1,20 @@
 import * as vscode from 'vscode';
+import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
+import {
+  codecLabel,
+  ensureProxyDir,
+  findFfmpeg,
+  probeSource,
+  proxyDir,
+  proxyFileName,
+  removeQuietly,
+  TranscodeCancelled,
+  transcode,
+  type FfmpegTools,
+  type SourceProbe,
+} from './videoProxy';
 
 // A read-only custom editor that plays QuickTime (.mov) and MP4 (.mp4/.m4v)
 // files in a webview, with MarkCopy's copy actions on the current frame.
@@ -32,9 +46,13 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     // case for this editor, and without its directory here the element would be
     // handed a URI the webview refuses to serve.
     const fileRoot = vscode.Uri.joinPath(document.uri, '..');
+    // Where an ffmpeg-built proxy would go. Registered up front, before any
+    // proxy exists, because this list is fixed at the moment the element asks
+    // for a URI: a root added later would come too late for the file it is for.
+    const proxyRoot = vscode.Uri.file(proxyDir());
     webview.options = {
       enableScripts: true,
-      localResourceRoots: [mediaRoot, fileRoot],
+      localResourceRoots: [mediaRoot, fileRoot, proxyRoot],
     };
 
     const nonce = getNonce();
@@ -47,6 +65,10 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
       .get<string>('theme', 'auto');
     webview.html = this.html(webview, asUri('video.js'), asUri('preview.css'), nonce, theme);
 
+    const proxy = new ProxySession(document.uri, webview, (built) =>
+      this.sendLoad(webview, document.uri, built),
+    );
+
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
         await this.sendLoad(webview, document.uri);
@@ -56,6 +78,14 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         // The escape hatch for a codec VS Code's Chromium cannot decode
         // (ProRes, DNxHD, most HEVC), which is a common shape for a .mov.
         await vscode.env.openExternal(document.uri);
+      } else if (msg?.type === 'proxyRequest') {
+        // The element gave up on the file. Whether that is the end of the story
+        // depends on things only the host can see: the setting, and ffmpeg.
+        await proxy.offer();
+      } else if (msg?.type === 'proxyStart') {
+        await proxy.build();
+      } else if (msg?.type === 'proxyCancel') {
+        proxy.cancel();
       } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
         // Persist a setting changed from the viewer's menu (theme, loop) at the
         // scope where it is defined, matching the other previews.
@@ -74,11 +104,27 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         .get<string>('theme', 'auto');
       void webview.postMessage({ type: 'setTheme', value });
     });
-    panel.onDidDispose(() => themeListener.dispose());
+    panel.onDidDispose(() => {
+      themeListener.dispose();
+      // The proxy is scratch, not an export: nothing offers to keep it, so the
+      // panel closing is what it was scoped to.
+      void proxy.dispose();
+    });
   }
 
-  /** Point the webview at the file and tell it what it is about to play. */
-  private async sendLoad(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
+  /**
+   * Point the webview at something playable and tell it what it is about to play.
+   *
+   * `built` swaps the source for an ffmpeg proxy while leaving every other field
+   * describing the original, because that is what the reader opened: the name in
+   * the status line, the path its copy actions yield, and the size on disk are
+   * all facts about their file, not about the scratch copy standing in for it.
+   */
+  private async sendLoad(
+    webview: vscode.Webview,
+    uri: vscode.Uri,
+    built?: BuiltProxy,
+  ): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     // Only for the readout. A file that cannot be stat'd may still play, so a
     // failure here drops the size rather than the video.
@@ -88,12 +134,13 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     );
     void webview.postMessage({
       type: 'load',
-      src: webview.asWebviewUri(uri).toString(),
+      src: webview.asWebviewUri(built ? vscode.Uri.file(built.path) : uri).toString(),
       name: basename(uri),
       path: uri.fsPath,
       size,
       autoplay: cfg.get<boolean>('video.autoplay', false),
       loop: cfg.get<boolean>('video.loop', false),
+      proxyNote: built?.note,
     });
   }
 
@@ -194,6 +241,42 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     cursor: pointer;
   }
   .mc-video-button:hover { background: var(--vscode-button-hoverBackground, #0a6ad1); }
+  .mc-video-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+  /* The transcode's progress. Fixed width rather than a share of the viewport:
+     a bar that resizes with the panel reads as motion, and this one is already
+     moving for a reason. */
+  .mc-video-progress {
+    width: 260px;
+    max-width: 80%;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    /* A neutral track rather than a faded copy of the fill colour: opacity on
+       the track would fade the fill inside it too, and mid-grey at this alpha
+       reads as a groove against both the light and the dark viewport. */
+    background: rgba(128, 128, 128, 0.35);
+  }
+  .mc-video-progress-fill {
+    height: 100%;
+    width: 0;
+    background: var(--vscode-progressBar-background, #0969da);
+    transition: width 120ms linear;
+  }
+  /* A container with no duration gives no percentage to show, so the bar paces
+     instead of claiming a position it cannot compute. */
+  .mc-video-progress-fill--waiting {
+    width: 40%;
+    animation: mc-video-pace 1.4s ease-in-out infinite;
+  }
+  @keyframes mc-video-pace {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mc-video-progress-fill { transition: none; }
+    .mc-video-progress-fill--waiting { animation: none; width: 100%; opacity: 0.5; }
+  }
 
   /* Both boxes above set display:flex on an id selector, which outranks the
      user agent's [hidden] { display: none } and would leave the stage and the
@@ -213,6 +296,202 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+  }
+}
+
+/** A finished proxy: where it is, and how the status line should describe it. */
+interface BuiltProxy {
+  path: string;
+  note: string;
+}
+
+// How often the encode's position is pushed to the webview. ffmpeg reports about
+// twice a second; a 4K master reports just as often and would otherwise fill the
+// message channel with numbers nobody can read that fast.
+const PROGRESS_INTERVAL_MS = 250;
+
+/**
+ * One panel's attempt to make an unplayable file playable.
+ *
+ * Owns everything with a lifetime: the running ffmpeg, the file it is writing,
+ * and the reader's place in the conversation about it. All of that is scoped to
+ * the panel, which is why it is an object per panel rather than module state.
+ */
+class ProxySession {
+  private abort: AbortController | undefined;
+  private built: BuiltProxy | undefined;
+  private running = false;
+  // Both looked up once and kept for the panel's life. Under `auto`, `offer`
+  // hands straight over to `build`, and without these the PATH walk and the
+  // ffprobe run would each happen twice for one transcode. The probe is also
+  // what lets a cancelled encode come back offering to build the same named
+  // codec, rather than falling back to the generic message.
+  private tools: FfmpegTools | undefined;
+  private probed: SourceProbe | undefined;
+
+  constructor(
+    private readonly source: vscode.Uri,
+    private readonly webview: vscode.Webview,
+    private readonly play: (built: BuiltProxy) => Promise<void>,
+  ) {}
+
+  /**
+   * Answer the viewer's question: can this file be rescued, and should we?
+   *
+   * Under `auto` this goes straight on to the encode. The setting exists because
+   * "straight on" is the wrong default for someone whose folder is 4K camera
+   * masters, where the honest answer is a dialogue rather than a ten-minute
+   * spinner they did not ask for.
+   */
+  async offer(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('markcopy', this.source);
+    const mode = cfg.get<string>('video.transcode', 'auto');
+    if (mode === 'off') {
+      this.post({ state: 'unavailable', reason: 'disabled' });
+      return;
+    }
+    const tools = await this.find(cfg);
+    if (!tools) {
+      this.post({ state: 'unavailable', reason: 'missing' });
+      return;
+    }
+    if (mode === 'ask') {
+      // Probe first, so the offer can name the codec rather than describe the
+      // whole family of things it might be.
+      this.post({ state: 'ask', codec: codecLabel(await this.probe(tools.ffprobe)) });
+      return;
+    }
+    await this.build();
+  }
+
+  /** Encode the proxy, reporting progress, and play it when it lands. */
+  async build(): Promise<void> {
+    if (this.running) {
+      return;
+    }
+    if (this.built) {
+      // Already have one; a second press is a request to watch it, not to spend
+      // the encode again.
+      await this.play(this.built);
+      return;
+    }
+
+    const cfg = vscode.workspace.getConfiguration('markcopy', this.source);
+    const tools = await this.find(cfg);
+    if (!tools) {
+      this.post({ state: 'unavailable', reason: 'missing' });
+      return;
+    }
+
+    this.running = true;
+    this.abort = new AbortController();
+    const abort = this.abort;
+    try {
+      const probe = await this.probe(tools.ffprobe);
+      this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec });
+
+      const dir = await ensureProxyDir();
+      const output = join(dir, proxyFileName(basename(this.source)));
+
+      let lastPost = 0;
+      await transcode({
+        ffmpeg: tools.ffmpeg,
+        input: this.source.fsPath,
+        output,
+        probe,
+        signal: abort.signal,
+        onProgress: (seconds) => {
+          const now = Date.now();
+          if (now - lastPost < PROGRESS_INTERVAL_MS) {
+            return;
+          }
+          lastPost = now;
+          this.post({ state: 'running', seconds, durationSec: probe.durationSec });
+        },
+      });
+
+      this.built = {
+        path: output,
+        // Said in the status line for as long as the proxy is on screen. The
+        // checkerboard half matters more than it looks: a frame grabbed from a
+        // composited proxy has the board baked into it, and the reader has to
+        // know that before pasting it into a bug report.
+        note: probe.hasAlpha
+          ? 'ffmpeg preview copy · alpha on checkerboard'
+          : 'ffmpeg preview copy',
+      };
+      await this.play(this.built);
+    } catch (err) {
+      if (err instanceof TranscodeCancelled) {
+        // Back to the offer rather than to an error: the reader stopped this,
+        // and may well want it again once they know how long it takes. The
+        // probe is already in hand, so the offer still names the codec.
+        this.post({ state: 'ask', codec: codecLabel(await this.probe(tools.ffprobe)) });
+      } else {
+        this.post({ state: 'failed', detail: err instanceof Error ? err.message : String(err) });
+      }
+    } finally {
+      this.running = false;
+      this.abort = undefined;
+    }
+  }
+
+  cancel(): void {
+    this.abort?.abort();
+  }
+
+  async dispose(): Promise<void> {
+    this.abort?.abort();
+    if (this.built) {
+      await removeQuietly(this.built.path);
+      this.built = undefined;
+    }
+  }
+
+  /**
+   * The ffmpeg for this panel, found once.
+   *
+   * Only a successful lookup sticks. A failed one is deliberately not
+   * remembered: "no ffmpeg" is the answer most likely to stop being true while
+   * the panel is open, because the message the reader is looking at is the one
+   * telling them to go and install it.
+   */
+  private async find(cfg: vscode.WorkspaceConfiguration): Promise<FfmpegTools | undefined> {
+    this.tools ??= await findFfmpeg(cfg.get<string>('video.ffmpegPath', ''));
+    return this.tools;
+  }
+
+  /**
+   * What the source is, or a blank answer.
+   *
+   * A probe that fails is not a reason to refuse the encode: every field it
+   * yields is an optimisation (the codec in the message, the total behind the
+   * percentage, the checkerboard behind an alpha channel), and `transcodeArgs`
+   * already treats an empty probe as "take the plain path".
+   */
+  private async probe(ffprobe: string): Promise<SourceProbe> {
+    if (this.probed) {
+      return this.probed;
+    }
+    try {
+      this.probed = await probeSource(ffprobe, this.source.fsPath);
+    } catch {
+      this.probed = {
+        durationSec: 0,
+        width: 0,
+        height: 0,
+        frameRate: 0,
+        hasAlpha: false,
+        hasAudio: false,
+        codec: '',
+        profile: '',
+      };
+    }
+    return this.probed;
+  }
+
+  private post(msg: Record<string, unknown>): void {
+    void this.webview.postMessage({ type: 'proxy', ...msg });
   }
 }
 
