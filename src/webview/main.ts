@@ -4,9 +4,13 @@ import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
-import { enableCsvEditing, editorIn } from './csvEdit';
+import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
+// Type only: the host owns the grid operations, and naming them in one place
+// keeps the menu and the writeback from drifting apart. Erased at build time, so
+// no host code follows it into the webview bundle.
+import type { GridOp } from '../csv';
 
 // Heavy libraries are loaded lazily on first use so the initial webview bundle
 // stays small. Each getter caches the module's default export after the first
@@ -51,6 +55,12 @@ let currentTheme = 'auto';
 let currentSyncScroll = true;
 let currentAutoPreview = true;
 let currentMath = true;
+// The document version the grid on screen was drawn from. Only the context menu
+// reads it, and only while building itself, which is why a global is safe here
+// where the cell editor deliberately closes over its own render version instead:
+// a menu is always built against the grid on screen, while an open editor can
+// outlive the render that made it.
+let currentDocVersion = 0;
 
 // Whether the surface on screen participates in scroll sync. Separate from
 // currentSyncScroll, which is the user's setting: the menu shows the setting,
@@ -162,6 +172,7 @@ async function render(
   surfaceSyncs = supportsSync;
   currentAutoPreview = autoPreview;
   currentMath = math;
+  currentDocVersion = docVersion;
   // Defense in depth. The host renders Markdown with `html: true`, so raw HTML
   // in the document reaches us untrusted. The webview CSP already blocks script
   // execution (script-src 'nonce-...', no unsafe-inline), but sanitizing here
@@ -678,6 +689,70 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
   return specific;
 }
 
+// Row and column edits for the CSV grid, offered on whatever the pointer is
+// over: a data cell, a column header, or the row-number gutter.
+//
+// Absent for a spreadsheet sheet, which renders this same markup read-only (see
+// data-mc-editable in src/csv.ts), and absent while a cell editor is open: the
+// re-render one of these causes would take the half-typed value down with it,
+// and the reader can close the editor and right-click again.
+function buildGridEntries(target: HTMLElement): MenuEntry[] {
+  const grid = target.closest<HTMLTableElement>('table.mc-csv[data-mc-editable="1"]');
+  if (!grid || editorIn(target)) {
+    return [];
+  }
+  const ref = gridRefFrom(target);
+  if (!ref) {
+    return [];
+  }
+  // Read now, while the menu is built against this grid, rather than when a row
+  // is clicked: the ref above describes *this* render, so if another one lands
+  // in between, the host should refuse the edit rather than apply it to a grid
+  // the reader never saw.
+  const docVersion = currentDocVersion;
+  // Every one of these moves the grid under the reader rather than moving the
+  // reader: after an insert above, the blank row is the square they were on;
+  // after a delete, the row below has slid up into it. So they all park focus on
+  // the same square and let the re-render seat them there.
+  const focus = { line: ref.line, column: Math.max(ref.column, 0) };
+  const run = (op: GridOp) => (): void => {
+    parkFocus(focus);
+    vscode.postMessage({ type: 'gridOp', op, line: ref.line, column: ref.column, docVersion });
+  };
+
+  const insert: MenuEntry[] = [
+    { kind: 'item', label: 'Row Above', run: run('insertRowAbove') },
+    { kind: 'item', label: 'Row Below', run: run('insertRowBelow') },
+  ];
+  const remove: MenuEntry[] = [{ kind: 'item', label: 'Row', run: run('deleteRow') }];
+  // The gutter addresses a row but no column, so from there only the row half of
+  // each menu means anything.
+  if (ref.column >= 0) {
+    insert.push(
+      { kind: 'item', label: 'Column Left', run: run('insertColumnLeft') },
+      { kind: 'item', label: 'Column Right', run: run('insertColumnRight') },
+    );
+    // Taking the only column out would leave a file of blank lines, which renders
+    // as an empty document: there would be no column left to right-click to get
+    // back. Deleting the last row is offered, because an empty file still shows
+    // the grid's own chrome and Ctrl+Z is right there.
+    if (columnCount(grid) > 1) {
+      remove.push({ kind: 'item', label: 'Column', run: run('deleteColumn') });
+    }
+  }
+
+  return [
+    { kind: 'submenu', label: 'Insert', entries: insert },
+    { kind: 'submenu', label: 'Delete', entries: remove },
+  ];
+}
+
+// Data columns in the grid. The renderer emits one <col> per column plus one for
+// the row-number gutter (src/csv.ts).
+function columnCount(grid: HTMLTableElement): number {
+  return Math.max(0, grid.querySelectorAll('colgroup > col').length - 1);
+}
+
 function buildMenu(target: HTMLElement): MenuEntry[] {
   const entries: MenuEntry[] = [];
   // A CSV cell being edited is a text field, not a slice of the document, so the
@@ -691,6 +766,12 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   const copies = cellEditor ? buildCellEditorEntries(cellEditor) : buildCopyEntries(target);
   if (copies.length > 0) {
     entries.push(...copies, { kind: 'divider' });
+  }
+
+  // Row and column edits, when the pointer is over a grid that can take them.
+  const structure = buildGridEntries(target);
+  if (structure.length > 0) {
+    entries.push(...structure, { kind: 'divider' });
   }
 
   // Undo any dragging done to the CSV grid's columns. Only offered on a grid the

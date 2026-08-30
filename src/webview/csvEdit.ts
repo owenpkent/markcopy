@@ -14,7 +14,7 @@
 import type { MenuController } from './menu';
 
 /** Which cell the reader is on. Survives the re-render caused by a commit. */
-interface CellRef {
+export interface CellRef {
   line: number;
   column: number;
 }
@@ -260,6 +260,46 @@ function cellFrom(target: EventTarget | null): HTMLTableCellElement | undefined 
  */
 export function editorIn(node: EventTarget | Node | null): HTMLTextAreaElement | undefined {
   return (node as HTMLElement)?.closest?.<HTMLTextAreaElement>(EDITOR_SELECTOR) ?? undefined;
+}
+
+/**
+ * The row and column the pointer is over, for an edit that takes a whole row or
+ * column rather than one field.
+ *
+ * Unlike the cell lookup the grid uses internally, this also answers for the
+ * row-number gutter, which addresses a row but no column: `column` comes back as
+ * -1 there, and the caller offers only the operations that need no column.
+ * Exported because the context menu is built in main.ts, over whatever was
+ * right-clicked.
+ */
+export function gridRefFrom(target: EventTarget | null): CellRef | undefined {
+  const cell = (target as HTMLElement)?.closest?.<HTMLTableCellElement>('td,th');
+  const row = cell?.parentElement as HTMLTableRowElement | null;
+  if (!cell || !row?.dataset.recordLine) {
+    return undefined;
+  }
+  const line = Number(row.dataset.recordLine);
+  if (Number.isNaN(line)) {
+    return undefined;
+  }
+  if (cell.hasAttribute('data-mc-ignore')) {
+    return { line, column: -1 };
+  }
+  const column = dataCells(row).indexOf(cell);
+  return column < 0 ? undefined : { line, column };
+}
+
+/**
+ * Leave the reader on `ref` through the re-render a host-side edit will cause.
+ *
+ * Inserting or deleting a row or column moves the grid under the reader rather
+ * than moving the reader: the square they were standing on is the one they
+ * should still be standing on afterwards, whatever has slid into it. Focus is
+ * remembered by (line, column) across renders, so saying so is the whole of it.
+ */
+export function parkFocus(ref: CellRef): void {
+  focused = ref;
+  restoring = true;
 }
 
 /**

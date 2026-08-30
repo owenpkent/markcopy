@@ -11,7 +11,7 @@ import {
   type PageSize,
 } from './pdfExport';
 import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
-import { cellEdit, delimiterHint, renderCsvHtml, sniffDelimiter } from './csv';
+import { cellEdit, delimiterHint, gridEdits, isGridOp, renderCsvHtml, sniffDelimiter } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { XlsxEditorProvider } from './xlsxEditor';
@@ -296,6 +296,8 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         void exportPdf(context, state.docUri, msg.bodyHtml);
       } else if (msg?.type === 'editCell') {
         void applyCellEdit(state, msg);
+      } else if (msg?.type === 'gridOp') {
+        void applyGridOp(state, msg);
       }
     },
     undefined,
@@ -466,6 +468,60 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   }
   // Re-render at once rather than waiting out the debounce, so the grid's notion
   // of the document version catches up before the next cell edit is committed.
+  update(state);
+}
+
+// Insert or delete a whole row or column.
+//
+// Written the same way a cell edit is: the grid posts what it wants done and
+// waits for the document to change, so the file stays authoritative and the
+// operation lands in the editor's own undo stack. One WorkspaceEdit carries
+// every replacement, so a column that touches ten thousand rows is still a
+// single change and a single Ctrl+Z.
+async function applyGridOp(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
+  const op = msg.op;
+  const line = Number(msg.line);
+  const column = Number(msg.column);
+  if (!isGridOp(op) || !Number.isInteger(line) || !Number.isInteger(column)) {
+    return;
+  }
+
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
+    return;
+  }
+  if (typeof msg.docVersion === 'number' && !addressable(state, doc, msg.docVersion)) {
+    return; // stale grid; the re-render already on its way carries the truth
+  }
+
+  const text = doc.getText();
+  // The document's own line ending, so a new row does not introduce the other
+  // kind into a file that has been consistent until now.
+  const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+  const edits = gridEdits(text, csvDelimiter(doc, text), op, { line, column }, eol);
+  if (edits.length === 0) {
+    return;
+  }
+
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  for (const edit of edits) {
+    // Every offset was measured against this same unedited text and no two of
+    // the ranges overlap, so they can all be handed over together.
+    workspaceEdit.replace(
+      doc.uri,
+      new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)),
+      edit.text,
+    );
+  }
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) {
+    void vscode.window.showWarningMessage('MarkCopy: could not edit this file.');
+    return;
+  }
+  // Re-render at once rather than waiting out the debounce, so the grid stops
+  // addressing rows by numbers this edit has just moved.
   update(state);
 }
 
