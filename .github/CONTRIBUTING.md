@@ -86,13 +86,13 @@ On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, and `sample.stl` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, the video player, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, `sample.stl`, and `sample.mov` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
 1. Run `npm run watch` (or `npm run compile` once).
 2. Press **F5** in VS Code. This launches the Extension Development Host with MarkCopy loaded (the `.vscode/launch.json` config runs `npm: compile` first, and opens this repo as the dev host's workspace so the fixtures are to hand).
-3. In the new window, open `sample.md` or `sample.csv`; the preview opens beside it automatically, or run **MarkCopy: Open Rich Preview to the Side**. `sample.xlsx`, `sample.pdf`, and `sample.stl` open straight into their own custom editors.
+3. In the new window, open `sample.md` or `sample.csv`; the preview opens beside it automatically, or run **MarkCopy: Open Rich Preview to the Side**. `sample.xlsx`, `sample.pdf`, `sample.stl`, and `sample.mov` open straight into their own custom editors.
 4. Right-click around the preview to exercise the copy paths.
 
 Changes to `package.json` contributions (languages, activation events, menus, settings) are only read when the dev host **process** starts, so close the window and press F5 again rather than reloading it.

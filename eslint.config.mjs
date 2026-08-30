@@ -14,6 +14,7 @@ export default tseslint.config(
       'media/pdf.js',
       'media/pdf.worker.js',
       'media/stl.js',
+      'media/video.js',
       '**/*.map',
     ],
   },
@@ -44,7 +45,13 @@ export default tseslint.config(
   },
   {
     // Extension host code runs in Node.
-    files: ['src/extension.ts', 'src/render.ts', 'src/pdfEditor.ts', 'src/stlEditor.ts'],
+    files: [
+      'src/extension.ts',
+      'src/render.ts',
+      'src/pdfEditor.ts',
+      'src/stlEditor.ts',
+      'src/videoEditor.ts',
+    ],
     languageOptions: { globals: { ...globals.node } },
   },
   {

@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF & STL Preview",
-  "description": "One-stop Markdown, CSV, Excel, PDF, and STL preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF, STL & Video Preview",
+  "description": "One-stop Markdown, CSV, Excel, PDF, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
   "version": "0.8.2",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -38,6 +38,11 @@
     "3d",
     "mesh",
     "three.js",
+    "mov",
+    "quicktime",
+    "mp4",
+    "video",
+    "video player",
     "preview",
     "copy",
     "rich text",
@@ -139,6 +144,31 @@
           },
           {
             "filenamePattern": "*.STL"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "markcopy.videoPreview",
+        "displayName": "MarkCopy Video Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.mov"
+          },
+          {
+            "filenamePattern": "*.MOV"
+          },
+          {
+            "filenamePattern": "*.mp4"
+          },
+          {
+            "filenamePattern": "*.MP4"
+          },
+          {
+            "filenamePattern": "*.m4v"
+          },
+          {
+            "filenamePattern": "*.M4V"
           }
         ],
         "priority": "default"
@@ -277,6 +307,16 @@
           "type": "string",
           "default": "#8ab4f8",
           "description": "Color of the mesh material in the STL preview."
+        },
+        "markcopy.video.autoplay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start playing as soon as a video preview opens. Autoplay always starts muted, because that is the only kind a browser engine will start without a click."
+        },
+        "markcopy.video.loop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Repeat a video when it reaches the end. Also toggled from the preview's right-click Playback menu."
         },
         "markcopy.pdf.pageSize": {
           "type": "string",

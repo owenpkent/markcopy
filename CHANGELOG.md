@@ -4,6 +4,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Video preview for `.mov`, `.mp4`, and `.m4v`.** Opening one plays it inline with transport controls, a readout of dimensions, duration, and size, and the shared **Theme** submenu, instead of the wall of binary VS Code shows for a QuickTime file. Its built-in preview covers `.mp4` and `.webm` only, so `.mov` and `.m4v` had no viewer at all; where both apply, MarkCopy's takes precedence, and **Reopen Editor With...** still reaches the built-in one or the raw bytes.
+  - **Copy Frame as PNG** and **Save Frame as PNG…** grab the frame on screen at the video's true resolution, not its on-screen size. The saved file defaults to the video's own folder and carries the timecode in its name (`clip-1m23.400s.png`), so grabbing several in a row never overwrites the first. `,` and `.` step roughly a frame at a time to line the shot up; **space**, **m**, and **f** play, mute, and go fullscreen.
+  - **Playback** sets looping (persisted as `markcopy.video.loop`) and speed from 0.25x to 2x, and `markcopy.video.autoplay` starts a video on open. Autoplay always starts muted, because that is the only kind a browser engine will start without a click.
+  - **The file is streamed, not read.** Unlike the PDF and STL viewers, which read the whole file and hand it to the webview, the player pulls ranges off disk as it plays, so a multi-gigabyte clip opens as fast as a small one and costs no more memory. Nothing is fetched over the network.
+  - **A file VS Code cannot decode says so.** QuickTime is a container, not a codec: H.264/AAC plays, but the ProRes, DNxHD, and HEVC that come out of a professional camera or editor do not. Those now show what is wrong and an **Open in Default App** button, rather than a black rectangle.
+
 ### Planned
 
 - PlantUML support.

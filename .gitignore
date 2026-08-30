@@ -14,6 +14,8 @@ media/pdf.worker.js
 media/pdf.worker.js.map
 media/stl.js
 media/stl.js.map
+media/video.js
+media/video.js.map
 *.vsix
 .DS_Store
 

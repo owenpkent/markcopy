@@ -903,6 +903,19 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   color: var(--vscode-menu-selectionForeground, #fff);
   outline: none;
 }
+/* An action that belongs on this menu but cannot run right now. Still focusable,
+   so it keeps its place in the keyboard walk; the selection tint is withheld so
+   arrowing onto it does not look like arming it. */
+.mc-menu-item--disabled {
+  opacity: 0.45;
+}
+.mc-menu-item--disabled:hover,
+.mc-menu-item--disabled:focus {
+  background: none;
+  color: inherit;
+  outline: 1px solid var(--vscode-focusBorder, #0969da);
+  outline-offset: -1px;
+}
 .mc-menu-divider {
   height: 1px;
   margin: 4px 6px;

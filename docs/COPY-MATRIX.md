@@ -1,6 +1,6 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why.)
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v).)
 
 The top level is short: it names whatever you clicked ("Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Selection > Code > Table > Diagram > Equation > Block, so a selection inside a table still gets "Copy Selection" at the top, not "Copy Table".
 
@@ -153,3 +153,23 @@ There is no cell editing, so no equivalent of the CSV grid's writeback: the docu
 The STL viewer has **no copy actions**, and its absence from this matrix is deliberate rather than an omission. Every row above copies something the reader can identify and a receiving app can use: text, a table of cells, an image of a diagram. An STL is an unstructured list of triangles with no text, no structure, and no author-intended visual, so there is no format to offer that is not a screenshot of an arbitrary camera angle. Right-clicking in the viewer does nothing; its toolbar is view controls only.
 
 **Copy Whole Document as Rich Text** and **Save as PDF** do not apply either, for the same reason: both serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
+
+## Video (.mov / .mp4 / .m4v)
+
+The video player's menu is short, because there is exactly one thing in a video worth putting on a clipboard: the frame you are looking at.
+
+| Action                  | Clipboard flavor | Pastes cleanly into                                     |
+| ----------------------- | ---------------- | ------------------------------------------------------- |
+| **Copy Frame as PNG**   | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save Frame as PNG…**  | (writes a file)  | Anywhere, via a save dialog                             |
+| **Copy as > File Name** | `text/plain`     | Anywhere                                                |
+| **Copy as > Full Path** | `text/plain`     | A terminal, a script, another editor                    |
+
+Notes:
+
+- **The frame is copied at the video's own resolution**, not the size it happens to be displayed at. A 4K clip in a narrow pane still yields a 3840x2160 PNG.
+- **The saved file carries the timecode**, as `clip-1m23.400s.png` beside the video, milliseconds included so two grabs a few frames apart do not overwrite each other. Colons cannot appear in a Windows filename, so this is not the timecode the player displays.
+- **Nudge with `,` and `.`** (roughly a frame at 30fps) to land on the frame you want before grabbing it.
+- **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
+
+**Copy Whole Document as Rich Text** and **Save as PDF** do not apply here either: there is no HTML document to serialize, only a `<video>` element.

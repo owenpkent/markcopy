@@ -1,8 +1,9 @@
-// Bundles the browser-side webview code. Four outputs:
+// Bundles the browser-side webview code. Five outputs:
 //   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
 //   media/stl.js         STL preview (esm, bundles Three.js)
+//   media/video.js       video preview (esm)
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
@@ -71,6 +72,15 @@ async function main() {
     run({
       ...shared,
       entryPoints: [{ in: 'src/webview/stl.ts', out: 'stl' }],
+      format: 'esm',
+      outdir: 'media',
+    }),
+    // Video preview: tiny (no media library, the <video> element does the
+    // work), but its own entry point so it does not drag in the Markdown
+    // preview's bundle just to show a player.
+    run({
+      ...shared,
+      entryPoints: [{ in: 'src/webview/video.ts', out: 'video' }],
       format: 'esm',
       outdir: 'media',
     }),
