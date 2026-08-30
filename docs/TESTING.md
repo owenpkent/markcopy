@@ -153,6 +153,9 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 - [ ] Edit a cell, then immediately edit the one below: no focus is lost between commits.
 - [ ] Edit two cells in quick succession, committing each with Enter: **both** land in the file. (The second must not be dropped for being one document version behind.)
 - [ ] Start editing a cell, then click straight onto a different cell: the edit is kept and focus stays on the cell you clicked, rather than snapping back.
+- [ ] ☑ Start editing a cell, then click somewhere that is **not** a cell — the padding around the grid, the row-number gutter, the empty space past the last row: the edit is kept, exactly as it is when you click another cell. (This is the class of gesture that fires no `blur` where the engine does not move focus for it.)
+- [ ] ☑ Start editing a cell, then switch to another editor tab and come back: the edit was committed on the way out, not lost with the hidden panel.
+- [ ] ☑ Start editing a header cell, then drag that column's divider: the editor stays open and the column resizes, so a header can be widened while its own name is being typed.
 - [ ] Double-click a cell to start editing, then click inside the value: the caret lands where you clicked and the editor stays open. Drag across part of the value: it selects, and still nothing closes. (Deliberately not ☑: jsdom has neither hit-testing nor drag selection, so the tests can only check that the editor survives a synthetic press. Where the caret actually lands is exactly what nobody can automate here.)
 - [ ] ☑ Double-click again inside an open editor: the whole value is selected, so typing replaces it.
 - [ ] ☑ Right-click inside an open editor: the edit stays open with its selection visible, and the menu offers **Copy Selection** / **Copy Cell** / **Select All** above the usual document rows, rather than the table's copy rows. Dismiss the menu with **Escape**: the caret is back in the editor, so typing goes into the cell and a second **Escape** discards the edit.
@@ -291,8 +294,24 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 
 ### Bad input and codecs
 
-- [ ] ★ A ProRes or HEVC `.mov` (or any file VS Code cannot decode) shows the "cannot play" message naming ProRes and the default player, not a black rectangle or an empty tab. Make one with `ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -c:v prores_ks prores.mov`.
-- [ ] **Open in Default App**, on that message and in the right-click menu, opens the file in the OS player.
+Make the fixtures once, with ffmpeg on `PATH`:
+
+```
+ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -c:v prores_ks prores.mov
+ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le alpha.mov
+```
+
+- [ ] ★ **With ffmpeg installed**, opening `prores.mov` shows "Building a playable copy… n%" with a progress bar, then plays. The status line ends with `ffmpeg preview copy`.
+- [ ] `alpha.mov` plays over a grey **transparency checkerboard**, not flat black, and the status line says `alpha on checkerboard`. **Copy Frame as PNG** from it: the board is in the pasted image (it is baked into the proxy, which is what the status line is warning you about).
+- [ ] Press **Cancel** during a long file's encode: it stops, and the offer to build one comes back rather than an error.
+- [ ] Close the tab after a proxy has played, then check `%TEMP%\markcopy-video` (`/tmp/markcopy-video`): the copy is gone. Nothing accumulates across a session of opening clips.
+- [ ] The original file's timestamp and size are unchanged after all of the above.
+- [ ] With `markcopy.video.transcode` set to `ask`, the same file offers a **Build Playable Copy** button naming the codec ("clip.mov is ProRes 4444, which VS Code cannot play") instead of starting on its own. Pressing it encodes and plays.
+- [ ] With it set to `off`, the message names `markcopy.video.transcode` and does **not** suggest installing ffmpeg.
+- [ ] With `markcopy.video.ffmpegPath` pointed at a file that is not ffmpeg, the failure names what went wrong rather than hanging or silently falling back.
+- [ ] ★ **Without ffmpeg** — take it off `PATH` for the session and reload the window, leaving `markcopy.video.ffmpegPath` empty so the detection really runs and finds nothing — a ProRes or HEVC `.mov` shows the "cannot play" message naming ProRes and the default player, plus the note about installing ffmpeg. Not a black rectangle, and not an empty tab.
+- [ ] **Open in Default App**, on every one of those messages and in the right-click menu, opens the file in the OS player.
+- [ ] An `.mp4` VS Code _can_ play opens instantly, with no probe, no encode, and no `ffmpeg preview copy` in the status line.
 - [ ] A truncated or garbage `.mov` (`node -e "require('fs').writeFileSync('bad.mov', Buffer.alloc(2048, 0xff))"`) reports that it cannot be played rather than hanging or showing nothing.
 - [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
 - [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.
