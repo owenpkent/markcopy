@@ -14,7 +14,7 @@
 import type { MenuController } from './menu';
 
 /** Which cell the reader is on. Survives the re-render caused by a commit. */
-interface CellRef {
+export interface CellRef {
   line: number;
   column: number;
 }
@@ -67,9 +67,13 @@ export function enableCsvEditing(root: ParentNode, commit: CommitCell, menu: Men
     focused = undefined;
     return;
   }
-  // Re-seat the reader after the render a commit triggered.
+  // Re-seat the reader after the render a commit triggered. The square may be
+  // gone rather than merely moved: deleting the last row of a file, or its last
+  // column, takes the parked ref out of the grid with it. Falling back to the
+  // nearest surviving cell keeps the reader inside the grid instead of dropping
+  // them on <body> with nothing focused and the arrow keys dead.
   if (focused) {
-    const cell = findCell(tables[0], focused);
+    const cell = findCell(tables[0], focused) ?? nearestCell(tables[0], focused);
     if (cell) {
       setFocus(cell, { scroll: restoring });
     }
@@ -99,6 +103,29 @@ function refOf(cell: HTMLTableCellElement): CellRef | undefined {
 function findCell(table: HTMLTableElement, ref: CellRef): HTMLTableCellElement | undefined {
   const row = rowsOf(table).find((r) => Number(r.dataset.recordLine) === ref.line);
   return row ? dataCells(row)[ref.column] : undefined;
+}
+
+// The closest surviving cell to `ref`, for when the square itself is gone: the
+// last row at or above `ref.line`, and the nearest column it actually has. A
+// delete at the end of a file leaves nothing below to slide up, so the answer
+// there is the row that is now last rather than no row at all.
+function nearestCell(table: HTMLTableElement, ref: CellRef): HTMLTableCellElement | undefined {
+  const rows = rowsOf(table);
+  let best: HTMLTableRowElement | undefined;
+  for (const row of rows) {
+    const line = Number(row.dataset.recordLine);
+    if (!Number.isNaN(line) && line <= ref.line) {
+      best = row;
+    }
+  }
+  // Nothing at or above it means every row is below: the first one is then the
+  // nearest, which is where a delete of the very first row lands.
+  const row = best ?? rows[0];
+  if (!row) {
+    return undefined; // an emptied file has no square to offer
+  }
+  const cells = dataCells(row);
+  return cells[Math.min(ref.column, cells.length - 1)];
 }
 
 function setFocus(cell: HTMLTableCellElement, opts: { scroll?: boolean } = {}): void {
@@ -260,6 +287,46 @@ function cellFrom(target: EventTarget | null): HTMLTableCellElement | undefined 
  */
 export function editorIn(node: EventTarget | Node | null): HTMLTextAreaElement | undefined {
   return (node as HTMLElement)?.closest?.<HTMLTextAreaElement>(EDITOR_SELECTOR) ?? undefined;
+}
+
+/**
+ * The row and column the pointer is over, for an edit that takes a whole row or
+ * column rather than one field.
+ *
+ * Unlike the cell lookup the grid uses internally, this also answers for the
+ * row-number gutter, which addresses a row but no column: `column` comes back as
+ * -1 there, and the caller offers only the operations that need no column.
+ * Exported because the context menu is built in main.ts, over whatever was
+ * right-clicked.
+ */
+export function gridRefFrom(target: EventTarget | null): CellRef | undefined {
+  const cell = (target as HTMLElement)?.closest?.<HTMLTableCellElement>('td,th');
+  const row = cell?.parentElement as HTMLTableRowElement | null;
+  if (!cell || !row?.dataset.recordLine) {
+    return undefined;
+  }
+  const line = Number(row.dataset.recordLine);
+  if (Number.isNaN(line)) {
+    return undefined;
+  }
+  if (cell.hasAttribute('data-mc-ignore')) {
+    return { line, column: -1 };
+  }
+  const column = dataCells(row).indexOf(cell);
+  return column < 0 ? undefined : { line, column };
+}
+
+/**
+ * Leave the reader on `ref` through the re-render a host-side edit will cause.
+ *
+ * Inserting or deleting a row or column moves the grid under the reader rather
+ * than moving the reader: the square they were standing on is the one they
+ * should still be standing on afterwards, whatever has slid into it. Focus is
+ * remembered by (line, column) across renders, so saying so is the whole of it.
+ */
+export function parkFocus(ref: CellRef): void {
+  focused = ref;
+  restoring = true;
 }
 
 /**

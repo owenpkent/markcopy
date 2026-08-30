@@ -12,6 +12,11 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - **The file is streamed, not read.** Unlike the PDF and STL viewers, which read the whole file and hand it to the webview, the player pulls ranges off disk as it plays, so a multi-gigabyte clip opens as fast as a small one and costs no more memory. Nothing is fetched over the network.
   - **A file VS Code cannot decode says so.** QuickTime is a container, not a codec: H.264/AAC plays, but the ProRes, DNxHD, and HEVC that come out of a professional camera or editor do not. Those now show what is wrong and an **Open in Default App** button, rather than a black rectangle.
 
+- **Insert and delete rows and columns in the CSV grid.** Right-click a cell, a column header, or a row number: **Insert** offers Row Above, Row Below, Column Left, and Column Right, **Delete** offers Row and Column. Until now the grid could only change fields that already existed, so growing or shrinking a file meant leaving the preview and counting commas in the text editor.
+  - A new row is blank and as wide as the row it lands next to, so a ragged file stays as ragged as it was. A new column opens down the whole file, including the rows past `markcopy.csv.maxRows` that the grid never drew, so a truncated view cannot shear a file in half.
+  - Each one is written into the document as a single change, exactly like a cell edit: **Ctrl+Z** takes back a column that touched ten thousand rows in one go, and every field that did not move keeps its original bytes, quoting and line endings included.
+  - The grid moves under the cursor the way a spreadsheet does. After **Insert Row Above** you are standing on the new blank row, and after a **Delete** you are on whatever has slid into its place.
+
 ### Planned
 
 - PlantUML support.

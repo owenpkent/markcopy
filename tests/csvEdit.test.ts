@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderCsvHtml } from '../src/csv';
-import { enableCsvEditing } from '../src/webview/csvEdit';
+import { enableCsvEditing, gridRefFrom, parkFocus } from '../src/webview/csvEdit';
 import { enhanceCsvTables } from '../src/webview/csvTable';
 import { createMenu, type MenuController } from '../src/webview/menu';
 
@@ -497,5 +497,68 @@ describe('read-only grids', () => {
     // Without this, removing `data-mc-editable` from src/csv.ts would leave every
     // test above passing against a grid nobody can edit.
     expect(renderCsvHtml(CSV).html).toContain('data-mc-editable="1"');
+  });
+});
+
+// What the context menu asks the grid before offering to insert or delete a row
+// or column: which square is under the pointer, and where to leave the reader
+// once the host has rewritten the document.
+describe('whole-row and whole-column refs', () => {
+  it('reads the record line and column off a data cell', () => {
+    expect(gridRefFrom(cell(1, 1))).toEqual({ line: 2, column: 1 });
+  });
+
+  it('reads a column header, which addresses the header record', () => {
+    expect(gridRefFrom(cell(-1, 1))).toEqual({ line: 0, column: 1 });
+  });
+
+  it('answers for the row-number gutter, which has a row but no column', () => {
+    const gutter = document.querySelector('tbody .mc-csv-gutter') as HTMLElement;
+    expect(gridRefFrom(gutter)).toEqual({ line: 1, column: -1 });
+  });
+
+  it('answers from inside a cell, not just the cell itself', () => {
+    const grip = cell(-1, 0).querySelector('.mc-csv-grip') as HTMLElement;
+    expect(gridRefFrom(grip)).toEqual({ line: 0, column: 0 });
+  });
+
+  it('has no answer outside the grid', () => {
+    expect(gridRefFrom(document.body)).toBeUndefined();
+    expect(gridRefFrom(null)).toBeUndefined();
+  });
+});
+
+describe('parked focus', () => {
+  it('seats the reader on the parked square after the host re-renders', () => {
+    parkFocus({ line: 2, column: 1 });
+    renderGrid();
+    expect(document.activeElement).toBe(cell(1, 1));
+    expect(cell(1, 1).classList.contains('mc-csv-cell--focus')).toBe(true);
+  });
+
+  it('keeps the square, not the value that used to be in it', () => {
+    // A deleted row leaves the row below it on that line. The reader should end
+    // up on the same square, now holding what has slid up into it.
+    parkFocus({ line: 1, column: 0 });
+    renderGrid('name,qty\nGadget,12');
+    expect(document.activeElement).toBe(cell(0, 0));
+    expect(cell(0, 0).textContent).toBe('Gadget');
+  });
+
+  it('falls back to the nearest surviving row when the parked square is gone', () => {
+    // Deleting the last row of a file leaves nothing below to slide up, so the
+    // square itself goes. Landing on the row that is now last keeps the reader
+    // in the grid; dropping them on <body> would leave the arrow keys dead.
+    parkFocus({ line: 9, column: 0 });
+    renderGrid();
+    expect(document.activeElement).toBe(cell(1, 0));
+  });
+
+  it('clamps to the widest column the surviving row has', () => {
+    // The same, for a delete that took the column rather than the row.
+    parkFocus({ line: 1, column: 5 });
+    renderGrid('name\nWidget\nGadget');
+    expect(document.activeElement).toBe(cell(0, 0));
+    expect(cell(0, 0).textContent).toBe('Widget');
   });
 });

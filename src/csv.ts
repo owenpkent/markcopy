@@ -297,6 +297,192 @@ export function cellEdit(
   };
 }
 
+/**
+ * A whole-row or whole-column change to the grid.
+ *
+ * Insertions name the side the new row or column lands on, so an operation
+ * reads the same here as it does on the menu row that sends it.
+ */
+export type GridOp =
+  | 'insertRowAbove'
+  | 'insertRowBelow'
+  | 'deleteRow'
+  | 'insertColumnLeft'
+  | 'insertColumnRight'
+  | 'deleteColumn';
+
+const GRID_OPS: readonly string[] = [
+  'insertRowAbove',
+  'insertRowBelow',
+  'deleteRow',
+  'insertColumnLeft',
+  'insertColumnRight',
+  'deleteColumn',
+];
+
+/** Whether `value` is an operation gridEdits understands. */
+export function isGridOp(value: unknown): value is GridOp {
+  return typeof value === 'string' && GRID_OPS.includes(value);
+}
+
+// Where a record's own text starts and ends, quotes included and line
+// terminator excluded. The parser never emits a record without a field, so
+// there is always a first and last span to ask.
+function recordStart(record: CsvRecord): number {
+  return record.spans[0].start;
+}
+
+function recordEnd(record: CsvRecord): number {
+  return record.spans[record.spans.length - 1].end;
+}
+
+// Work out the edits that insert or delete a whole row or column.
+//
+// Row operations address one record by the line it starts on, exactly as
+// cellEdit does, so a row that spans several lines (a quoted field with a
+// newline in it) is one row here too.
+//
+// Column operations have to touch every record in the document, including the
+// ones past markcopy.csv.maxRows that the grid never rendered: a column belongs
+// to the file rather than to the window onto it, and shifting only the rows on
+// screen would shear the file in half at the truncation point.
+//
+// Returns non-overlapping edits in document order, so a caller can apply them as
+// one atomic change and one undo stop. An operation with nothing to address (an
+// unknown line, a column no record reaches) returns an empty list rather than
+// guessing at what was meant.
+export function gridEdits(
+  text: string,
+  delimiter: string,
+  op: GridOp,
+  ref: { line: number; column: number },
+  eol = '\n',
+): CsvCellEdit[] {
+  const { records } = parseDelimited(text, delimiter);
+  const edits =
+    op === 'insertRowAbove' || op === 'insertRowBelow' || op === 'deleteRow'
+      ? rowEdits(records, op, ref.line, delimiter, text, eol)
+      : columnEdits(records, op, ref.column, delimiter);
+  // Drop the edits that would change nothing: deleting an already-empty lone
+  // field, say. Applied, they would still push an undo stop and re-render the
+  // preview in exchange for no change at all.
+  return edits.filter((edit) => edit.start !== edit.end || edit.text !== '');
+}
+
+function rowEdits(
+  records: CsvRecord[],
+  op: 'insertRowAbove' | 'insertRowBelow' | 'deleteRow',
+  line: number,
+  delimiter: string,
+  text: string,
+  eol: string,
+): CsvCellEdit[] {
+  const record = records.find((r) => r.line === line);
+  if (!record) {
+    return [];
+  }
+  if (op === 'deleteRow') {
+    return [deleteRowEdit(record, text)];
+  }
+  // The blank row is as wide as the row it lands next to rather than as wide as
+  // the widest row in the file: a ragged document stays exactly as ragged as it
+  // was, and the grid never gains a column because an empty row was added to it.
+  const blank = delimiter.repeat(Math.max(0, record.cells.length - 1));
+  const above = op === 'insertRowAbove';
+  // Below inserts at the end of the record's own text, before the terminator
+  // that closes it, so the last row of a file that does not end in a newline
+  // gains one exactly like any other row.
+  const offset = above ? recordStart(record) : recordEnd(record);
+  return [{ start: offset, end: offset, text: above ? blank + eol : eol + blank }];
+}
+
+// Take the record out along with the line terminator that ends it, so the rows
+// below move up instead of leaving a blank line behind. The last record of a
+// file that does not end in a newline has no terminator of its own; there the
+// one in front of it goes instead, for the same reason.
+function deleteRowEdit(record: CsvRecord, text: string): CsvCellEdit {
+  let start = recordStart(record);
+  let end = recordEnd(record);
+  if (text[end] === '\r' && text[end + 1] === '\n') {
+    end += 2;
+  } else if (text[end] === '\n' || text[end] === '\r') {
+    end += 1;
+  } else if (text[start - 1] === '\n') {
+    start -= text[start - 2] === '\r' ? 2 : 1;
+  } else if (text[start - 1] === '\r') {
+    start -= 1;
+  }
+  return { start, end, text: '' };
+}
+
+function columnEdits(
+  records: CsvRecord[],
+  op: 'insertColumnLeft' | 'insertColumnRight' | 'deleteColumn',
+  column: number,
+  delimiter: string,
+): CsvCellEdit[] {
+  if (column < 0) {
+    return [];
+  }
+
+  if (op === 'deleteColumn') {
+    return records.flatMap((record) => {
+      const span = record.spans[column];
+      if (!span) {
+        return []; // a short row that never reached this column
+      }
+      const next = record.spans[column + 1];
+      if (next) {
+        // The field and the delimiter behind it, so everything to its right
+        // slides one column left.
+        return [{ start: span.start, end: next.start, text: '' }];
+      }
+      // The last column has no delimiter behind it to take, so the one in front
+      // goes instead. A record of a single field has neither, and is left as an
+      // empty row for the parser to drop.
+      const previous = record.spans[column - 1];
+      return [{ start: previous ? previous.end : span.start, end: span.end, text: '' }];
+    });
+  }
+
+  // The index the new empty field takes; every field from there on shifts right.
+  const at = op === 'insertColumnLeft' ? column : column + 1;
+  return records.flatMap((record) => {
+    // A record takes part only if it reaches the column being addressed, the
+    // same test deleteColumn makes above. A short row that stops before it has
+    // nothing to shift and no field next to the new one, and padding it out
+    // with delimiters would rewrite a row the reader never touched.
+    if (column >= record.spans.length) {
+      return [];
+    }
+    // Inserting to the right of a record's last field has nothing to shift
+    // either, but the new column does belong to this record, so it is made by a
+    // trailing delimiter. That is also how a column is appended past the last
+    // one in the file at all. `insertColumnLeft` never lands here: it puts the
+    // new field at `column` itself, which the test above just proved exists.
+    const offset = at < record.spans.length ? record.spans[at].start : recordEnd(record);
+    return [{ start: offset, end: offset, text: delimiter }];
+  });
+}
+
+/**
+ * Apply edits that are non-overlapping and in document order, which is what
+ * `gridEdits` returns, and hand back the resulting text.
+ *
+ * The host uses this to fold an operation too large to hand over range by range
+ * into a single whole-document replacement; the tests use it to check what an
+ * operation actually produces.
+ */
+export function applyCsvEdits(text: string, edits: readonly CsvCellEdit[]): string {
+  let out = '';
+  let at = 0;
+  for (const edit of edits) {
+    out += text.slice(at, edit.start) + edit.text;
+    at = edit.end;
+  }
+  return out + text.slice(at);
+}
+
 export interface CsvHtmlOptions {
   /** 'auto' sniffs the delimiter; anything else is used verbatim. */
   delimiter?: 'auto' | string;
