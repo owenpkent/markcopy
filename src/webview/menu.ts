@@ -7,8 +7,12 @@
 // A plain clickable action ('item'), a nested panel ('submenu'), a group
 // heading ('label', not interactive), a horizontal rule ('divider'), or a
 // radio/checkbox setting toggle that renders a leading checkmark when active.
+//
+// An item may be `disabled`, for an action that belongs on the menu but cannot
+// run right now: it stays visible and stays reachable by keyboard, so the reason
+// it is greyed can be read off the row rather than discovered by clicking it.
 export type MenuEntry =
-  | { kind: 'item'; label: string; run: () => void | Promise<void> }
+  | { kind: 'item'; label: string; run: () => void | Promise<void>; disabled?: boolean }
   | { kind: 'submenu'; label: string; entries: MenuEntry[] }
   | { kind: 'label'; label: string }
   | { kind: 'divider' }
@@ -238,6 +242,13 @@ export function createMenu(root: HTMLDivElement): MenuController {
       el.className = 'mc-menu-item';
       el.setAttribute('role', 'menuitem');
       el.textContent = entry.label;
+      if (entry.kind === 'item' && entry.disabled) {
+        // aria-disabled rather than removing it from the tab order: a row that
+        // cannot be reached cannot explain itself either. The click handler
+        // below is what actually holds the action back.
+        el.classList.add('mc-menu-item--disabled');
+        el.setAttribute('aria-disabled', 'true');
+      }
     }
 
     // Hovering a submenu row opens its panel. Hovering any other row queues the
@@ -270,6 +281,11 @@ export function createMenu(root: HTMLDivElement): MenuController {
           openSubmenu(el, entry.entries, depth + 1);
         }
         focusFirst(panels[depth + 1]);
+        return;
+      }
+      if (entry.kind === 'item' && entry.disabled) {
+        // Nothing to run, and the menu stays open: closing it would read as the
+        // action having been taken.
         return;
       }
       closeFrom(0);

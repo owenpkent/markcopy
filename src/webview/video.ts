@@ -286,12 +286,21 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   switch (e.key) {
-    case ' ':
-      // The native controls already bind Space, but only while one of their
-      // buttons has focus; this covers the far more common case of the page.
+    case ' ': {
+      // Space is the browser's whenever it has somewhere of its own to go: the
+      // native controls bind it while the video element has focus (which a click
+      // on the picture hands them), and a button takes it as a click. Toggling
+      // on top of either would undo the first and double the second, so this
+      // covers only the case nothing else does, which is also the common one:
+      // the page itself holding focus.
+      const target = e.target as HTMLElement | null;
+      if (target === video || target?.tagName === 'BUTTON') {
+        break;
+      }
       e.preventDefault();
       togglePlay();
       break;
+    }
     case ',':
       // A frame-ish step at 30fps, for lining up a frame grab.
       nudge(-1 / 30);
@@ -320,9 +329,25 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
 
+  // Once the CORS retry has run, the canvas is tainted for the rest of this
+  // file's life and no frame will ever come off it. Say so on the rows
+  // themselves rather than letting each attempt fail into the same toast.
   const entries: MenuEntry[] = [
-    { kind: 'item', label: 'Copy Frame as PNG', run: () => void copyFramePng() },
-    { kind: 'item', label: 'Save Frame as PNG…', run: () => void saveFramePng() },
+    ...(frameCopyBlocked
+      ? [{ kind: 'label', label: 'Frames unavailable for this file' } as MenuEntry]
+      : []),
+    {
+      kind: 'item',
+      label: 'Copy Frame as PNG',
+      run: () => void copyFramePng(),
+      disabled: frameCopyBlocked,
+    },
+    {
+      kind: 'item',
+      label: 'Save Frame as PNG…',
+      run: () => void saveFramePng(),
+      disabled: frameCopyBlocked,
+    },
     { kind: 'divider' },
     {
       kind: 'submenu',

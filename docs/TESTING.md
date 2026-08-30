@@ -270,6 +270,7 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 ### Keyboard
 
 - [ ] **Space** plays and pauses without first clicking a control.
+- [ ] ★ **Space** still toggles exactly once right after clicking the picture, which is when the video element itself holds the focus and binds Space too. Two handlers firing here would cancel each other out and look like a dead key.
 - [ ] **`,`** and **`.`** step backward and forward by about a frame while paused.
 - [ ] **m** mutes and unmutes; **f** enters fullscreen and **Esc** leaves it.
 
@@ -279,6 +280,7 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 - [ ] ★ Right-click -> **Save Frame as PNG…** offers a name like `sample-01.234s.png` in the video's own folder, and the saved file matches the frame.
 - [ ] Grab two frames a step apart: the suggested names differ, so neither overwrites the other.
 - [ ] **Copy as** -> **File Name** and **Full Path** put the expected text on the clipboard.
+- [ ] On a host that does not serve webview resources with `Access-Control-Allow-Origin` (the retry path in `src/webview/video.ts`), the video still plays and both frame rows are greyed out under a **Frames unavailable for this file** heading, rather than failing into a toast on every attempt. Hard to stage deliberately: check it by flipping `frameCopyBlocked` to `true` in a dev build.
 
 ### Playback menu and settings
 

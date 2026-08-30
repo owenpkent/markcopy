@@ -177,6 +177,30 @@ describe('createMenu', () => {
     expect(panels()).toHaveLength(1);
   });
 
+  it('marks a disabled item, and neither runs it nor closes the menu', () => {
+    const menu = createMenu(root);
+    let ran = 0;
+    menu.show(0, 0, [
+      { kind: 'item', label: 'Copy Frame as PNG', run: () => void ran++, disabled: true },
+    ]);
+
+    const [item] = Array.from(root.querySelectorAll<HTMLElement>('.mc-menu-item'));
+    expect(item.classList.contains('mc-menu-item--disabled')).toBe(true);
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    // Still in the tab order: a row nobody can reach cannot say why it is greyed.
+    expect(item.tabIndex).toBe(0);
+
+    item.click();
+    expect(ran).toBe(0);
+    // Closing would read as the action having been taken.
+    expect(root.hidden).toBe(false);
+
+    // Enter routes through the same click handler, so it is held back too.
+    press(item, 'Enter');
+    expect(ran).toBe(0);
+    expect(root.hidden).toBe(false);
+  });
+
   it('reuses the root panel across shows without stacking stale submenus', () => {
     const menu = createMenu(root);
     const entries: MenuEntry[] = [
