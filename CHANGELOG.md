@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.9.0] - 2026-08-30
+
 ### Added
 
 - **Video preview for `.mov`, `.mp4`, and `.m4v`.** Opening one plays it inline with transport controls, a readout of dimensions, duration, and size, and the shared **Theme** submenu, instead of the wall of binary VS Code shows for a QuickTime file. Its built-in preview covers `.mp4` and `.webm` only, so `.mov` and `.m4v` had no viewer at all; where both apply, MarkCopy's takes precedence, and **Reopen Editor With...** still reaches the built-in one or the raw bytes.
@@ -17,10 +24,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - Each one is written into the document as a single change, exactly like a cell edit: **Ctrl+Z** takes back a column that touched ten thousand rows in one go, and every field that did not move keeps its original bytes, quoting and line endings included.
   - The grid moves under the cursor the way a spreadsheet does. After **Insert Row Above** you are standing on the new blank row, and after a **Delete** you are on whatever has slid into its place.
 
-### Planned
+### Changed
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- **Mermaid updated to 11.17.2**, which brings new diagram syntax to the preview: the `folder`, `bucket`, `console`, `browser` and `person` flowchart shapes, collapsible flowchart subgraphs (`subgraphId@{ view: collapsed }`), subgraphs in ER diagrams, and legends for named series in an xy chart.
+  - Class diagrams now render through Mermaid's unified renderer rather than the legacy one, so an existing `classDiagram` may lay out slightly differently. Setting `"markcopy.mermaid": { "class": { "defaultRenderer": "dagre-d3" } }` restores the old one.
 
 ## [0.8.2] - 2026-08-27
 
@@ -233,7 +240,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/owenpkent/markcopy/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/owenpkent/markcopy/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/owenpkent/markcopy/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/owenpkent/markcopy/compare/v0.7.0...v0.8.0
