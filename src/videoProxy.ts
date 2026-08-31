@@ -6,12 +6,14 @@
 // OS player. When ffmpeg is on the machine there is a better answer: encode a
 // throwaway H.264 copy next to it and play that.
 //
-// The proxy is a preview, not an export. It is written to a temp directory, it
-// is deleted when the panel closes, and nothing offers to keep it.
+// The proxy is a preview, not an export. It is written to a temp directory and
+// nothing offers to keep it: the panel closing deletes the one it was playing,
+// an encode that is cancelled or fails deletes what it had written, and a sweep
+// at startup takes anything a window was killed before it could tidy away.
 //
 // Nothing here imports `vscode`, so it is all unit-testable.
 import { spawn } from 'node:child_process';
-import { access, mkdir, rm } from 'node:fs/promises';
+import { access, lstat, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -512,10 +514,74 @@ export function proxyFileName(sourceName: string, random: string = randomBytes(6
   return `${stem.slice(0, 60)}-${random}.mp4`;
 }
 
-export async function ensureProxyDir(): Promise<string> {
-  const dir = proxyDir();
-  await mkdir(dir, { recursive: true });
+/**
+ * Make the proxy directory, and refuse to use one that is not ours.
+ *
+ * Deliberately not `recursive`, which succeeds against whatever already sits at
+ * the path. On a shared `/tmp` that could be a directory another user created
+ * first, or a symlink they pointed somewhere of their choosing, and this path is
+ * handed to the webview as a `localResourceRoot`. `mkdir` failing with EEXIST is
+ * the signal to go and look at what is there instead of writing into it.
+ */
+export async function ensureProxyDir(dir: string = proxyDir()): Promise<string> {
+  try {
+    await mkdir(dir, { mode: 0o700 });
+    return dir;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw err;
+    }
+  }
+  // `lstat`, not `stat`: a symlink to a directory has to read as a symlink here,
+  // which is the whole point of looking.
+  const info = await lstat(dir);
+  if (!info.isDirectory()) {
+    throw new Error(`${dir} exists and is not a directory.`);
+  }
+  const uid = process.getuid?.();
+  if (uid !== undefined && info.uid !== uid) {
+    throw new Error(`${dir} is owned by another user.`);
+  }
   return dir;
+}
+
+// How stale a proxy has to be before a sweep will take it. Long enough that a
+// panel left open overnight keeps the file it is playing, short enough that a
+// crashed window's leftovers do not live on the disk forever.
+const STALE_PROXY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delete proxies left behind by a window that never got the chance to clean up.
+ *
+ * Every proxy is removed when its panel closes and every abandoned one when its
+ * encode ends, so in the normal case this finds nothing. It exists for the case
+ * where there is no normal case: an extension host that was killed, a machine
+ * that lost power. Age-gated because another window may be playing a proxy right
+ * now, and that file is minutes old rather than a day.
+ */
+export async function sweepProxyDir(
+  dir: string = proxyDir(),
+  now: number = Date.now(),
+): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return; // no directory yet, which is the common case
+  }
+  await Promise.all(
+    entries.map(async (name) => {
+      const full = join(dir, name);
+      try {
+        const info = await stat(full);
+        if (info.isFile() && now - info.mtimeMs > STALE_PROXY_MS) {
+          await removeQuietly(full);
+        }
+      } catch {
+        /* raced with another window's own cleanup; it can have it */
+      }
+    }),
+  );
 }
 
 /** Best-effort delete; a stranded proxy is not worth failing a close over. */
@@ -622,7 +688,9 @@ function run(
     let stderr = '';
     let settled = false;
     let stallTimer: NodeJS.Timeout | undefined;
+    let exitTimer: NodeJS.Timeout | undefined;
     let stalled = false;
+    let cancelled = false;
 
     const finish = (fn: () => void): void => {
       if (settled) {
@@ -630,6 +698,7 @@ function run(
       }
       settled = true;
       clearTimeout(stallTimer);
+      clearTimeout(exitTimer);
       signal?.removeEventListener('abort', onAbort);
       fn();
     };
@@ -645,29 +714,54 @@ function run(
       }, stallMs);
     };
 
+    /** Why a killed run rejected: the reader stopped it, or it wedged. */
+    const rejectKilled = (): void => {
+      finish(() =>
+        reject(
+          cancelled
+            ? new TranscodeCancelled()
+            : new Error('ffmpeg stopped making progress and was cancelled.'),
+        ),
+      );
+    };
+
     const kill = (): void => {
       child.kill();
       // A process that ignores the polite signal still holds the output file
       // open, which on Windows fails the cleanup delete. Insist after a moment.
       setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref?.();
+      // And stop waiting eventually regardless. Settling on `close` is what lets
+      // the caller delete the half-written file (below), but a caller left
+      // hanging on a process that will not die is the worse failure of the two.
+      exitTimer = setTimeout(rejectKilled, KILL_GRACE_MS * 2);
+      exitTimer.unref?.();
     };
 
+    /**
+     * Kill the run, but settle it on the child's own exit rather than here.
+     *
+     * The caller deletes the half-written output the moment this rejects, and on
+     * Windows that delete fails while ffmpeg still holds the handle open. ffmpeg
+     * goes on SIGTERM in milliseconds, so the wait costs nothing the reader can
+     * see, and `kill` bounds it either way.
+     */
     function onAbort(): void {
+      cancelled = true;
       kill();
-      finish(() => reject(new TranscodeCancelled()));
     }
-
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
-      stdout += chunk;
       armStall();
-      onStdout?.(chunk);
+      if (onStdout) {
+        // Handed straight on and dropped. The transcode streams `-progress`
+        // here and reads each chunk as it lands; keeping the chunks too would
+        // hold megabytes of superseded timestamps for the length of an encode
+        // that nothing ever reads back.
+        onStdout(chunk);
+      } else {
+        stdout += chunk;
+      }
     });
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk: string) => {
@@ -678,14 +772,20 @@ function run(
       finish(() => reject(new Error(`could not run ${command} (${err.message}).`)));
     });
     child.on('close', (code) => {
-      finish(() => {
-        if (stalled) {
-          reject(new Error('ffmpeg stopped making progress and was cancelled.'));
-        } else {
-          resolve({ code: code ?? 0, stdout, stderr });
-        }
-      });
+      if (cancelled || stalled) {
+        rejectKilled();
+        return;
+      }
+      finish(() => resolve({ code: code ?? 0, stdout, stderr }));
     });
+
+    // Wired only now that `close` can settle the promise: an already-aborted
+    // signal kills the child immediately, and nothing else would ever resolve it.
+    if (signal?.aborted) {
+      onAbort();
+    } else {
+      signal?.addEventListener('abort', onAbort, { once: true });
+    }
 
     armStall();
   });

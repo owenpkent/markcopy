@@ -321,6 +321,9 @@ class ProxySession {
   private abort: AbortController | undefined;
   private built: BuiltProxy | undefined;
   private running = false;
+  // Set by dispose. An encode that lands in the same tick as the panel closing
+  // has a finished proxy and nowhere to play it, and must not keep the file.
+  private disposed = false;
   // Both looked up once and kept for the panel's life. Under `auto`, `offer`
   // hands straight over to `build`, and without these the PATH walk and the
   // ffprobe run would each happen twice for one transcode. The probe is also
@@ -386,12 +389,15 @@ class ProxySession {
     this.running = true;
     this.abort = new AbortController();
     const abort = this.abort;
+    // Named out here so the cleanup below can reach it: a cancelled or failed
+    // encode has already written part of this file.
+    let output: string | undefined;
     try {
       const probe = await this.probe(tools.ffprobe);
       this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec });
 
       const dir = await ensureProxyDir();
-      const output = join(dir, proxyFileName(basename(this.source)));
+      output = join(dir, proxyFileName(basename(this.source)));
 
       let lastPost = 0;
       await transcode({
@@ -410,6 +416,11 @@ class ProxySession {
         },
       });
 
+      if (this.disposed) {
+        // The panel went while ffmpeg was working. There is no webview left to
+        // play this, so leave it unclaimed and let the cleanup below take it.
+        return;
+      }
       this.built = {
         path: output,
         // Said in the status line for as long as the proxy is on screen. The
@@ -433,6 +444,15 @@ class ProxySession {
     } finally {
       this.running = false;
       this.abort = undefined;
+      // Anything written but never claimed is scratch nothing will ever come
+      // looking for: a cancelled encode, a failed one, or one whose panel closed
+      // underneath it. Left here it would sit in the temp directory forever,
+      // and a cancelled 4K master is not a small thing to leave behind.
+      // `transcode` settles only once ffmpeg has actually exited, so by now the
+      // file is no longer open and Windows will let go of it.
+      if (output !== undefined && this.built?.path !== output) {
+        await removeQuietly(output);
+      }
     }
   }
 
@@ -441,6 +461,7 @@ class ProxySession {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.abort?.abort();
     if (this.built) {
       await removeQuietly(this.built.path);

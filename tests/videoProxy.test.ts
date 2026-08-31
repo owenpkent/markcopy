@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   checkerboardFilter,
   codecLabel,
+  ensureProxyDir,
   ffmpegCandidates,
   ffprobeFor,
   findFfmpeg,
@@ -10,6 +14,7 @@ import {
   parseProgressSeconds,
   probeArgs,
   proxyFileName,
+  sweepProxyDir,
   transcodeArgs,
   type SourceProbe,
 } from '../src/videoProxy';
@@ -333,5 +338,92 @@ describe('proxyFileName', () => {
     expect(proxyFileName('...', 'x')).toBe('video-x.mp4');
     expect(proxyFileName('', 'x')).toBe('video-x.mp4');
     expect(proxyFileName('!!!.mov', 'x')).toBe('video-x.mp4');
+  });
+});
+
+describe('ensureProxyDir', () => {
+  let root = '';
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'markcopy-test-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('creates the directory when it is not there', async () => {
+    const dir = join(root, 'proxies');
+    expect(await ensureProxyDir(dir)).toBe(dir);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('accepts a directory it already made', async () => {
+    const dir = join(root, 'proxies');
+    await ensureProxyDir(dir);
+    await expect(ensureProxyDir(dir)).resolves.toBe(dir);
+  });
+
+  it('refuses a path that is a file rather than a directory', async () => {
+    const dir = join(root, 'proxies');
+    await writeFile(dir, 'not a directory');
+    await expect(ensureProxyDir(dir)).rejects.toThrow(/not a directory/);
+  });
+
+  // The reason `recursive` is not used: it would follow this happily, and the
+  // directory is handed to the webview as a localResourceRoot.
+  it('refuses a symlink standing in for the directory', async () => {
+    const elsewhere = join(root, 'elsewhere');
+    await mkdir(elsewhere);
+    const dir = join(root, 'proxies');
+    try {
+      await symlink(elsewhere, dir, 'dir');
+    } catch {
+      return; // Windows without developer mode cannot make one; nothing to test
+    }
+    await expect(ensureProxyDir(dir)).rejects.toThrow(/not a directory/);
+  });
+});
+
+describe('sweepProxyDir', () => {
+  let dir = '';
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = Date.UTC(2026, 0, 2);
+
+  const proxy = async (name: string, ageMs: number): Promise<string> => {
+    const full = join(dir, name);
+    await writeFile(full, 'x');
+    const when = new Date(now - ageMs);
+    await utimes(full, when, when);
+    return full;
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'markcopy-sweep-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('removes proxies a crashed window left behind', async () => {
+    await proxy('old-a1b2c3.mp4', 3 * DAY);
+    await sweepProxyDir(dir, now);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('keeps one a panel open right now could still be playing', async () => {
+    await proxy('live-a1b2c3.mp4', 60_000);
+    await proxy('stale-d4e5f6.mp4', 2 * DAY);
+    await sweepProxyDir(dir, now);
+    expect(await readdir(dir)).toEqual(['live-a1b2c3.mp4']);
+  });
+
+  it('leaves subdirectories alone', async () => {
+    await mkdir(join(dir, 'nested'));
+    await sweepProxyDir(dir, now + 10 * DAY);
+    expect(await readdir(dir)).toEqual(['nested']);
+  });
+
+  it('says nothing about a directory that was never made', async () => {
+    await expect(sweepProxyDir(join(dir, 'absent'), now)).resolves.toBeUndefined();
   });
 });
