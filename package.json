@@ -113,6 +113,53 @@
     ],
     "customEditors": [
       {
+        "viewType": "markcopy.markdownPreview",
+        "displayName": "MarkCopy Markdown Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.MD"
+          },
+          {
+            "filenamePattern": "*.markdown"
+          },
+          {
+            "filenamePattern": "*.mdown"
+          },
+          {
+            "filenamePattern": "*.mkd"
+          },
+          {
+            "filenamePattern": "*.mdx"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "markcopy.csvPreview",
+        "displayName": "MarkCopy CSV Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.csv"
+          },
+          {
+            "filenamePattern": "*.CSV"
+          },
+          {
+            "filenamePattern": "*.tsv"
+          },
+          {
+            "filenamePattern": "*.TSV"
+          },
+          {
+            "filenamePattern": "*.tab"
+          }
+        ],
+        "priority": "option"
+      },
+      {
         "viewType": "markcopy.pdfPreview",
         "displayName": "MarkCopy PDF Preview",
         "selector": [
@@ -178,12 +225,12 @@
       "editor/title": [
         {
           "command": "markcopy.saveAsPdf",
-          "when": "activeWebviewPanelId == markcopy.preview",
+          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
           "group": "navigation@1"
         },
         {
           "command": "markcopy.openSettings",
-          "when": "activeWebviewPanelId == markcopy.preview",
+          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
           "group": "navigation@2"
         }
       ],

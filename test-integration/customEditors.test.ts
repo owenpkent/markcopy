@@ -16,6 +16,8 @@ const XLSX_VIEW = 'markcopy.xlsxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
+const MARKDOWN_VIEW = 'markcopy.markdownPreview';
+const CSV_VIEW = 'markcopy.csvPreview';
 
 /**
  * Poll `probe` until it returns something, or give up.
@@ -185,6 +187,38 @@ suite('MarkCopy custom editors', () => {
       customTabs().find((candidate) => candidate.uri === uri.toString()),
     );
     assert.strictEqual(tab?.viewType, VIDEO_VIEW, 'clip.mp4 did not open in the MarkCopy player');
+  });
+
+  test('a Markdown file opens as a MarkCopy tab when asked, and only when asked', async () => {
+    const uri = fixture('sample.md');
+
+    // "priority": "option" is the whole point of this pair: the editor picker
+    // offers MarkCopy, and until someone picks it (or sets it as the default for
+    // *.md), opening a Markdown file goes on landing in the text editor.
+    await vscode.commands.executeCommand('vscode.open', uri);
+    assert.ok(
+      !customTabs().some((tab) => tab.uri === uri.toString()),
+      `a plain open of sample.md should stay in the text editor, saw: ${JSON.stringify(customTabs())}`,
+    );
+
+    await closeEverything();
+    await vscode.commands.executeCommand('vscode.openWith', uri, MARKDOWN_VIEW);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.strictEqual(tab?.viewType, MARKDOWN_VIEW, 'sample.md did not open in the preview');
+  });
+
+  test('a CSV file opens as a MarkCopy tab when asked', async () => {
+    const uri = fixture('sample.csv');
+
+    await vscode.commands.executeCommand('vscode.openWith', uri, CSV_VIEW);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.strictEqual(tab?.viewType, CSV_VIEW, 'sample.csv did not open in the preview');
   });
 
   test('the video preview has its own playback settings', () => {
