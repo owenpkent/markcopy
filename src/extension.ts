@@ -29,9 +29,19 @@ import { sweepProxyDir } from './videoProxy';
 
 const VIEW_TYPE = 'markcopy.preview';
 
+// The two custom-editor viewTypes contributed in package.json. They share this
+// provider and this code path; they differ only in which files the editor picker
+// offers them for, and in the name it shows.
+const MARKDOWN_VIEW_TYPE = 'markcopy.markdownPreview';
+const CSV_VIEW_TYPE = 'markcopy.csvPreview';
+
 interface PreviewState {
   panel: vscode.WebviewPanel;
   docUri: vscode.Uri;
+  // True for a preview that *is* the document's editor tab, opened through the
+  // editor picker's "Reopen Editor With...". It is bound to that document for
+  // life, and VS Code, not update(), owns its tab title.
+  tab?: boolean;
   // A heading id to scroll to on the next render, set when a link navigates to a
   // new document with a `#fragment`. Consumed (and cleared) by the next update().
   pendingReveal?: string;
@@ -41,9 +51,19 @@ interface PreviewState {
   // same row. Reset when the preview retargets to another document.
   lineCount?: number;
   lineCountVersion?: number;
+  // This preview's pending debounced render (see scheduleUpdate). Per preview, so
+  // typing in one document cannot cancel another preview's render.
+  timer?: ReturnType<typeof setTimeout>;
 }
 
-let current: PreviewState | undefined;
+// Every live preview: the side panel, plus one per document opened *as* a
+// MarkCopy editor tab. Document edits, setting changes and scroll sync fan out
+// to all of them.
+const previews = new Set<PreviewState>();
+
+// The "to the side" panel: the single preview openPreview retargets rather than
+// duplicating. A preview opened as an editor tab is never this one.
+let side: PreviewState | undefined;
 // Rebuilt in update() only when the `markcopy.math` setting flips, so toggling
 // math on/off takes effect without reloading the window.
 let md = createMarkdownIt();
@@ -108,6 +128,19 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
+    // Markdown and CSV files can also be opened *as* a MarkCopy preview, from the
+    // editor picker's "Reopen Editor With..." (and for good, from its "Set Default
+    // for '*.md'"). Contributed at "option" priority, so nothing about what a
+    // double-click in the Explorer does changes until someone asks for it.
+    vscode.window.registerCustomEditorProvider(
+      MARKDOWN_VIEW_TYPE,
+      new PreviewEditorProvider(context),
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+    vscode.window.registerCustomEditorProvider(CSV_VIEW_TYPE, new PreviewEditorProvider(context), {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+
     vscode.commands.registerCommand('markcopy.openPreview', (uri?: vscode.Uri) => {
       const doc = pickDocument(uri);
       if (doc) {
@@ -126,9 +159,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('markcopy.copyDocumentAsRichText', () => {
-      if (current) {
-        current.panel.reveal(vscode.ViewColumn.Beside, true);
-        current.panel.webview.postMessage({ type: 'copyAll' });
+      const state = activePreview();
+      if (state) {
+        // Only the side panel is ours to move; an editor tab stays in the group
+        // the reader put it in.
+        if (state === side) {
+          state.panel.reveal(vscode.ViewColumn.Beside, true);
+        }
+        state.panel.webview.postMessage({ type: 'copyAll' });
       } else {
         vscode.window.showInformationMessage(
           'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
@@ -140,8 +178,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // content (KaTeX, Mermaid, highlighted code) and posts it back as a `pdfHtml`
     // message, handled in onDidReceiveMessage below and rendered by exportPdf.
     vscode.commands.registerCommand('markcopy.saveAsPdf', () => {
-      if (current) {
-        current.panel.webview.postMessage({ type: 'exportPdf' });
+      const state = activePreview();
+      if (state) {
+        state.panel.webview.postMessage({ type: 'exportPdf' });
       } else {
         vscode.window.showInformationMessage(
           'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
@@ -151,30 +190,32 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Live update the preview when the source document changes.
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (current && e.document.uri.toString() === current.docUri.toString()) {
+      for (const state of previewsOf(e.document.uri)) {
         // Every change is seen here, unlike update(), which is debounced. Note
         // the version whenever a line appears or disappears: that is the moment
         // line numbers minted by an earlier render stopped being trustworthy.
-        if (current.lineCount !== undefined && e.document.lineCount !== current.lineCount) {
-          current.lineCountVersion = e.document.version;
+        if (state.lineCount !== undefined && e.document.lineCount !== state.lineCount) {
+          state.lineCountVersion = e.document.version;
         }
-        current.lineCount = e.document.lineCount;
-        scheduleUpdate(current);
+        state.lineCount = e.document.lineCount;
+        scheduleUpdate(state);
       }
     }),
 
     // Re-render when a MarkCopy setting (style profile, theme, sync) changes.
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (current && e.affectsConfiguration('markcopy')) {
-        update(current);
+      if (e.affectsConfiguration('markcopy')) {
+        for (const state of previews) {
+          update(state);
+        }
       }
     }),
 
     // Re-render when the VS Code color theme changes so Mermaid diagrams
     // re-theme in auto mode (the CSS palette already updates live).
     vscode.window.onDidChangeActiveColorTheme(() => {
-      if (current) {
-        update(current);
+      for (const state of previews) {
+        update(state);
       }
     }),
 
@@ -189,9 +230,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!syncScrollEnabled() || revealEcho()) {
         return;
       }
-      if (current && e.textEditor.document.uri.toString() === current.docUri.toString()) {
-        const line = e.visibleRanges[0]?.start.line ?? 0;
-        current.panel.webview.postMessage({ type: 'scrollToLine', line });
+      const line = e.visibleRanges[0]?.start.line ?? 0;
+      for (const state of previewsOf(e.textEditor.document.uri)) {
+        state.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
     }),
   );
@@ -227,7 +268,52 @@ function maybeAutoPreview(
 }
 
 export function deactivate(): void {
-  current?.panel.dispose();
+  // Spread: disposing fires onDidDispose, which deletes from the set.
+  for (const state of [...previews]) {
+    state.panel.dispose();
+  }
+}
+
+// Opens a Markdown or CSV document *as* a MarkCopy preview: the same webview the
+// side panel uses, in the document's own tab rather than beside it. Everything
+// downstream is shared, because what is behind it is still a TextDocument. It
+// re-renders as you type in another editor on the same file, and a CSV cell edit
+// is still written back through a WorkspaceEdit, undo and all.
+class PreviewEditorProvider implements vscode.CustomTextEditorProvider {
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
+    panel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: resourceRoots(this.context, document.uri),
+    };
+    registerPreview(this.context, { panel, docUri: document.uri, tab: true });
+  }
+}
+
+// The preview a command should act on: whichever MarkCopy tab has focus, or else
+// the side panel. A custom editor's webview reports `active` exactly as a panel
+// does, so this follows the reader rather than guessing.
+function activePreview(): PreviewState | undefined {
+  for (const state of previews) {
+    if (state.panel.active) {
+      return state;
+    }
+  }
+  if (side) {
+    return side;
+  }
+  // Nothing focused and no side panel: fall back to a tab open on whatever the
+  // reader is editing, so a command run from the palette still lands somewhere.
+  const doc = vscode.window.activeTextEditor?.document;
+  return doc ? previewsOf(doc.uri)[0] : undefined;
+}
+
+// The live previews showing a document: the side panel when it is pointed at it,
+// plus any editor tabs opened on it.
+function previewsOf(uri: vscode.Uri): PreviewState[] {
+  const key = uri.toString();
+  return [...previews].filter((state) => state.docUri.toString() === key);
 }
 
 function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
@@ -242,8 +328,8 @@ function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
 }
 
 function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument): void {
-  if (current) {
-    if (current.docUri.toString() !== doc.uri.toString()) {
+  if (side) {
+    if (side.docUri.toString() !== doc.uri.toString()) {
       // When the preview panel's own column was the active group, VS Code opens
       // the newly-focused Markdown file as a tab *in that column*. Move it back to
       // the first column so the preview beside it stays a clean two-column layout
@@ -252,29 +338,29 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
       if (
         editor &&
         editor.document.uri.toString() === doc.uri.toString() &&
-        editor.viewColumn === current.panel.viewColumn
+        editor.viewColumn === side.panel.viewColumn
       ) {
         void vscode.window.showTextDocument(editor.document, {
           viewColumn: vscode.ViewColumn.One,
           preserveFocus: false,
         });
       }
-      current.docUri = doc.uri;
+      side.docUri = doc.uri;
       // Line tracking belongs to the document that just went away; the new one
       // gets its own baseline from the render below.
-      current.lineCount = undefined;
-      current.lineCountVersion = undefined;
+      side.lineCount = undefined;
+      side.lineCountVersion = undefined;
       // Grant the webview read access to the newly-targeted document's folder so
       // its relative images resolve (localResourceRoots is fixed at creation).
-      current.panel.webview.options = {
+      side.panel.webview.options = {
         enableScripts: true,
         localResourceRoots: resourceRoots(context, doc.uri),
       };
     }
     // Reveal in the panel's existing column (never "Beside") so retargeting to a
     // new document never migrates the preview into an additional column.
-    current.panel.reveal(current.panel.viewColumn ?? vscode.ViewColumn.Beside, true);
-    update(current);
+    side.panel.reveal(side.panel.viewColumn ?? vscode.ViewColumn.Beside, true);
+    update(side);
     return;
   }
 
@@ -289,13 +375,20 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
     },
   );
 
-  const state: PreviewState = { panel, docUri: doc.uri };
-  current = state;
+  side = registerPreview(context, { panel, docUri: doc.uri });
+}
+
+// Everything a preview needs whichever surface it lives on: the page, the message
+// wiring, teardown, and a first render. Both the side panel and an editor tab go
+// through here, which is what keeps the two from drifting apart.
+function registerPreview(context: vscode.ExtensionContext, state: PreviewState): PreviewState {
+  const panel = state.panel;
+  previews.add(state);
 
   panel.webview.html = htmlShell(context, panel.webview);
 
-  panel.webview.onDidReceiveMessage(
-    (msg) => {
+  const disposables: vscode.Disposable[] = [
+    panel.webview.onDidReceiveMessage((msg) => {
       if (msg?.type === 'revealLine') {
         revealEditorLine(state.docUri, msg.line);
       } else if (msg?.type === 'toast') {
@@ -313,24 +406,25 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
       } else if (msg?.type === 'gridOp') {
         void applyGridOp(state, msg);
       }
-    },
-    undefined,
-    context.subscriptions,
-  );
+    }),
+  ];
 
-  panel.onDidDispose(
-    () => {
-      if (current === state) {
-        // Remember the dismissal so auto-preview does not immediately reopen it.
-        dismissedPreviews.add(state.docUri.toString());
-        current = undefined;
-      }
-    },
-    undefined,
-    context.subscriptions,
-  );
+  panel.onDidDispose(() => {
+    disposables.forEach((d) => d.dispose());
+    if (state.timer !== undefined) {
+      clearTimeout(state.timer);
+    }
+    previews.delete(state);
+    if (side === state) {
+      // Remember the dismissal so auto-preview does not immediately reopen it.
+      // An editor tab is not auto-anything, so closing one means only itself.
+      dismissedPreviews.add(state.docUri.toString());
+      side = undefined;
+    }
+  });
 
   update(state);
+  return state;
 }
 
 // The folders the preview webview may load local resources (images) from: the
@@ -348,15 +442,14 @@ function resourceRoots(context: vscode.ExtensionContext, docUri: vscode.Uri): vs
 // string-built grid of up to markcopy.csv.maxRows rows on every keystroke.
 // Short enough to read as live, long enough that holding a key down renders once.
 const UPDATE_DEBOUNCE_MS = 80;
-let updateTimer: ReturnType<typeof setTimeout> | undefined;
 
 function scheduleUpdate(state: PreviewState): void {
-  if (updateTimer !== undefined) {
-    clearTimeout(updateTimer);
+  if (state.timer !== undefined) {
+    clearTimeout(state.timer);
   }
-  updateTimer = setTimeout(() => {
-    updateTimer = undefined;
-    if (current === state) {
+  state.timer = setTimeout(() => {
+    state.timer = undefined;
+    if (previews.has(state)) {
       update(state);
     }
   }, UPDATE_DEBOUNCE_MS);
@@ -365,9 +458,9 @@ function scheduleUpdate(state: PreviewState): void {
 function update(state: PreviewState): void {
   // A direct update supersedes anything the debounce still has pending, so the
   // two can never race and render the same document twice.
-  if (updateTimer !== undefined) {
-    clearTimeout(updateTimer);
-    updateTimer = undefined;
+  if (state.timer !== undefined) {
+    clearTimeout(state.timer);
+    state.timer = undefined;
   }
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
@@ -399,7 +492,9 @@ function update(state: PreviewState): void {
           resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),
         });
   state.lineCount = doc.lineCount;
-  state.panel.title = `Preview ${basename(state.docUri)}`;
+  if (!state.tab) {
+    state.panel.title = `Preview ${basename(state.docUri)}`;
+  }
   // A one-shot heading reveal, set when a link navigated here. The webview also
   // scrolls a newly-targeted document to the top on its own (docKey change).
   const revealFragment = state.pendingReveal || undefined;
@@ -634,6 +729,22 @@ async function openLink(
     doc = await vscode.workspace.openTextDocument(targetUri);
   } catch {
     void vscode.window.showWarningMessage(`MarkCopy: could not open ${basename(targetUri)}.`);
+    return;
+  }
+  if (state.tab) {
+    // A custom editor cannot retarget to another document, so following a link
+    // opens the target as its own MarkCopy tab in the same group. Reading stays
+    // where the reader is instead of jumping to the side panel.
+    await vscode.commands.executeCommand('vscode.openWith', targetUri, MARKDOWN_VIEW_TYPE, {
+      viewColumn: state.panel.viewColumn,
+    });
+    // By now the new tab has registered its preview, so the heading it was
+    // linked to can be handed straight to it.
+    const opened = previewsOf(targetUri).find((p) => p.tab);
+    if (opened && target.fragment) {
+      opened.pendingReveal = target.fragment;
+      update(opened);
+    }
     return;
   }
   // Land at the linked heading, or the top of the new document. Set before the

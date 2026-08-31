@@ -50,6 +50,16 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
 - [ ] Relative and absolute local images render; remote images still load.
 
+### Where the preview opens
+
+- [ ] ★ In `sample.md`'s editor title bar, `...` -> **Reopen Editor With...** lists **MarkCopy Markdown Preview**; picking it replaces the tab with the preview, full width, titled `sample.md` (not `Preview sample.md`).
+- [ ] The tab's own title bar still has the **Save as PDF** and settings buttons, and right-clicking inside it gives the usual copy menu.
+- [ ] With the tab open, edit `sample.md` in a second editor group: the tab re-renders as you type.
+- [ ] Clicking a link to another Markdown file from the tab opens that file as a MarkCopy tab, landing at the linked heading.
+- [ ] Same check on [sample.csv](../sample.csv) with **MarkCopy CSV Preview**: the grid opens in the tab, a cell edit writes back, and **Ctrl+Z** in the tab takes it back.
+- [ ] Closing a preview tab does not suppress the side panel: reopening `sample.md` as text still auto-previews.
+- [ ] Double-clicking `sample.md` in the Explorer still opens the text editor (the entries are `option` priority, not `default`).
+
 ### Copy actions
 
 Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COPY-MATRIX.md).
