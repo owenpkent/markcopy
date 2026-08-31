@@ -103,6 +103,8 @@ To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, 
 
 Local images in the document render automatically, and the right-click menu's **Preferences** submenu (or the gear icon in the preview's title bar) lets you change theme, sync scroll, math, and auto-preview without leaving the preview.
 
+**To read a document full width, open the preview as the tab itself.** Click the `...` in the editor title bar, choose **Reopen Editor With...**, and pick **MarkCopy Markdown Preview** (or **MarkCopy CSV Preview**); **Set Default for '\*.md'** in that same menu makes it the editor a double-click opens from then on. It is the same preview, with the same right-click menu and the same editable CSV grid, and it keeps re-rendering as you edit the file in any other editor.
+
 ## Commands
 
 | Command                                    | ID                                | What it does                                                          |
