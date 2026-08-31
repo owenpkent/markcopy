@@ -4,6 +4,16 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **ProRes, DNxHD, and HEVC videos now play, if you have ffmpeg.** QuickTime is a container, not a codec: the `.mov` files that come out of a camera or an editor hold codecs VS Code's Chromium has never been able to decode, and until now the preview could only say so and point at your default player. It now looks for `ffmpeg` — on `PATH`, then the usual install locations, or wherever `markcopy.video.ffmpegPath` points — and encodes a throwaway H.264 copy to a temp folder, with a progress bar and a **Cancel** button while it runs. The copy is what plays; the original is never touched, and the copy is deleted when the tab closes. The status line says `ffmpeg preview copy` for as long as one is on screen.
+  - **A clip with an alpha channel goes over a transparency checkerboard**, not flat black. A ProRes 4444 lower third is mostly transparent, and flattening it onto black produces a frame that looks exactly like a clip rendering nothing. The status line says `alpha on checkerboard`, which is also the warning that the board is baked into any frame you grab.
+  - **`markcopy.video.transcode`** chooses between `auto` (the default), `ask` — say what the file is and offer a button, for anyone whose folder is long 4K masters — and `off`, which keeps the old message-and-default-player behaviour. With no ffmpeg installed you get that same message, plus a note that installing one would let MarkCopy play the file here.
+
+### Fixed
+
+- **A CSV cell edit is no longer lost when you click somewhere that is not a cell.** Committing hung entirely on the editor being blurred, which covers clicking another cell but not clicking the padding around the grid, the row-number gutter, or the empty space past the last row: nothing there takes the focus in every engine, so no `blur` arrived, nothing was committed, and the value went with the next render. Leaving the webview (another editor tab, another window) had the same hole, and closed it the same way. Every spreadsheet keeps that edit, so it is kept, while a right-click — which takes the focus on purpose, so the menu's copy rows can read the value — still leaves the edit open underneath the menu.
+
 ### Planned
 
 - PlantUML support.

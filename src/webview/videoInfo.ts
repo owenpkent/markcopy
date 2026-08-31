@@ -83,3 +83,67 @@ export function describeMediaError(code: number | undefined, name: string): stri
       return `VS Code cannot play ${name}. It supports H.264 (and AAC audio); ProRes, DNxHD, and most HEVC files need your default player.`;
   }
 }
+
+/**
+ * What a file that VS Code cannot decode is, when ffmpeg has told us.
+ *
+ * The generic message below has to hedge ("ProRes, DNxHD, and most HEVC"),
+ * because without a prober all the viewer knows is that the element gave up. A
+ * probe turns that into a fact about this file, which is both shorter and the
+ * thing the reader would otherwise go and look up.
+ */
+export function describeCodec(name: string, codec: string): string {
+  return codec ? `${name} is ${codec}, which VS Code cannot play.` : `VS Code cannot play ${name}.`;
+}
+
+/** The offer, when ffmpeg is there to make good on it. */
+export function proxyOffer(name: string, codec: string): string {
+  return `${describeCodec(name, codec)} MarkCopy can build a playable copy with ffmpeg, without touching the original.`;
+}
+
+/**
+ * The dead end, when it is not.
+ *
+ * Names the way out that costs nothing (the OS player, one button away) before
+ * the one that costs an install, so the reader who just wants to watch the clip
+ * is not sent to a package manager first.
+ */
+export function proxyUnavailable(name: string): string {
+  return `VS Code cannot play ${name}. It supports H.264 (and AAC audio); ProRes, DNxHD, and most HEVC files need your default player. Install ffmpeg, or set markcopy.video.ffmpegPath, and MarkCopy will build a playable copy here instead.`;
+}
+
+/** What went wrong, with ffmpeg's own words kept: they are terse and specific. */
+export function proxyFailed(name: string, detail: string): string {
+  const said = detail.trim();
+  return said
+    ? `ffmpeg could not build a playable copy of ${name}: ${said}`
+    : `ffmpeg could not build a playable copy of ${name}.`;
+}
+
+/**
+ * The progress line, which reports a percentage only when it can mean one.
+ *
+ * A container with no duration (a stream, a damaged index) still encodes fine,
+ * and claiming a percentage against an unknown total would either stick at 0 or
+ * run past 100. Elapsed output time is the honest readout there.
+ */
+export function proxyProgress(seconds: number, durationSec: number): string {
+  if (durationSec > 0) {
+    const pct = Math.min(100, Math.max(0, Math.round((seconds / durationSec) * 100)));
+    return `Building a playable copy… ${pct}%`;
+  }
+  return seconds > 0
+    ? `Building a playable copy… ${formatDuration(seconds)} in`
+    : 'Building a playable copy…';
+}
+
+/**
+ * The dead end the reader chose, when `markcopy.video.transcode` is off.
+ *
+ * Separate from proxyUnavailable because pointing someone at an ffmpeg install
+ * they may already have, to enable a thing they switched off on purpose, is
+ * worse than saying nothing. The setting is named so the way back is findable.
+ */
+export function proxyDisabled(name: string): string {
+  return `VS Code cannot play ${name}. Transcoding is off (markcopy.video.transcode), so this needs your default player.`;
+}

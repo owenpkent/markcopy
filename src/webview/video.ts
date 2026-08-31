@@ -7,7 +7,17 @@
 // streams the file straight off disk, seeking with range requests, so a 2 GB
 // clip costs the same in memory as a 2 MB one.
 import { createMenu, type MenuEntry } from './menu';
-import { describeMediaError, formatBytes, formatDuration, frameFileName } from './videoInfo';
+import {
+  describeMediaError,
+  formatBytes,
+  formatDuration,
+  frameFileName,
+  proxyDisabled,
+  proxyFailed,
+  proxyOffer,
+  proxyProgress,
+  proxyUnavailable,
+} from './videoInfo';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -49,6 +59,15 @@ let sourceUri = '';
 let frameCopyBlocked = false;
 let corsRetried = false;
 
+// How the status line should describe the thing actually on screen, when it is
+// not the file itself but an ffmpeg-built copy of it. Empty while playing the
+// original. A reader grabbing a frame has to know it came from a re-encode.
+let proxyNote = '';
+// Whether the host has already been asked about a proxy for this file, so a
+// second `error` (the proxy's own, or a retry) does not start the conversation
+// over from the top.
+let proxyAsked = false;
+
 // The active markcopy.theme, seeded from the host and changed via the menu.
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
 
@@ -76,28 +95,97 @@ function updateStatus(): void {
   if (size) {
     parts.push(size);
   }
+  if (proxyNote) {
+    parts.push(proxyNote);
+  }
   statusEl.textContent = parts.join('  ·  ');
 }
 
-/** Replace the viewport with a message the reader can act on. */
-function showError(message: string): void {
+interface OverlayAction {
+  label: string;
+  run: () => void;
+}
+
+// The message paragraph and progress bar of the overlay currently on screen, so
+// a transcode ticking twice a second can rewrite them in place. Rebuilding the
+// overlay on every tick would drop the focus ring off the Cancel button between
+// one frame and the next, making it unclickable by keyboard for the whole encode.
+let overlayText: HTMLParagraphElement | undefined;
+let overlayFill: HTMLDivElement | undefined;
+
+/** The door the messages point at: hand the file to the player that can read it. */
+function openExternalAction(): OverlayAction {
+  return {
+    label: 'Open in Default App',
+    run: () => vscode.postMessage({ type: 'openExternal' }),
+  };
+}
+
+/**
+ * Replace the viewport with a message the reader can act on.
+ *
+ * `progress` draws a bar under the message: a fraction for a transcode whose
+ * total is known, or -1 for one whose is not, which animates rather than
+ * claiming a position it cannot compute.
+ */
+function showOverlay(message: string, actions: OverlayAction[], progress?: number): void {
   stage.hidden = true;
   errorEl.hidden = false;
   errorEl.textContent = '';
+  overlayText = undefined;
+  overlayFill = undefined;
 
   const text = document.createElement('p');
   text.className = 'mc-video-error-text';
   text.textContent = message;
   errorEl.appendChild(text);
+  overlayText = text;
 
-  // The message above says the OS player can probably open it; this is that
-  // door, rather than an instruction to go find the file in Explorer.
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'mc-video-button';
-  open.textContent = 'Open in Default App';
-  open.addEventListener('click', () => vscode.postMessage({ type: 'openExternal' }));
-  errorEl.appendChild(open);
+  if (progress !== undefined) {
+    const track = document.createElement('div');
+    track.className = 'mc-video-progress';
+    const fill = document.createElement('div');
+    fill.className = 'mc-video-progress-fill';
+    track.appendChild(fill);
+    errorEl.appendChild(track);
+    overlayFill = fill;
+    setProgress(progress);
+  }
+
+  if (actions.length > 0) {
+    const row = document.createElement('div');
+    row.className = 'mc-video-actions';
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mc-video-button';
+      button.textContent = action.label;
+      button.addEventListener('click', action.run);
+      row.appendChild(button);
+    }
+    errorEl.appendChild(row);
+  }
+}
+
+function setProgress(fraction: number): void {
+  if (!overlayFill) {
+    return;
+  }
+  const indeterminate = fraction < 0;
+  overlayFill.classList.toggle('mc-video-progress-fill--waiting', indeterminate);
+  overlayFill.style.width = indeterminate
+    ? ''
+    : `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
+}
+
+/** Retitle the overlay already on screen, or draw a fresh one if there is none. */
+function updateOverlay(message: string, fraction: number, actions: OverlayAction[]): void {
+  if (overlayText && overlayFill) {
+    overlayText.textContent = message;
+    setProgress(fraction);
+    return;
+  }
+  showOverlay(message, actions, fraction);
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +199,8 @@ interface LoadMessage {
   size: number;
   autoplay: boolean;
   loop: boolean;
+  /** Set when `src` is an ffmpeg-built copy rather than the file itself. */
+  proxyNote?: string;
 }
 
 function load(msg: LoadMessage): void {
@@ -118,6 +208,11 @@ function load(msg: LoadMessage): void {
   filePath = msg.path;
   fileBytes = msg.size;
   sourceUri = msg.src;
+  proxyNote = msg.proxyNote ?? '';
+  // A second source means a second chance at both: the CORS probe is per-file,
+  // and a proxy that fails to load is a different failure from the original's.
+  corsRetried = false;
+  frameCopyBlocked = false;
 
   video.loop = msg.loop;
   // Chromium only honours autoplay without a user gesture while muted, so an
@@ -133,6 +228,10 @@ function load(msg: LoadMessage): void {
 video.addEventListener('loadedmetadata', () => {
   stage.hidden = false;
   errorEl.hidden = true;
+  // The overlay's nodes go with it; leaving the handles set would let a late
+  // progress tick write into a box nobody can see.
+  overlayText = undefined;
+  overlayFill = undefined;
   updateStatus();
 });
 
@@ -149,8 +248,79 @@ video.addEventListener('error', () => {
     video.load();
     return;
   }
-  showError(describeMediaError(video.error?.code, fileName));
+
+  const code = video.error?.code;
+  // A codec this engine has no decoder for is the one failure ffmpeg can undo.
+  // A cancelled load or an unreadable file is not, and asking the host to spend
+  // a transcode on either would trade a clear message for a slow one.
+  const transcodable = code === 3 || code === 4 || code === undefined;
+  if (transcodable && !proxyNote && !proxyAsked) {
+    proxyAsked = true;
+    showOverlay('Checking whether this file can be previewed…', [openExternalAction()]);
+    vscode.postMessage({ type: 'proxyRequest' });
+    return;
+  }
+  showOverlay(describeMediaError(code, fileName), [openExternalAction()]);
 });
+
+// ---------------------------------------------------------------------------
+// The ffmpeg proxy
+// ---------------------------------------------------------------------------
+/**
+ * What the host has to say about building a playable copy of this file.
+ *
+ * The viewer drives none of this: it reports that the element gave up and then
+ * renders whatever comes back, because every input to the decision (is ffmpeg
+ * installed, what codec is this really, has the reader turned transcoding off)
+ * lives on the host side of the postMessage boundary.
+ */
+interface ProxyMessage {
+  type: 'proxy';
+  state: 'unavailable' | 'ask' | 'running' | 'failed';
+  /** Why there will be no proxy: no ffmpeg to run, or the reader said not to. */
+  reason?: 'missing' | 'disabled';
+  /** The source codec as ffprobe named it, when a probe got that far. */
+  codec?: string;
+  /** Seconds encoded so far, and the total to measure them against. */
+  seconds?: number;
+  durationSec?: number;
+  /** ffmpeg's own account of a failure. */
+  detail?: string;
+}
+
+const buildAction: OverlayAction = {
+  label: 'Build Playable Copy',
+  run: () => vscode.postMessage({ type: 'proxyStart' }),
+};
+const cancelAction: OverlayAction = {
+  label: 'Cancel',
+  run: () => vscode.postMessage({ type: 'proxyCancel' }),
+};
+
+function onProxyMessage(msg: ProxyMessage): void {
+  switch (msg.state) {
+    case 'unavailable':
+      showOverlay(
+        msg.reason === 'disabled' ? proxyDisabled(fileName) : proxyUnavailable(fileName),
+        [openExternalAction()],
+      );
+      break;
+    case 'ask':
+      showOverlay(proxyOffer(fileName, msg.codec ?? ''), [buildAction, openExternalAction()]);
+      break;
+    case 'running': {
+      const duration = msg.durationSec ?? 0;
+      const seconds = msg.seconds ?? 0;
+      updateOverlay(proxyProgress(seconds, duration), duration > 0 ? seconds / duration : -1, [
+        cancelAction,
+      ]);
+      break;
+    }
+    case 'failed':
+      showOverlay(proxyFailed(fileName, msg.detail ?? ''), [openExternalAction()]);
+      break;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Frames
@@ -425,6 +595,7 @@ function applyTheme(value: string): void {
 window.addEventListener('message', (event: MessageEvent) => {
   const msg = event.data as
     | LoadMessage
+    | ProxyMessage
     | { type: 'error'; message: string }
     | { type: 'setTheme'; value: string }
     | { type: 'toast'; message: string };
@@ -433,8 +604,10 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
   if (msg.type === 'load') {
     load(msg);
+  } else if (msg.type === 'proxy') {
+    onProxyMessage(msg);
   } else if (msg.type === 'error') {
-    showError(msg.message);
+    showOverlay(msg.message, [openExternalAction()]);
   } else if (msg.type === 'setTheme') {
     applyTheme(msg.value);
   } else if (msg.type === 'toast') {

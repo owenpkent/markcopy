@@ -25,6 +25,7 @@ import { htmlShell } from './previewShell';
 import { XlsxEditorProvider } from './xlsxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
+import { sweepProxyDir } from './videoProxy';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -53,6 +54,11 @@ let mdMath = true;
 const dismissedPreviews = new Set<string>();
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Proxies are deleted when their panel closes, so this normally finds nothing.
+  // It is here for the window that was killed rather than closed, which never got
+  // to run that cleanup. Fire and forget: nothing downstream waits on a sweep.
+  void sweepProxyDir();
+
   context.subscriptions.push(
     // PDF files open in the MarkCopy PDF preview (a read-only custom editor).
     vscode.window.registerCustomEditorProvider(

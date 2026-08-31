@@ -318,6 +318,27 @@
           "default": false,
           "description": "Repeat a video when it reaches the end. Also toggled from the preview's right-click Playback menu."
         },
+        "markcopy.video.transcode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ask",
+            "off"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Build the preview copy as soon as a file turns out to be unplayable.",
+            "Say what the file is and offer a button, instead of starting on its own.",
+            "Never transcode; offer the default player, as MarkCopy did before."
+          ],
+          "markdownDescription": "What to do with a video VS Code cannot decode (ProRes, DNxHD, most HEVC). When ffmpeg is installed, MarkCopy can encode a throwaway H.264 copy to a temp folder and play that; the original is never touched, and the copy is deleted when the tab closes. Set this to `ask` if you work with long 4K masters, where an automatic transcode is a wait you did not ask for."
+        },
+        "markcopy.video.ffmpegPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `ffmpeg` executable used to build a playable preview copy. Leave empty to detect one automatically (PATH, then the usual install locations). `ffprobe` is taken from the same folder.\n\nThis setting is machine-scoped: it can only be set in your own user settings, never by a workspace, because its value is launched as a program."
+        },
         "markcopy.pdf.pageSize": {
           "type": "string",
           "enum": [
