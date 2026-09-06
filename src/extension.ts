@@ -10,7 +10,13 @@ import {
   renderPdf,
   type PageSize,
 } from './pdfExport';
-import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from './preview-utils';
+import {
+  classifyLink,
+  isTexDocument,
+  localImageRef,
+  previewKind,
+  shouldAutoPreview,
+} from './preview-utils';
 import {
   applyCsvEdits,
   cellEdit,
@@ -26,6 +32,8 @@ import { XlsxEditorProvider } from './xlsxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { sweepProxyDir } from './videoProxy';
+import { TexEditorProvider, recompileActiveTex, texPanelFor } from './texEditor';
+import { sweepTexRoot } from './texCompile';
 
 const VIEW_TYPE = 'markcopy.preview';
 
@@ -73,11 +81,16 @@ let mdMath = true;
 // so a dismissed preview does not spring back open on the next focus change.
 const dismissedPreviews = new Set<string>();
 
+// LaTeX previews whose `openWith` is in flight. See `openTexPreview`.
+const openingTex = new Set<string>();
+
 export function activate(context: vscode.ExtensionContext): void {
   // Proxies are deleted when their panel closes, so this normally finds nothing.
   // It is here for the window that was killed rather than closed, which never got
   // to run that cleanup. Fire and forget: nothing downstream waits on a sweep.
   void sweepProxyDir();
+  // Same story for LaTeX build directories, which are larger and more numerous.
+  void sweepTexRoot();
 
   context.subscriptions.push(
     // PDF files open in the MarkCopy PDF preview (a read-only custom editor).
@@ -128,6 +141,16 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
+    // LaTeX files can be opened as a MarkCopy preview, which compiles them and
+    // shows the PDF. Contributed at "option" priority, like Markdown and CSV and
+    // unlike the read-only previews: a .tex is a file people edit, so opening one
+    // has to keep giving them the text editor.
+    vscode.window.registerCustomEditorProvider(
+      TexEditorProvider.viewType,
+      new TexEditorProvider(context, (uri) => dismissedPreviews.add(uri.toString())),
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+
     // Markdown and CSV files can also be opened *as* a MarkCopy preview, from the
     // editor picker's "Reopen Editor With..." (and for good, from its "Set Default
     // for '*.md'"). Contributed at "option" priority, so nothing about what a
@@ -144,11 +167,29 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('markcopy.openPreview', (uri?: vscode.Uri) => {
       const doc = pickDocument(uri);
       if (doc) {
+        // LaTeX does not go through the shared preview panel. It renders through
+        // pdf.js rather than the Markdown/CSV webview bundle, so its preview is a
+        // custom editor; opening it Beside gives the same source-left,
+        // preview-right layout by a different route.
         // An explicit open clears any earlier dismissal for this document.
         dismissedPreviews.delete(doc.uri.toString());
+        if (isTexDocument(doc.languageId, doc.uri.path)) {
+          openTexPreview(doc.uri, false);
+          return;
+        }
         openPreview(context, doc);
       } else {
-        vscode.window.showInformationMessage('MarkCopy: open a Markdown or CSV file first.');
+        vscode.window.showInformationMessage(
+          'MarkCopy: open a Markdown, CSV, or LaTeX file first.',
+        );
+      }
+    }),
+
+    vscode.commands.registerCommand('markcopy.recompileTex', () => {
+      if (!recompileActiveTex()) {
+        vscode.window.showInformationMessage(
+          'MarkCopy: focus a LaTeX preview first (MarkCopy: Open Rich Preview).',
+        );
       }
     }),
 
@@ -254,6 +295,17 @@ function maybeAutoPreview(
   }
   const doc = editor.document;
   const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
+  if (isTexDocument(doc.languageId, doc.uri.path)) {
+    // LaTeX gets the same auto-preview bargain as Markdown and CSV, but by a
+    // different route: it is a custom editor rather than the shared panel, so
+    // there is no panel to retarget, just a tab to open beside. Being the one
+    // MarkCopy format that did not open on its own was the whole reason this
+    // looked broken.
+    if (enabled && doc.uri.scheme === 'file' && !dismissedPreviews.has(doc.uri.toString())) {
+      openTexPreview(doc.uri, true);
+    }
+    return;
+  }
   const eligible = shouldAutoPreview({
     enabled,
     languageId: doc.languageId,
@@ -265,6 +317,56 @@ function maybeAutoPreview(
   if (eligible) {
     openPreview(context, doc);
   }
+}
+
+/**
+ * Open the LaTeX preview for `uri` beside its source, or surface the one already
+ * showing it.
+ *
+ * The existing-panel check is not an optimisation, it is what stops this from
+ * multiplying. Auto-preview calls this on every active-editor change, and
+ * `vscode.openWith` cannot be relied on to reuse a tab here: its target group is
+ * `ViewColumn.Beside`, computed against whatever is focused at the time, so as
+ * soon as focus is inside the preview's own group Beside means a new group and
+ * openWith builds another panel. Each panel is a pdf.js webview with its own
+ * compile session, so they accumulate until the extension host dies.
+ *
+ * `preserveFocus` also decides how insistent to be. The automatic path stays
+ * quiet: if a preview for this document exists anywhere, leave it exactly where
+ * it is, because yanking a tab into view while someone is typing is worse than
+ * doing nothing. Only an explicit request reveals it.
+ */
+function openTexPreview(uri: vscode.Uri, preserveFocus: boolean): void {
+  const key = uri.toString();
+  const existing = texPanelFor(uri);
+  if (existing) {
+    if (!preserveFocus) {
+      existing.reveal(existing.viewColumn, true);
+    }
+    return;
+  }
+  // `texPanelFor` alone is not enough, because it can only see panels that have
+  // finished resolving, and `openWith` is asynchronous. Restoring a folder full
+  // of editors churns the active editor several times in a row, so without a
+  // synchronous claim staked here every one of those passes sees "no panel yet"
+  // and starts another open. They all then resolve, and the window is suddenly
+  // carrying a dozen pdf.js webviews for one document, which is enough to take
+  // the extension host down with it.
+  if (openingTex.has(key)) {
+    return;
+  }
+  openingTex.add(key);
+  void Promise.resolve(
+    vscode.commands.executeCommand('vscode.openWith', uri, TexEditorProvider.viewType, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preserveFocus,
+    }),
+  ).then(
+    () => openingTex.delete(key),
+    // Released on failure too, so one refused open does not wedge this document
+    // out of ever previewing again for the rest of the session.
+    () => openingTex.delete(key),
+  );
 }
 
 export function deactivate(): void {

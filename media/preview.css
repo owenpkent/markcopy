@@ -971,6 +971,111 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   z-index: 1100;
 }
 
+/* ---- TeX compile-status overlay ------------------------------------------
+   Built lazily in pdf.ts (see ensureTexOverlay) once a texEditor host starts
+   sending texState messages; a plain .pdf never creates any of this. Sits
+   above the page canvas (.textLayer is z-index 1, .mc-annot-layer is 2) but
+   below the toolbar/menu/toast/note popover, so those stay reachable while a
+   compile is in progress. */
+.mc-tex-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 15vh;
+  /* The container never intercepts anything itself; only the card opts back in
+     (see .mc-tex-card below), and --inert switches that off too. */
+  pointer-events: none;
+}
+/* Setting display:flex above (an author rule) outranks the user agent's own
+   [hidden] { display: none }, same as #mc-stage in the video preview; restate
+   it here or root.hidden = true would stop hiding anything. */
+.mc-tex-overlay[hidden] {
+  display: none;
+}
+/* No pages rendered yet: the overlay is the entire visible surface, so centre
+   it in the viewport instead of leaving it as a thin bar over blankness. */
+.mc-tex-overlay--empty {
+  align-items: center;
+  padding-top: 0;
+}
+.mc-tex-card {
+  pointer-events: auto;
+  max-width: min(90vw, 480px);
+  box-sizing: border-box;
+  padding: 20px 24px;
+  border-radius: 8px;
+  text-align: center;
+  background: var(--vscode-editorWidget-background, #24292f);
+  color: var(--vscode-editorWidget-foreground, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+/* Compiling has no button, and a recompile runs over a document already on
+   screen, so nothing in the card should catch scroll or right-click either. */
+.mc-tex-overlay--inert .mc-tex-card {
+  pointer-events: none;
+}
+.mc-tex-spinner {
+  width: 22px;
+  height: 22px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--vscode-progressBar-background, #0969da);
+  animation: mc-tex-spin 0.8s linear infinite;
+}
+.mc-tex-spinner[hidden] {
+  display: none;
+}
+@keyframes mc-tex-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-tex-spinner {
+    animation: none;
+  }
+}
+.mc-tex-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mc-tex-detail {
+  margin: 10px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mc-tex-actions {
+  margin-top: 14px;
+}
+.mc-tex-button {
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--vscode-button-background, #0969da);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+}
+.mc-tex-button:hover {
+  background: var(--vscode-button-hoverBackground, #0a6ad1);
+}
+
 /* ---------------------------------------------------------------------------
    Spreadsheet sheets
    ---------------------------------------------------------------------------

@@ -1,0 +1,49 @@
+% A small document that exercises the parts of a LaTeX preview worth looking at:
+% sectioning, display and inline math, a table, a figure-less float, and a
+% cross-reference, which is the thing that needs a second compilation pass.
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\title{MarkCopy LaTeX Preview}
+\author{Sample Document}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Inline and display math}
+\label{sec:math}
+
+Euler's identity, $e^{i\pi} + 1 = 0$, is compact enough to sit inline. The
+Gaussian integral wants its own line:
+
+\begin{equation}
+  \label{eq:gauss}
+  \int_{-\infty}^{\infty} e^{-x^2} \, dx = \sqrt{\pi}.
+\end{equation}
+
+\section{A cross-reference}
+
+Equation~\eqref{eq:gauss} appears in Section~\ref{sec:math}. A reference like
+this one resolves only on the second pass, which is why the preview prefers an
+engine that reruns the document on its own.
+
+\section{A table}
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{lrr}
+    \toprule
+    Engine    & Passes & Fetches packages \\
+    \midrule
+    pdflatex  & manual & no  \\
+    latexmk   & auto   & no  \\
+    tectonic  & auto   & yes \\
+    \bottomrule
+  \end{tabular}
+  \caption{What the preview is choosing between.}
+\end{table}
+
+\end{document}

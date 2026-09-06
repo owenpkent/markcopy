@@ -18,6 +18,7 @@ const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
 const MARKDOWN_VIEW = 'markcopy.markdownPreview';
 const CSV_VIEW = 'markcopy.csvPreview';
+const TEX_VIEW = 'markcopy.texPreview';
 
 /**
  * Poll `probe` until it returns something, or give up.
@@ -219,6 +220,110 @@ suite('MarkCopy custom editors', () => {
       customTabs().find((candidate) => candidate.uri === uri.toString()),
     );
     assert.strictEqual(tab?.viewType, CSV_VIEW, 'sample.csv did not open in the preview');
+  });
+
+  test('opening a .tex leaves the source in the text editor and previews beside it', async () => {
+    const uri = fixture('sample.tex');
+
+    // Two things at once, and they pull in opposite directions. "option"
+    // priority means the file itself must still land in the text editor, since a
+    // .tex is a file people spend all day editing and stealing that would be
+    // worse than having no preview at all. Auto-preview then opens the preview
+    // as a SECOND tab beside it, the same bargain Markdown and CSV get. Being
+    // the one MarkCopy format that opened to nothing is what made this look
+    // broken in the first place, so it is worth pinning here rather than
+    // trusting it to stay wired up.
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    const textTab = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .find(
+        (tab) =>
+          tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString(),
+      );
+    assert.ok(textTab, 'sample.tex should still open in a plain text editor');
+
+    const preview = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.strictEqual(preview?.viewType, TEX_VIEW, 'no LaTeX preview opened beside the source');
+  });
+
+  test('a burst of preview requests still opens exactly one panel', async () => {
+    // The shape that actually broke: opening a folder restores its editors and
+    // churns the active editor several times in a row, with no await between
+    // passes. `vscode.openWith` is asynchronous, so every pass in that burst saw
+    // "no panel yet" and started another open, and the window ended up carrying
+    // a stack of pdf.js webviews for one document. Firing without awaiting is
+    // the whole point of this test; awaiting between calls hides the bug.
+    const uri = fixture('sample.tex');
+    await vscode.workspace.openTextDocument(uri);
+
+    for (let i = 0; i < 8; i++) {
+      void vscode.commands.executeCommand('markcopy.openPreview', uri);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const previews = customTabs().filter(
+      (tab) => tab.uri === uri.toString() && tab.viewType === TEX_VIEW,
+    );
+    assert.strictEqual(
+      previews.length,
+      1,
+      `a burst should collapse to one preview, saw ${previews.length}`,
+    );
+  });
+
+  test('focusing a .tex over and over does not pile up preview panels', async () => {
+    // The regression this exists for: auto-preview runs on every active-editor
+    // change, and vscode.openWith targets ViewColumn.Beside, which is relative
+    // to whatever is focused. Once focus is inside the preview's own group,
+    // Beside means a new group, so each pass built ANOTHER panel. Every one of
+    // them is a pdf.js webview with its own compile session, and they piled up
+    // until the extension host fell over.
+    const uri = fixture('sample.tex');
+    const doc = await vscode.workspace.openTextDocument(uri);
+
+    for (let pass = 0; pass < 5; pass++) {
+      // Bounce focus between the source and the preview's group, which is the
+      // shape that used to multiply panels.
+      await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+      await waitFor(() => customTabs().find((c) => c.uri === uri.toString()));
+      await vscode.commands.executeCommand('workbench.action.focusNextGroup');
+    }
+    await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const previews = customTabs().filter(
+      (tab) => tab.uri === uri.toString() && tab.viewType === TEX_VIEW,
+    );
+    assert.strictEqual(
+      previews.length,
+      1,
+      `expected exactly one LaTeX preview, saw ${previews.length}: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('a LaTeX file opens as a MarkCopy tab when asked for directly', async () => {
+    const uri = fixture('sample.tex');
+
+    await vscode.commands.executeCommand('vscode.openWith', uri, TEX_VIEW);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.strictEqual(tab?.viewType, TEX_VIEW, 'sample.tex did not open in the preview');
+  });
+
+  test('the LaTeX preview has its own compile settings', () => {
+    // As with the sheet limits below: read through the real configuration, since
+    // a contributed key that does not match the key the code reads keeps
+    // returning the hardcoded default and the setting silently does nothing.
+    const cfg = vscode.workspace.getConfiguration('markcopy');
+    assert.strictEqual(cfg.get('tex.compile'), 'auto');
+    assert.strictEqual(cfg.get('tex.engine'), 'auto');
+    assert.strictEqual(cfg.get('tex.recompileOnSave'), true);
+    assert.strictEqual(cfg.get('tex.rootFile'), '');
   });
 
   test('the video preview has its own playback settings', () => {

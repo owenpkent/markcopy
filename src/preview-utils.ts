@@ -125,6 +125,23 @@ export function previewKind(languageId: string, path = ''): PreviewKind | undefi
   return undefined;
 }
 
+/**
+ * Whether MarkCopy previews this document as LaTeX.
+ *
+ * Kept apart from `previewKind` on purpose: that answers "which way does the
+ * shared Markdown/CSV webview render this", and LaTeX does not go through that
+ * webview at all. It compiles to a PDF and opens in its own custom editor, so
+ * the only thing callers need from here is yes or no.
+ *
+ * `latex` is VS Code's own built-in language id, but the extension is accepted
+ * too, for the same reason `previewKind` accepts one: a `files.associations`
+ * entry or another extension can map .tex somewhere else, and the preview should
+ * not go inert just because something renamed the language.
+ */
+export function isTexDocument(languageId: string, path = ''): boolean {
+  return languageId === 'latex' || /\.(tex|ltx|latex)$/i.test(path);
+}
+
 export interface AutoPreviewInput {
   /** Value of the `markcopy.autoPreview` setting. */
   enabled: boolean;

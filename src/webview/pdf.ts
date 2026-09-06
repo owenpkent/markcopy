@@ -1,5 +1,10 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  RenderTask,
+} from 'pdfjs-dist';
 import { createMenu, type MenuEntry } from './menu';
 
 // Minimal VS Code webview API surface we use.
@@ -19,6 +24,20 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 // State
 // ---------------------------------------------------------------------------
 let doc: PDFDocumentProxy | null = null;
+// Held only so a reload can tear the previous document down. `destroy` lives on
+// the loading task rather than on the document proxy.
+let loadingTask: PDFDocumentLoadingTask | null = null;
+// The worker backing the current document, plus the blob URL it was started
+// from. `PDFWorker` only owns (and terminates) a worker it constructed itself;
+// handed a ready-made one through `workerPort`, as `load` does below, it calls
+// `#initializeFromPort` instead and its own `destroy()` never touches that
+// worker at all. Left to `loadingTask.destroy()` alone, the worker (and the
+// blob URL) this load is about to replace would simply leak -- fine for the
+// PDF preview, which loads once, but the LaTeX preview reloads on every save,
+// so 50 saves would mean 50 live worker threads each holding the full pdf.js
+// bundle. Tracked here so `resetViewer` can terminate and revoke them by hand.
+let currentWorker: Worker | null = null;
+let currentWorkerUrl: string | null = null;
 const pages: PDFPageProxy[] = []; // 1-based via index+1
 const baseSize: { w: number; h: number }[] = []; // page size at scale 1 (CSS px)
 const wrappers: HTMLDivElement[] = [];
@@ -78,6 +97,8 @@ window.addEventListener('message', (e: MessageEvent) => {
     // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
     // to match, without persisting again.
     applyTheme(msg.value as string);
+  } else if (msg?.type === 'texState') {
+    handleTexState(msg as TexStateMessage);
   }
 });
 
@@ -119,7 +140,11 @@ function toast(text: string, ms = 1600): void {
 // Load
 // ---------------------------------------------------------------------------
 async function load(data: Uint8Array, workerSrc: string): Promise<void> {
-  root.textContent = '';
+  // Where the reader was, so a recompile can put them back. Only meaningful on a
+  // reload, and `resetViewer` is about to throw the page list away, so it has to
+  // be read first.
+  const wasAt = wrappers.length ? pageAtViewportCenter() : 0;
+  resetViewer();
 
   // Run pdf.js off the main thread. The worker script is a webview-resource URI
   // (cross-origin to the vscode-webview:// document), so `new Worker(workerSrc)`
@@ -128,14 +153,17 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
     const res = await fetch(workerSrc);
     const code = await res.text();
     const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-    pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(blobUrl, { type: 'module' });
+    currentWorker = new Worker(blobUrl, { type: 'module' });
+    currentWorkerUrl = blobUrl;
+    pdfjsLib.GlobalWorkerOptions.workerPort = currentWorker;
   } catch (err) {
     root.innerHTML = `<pre class="mc-error">Failed to start PDF worker: ${escapeHtml(String(err))}</pre>`;
     return;
   }
 
   try {
-    doc = await pdfjsLib.getDocument({ data }).promise;
+    loadingTask = pdfjsLib.getDocument({ data });
+    doc = await loadingTask.promise;
   } catch (err) {
     root.innerHTML = `<pre class="mc-error">Failed to open PDF: ${escapeHtml(String(err))}</pre>`;
     return;
@@ -164,7 +192,56 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
 
   updateZoomLabel();
   updatePageLabel();
+  if (wasAt > 1) {
+    // A LaTeX preview reloads on every save. Landing back at page 1 each time
+    // would make the preview unusable for anything longer than a page, so hold
+    // the reader's place. Clamped by goToPage, since the document may have got
+    // shorter since they were last looking at it.
+    goToPage(wasAt);
+  }
   toast(`Loaded ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`);
+}
+
+/**
+ * Drop everything belonging to the document currently on screen.
+ *
+ * The PDF preview only ever loads once, so for years this did not need to exist.
+ * The LaTeX preview reloads on every recompile, and without it each reload
+ * appended to `pages` and `wrappers` while the DOM was rebuilt from scratch, so
+ * every page-indexed feature (page navigation, copy page as PNG, annotations)
+ * silently addressed detached elements belonging to the previous compile.
+ */
+function resetViewer(): void {
+  // Rasterisation already in flight is writing into canvases that are about to
+  // be detached. Cancelling first also stops pdf.js complaining about render
+  // tasks whose page proxy is destroyed underneath them.
+  for (const task of renderTasks.values()) {
+    task.cancel();
+  }
+  renderTasks.clear();
+  observer?.disconnect();
+  observer = null;
+  // The worker holds the old document open until this resolves; a long editing
+  // session is a lot of abandoned documents otherwise. `destroy()` does NOT
+  // also stop the worker (see the comment on `currentWorker` above), so that
+  // is done explicitly here, along with the blob URL it was started from.
+  void loadingTask?.destroy();
+  loadingTask = null;
+  currentWorker?.terminate();
+  currentWorker = null;
+  if (currentWorkerUrl) {
+    URL.revokeObjectURL(currentWorkerUrl);
+    currentWorkerUrl = null;
+  }
+  doc = null;
+  pages.length = 0;
+  baseSize.length = 0;
+  wrappers.length = 0;
+  renderedScale.clear();
+  inFlight.clear();
+  visible.clear();
+  pageText.clear();
+  root.textContent = '';
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +718,112 @@ function closeNote(): void {
 }
 
 // ---------------------------------------------------------------------------
+// TeX compile-status overlay
+// ---------------------------------------------------------------------------
+// Set once any texState message arrives. A plain .pdf's host (src/pdfEditor.ts)
+// never sends one, so this stays false and the "Recompile LaTeX" menu entry
+// never appears there.
+let texMode = false;
+
+/**
+ * Compile status pushed by the host's tex editor provider (src/texEditor.ts,
+ * owned separately). This webview does not know or care what a compile is: it
+ * just lays out whatever text/detail/action the host hands it.
+ */
+interface TexStateMessage {
+  type: 'texState';
+  state: 'compiling' | 'failed' | 'unavailable' | 'ok';
+  text?: string;
+  /** Compiler output, shown in a smaller monospace block when present. */
+  detail?: string;
+  /** Label for the recompile button; no button at all when this is absent, since
+   * some states are dead ends (compiling switched off in settings, no LaTeX
+   * engine installed) and a button that cannot help is worse than no button. */
+  action?: string;
+}
+
+interface TexOverlay {
+  root: HTMLDivElement;
+  spinner: HTMLDivElement;
+  text: HTMLParagraphElement;
+  detail: HTMLPreElement;
+  actions: HTMLDivElement;
+  button: HTMLButtonElement;
+}
+let texOverlay: TexOverlay | null = null;
+
+// Built lazily on the first texState message rather than up front. A plain PDF
+// never sends that message, so for it this function is simply never called and
+// nothing tex-related ever touches the DOM.
+function ensureTexOverlay(): TexOverlay {
+  if (texOverlay) {
+    return texOverlay;
+  }
+  const root = document.createElement('div');
+  root.className = 'mc-tex-overlay';
+  root.hidden = true;
+
+  const card = document.createElement('div');
+  card.className = 'mc-tex-card';
+
+  const spinner = document.createElement('div');
+  spinner.className = 'mc-tex-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+
+  const text = document.createElement('p');
+  text.className = 'mc-tex-text';
+
+  const detail = document.createElement('pre');
+  detail.className = 'mc-tex-detail';
+  detail.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'mc-tex-actions';
+  actions.hidden = true;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'mc-tex-button';
+  button.addEventListener('click', () => vscode.postMessage({ type: 'texRecompile' }));
+  actions.appendChild(button);
+
+  card.append(spinner, text, detail, actions);
+  root.appendChild(card);
+  document.body.appendChild(root);
+
+  texOverlay = { root, spinner, text, detail, actions, button };
+  return texOverlay;
+}
+
+function handleTexState(msg: TexStateMessage): void {
+  texMode = true; // gates the "Recompile LaTeX" context-menu entry, from here on
+  const overlay = ensureTexOverlay();
+
+  if (msg.state === 'ok') {
+    overlay.root.hidden = true;
+    return;
+  }
+
+  // No pages rendered yet means the overlay IS the whole viewer, so centre it in
+  // the full viewport rather than pin it near the top like a banner over content
+  // that doesn't exist. Once pages exist (a recompile), keep them on screen
+  // underneath instead of blanking the view: losing the reader's scroll position
+  // on every save would be miserable.
+  overlay.root.classList.toggle('mc-tex-overlay--empty', wrappers.length === 0);
+
+  overlay.spinner.hidden = msg.state !== 'compiling';
+  overlay.text.textContent = msg.text ?? '';
+  overlay.detail.hidden = !msg.detail;
+  overlay.detail.textContent = msg.detail ?? '';
+  overlay.actions.hidden = !msg.action;
+  overlay.button.textContent = msg.action ?? '';
+  // Nothing is clickable while compiling, and a recompile runs over a document
+  // that's already on screen, so every pointer event (scroll, right-click, the
+  // works) has to fall straight through the overlay instead of landing on it.
+  overlay.root.classList.toggle('mc-tex-overlay--inert', msg.state === 'compiling');
+  overlay.root.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
 const contextMenu = createMenu(menu);
@@ -684,6 +867,15 @@ document.addEventListener('contextmenu', (e) => {
       kind: 'item',
       label: 'Add Comment Here',
       run: () => addCommentAt(pageEl, cx, cy),
+    });
+  }
+
+  if (texMode) {
+    entries.push({ kind: 'divider' });
+    entries.push({
+      kind: 'item',
+      label: 'Recompile LaTeX',
+      run: () => vscode.postMessage({ type: 'texRecompile' }),
     });
   }
 
