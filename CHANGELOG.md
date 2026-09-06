@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.10.0] - 2026-09-06
+
 ### Added
 
 - **LaTeX preview.** Open or focus a `.tex`, `.ltx`, or `.latex` file and MarkCopy opens the preview beside it automatically, governed by `markcopy.autoPreview` just like Markdown, CSV, and TSV (or reach it by hand via **Reopen Editor With...** or **MarkCopy: Open Rich Preview to the Side**). MarkCopy compiles it with an external LaTeX engine and shows the result through the same PDF viewer as `.pdf` files, right-click menu, comments, zoom, and Theme submenu included. It rebuilds on save, or from the floating **Recompile** button, the editor title bar's refresh icon, **MarkCopy: Recompile LaTeX**, or a right-click **Recompile LaTeX** entry. Contributed at `option` priority, like Markdown and CSV, so a `.tex` file still opens in the text editor by default: it is a file people spend most of the day editing, and stealing that would be worse than having no preview at all.
@@ -34,11 +41,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **The PDF viewer now resets its page state when a new document loads into it.** This could not happen before, because a plain `.pdf` only ever loaded once. It matters now that the LaTeX preview reloads the same viewer on every recompile: without a reset, each reload appended to the existing page list while the DOM was rebuilt underneath it, leaving page navigation, comment pins, and Copy Page as PNG addressing detached elements left over from the previous compile.
   - **A reload also no longer leaves the previous pdf.js worker running.** Same root cause, one layer down: the viewer hands pdf.js a worker it started itself, and pdf.js only ever shuts down a worker it created, so tearing the document down left the thread behind. Loading a `.pdf` once, that cost nothing; recompiling a `.tex` fifty times in a sitting left fifty live workers, each holding the full pdf.js bundle in memory. The worker and the blob URL it was started from are now both released with the document.
 - **A CSV cell edit is no longer lost when you click somewhere that is not a cell.** Committing hung entirely on the editor being blurred, which covers clicking another cell but not clicking the padding around the grid, the row-number gutter, or the empty space past the last row: nothing there takes the focus in every engine, so no `blur` arrived, nothing was committed, and the value went with the next render. Leaving the webview (another editor tab, another window) had the same hole, and closed it the same way. Every spreadsheet keeps that edit, so it is kept, while a right-click — which takes the focus on purpose, so the menu's copy rows can read the value — still leaves the edit open underneath the menu.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.9.0] - 2026-08-30
 
@@ -271,7 +273,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/owenpkent/markcopy/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/owenpkent/markcopy/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/owenpkent/markcopy/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/owenpkent/markcopy/compare/v0.8.0...v0.8.1
