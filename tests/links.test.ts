@@ -6,7 +6,7 @@
 // somewhere else: a `mailto:` left on the front, a sentence's full stop stuck to
 // the end, a percent-escape never decoded.
 import { describe, it, expect } from 'vitest';
-import { refFromHref, refFromText, nounFor } from '../src/webview/links';
+import { refFromHref, refFromText, nounFor, markdownLink } from '../src/webview/links';
 
 describe('refFromHref', () => {
   it('reads the bare address out of a mailto:', () => {
@@ -104,5 +104,37 @@ describe('nounFor', () => {
       'Email Address',
     );
     expect(nounFor({ kind: 'url', value: 'https://b.co', href: 'https://b.co' })).toBe('Link');
+  });
+});
+
+describe('markdownLink', () => {
+  it('leaves an ordinary address alone', () => {
+    expect(markdownLink('the docs', 'https://example.com/a')).toBe(
+      '[the docs](https://example.com/a)',
+    );
+  });
+
+  it('escapes brackets in the text, which would end the label early', () => {
+    expect(markdownLink('see [1]', 'https://example.com')).toBe(
+      '[see \\[1\\]](https://example.com)',
+    );
+  });
+
+  it('percent-encodes the parentheses and spaces that would end the target early', () => {
+    expect(markdownLink('wiki', 'https://example.com/Foo_(bar)')).toBe(
+      '[wiki](https://example.com/Foo_%28bar%29)',
+    );
+    expect(markdownLink('file', 'https://example.com/my file.pdf')).toBe(
+      '[file](https://example.com/my%20file.pdf)',
+    );
+  });
+
+  // The angle-bracket form this used to take ends at the first `>`, so an href
+  // holding one alongside a paren pasted as a link pointing somewhere else
+  // entirely. Only reachable from a real href, which is what the menu feeds it.
+  it('survives an address holding both a paren and an angle bracket', () => {
+    expect(markdownLink('odd', 'https://example.com/a(b)>c')).toBe(
+      '[odd](https://example.com/a%28b%29>c)',
+    );
   });
 });

@@ -6,7 +6,7 @@ import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
-import { nounFor, refFromHref, refFromText } from './links';
+import { markdownLink, nounFor, refFromHref, refFromText } from './links';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
@@ -770,16 +770,6 @@ function linkGroup(target: HTMLElement): CopyGroup | null {
     run: () => copyText(markdownLink(text || ref.value, ref.href)),
   });
   return { noun, actions };
-}
-
-// `[text](href)`, escaped enough to survive being pasted back into a document.
-// Brackets in the text would end the label early, and whitespace or parentheses
-// in the address would end the target early; angle brackets are the form that
-// takes them.
-function markdownLink(text: string, href: string): string {
-  const label = text.replace(/([[\]])/g, '\\$1');
-  const target = /[()\s]/.test(href) ? `<${href}>` : href;
-  return `[${label}](${target})`;
 }
 
 // Row and column edits for the CSV grid, offered on whatever the pointer is
