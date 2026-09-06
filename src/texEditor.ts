@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { readFile } from 'node:fs/promises';
-import { basename, dirname, extname, relative, sep } from 'node:path';
+import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import { readComments, writeComments } from './pdfEditor';
@@ -10,6 +10,7 @@ import {
   compile,
   ensureTexDir,
   findTex,
+  isInsideDir,
   outDirFor,
   removeQuietly,
   resolveRootFile,
@@ -105,20 +106,33 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
-    const themeListener = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (!e.affectsConfiguration('markcopy.theme', document.uri)) {
-        return;
+    const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('markcopy.theme', document.uri)) {
+        const value = vscode.workspace
+          .getConfiguration('markcopy', document.uri)
+          .get<string>('theme', 'auto');
+        void webview.postMessage({ type: 'setTheme', value });
       }
-      const value = vscode.workspace
-        .getConfiguration('markcopy', document.uri)
-        .get<string>('theme', 'auto');
-      void webview.postMessage({ type: 'setTheme', value });
+      if (e.affectsConfiguration('markcopy.tex', document.uri)) {
+        session.invalidateTools();
+        // The setting a reader reaches for right after "no LaTeX engine
+        // installed" is exactly this one, so it is worth retrying on their
+        // behalf rather than waiting for the next save. Not when compiling is
+        // switched off, though: that would turn ticking `tex.compile` back to
+        // "off" into one more unwanted compile on the way there.
+        const mode = vscode.workspace
+          .getConfiguration('markcopy', document.uri)
+          .get<string>('tex.compile', 'auto');
+        if (mode !== 'off') {
+          void session.run();
+        }
+      }
     });
 
     panel.onDidDispose(() => {
       active.delete(entry);
       saveListener.dispose();
-      themeListener.dispose();
+      configListener.dispose();
       void session.dispose();
       this.onDismiss?.(document.uri);
     });
@@ -216,6 +230,13 @@ export function recompileActiveTex(): boolean {
 class CompileSession {
   private abort: AbortController | undefined;
   private running = false;
+  // Set when `run` is asked to start again while one is already in flight (a
+  // second save landing before the first compile settles, or Recompile
+  // clicked while the spinner is up). Restarting immediately would throw away
+  // a latexmk run that may be a single incremental pass from finishing, so the
+  // request is only noted here and picked up by the `finally` in `run` once
+  // the current one is done, rather than aborting it.
+  private rerunRequested = false;
   private disposed = false;
   // Looked up once and kept for the panel's life. Under `auto`, `start` hands
   // straight over to `run`, and without this the PATH walk would happen twice
@@ -261,9 +282,7 @@ class CompileSession {
     // Anything the root file could plausibly be pulling in. Scoping this to the
     // root's own directory tree keeps an unrelated .tex elsewhere in the
     // workspace from triggering a compile nobody asked for.
-    const root = dirname(this.rootFile());
-    const rel = relative(root, uri.fsPath);
-    return rel !== '' && !rel.startsWith('..' + sep) && rel !== '..';
+    return isInsideDir(dirname(this.rootFile()), uri.fsPath);
   }
 
   /** First contact: decide whether to compile at all, and say so if not. */
@@ -297,6 +316,7 @@ class CompileSession {
   /** Compile, and show the result. */
   async run(): Promise<void> {
     if (this.running) {
+      this.rerunRequested = true;
       return;
     }
     const cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri);
@@ -351,6 +371,13 @@ class CompileSession {
     } finally {
       this.running = false;
       this.abort = undefined;
+      // A disposed panel has nobody left to show a rerun to, and its temp
+      // directory may already be on the way out; only honour the request while
+      // the panel is still around to want it.
+      if (this.rerunRequested && !this.disposed) {
+        this.rerunRequested = false;
+        void this.run();
+      }
     }
   }
 
@@ -361,6 +388,7 @@ class CompileSession {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.rerunRequested = false; // nothing left to honour a rerun for
     this.abort?.abort();
     const dir = this.outDir;
     this.outDir = undefined;
@@ -380,6 +408,19 @@ class CompileSession {
     // The whole directory, not just the PDF: a LaTeX run leaves .aux, .log,
     // .out, .bbl and more beside it, and none of it outlives the last panel.
     await removeQuietly(dir);
+  }
+
+  /**
+   * Drop the memoized engine choice so the next compile re-resolves it.
+   *
+   * `tools` is looked up once and kept for the panel's life (see `find`
+   * below), so without this a reader who changes `markcopy.tex.engine` or
+   * `.enginePath` -- typically right after a failed compile, since that
+   * overlay's own "no LaTeX engine installed" text sends them to settings --
+   * would see nothing happen until they closed and reopened the tab.
+   */
+  invalidateTools(): void {
+    this.tools = undefined;
   }
 
   private async find(cfg: vscode.WorkspaceConfiguration): Promise<TexTools | undefined> {

@@ -25,9 +25,19 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 // ---------------------------------------------------------------------------
 let doc: PDFDocumentProxy | null = null;
 // Held only so a reload can tear the previous document down. `destroy` lives on
-// the loading task rather than on the document proxy, and it is also what
-// terminates the worker this load is about to replace.
+// the loading task rather than on the document proxy.
 let loadingTask: PDFDocumentLoadingTask | null = null;
+// The worker backing the current document, plus the blob URL it was started
+// from. `PDFWorker` only owns (and terminates) a worker it constructed itself;
+// handed a ready-made one through `workerPort`, as `load` does below, it calls
+// `#initializeFromPort` instead and its own `destroy()` never touches that
+// worker at all. Left to `loadingTask.destroy()` alone, the worker (and the
+// blob URL) this load is about to replace would simply leak -- fine for the
+// PDF preview, which loads once, but the LaTeX preview reloads on every save,
+// so 50 saves would mean 50 live worker threads each holding the full pdf.js
+// bundle. Tracked here so `resetViewer` can terminate and revoke them by hand.
+let currentWorker: Worker | null = null;
+let currentWorkerUrl: string | null = null;
 const pages: PDFPageProxy[] = []; // 1-based via index+1
 const baseSize: { w: number; h: number }[] = []; // page size at scale 1 (CSS px)
 const wrappers: HTMLDivElement[] = [];
@@ -143,7 +153,9 @@ async function load(data: Uint8Array, workerSrc: string): Promise<void> {
     const res = await fetch(workerSrc);
     const code = await res.text();
     const blobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-    pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(blobUrl, { type: 'module' });
+    currentWorker = new Worker(blobUrl, { type: 'module' });
+    currentWorkerUrl = blobUrl;
+    pdfjsLib.GlobalWorkerOptions.workerPort = currentWorker;
   } catch (err) {
     root.innerHTML = `<pre class="mc-error">Failed to start PDF worker: ${escapeHtml(String(err))}</pre>`;
     return;
@@ -210,9 +222,17 @@ function resetViewer(): void {
   observer?.disconnect();
   observer = null;
   // The worker holds the old document open until this resolves; a long editing
-  // session is a lot of abandoned documents otherwise.
+  // session is a lot of abandoned documents otherwise. `destroy()` does NOT
+  // also stop the worker (see the comment on `currentWorker` above), so that
+  // is done explicitly here, along with the blob URL it was started from.
   void loadingTask?.destroy();
   loadingTask = null;
+  currentWorker?.terminate();
+  currentWorker = null;
+  if (currentWorkerUrl) {
+    URL.revokeObjectURL(currentWorkerUrl);
+    currentWorkerUrl = null;
+  }
   doc = null;
   pages.length = 0;
   baseSize.length = 0;

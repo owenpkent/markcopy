@@ -598,6 +598,34 @@ export function resolveRootFile(
   return resolve(docPath);
 }
 
+/**
+ * Whether `target` sits inside `root`'s own directory tree.
+ *
+ * Used to decide whether a saved file could plausibly be `\input` or cited by
+ * the document being previewed, so this has to reject a path `relative` can't
+ * actually express as a descendant. Ordinarily that is `..` or anything
+ * starting with `..` + a separator, but `path.relative` has no way to say
+ * "there is no relative route from here to there" and instead hands back the
+ * second path untouched: `path.win32.relative('C:\\proj', 'D:\\other\\x.tex')`
+ * is `'D:\\other\\x.tex'`, which is neither of those two shapes and would
+ * otherwise sail through both guards. An absolute result is exactly that
+ * case, so it gets its own check rather than being folded into one regex.
+ *
+ * `platform` follows the same convention as `texCandidates`: production
+ * always leaves it at the default (the actual host, which is what every path
+ * compared here already comes in), and a test can pin it to exercise the
+ * Windows drive case above from any host.
+ */
+export function isInsideDir(
+  root: string,
+  target: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const path = platform === 'win32' ? win32 : posix;
+  const rel = path.relative(root, target);
+  return rel !== '' && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep);
+}
+
 // ---------------------------------------------------------------------------
 // Running the engine
 // ---------------------------------------------------------------------------
@@ -703,6 +731,47 @@ interface RunOptions {
 }
 
 /**
+ * Best-effort attempt to reach the rest of the engine's process tree, beyond
+ * the one process node `child.kill()` above already signals.
+ *
+ * latexmk and tectonic, both preferred under `auto`, run the actual engine as
+ * a child of themselves. `child.kill()` only ever reaches the process it was
+ * called on, so killing latexmk left pdflatex running underneath it, still
+ * holding the .log and .pdf files open: exactly the Windows file lock
+ * `KILL_GRACE_MS` exists to avoid, just one process further down than this
+ * module was looking.
+ *
+ * This runs alongside the `child.kill()` calls in `kill()` above, never in
+ * place of them: a missing pid or a platform quirk in here should not stop
+ * the direct signal from still being tried. `child.pid` is only ever missing
+ * when spawning failed before the OS handed one back, which `run` already
+ * treats as its own case elsewhere, so there is nothing more to reach here.
+ *
+ * On Windows, `taskkill /T` walks the tree in a way `child.kill()` cannot. On
+ * POSIX, `child` is spawned detached (see `spawn` above) so it leads its own
+ * process group, and signalling the negated pid reaches every process in that
+ * group rather than only the leader.
+ */
+function killTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals | undefined): void {
+  if (typeof child.pid !== 'number') {
+    return;
+  }
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }).on(
+      'error',
+      () => undefined, // best-effort; the caller's own grace period and hard timeout still apply
+    );
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal ?? 'SIGTERM');
+  } catch {
+    // The group leader is already gone, or this platform's negated-pid
+    // convention does not apply; the direct child.kill() above still stands.
+  }
+}
+
+/**
  * Spawn the engine and collect what it said.
  *
  * Unlike ffmpeg, a TeX engine does not cleanly split progress onto stdout and
@@ -724,7 +793,16 @@ function run(
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
-      child = spawn(command, args, { cwd, windowsHide: true });
+      // Detached on POSIX so the child leads its own process group: that is
+      // what lets `killTree` below signal the whole group rather than only
+      // the one process node this call spawned. Windows has no such notion
+      // (and no equivalent need, since `killTree` uses `taskkill /T` there
+      // instead), so this is skipped there.
+      child = spawn(command, args, {
+        cwd,
+        windowsHide: true,
+        detached: process.platform !== 'win32',
+      });
     } catch (err) {
       reject(new Error(`could not run ${command} (${String(err)}).`));
       return;
@@ -773,10 +851,14 @@ function run(
 
     const kill = (): void => {
       child.kill();
+      killTree(child, undefined);
       // A process that ignores the polite signal still holds the .log and
       // .pdf files open, which on Windows fails the reread and the next
       // compile's overwrite. Insist after a moment.
-      setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref?.();
+      setTimeout(() => {
+        child.kill('SIGKILL');
+        killTree(child, 'SIGKILL');
+      }, KILL_GRACE_MS).unref?.();
       // And stop waiting eventually regardless: a caller left hanging on a
       // process that will not die is worse than settling early.
       exitTimer = setTimeout(rejectKilled, KILL_GRACE_MS * 2);
@@ -870,7 +952,14 @@ export async function compile(opts: {
   let stdout = '';
   let exitCode = 0;
   for (let pass = 1; pass <= maxPasses; pass++) {
-    const result = await run(tools.path, compileArgs(tools, rootFile, outDir), {
+    // `cwd` below is already the document's own directory, so the engine only
+    // needs the bare file name, not the resolved absolute path. That matters
+    // on Windows: `resolve` on a UNC path (`\\server\share\doc.tex`) still
+    // starts with a backslash, and TeX reads a leading backslash on its first
+    // argument as a sequence of its own commands rather than a filename, so a
+    // document opened off a network share got back a TeX syntax error about
+    // its own path.
+    const result = await run(tools.path, compileArgs(tools, basename(rootFile), outDir), {
       cwd: dirname(rootFile),
       signal,
       stallMs: STALL_TIMEOUT_MS,

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import {
   compile,
   compileArgs,
@@ -13,6 +13,7 @@ import {
   engineFromPath,
   ensureTexDir,
   findTex,
+  isInsideDir,
   needsRerun,
   outDirFor,
   parseLatexLog,
@@ -381,6 +382,27 @@ describe('compileArgs', () => {
     }
   });
 
+  it('takes whatever positional file name it is given rather than a UNC root, so a leading backslash never reaches the engine', () => {
+    // The bug this guards: `path.win32.resolve` on a UNC path keeps the
+    // leading double backslash (confirmed below), and TeX reads a leading
+    // backslash on its first argument as a sequence of its own commands
+    // rather than a file to open. `compile()` avoids this by passing
+    // `basename(rootFile)`, not the resolved path, as the positional
+    // argument compileArgs places here; modelling that composition directly
+    // since compile() itself spawns a real process and is out of scope here.
+    const resolved = win32.resolve('\\\\server\\share\\doc.tex');
+    expect(resolved.startsWith('\\\\')).toBe(true); // the defect this exists to dodge
+
+    const args = compileArgs(
+      { path: 'pdflatex', engine: 'pdflatex' },
+      win32.basename(resolved),
+      'out',
+    );
+    const input = args[args.length - 1];
+    expect(input).toBe('doc.tex');
+    expect(input.startsWith('\\')).toBe(false);
+  });
+
   it('never lets any engine run arbitrary commands out of the document', () => {
     // \write18 under -shell-escape would let a document run whatever it
     // wants the moment its .tex file is opened for a preview.
@@ -679,6 +701,37 @@ describe('resolveRootFile', () => {
   it('ignores a whitespace-only configured setting', () => {
     const result = resolveRootFile(doc, '', '   ', workspaceRoot);
     expect(result).toBe(resolve(doc));
+  });
+});
+
+describe('isInsideDir', () => {
+  it('accepts a file nested under the root', () => {
+    expect(isInsideDir(join('project'), join('project', 'chapters', 'one.tex'))).toBe(true);
+  });
+
+  it('rejects the root directory itself: nothing left over to call a descendant', () => {
+    expect(isInsideDir(join('project'), join('project'))).toBe(false);
+  });
+
+  it('rejects a sibling directory that merely shares a name prefix', () => {
+    expect(isInsideDir(join('project'), join('project-2', 'x.tex'))).toBe(false);
+  });
+
+  it('rejects a path that only reaches the root by climbing out via ..', () => {
+    expect(isInsideDir(join('project', 'chapters'), join('project', 'other.tex'))).toBe(false);
+  });
+
+  it('regression: rejects a second Windows drive with no relative route to the first', () => {
+    // The exact bug this was written for: path.relative between two drives
+    // can express neither `..` nor `..` + a separator, since there is no
+    // relative route between them at all, so it hands back the second path
+    // untouched instead. Pinned to 'win32' so this reproduces from any host,
+    // the same way texCandidates's own Windows cases are pinned.
+    expect(isInsideDir('C:\\proj', 'D:\\other\\x.tex', 'win32')).toBe(false);
+  });
+
+  it('still recognises a same-drive descendant once the cross-drive guard is in place', () => {
+    expect(isInsideDir('C:\\proj', 'C:\\proj\\chapters\\one.tex', 'win32')).toBe(true);
   });
 });
 
