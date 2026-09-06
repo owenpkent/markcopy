@@ -54,6 +54,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 
 - **Copy as Rich Text**, for the whole document or just a selection. Pastes formatted into Word, Outlook, Gmail, Google Docs, Slack and OneNote.
 - **Per-element right-click copy**, with a short top-level menu that names whatever you clicked and a **Copy as** submenu for every other format:
+  - Link or email address: top level copies the target itself, as **Copy Link** or **Copy Email Address** (the address without its `mailto:` or any `?subject=`); **Copy as** has **Link Text** and a ready-made **Markdown** link. It leads the menu, ahead of a selection, since right-clicking a link names a single thing.
   - Selection: top level copies **Rich Text**; **Copy as** has **Markdown**.
   - Code block: top level copies **Plain Text**.
   - Table: top level copies **Rich Text**; **Copy as** has **Markdown**, **CSV**, **TSV** (both paste as real cells in Excel and Google Sheets), and **PNG**. This is also how a spreadsheet sheet leaves as a Markdown table.
@@ -72,7 +73,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 
   - **Undoing an edit.** Every change the grid makes is an ordinary edit to the document, so it lands in that file's normal undo stack: **Ctrl+Z** in the file's own text editor takes back the last cell, row, or column, one press per change, and the grid re-renders to follow. It has to be the text editor that has focus, though. Pressing Ctrl+Z with the preview focused does nothing, because VS Code sends undo to a focused editor and a preview panel is not one. For the same reason, keep the file open in an editor while you work in the grid: with no text editor for it anywhere, an edit has nothing to land in and is dropped.
   - **Resizable columns.** Drag any column divider, double-click one (or press Enter on it) to fit the column to its contents, and right-click for **Reset Column Widths**.
-  - **Copy anything out.** The grid is a real table, so the whole right-click copy menu works on it: **Copy Table** as rich text, or **Copy as** CSV, TSV, or PNG. The row-number gutter is viewer chrome and stays out of every one of them, so what you paste is the data in the file.
+  - **Copy anything out.** The grid is a real table, so the whole right-click copy menu works on it: **Copy Table** as rich text, or **Copy as** CSV, TSV, or PNG. The row-number gutter is viewer chrome and stays out of every one of them, so what you paste is the data in the file. A single cell comes out too, under **Copy as** > **Cell Text**, and when a cell holds an email address or a URL, the menu leads with **Copy Email Address** / **Copy Link** and takes just that value out of whatever text surrounds it, which nothing else in a `.csv` can do without a careful drag.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
 - **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown, CSV, or TSV file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
 - **GitHub-accurate styling** for output that pastes cleanly into docs and email.

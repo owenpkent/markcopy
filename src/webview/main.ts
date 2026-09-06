@@ -6,6 +6,7 @@ import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
+import { markdownLink, nounFor, refFromHref, refFromText } from './links';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
@@ -610,6 +611,16 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
   const mermaidEl = target.closest<HTMLElement>('.mc-mermaid');
   const mathEl = target.closest<HTMLElement>('.mc-math');
 
+  // A link leads the menu, ahead of even a selection. Right-clicking one is the
+  // most precise gesture there is -- it names a single element, where a
+  // selection names a range that may not have been aimed at anything -- and the
+  // address behind a link is the value a hand-drag across its text cannot get
+  // at all.
+  const link = linkGroup(target);
+  if (link) {
+    groups.push(link);
+  }
+
   if (hasSelection) {
     groups.push({
       noun: 'Selection',
@@ -627,6 +638,37 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
     });
   }
 
+  // A cell's own text, and the address in it when it holds one. Nothing
+  // linkifies CSV or spreadsheet cells -- they are rendered verbatim on purpose
+  // -- so in a grid this is the only route to an address that isn't a hand-drag.
+  //
+  // `data-mc-ignore` marks viewer chrome: the row-number gutter, a sheet's
+  // A/B/C header row. Every other copy flavor already leaves it out, and a row
+  // that put a row number on the clipboard would be the one place it leaked.
+  const cell = target.closest<HTMLElement>('td:not([data-mc-ignore]), th:not([data-mc-ignore])');
+  const cellText = (cell?.textContent ?? '').trim();
+  // Skipped under a link, which has already contributed the same address from
+  // its href, and from the row above this one.
+  const cellRef = cell && cellText && !link ? refFromText(cellText) : null;
+  const cellGroup: CopyGroup | null =
+    cell && cellText
+      ? {
+          noun: cellRef ? nounFor(cellRef) : 'Cell',
+          actions: [
+            ...(cellRef ? [{ label: nounFor(cellRef), run: () => copyText(cellRef.value) }] : []),
+            { label: 'Cell Text', run: () => copyText(cellText) },
+          ],
+        }
+      : null;
+
+  // Ahead of the table only when the cell holds something a table copy cannot
+  // give you. "Copy Table" is what a right-click in a grid has always offered
+  // and what docs/TESTING.md promises, so an ordinary cell stays behind it and
+  // reaches the menu through "Copy as".
+  if (cellGroup && cellRef) {
+    groups.push(cellGroup);
+  }
+
   if (table) {
     groups.push({
       noun: 'Table',
@@ -642,6 +684,10 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
         { label: 'PNG', run: () => copyPng(table) },
       ],
     });
+  }
+
+  if (cellGroup && !cellRef) {
+    groups.push(cellGroup);
   }
 
   if (mermaidEl) {
@@ -687,6 +733,43 @@ function copyGroups(target: HTMLElement): CopyGroup[] {
   }
 
   return specific;
+}
+
+// What a link under the pointer is worth copying, or null when the pointer is
+// not on one.
+//
+// The href is read as written rather than through the browser's resolved
+// `.href`, because inside a webview a relative link resolves against a
+// `vscode-webview://` origin: the resolved form of `./notes.md` is an address
+// that means nothing outside this window, while the written form is the one the
+// document says.
+function linkGroup(target: HTMLElement): CopyGroup | null {
+  const anchor = target.closest<HTMLAnchorElement>('a[href]');
+  const ref = anchor && refFromHref(anchor.getAttribute('href') ?? '');
+  if (!ref) {
+    return null;
+  }
+  const noun = nounFor(ref);
+  const text = (anchor?.textContent ?? '').trim();
+  const actions = [{ label: noun, run: () => copyText(ref.value) }];
+  // Only a mailto: has an href that differs from the address in it. For a URL
+  // the two are the same characters, and a second row copying them under a
+  // second name lengthens the menu without adding anything to it.
+  if (ref.href !== ref.value) {
+    actions.push({ label: 'Link Address', run: () => copyText(ref.href) });
+  }
+  // Dropped when the link shows its own target, which every autolinked address
+  // in the prose does: the row would copy what the row above it just copied.
+  if (text && text !== ref.value) {
+    actions.push({ label: 'Link Text', run: () => copyText(text) });
+  }
+  // The flavor the rest of the menu is built around: a link that lands in a
+  // document as a link rather than as loose characters someone has to re-wrap.
+  actions.push({
+    label: 'Markdown',
+    run: () => copyText(markdownLink(text || ref.value, ref.href)),
+  });
+  return { noun, actions };
 }
 
 // Row and column edits for the CSV grid, offered on whatever the pointer is

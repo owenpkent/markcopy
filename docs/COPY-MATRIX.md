@@ -2,9 +2,30 @@
 
 Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v).)
 
-The top level is short: it names whatever you clicked ("Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Selection > Code > Table > Diagram > Equation > Block, so a selection inside a table still gets "Copy Selection" at the top, not "Copy Table".
+The top level is short: it names whatever you clicked ("Copy Email Address", "Copy Link", "Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Link > Selection > Code > Table > Diagram > Equation > Block, so a selection inside a table still gets "Copy Selection" at the top, not "Copy Table", and a link takes the top from both: right-clicking one names a single element, where a selection names a range that may not have been aimed at anything.
 
 ## When you right-click a...
+
+### Link or email address
+
+Top level:
+
+| Action             | Clipboard flavor                     | Pastes well into                        |
+| ------------------ | ------------------------------------ | --------------------------------------- |
+| Copy Email Address | `text/plain` (the bare address)      | A To: field, a contact record, a form   |
+| Copy Link          | `text/plain` (the target as written) | A browser bar, a chat, another document |
+
+Copy as:
+
+| Format       | Clipboard flavor                | Pastes well into                                    |
+| ------------ | ------------------------------- | --------------------------------------------------- |
+| Link Address | `text/plain` (`mailto:...`)     | An `href`, another Markdown link                    |
+| Link Text    | `text/plain` (the words shown)  | Anywhere the label rather than the target is wanted |
+| Markdown     | `text/plain` (`[text](target)`) | Any editor, chat, another `.md` file                |
+
+One row or the other, by what the link points at: a `mailto:` gets **Copy Email Address**, which strips the `mailto:` and any `?subject=` the link carries, and everything else gets **Copy Link**. **Link Address** appears only for a `mailto:`, where the address and the href are different strings; **Link Text** only when the link's words differ from its target, which they do not for an address the renderer autolinked out of the prose.
+
+A link's target is copied as the document wrote it, not as the webview resolved it, so a relative link comes out as `./notes.md` rather than as a `vscode-webview://` URL that means nothing outside the window.
 
 ### Text selection (any highlighted text)
 
@@ -48,6 +69,8 @@ Copy as:
 | PNG      | `image/png`                              | Slides, chat, anywhere an image works  |
 
 This applies to the CSV/TSV grid too: a previewed `.csv` renders as a real table, so it offers exactly the same actions. Its row-number gutter is viewer chrome (marked `data-mc-ignore`) and is left out of every format, rich text and PNG included, so what you copy is the data in the file. Grid cell text is copied verbatim, so leading and trailing spaces inside a field survive; a Markdown table's cell whitespace is incidental to rendering and is still trimmed.
+
+A single cell is reachable too. **Copy as** carries a `CELL` section holding **Cell Text**, the clicked cell's own text; and when that text contains an email address or a URL, the menu leads with **Copy Email Address** / **Copy Link** for it instead of **Copy Table**. Nothing linkifies a grid, so an address in a `.csv` or a spreadsheet is plain characters with no link to right-click, and this is the only route to it that isn't a careful drag across part of a cell. An ordinary cell leaves **Copy Table** at the top where it has always been.
 
 A grid you have resized also gets one non-copy row, **Reset Column Widths**, which restores the automatic column sizing.
 

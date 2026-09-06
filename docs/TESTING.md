@@ -71,6 +71,8 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Right-click a Mermaid diagram, **Copy Diagram** (top-level): an image arrives.
 - [ ] Select some text, right-click -> **Copy as** -> **Markdown**: the original Markdown source comes back.
 - [ ] Right-click a rendered equation -> **Copy as** -> **LaTeX**: the original source comes back.
+- [ ] ☑ Right-click an email address in the prose, **Copy Email Address** (top-level): the bare address arrives, with no `mailto:` in front of it.
+- [ ] ☑ Right-click a link, **Copy Link** (top-level): the target arrives, not the words that stand in for it. **Copy as** -> **Markdown** gives `[text](target)`.
 - [ ] ★ **Copy Whole Document** (top-level menu, or the command palette's **Copy Whole Document as Rich Text**), paste into an email draft: formatting intact.
 - [ ] Every successful copy shows a toast.
 - [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
@@ -180,6 +182,7 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 - [ ] ★ ☑ Right-click the grid -> **Copy as** -> **CSV**, paste into Excel or Google Sheets: real cells, and **no row-number column**.
 - [ ] The pasted data round-trips the tricky rows: the quoted comma, the escaped quotes, and the multi-line cell all come back intact.
 - [ ] A field with deliberate leading/trailing spaces keeps them through a **Copy as** -> **CSV** round-trip.
+- [ ] ☑ Right-click a cell holding an email address or a URL: the menu leads with **Copy Email Address** / **Copy Link**, and copies just that value out of whatever text surrounds it. On an ordinary cell the top row is still **Copy Table**, with the cell's own text under **Copy as** -> **Cell Text**.
 - [ ] **Copy Table** (top level) pastes into Word or Google Docs as a formatted table, striping included, readable on white even from the dark theme, and with **no row-number column**.
 - [ ] **Copy as** -> **PNG** puts an image of the grid on the clipboard, again with no row-number column.
 - [ ] **Save as PDF** exports the grid; every row is there, it flows across pages rather than being clipped to one screen, the header row repeats on each page, wide cells wrap instead of being cut off at the margin, and the resize handles are absent.
