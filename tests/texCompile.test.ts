@@ -140,6 +140,22 @@ describe('engineFromPath', () => {
   });
 });
 
+// These cases write real files and then ask findTex to find them, so they run
+// on the HOST's platform rather than a pinned one. Pinning 'win32' passed on a
+// Windows dev machine and failed on Linux CI for two separate reasons: an
+// engine is named `latexmk` there rather than `latexmk.exe`, and win32.join
+// against a /tmp directory yields a backslash-joined path that exists nowhere.
+const HOST: NodeJS.Platform = process.platform;
+
+/** Put a fake engine binary on disk under the name this platform would use. */
+async function installFakeEngine(dir: string, engine: string): Promise<string> {
+  const file = join(dir, HOST === 'win32' ? `${engine}.exe` : engine);
+  // The mode is the point on POSIX: isExecutable asks access(path, X_OK), which
+  // Windows answers yes to for any file that exists and Linux answers honestly.
+  await writeFile(file, '', { mode: 0o755 });
+  return file;
+}
+
 describe('findTex', () => {
   // 'auto' now spawns candidates to check they actually run; reset between
   // tests so one test's mocked exit code never leaks into the next.
@@ -203,15 +219,12 @@ describe('findTex', () => {
   });
 
   it('honours the auto search order: latexmk, then tectonic, then the bare engines', async () => {
-    // Platform pinned to 'win32' (matching this test's own host) so the exact
-    // path returned can be compared with the host's own path.join, rather
-    // than mixing a target platform's separator into a real host directory.
     const dir = await mkdtemp(join(tmpdir(), 'markcopy-tex-path-'));
     try {
       // Only tectonic and pdflatex are "installed"; tectonic must win since
       // it precedes pdflatex in the auto order and latexmk is not present.
-      await writeFile(join(dir, 'tectonic.exe'), '');
-      await writeFile(join(dir, 'pdflatex.exe'), '');
+      await installFakeEngine(dir, 'tectonic');
+      await installFakeEngine(dir, 'pdflatex');
       // Only tectonic's probe succeeds, so this stays about the search order
       // even if the host machine happens to have some other engine for real
       // at one of the absolute fallback paths this code also checks.
@@ -221,8 +234,11 @@ describe('findTex', () => {
         setImmediate(() => child.emit('close', code));
         return child;
       });
-      const found = await findTex(undefined, 'auto', 'win32', { PATH: dir });
-      expect(found).toEqual({ path: join(dir, 'tectonic.exe'), engine: 'tectonic' });
+      const found = await findTex(undefined, 'auto', HOST, { PATH: dir });
+      expect(found).toEqual({
+        path: join(dir, HOST === 'win32' ? 'tectonic.exe' : 'tectonic'),
+        engine: 'tectonic',
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -234,16 +250,19 @@ describe('findTex', () => {
     // trusting that the file being present means it works.
     const dir = await mkdtemp(join(tmpdir(), 'markcopy-tex-path-'));
     try {
-      await writeFile(join(dir, 'latexmk.exe'), '');
-      await writeFile(join(dir, 'tectonic.exe'), '');
+      await installFakeEngine(dir, 'latexmk');
+      await installFakeEngine(dir, 'tectonic');
       vi.mocked(spawn).mockImplementation((command) => {
         const child = fakeChild();
         const code = (command as string).includes('latexmk') ? 1 : 0;
         setImmediate(() => child.emit('close', code));
         return child;
       });
-      const found = await findTex(undefined, 'auto', 'win32', { PATH: dir });
-      expect(found).toEqual({ path: join(dir, 'tectonic.exe'), engine: 'tectonic' });
+      const found = await findTex(undefined, 'auto', HOST, { PATH: dir });
+      expect(found).toEqual({
+        path: join(dir, HOST === 'win32' ? 'tectonic.exe' : 'tectonic'),
+        engine: 'tectonic',
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -252,10 +271,10 @@ describe('findTex', () => {
   it('returns undefined when every candidate that exists fails its probe', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'markcopy-tex-path-'));
     try {
-      await writeFile(join(dir, 'latexmk.exe'), '');
-      await writeFile(join(dir, 'tectonic.exe'), '');
+      await installFakeEngine(dir, 'latexmk');
+      await installFakeEngine(dir, 'tectonic');
       mockEveryProbe(1);
-      const found = await findTex(undefined, 'auto', 'win32', { PATH: dir });
+      const found = await findTex(undefined, 'auto', HOST, { PATH: dir });
       expect(found).toBeUndefined();
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -267,9 +286,12 @@ describe('findTex', () => {
     // left to fail loudly at spawn time, same as a configured path.
     const dir = await mkdtemp(join(tmpdir(), 'markcopy-tex-path-'));
     try {
-      await writeFile(join(dir, 'latexmk.exe'), '');
-      const found = await findTex(undefined, 'latexmk', 'win32', { PATH: dir });
-      expect(found).toEqual({ path: join(dir, 'latexmk.exe'), engine: 'latexmk' });
+      await installFakeEngine(dir, 'latexmk');
+      const found = await findTex(undefined, 'latexmk', HOST, { PATH: dir });
+      expect(found).toEqual({
+        path: join(dir, HOST === 'win32' ? 'latexmk.exe' : 'latexmk'),
+        engine: 'latexmk',
+      });
       expect(vi.mocked(spawn)).not.toHaveBeenCalled();
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -289,7 +311,7 @@ describe('findTex', () => {
     // a perfectly working tectonic look broken and get skipped by 'auto'.
     const dir = await mkdtemp(join(tmpdir(), 'markcopy-tex-path-'));
     try {
-      await writeFile(join(dir, 'tectonic.exe'), '');
+      await installFakeEngine(dir, 'tectonic');
       let seenArgs: readonly string[] = [];
       vi.mocked(spawn).mockImplementation((command, args) => {
         const isTectonic = (command as string).includes('tectonic');
@@ -300,8 +322,11 @@ describe('findTex', () => {
         setImmediate(() => child.emit('close', isTectonic ? 0 : 1));
         return child;
       });
-      const found = await findTex(undefined, 'auto', 'win32', { PATH: dir });
-      expect(found).toEqual({ path: join(dir, 'tectonic.exe'), engine: 'tectonic' });
+      const found = await findTex(undefined, 'auto', HOST, { PATH: dir });
+      expect(found).toEqual({
+        path: join(dir, HOST === 'win32' ? 'tectonic.exe' : 'tectonic'),
+        engine: 'tectonic',
+      });
       expect(seenArgs).toEqual(['--version']);
     } finally {
       await rm(dir, { recursive: true, force: true });
