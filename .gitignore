@@ -19,6 +19,11 @@ media/video.js.map
 *.vsix
 .DS_Store
 
+# Agent scratch: transcripts, and the git worktrees a subagent runs in.
+# A worktree here is a second checkout inside the repo, which eslint reads as
+# a second candidate tsconfigRootDir and refuses to lint against.
+.claude/
+
 # Generated manual-test fixture (node scripts/make-sample-pdf.js)
 /sample.pdf
 /sample.pdf.mccomments.json
