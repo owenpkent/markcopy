@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, PDF, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF, LaTeX, STL & Video Preview",
+  "description": "One-stop Markdown, CSV, Excel, PDF, LaTeX, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
   "version": "0.9.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -30,6 +30,11 @@
     "excel viewer",
     "pdf",
     "pdf viewer",
+    "latex",
+    "tex",
+    "latex preview",
+    "latexmk",
+    "tectonic",
     "csv",
     "csv viewer",
     "tsv",
@@ -60,7 +65,8 @@
     "onLanguage:markdown",
     "onLanguage:mdx",
     "onLanguage:csv",
-    "onLanguage:tsv"
+    "onLanguage:tsv",
+    "onLanguage:latex"
   ],
   "contributes": {
     "languages": [
@@ -103,6 +109,12 @@
         "title": "MarkCopy: Save as PDF",
         "category": "MarkCopy",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "markcopy.recompileTex",
+        "title": "MarkCopy: Recompile LaTeX",
+        "category": "MarkCopy",
+        "icon": "$(refresh)"
       },
       {
         "command": "markcopy.openSettings",
@@ -196,6 +208,25 @@
         "priority": "default"
       },
       {
+        "viewType": "markcopy.texPreview",
+        "displayName": "MarkCopy LaTeX Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.tex"
+          },
+          {
+            "filenamePattern": "*.TEX"
+          },
+          {
+            "filenamePattern": "*.ltx"
+          },
+          {
+            "filenamePattern": "*.latex"
+          }
+        ],
+        "priority": "option"
+      },
+      {
         "viewType": "markcopy.videoPreview",
         "displayName": "MarkCopy Video Preview",
         "selector": [
@@ -229,15 +260,20 @@
           "group": "navigation@1"
         },
         {
+          "command": "markcopy.recompileTex",
+          "when": "activeCustomEditorId == markcopy.texPreview",
+          "group": "navigation@1"
+        },
+        {
           "command": "markcopy.openSettings",
-          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
+          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview || activeCustomEditorId == markcopy.texPreview",
           "group": "navigation@2"
         }
       ],
       "editor/context": [
         {
           "command": "markcopy.openPreview",
-          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
+          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv || editorLangId == latex",
           "group": "1_markcopy"
         },
         {
@@ -249,7 +285,7 @@
       "explorer/context": [
         {
           "command": "markcopy.openPreview",
-          "when": "resourceLangId == markdown || resourceLangId == csv || resourceLangId == tsv",
+          "when": "resourceLangId == markdown || resourceLangId == csv || resourceLangId == tsv || resourceLangId == latex",
           "group": "navigation"
         }
       ]
@@ -385,6 +421,50 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "Path to the `ffmpeg` executable used to build a playable preview copy. Leave empty to detect one automatically (PATH, then the usual install locations). `ffprobe` is taken from the same folder.\n\nThis setting is machine-scoped: it can only be set in your own user settings, never by a workspace, because its value is launched as a program."
+        },
+        "markcopy.tex.compile": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "ask",
+            "off"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Compile as soon as a LaTeX preview opens, and again on every save.",
+            "Say what would be compiled and offer a button, instead of starting on its own.",
+            "Never compile; the preview says so rather than showing a document."
+          ],
+          "markdownDescription": "What to do when a LaTeX preview opens. MarkCopy compiles the document to a PDF in a temp folder and shows that; your source and its build files are never touched, and the temp folder is deleted when the tab closes. Set this to `ask` for thesis-scale documents, where compiling on open is a wait you did not ask for."
+        },
+        "markcopy.tex.engine": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "latexmk",
+            "tectonic",
+            "pdflatex",
+            "xelatex",
+            "lualatex"
+          ],
+          "default": "auto",
+          "markdownDescription": "Which LaTeX engine to compile with. `auto` prefers `latexmk`, then `tectonic`, then `pdflatex`, because the first two rerun the document themselves until cross-references and the bibliography settle. Choose `xelatex` or `lualatex` if your document uses `fontspec` or system fonts, which `pdflatex` cannot do."
+        },
+        "markcopy.tex.enginePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the LaTeX executable. Leave empty to detect one automatically (PATH, then the usual MiKTeX, TeX Live, MacTeX, and TinyTeX install locations).\n\nThis setting is machine-scoped: it can only be set in your own user settings, never by a workspace, because its value is launched as a program."
+        },
+        "markcopy.tex.rootFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The document to compile, relative to the workspace folder, for projects where the file you edit is a chapter rather than the whole thing. Leave empty to use the `% !TEX root = ...` comment at the top of the file, and failing that the file itself."
+        },
+        "markcopy.tex.recompileOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Rebuild the LaTeX preview when you save the document, or any .tex, .bib, .sty, .cls, or .tikz file beside it. Turn off to rebuild only from the Recompile button."
         },
         "markcopy.pdf.pageSize": {
           "type": "string",

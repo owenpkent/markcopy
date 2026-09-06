@@ -326,6 +326,58 @@ ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -p
 - [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
 - [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.
 
+## LaTeX preview
+
+Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equation, which resolves only on a second compile pass, so it is a reasonable stand-in for a real document. This section needs a real LaTeX engine installed; **Tectonic** is the cheapest way to get one, a single binary that fetches packages as the document needs them, against a multi-gigabyte TeX Live, MacTeX, or MiKTeX install.
+
+### Opening and first compile
+
+- [ ] ★ Double-click `sample.tex` in the Explorer: it opens in the text editor as usual (the entry is `option` priority, not `default`), and the LaTeX preview opens automatically beside it (`markcopy.autoPreview`, on by default), without stealing focus from the source. It compiles the document and shows the result through the same pdf.js viewer `.pdf` files use.
+- [ ] Close the preview tab, then click back into `sample.tex`'s editor (or switch away to another file and back): the preview stays closed rather than reopening on its own. Running **MarkCopy: Open Rich Preview to the Side** (or **Reopen Editor With...** > **MarkCopy LaTeX Preview**) reopens it, and it resumes auto-opening on focus after that.
+- [ ] With `markcopy.autoPreview` set to `false`, opening or focusing `sample.tex` leaves only the text editor open; the preview still opens via **Reopen Editor With...** or **MarkCopy: Open Rich Preview to the Side**.
+- [ ] `sample.tex` also opens this way via **MarkCopy: Open Rich Preview to the Side** (Command Palette, or right-click in the editor or Explorer), beside the source rather than replacing it.
+- [ ] While the first compile runs, the panel shows a spinner and "Compiling sample.tex…" rather than a blank viewer.
+- [ ] Once it finishes, the cross-reference in Section 2 resolves to a real section and equation number rather than "??", which is only true once the engine has run a second pass.
+
+### Recompiling
+
+- [ ] ★ Edit and save `sample.tex` (change the title, say): the preview recompiles and the new text appears.
+- [ ] Scroll partway down the PDF, then save the source again: after the recompile, the view holds its scroll position rather than snapping back to page 1.
+- [ ] The floating toolbar's **Recompile** button, the editor title bar's refresh icon, and **MarkCopy: Recompile LaTeX** from the Command Palette all recompile without needing a save first.
+- [ ] Right-click the PDF: **Recompile LaTeX** does the same, and appears only on a LaTeX preview, never on a plain `.pdf`'s right-click menu.
+- [ ] Running **MarkCopy: Recompile LaTeX** with no LaTeX preview focused shows a message asking you to focus one, rather than doing nothing silently.
+- [ ] Set `markcopy.tex.recompileOnSave` to `false` and save `sample.tex`: the previous PDF stays on screen, and the Recompile button and menu entry still work.
+
+### Errors
+
+- [ ] Break `sample.tex` on purpose (delete a closing brace, or add an undefined command like `\notarealcommand{x}`) and save: the preview shows a short, specific message (the offending file and line, and the error text) rather than a dump of the engine's raw log.
+- [ ] With more than one error in the document, the message says how many more there are past the first.
+- [ ] The **Recompile** action is offered on a failed compile; fixing the source and using it (or saving again) clears the error and shows the PDF.
+
+### Root-file resolution
+
+- [ ] Create a second file next to `sample.tex`, starting with `% !TEX root = sample.tex`, and open it as a MarkCopy LaTeX preview: it compiles `sample.tex`, not the chapter file itself.
+- [ ] Set `markcopy.tex.rootFile` to a specific file and confirm it wins over a `% !TEX root` comment in the open document.
+- [ ] With neither the setting nor the comment present, the document being edited is what compiles, which is what `sample.tex` exercises on its own.
+- [ ] Saving the chapter file recompiles a preview open on it, so `markcopy.tex.recompileOnSave` is watching the chapter, not only the root.
+
+### Settings
+
+- [ ] `markcopy.tex.compile: ask` shows an offer to compile naming the file and the detected engine, instead of compiling on open; its button compiles.
+- [ ] `markcopy.tex.compile: off` shows a message naming the setting and no button, and the engine never runs.
+- [ ] `markcopy.tex.engine` set to a specific engine (`pdflatex`, `xelatex`, `lualatex`, `tectonic`, or `latexmk`) is used instead of the auto-detected one; picking one your machine does not have shows the missing-engine message.
+- [ ] `markcopy.tex.enginePath` pointed at a real engine's executable is used even when it is not on PATH; pointed at something that is not a LaTeX engine, the compile fails naming that path rather than silently trying another engine.
+- [ ] `markcopy.tex.rootFile` and `markcopy.tex.recompileOnSave` are covered above.
+
+### No engine installed
+
+- [ ] With no LaTeX engine reachable (take it off `PATH` for the session, leaving `markcopy.tex.enginePath` empty so detection genuinely fails), opening `sample.tex` as a preview shows a message naming the platform's install options, Tectonic included as the lighter-weight one, instead of an error or a blank panel.
+
+### Copy actions and theming
+
+- [ ] ☑ The right-click menu offers exactly what the PDF viewer's does (Copy Selection, Copy Page N as PNG, **Copy as** Page/All Text, Add Comment Here, the **Theme** submenu), plus the LaTeX-only **Recompile LaTeX** entry, since it is the same viewer; see the [Copy Matrix](COPY-MATRIX.md#a-page-in-the-latex-preview).
+- [ ] Comments added on the compiled PDF persist to `<filename>.tex.mccomments.json` beside the source and survive a recompile.
+
 ## Paste-target pass
 
 For a minor or major release, take the ★ copy rows above to the real targets at least once: Word (or Outlook), Gmail or another web email, Google Docs, and Excel or Google Sheets. The [Copy Matrix](COPY-MATRIX.md) says what should paste well where; anything that pastes as raw Markdown, loses table structure, or arrives blank is a release blocker.

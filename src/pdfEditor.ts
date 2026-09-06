@@ -122,7 +122,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 }
 
 // Read the sidecar comments file, returning [] when it is absent or unreadable.
-async function readComments(uri: vscode.Uri): Promise<unknown[]> {
+// Exported so the LaTeX preview, which drives the same pdf.js webview, keeps its
+// pins in one place rather than growing a second copy of this.
+export async function readComments(uri: vscode.Uri): Promise<unknown[]> {
   try {
     const bytes = await vscode.workspace.fs.readFile(uri);
     const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
@@ -134,7 +136,7 @@ async function readComments(uri: vscode.Uri): Promise<unknown[]> {
 
 // Write the sidecar comments file, or delete it when there are no comments left
 // so we do not leave an empty artifact beside the PDF.
-async function writeComments(uri: vscode.Uri, comments: unknown): Promise<void> {
+export async function writeComments(uri: vscode.Uri, comments: unknown): Promise<void> {
   try {
     if (Array.isArray(comments) && comments.length > 0) {
       const json = JSON.stringify(comments, null, 2);

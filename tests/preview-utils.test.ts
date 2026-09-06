@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { classifyLink, localImageRef, previewKind, shouldAutoPreview } from '../src/preview-utils';
+import {
+  classifyLink,
+  localImageRef,
+  previewKind,
+  shouldAutoPreview,
+  isTexDocument,
+} from '../src/preview-utils';
 
 describe('localImageRef', () => {
   it('leaves remote and inline URIs untouched', () => {
@@ -164,5 +170,26 @@ describe('shouldAutoPreview', () => {
 
   it('does not reopen a document the user dismissed', () => {
     expect(shouldAutoPreview({ ...base, dismissed: new Set([base.docKey]) })).toBe(false);
+  });
+});
+
+describe('isTexDocument', () => {
+  it('recognizes the built-in latex language id', () => {
+    expect(isTexDocument('latex')).toBe(true);
+  });
+
+  it('recognizes the extensions even when something remapped the language', () => {
+    // A files.associations entry or another extension can take the `latex` id
+    // away; the preview should not go inert just because of that.
+    for (const path of ['/p/main.tex', '/p/MAIN.TEX', '/p/doc.ltx', '/p/doc.latex']) {
+      expect(isTexDocument('plaintext', path)).toBe(true);
+    }
+  });
+
+  it('leaves other documents alone', () => {
+    expect(isTexDocument('markdown', '/p/readme.md')).toBe(false);
+    expect(isTexDocument('plaintext', '/p/notes.txt')).toBe(false);
+    // A .tex in the middle of a name is not a LaTeX file.
+    expect(isTexDocument('plaintext', '/p/context.md')).toBe(false);
   });
 });

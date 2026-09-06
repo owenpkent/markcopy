@@ -1,6 +1,6 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v).)
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
 
 The top level is short: it names whatever you clicked ("Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Selection > Code > Table > Diagram > Equation > Block, so a selection inside a table still gets "Copy Selection" at the top, not "Copy Table".
 
@@ -115,6 +115,10 @@ Copy as:
 | All Text    | `text/plain` (all pages) | Any editor or document |
 
 Each page has a real pdf.js text layer (transparent, selectable spans over the canvas), so **Copy Selection** copies whatever you highlight directly on the page; earlier builds had no selectable text on the canvas, so this action had nothing to select.
+
+### A page in the LaTeX preview
+
+Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that PDF in this exact same viewer, so every action and clipboard flavor above under [A page in the PDF preview](#a-page-in-the-pdf-preview) applies unchanged: **Copy Selection**, **Copy Page N as PNG**, **Copy as** for page or all text, and **Add Comment Here**. The one addition is **Recompile LaTeX**, which reruns the compile rather than copying anything, and is offered only here, never on a plain `.pdf`.
 
 ### Always available
 
