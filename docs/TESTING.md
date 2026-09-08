@@ -43,7 +43,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 
 ### Rendering
 
-- [ ] ★ Open `sample.md`; the preview auto-opens to the side (`markcopy.autoPreview`).
+- [ ] ★ Open `sample.md`; its tab shows the rendered preview (`markcopy.autoPreview`), in one editor group, with no split and no text editor left beside it.
 - [ ] Headings, lists, task lists, blockquotes, and links render GitHub-style.
 - [ ] Fenced code blocks are syntax-highlighted.
 - [ ] Mermaid diagrams render and re-theme when the VS Code theme changes.
@@ -52,13 +52,25 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 
 ### Where the preview opens
 
-- [ ] ★ In `sample.md`'s editor title bar, `...` -> **Reopen Editor With...** lists **MarkCopy Markdown Preview**; picking it replaces the tab with the preview, full width, titled `sample.md` (not `Preview sample.md`).
+- [ ] ★ In `sample.md`'s editor title bar, the **Show Preview** button (`$(open-preview)`, leftmost) swaps that same tab to the preview, full width, titled `sample.md` (not `Preview sample.md`). No new editor group, and no second tab left open on the file. **Reopen Editor With...** > **MarkCopy Markdown Preview** gets to the same place.
 - [ ] The tab's own title bar still has the **Save as PDF** and settings buttons, and right-clicking inside it gives the usual copy menu.
 - [ ] With the tab open, edit `sample.md` in a second editor group: the tab re-renders as you type.
 - [ ] Clicking a link to another Markdown file from the tab opens that file as a MarkCopy tab, landing at the linked heading.
 - [ ] Same check on [sample.csv](../sample.csv) with **MarkCopy CSV Preview**: the grid opens in the tab, a cell edit writes back, and **Ctrl+Z** in the tab takes it back.
-- [ ] Closing a preview tab does not suppress the side panel: reopening `sample.md` as text still auto-previews.
-- [ ] Double-clicking `sample.md` in the Explorer still opens the text editor (the entries are `option` priority, not `default`).
+- [ ] Closing a preview tab and reopening `sample.md` shows the preview again: closing the tab closed the file, which is not the same as asking for the text.
+- [ ] ★ On the preview tab, that leftmost slot is now a **Show Source** button (`$(go-to-file)`): clicking it swaps back to the text, in the same group and the same tab. Click the two a few times: the tab count never grows and no group is ever added. The side panel does not spring open on the way to the source either.
+- [ ] Pin the source tab (right-click the tab -> **Pin**), then click **Show Preview**: the pinned tab stays open and the preview opens beside it in the group. Same with unsaved changes in the source: the dirty tab is not closed. Pin the _preview_ tab and click **Show Source**: it too stays.
+- [ ] `sample.csv`'s text editor has the **Show Preview** button too, and it opens the grid in place.
+- [ ] ★ After **Show Source**, switch to another file and back: `sample.md` stays in the text editor rather than swapping to the preview again. Running **MarkCopy: Open Rich Preview to the Side** still opens the side panel (the dismissal it records is cleared by an explicit request), and so does **Show Preview**.
+- [ ] ★ **MarkCopy: Open Rich Preview to the Side** still gives the two-column layout: source left, preview right, retargeting as you move between Markdown files. That is the only route to it now. While that panel is open, focusing another Markdown file retargets it and leaves that file's text editor alone: the tab swap is what auto-preview does when there is no panel, not instead of the panel.
+- [ ] ★ Run **MarkCopy: Open Rich Preview to the Side** from the Command Palette while a MarkCopy preview tab has focus (not a text editor). It opens the panel for that document rather than answering "open a Markdown, CSV, or LaTeX file first".
+- [ ] ★ Search for a word in `sample.md` with **Find in Files** and click a result on a line other than the first. You land on that line in the text editor and stay there: the tab does not swap the line out from under you. Same for `Ctrl+P` > `sample.md:12`.
+- [ ] ★ Edit and save `sample.md` so git sees a change, then click it in the **Source Control** panel. The diff opens and stays open; no preview covers it or takes the focus.
+- [ ] With `sample.md` unsaved (dirty) or its tab pinned, switching away and back leaves the text editor alone. **Show Preview** still swaps it.
+- [ ] ★ With the cursor in a text editor and no preview tab focused, running **MarkCopy: Show Source** from the Command Palette says so rather than silently doing nothing and turning auto-preview off for the file.
+- [ ] With `markcopy.autoPreview` off, opening `sample.md` leaves it in the text editor and nothing swaps; **Show Preview** still works.
+- [ ] Double-clicking `sample.md` in the Explorer still opens the text editor (the entries are `option` priority, not `default`), and the same for `sample.csv`.
+- [ ] With `"workbench.editorAssociations": { "*.md": "markcopy.markdownPreview" }` in settings, double-clicking `sample.md` opens the preview instead, and **Show Source** still gets back to the text.
 
 ### Copy actions
 
@@ -121,7 +133,7 @@ Open [sample.csv](../sample.csv).
 
 ### Rendering
 
-- [ ] ★ The preview auto-opens to the side and shows a grid, not raw text.
+- [ ] ★ The tab swaps to the grid rather than raw text, in place, with no second editor group.
 - [ ] The first row is a header; it stays pinned when you scroll down, and the row-number gutter stays pinned when you scroll right.
 - [ ] Rows alternate background color, and hovering a row highlights the whole row including its number.
 - [ ] `units`, `revenue`, `margin` are right-aligned; `product` and `notes` are left-aligned.

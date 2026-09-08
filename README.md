@@ -76,7 +76,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - **Resizable columns.** Drag any column divider, double-click one (or press Enter on it) to fit the column to its contents, and right-click for **Reset Column Widths**.
   - **Copy anything out.** The grid is a real table, so the whole right-click copy menu works on it: **Copy Table** as rich text, or **Copy as** CSV, TSV, or PNG. The row-number gutter is viewer chrome and stays out of every one of them, so what you paste is the data in the file. A single cell comes out too, under **Copy as** > **Cell Text**, and when a cell holds an email address or a URL, the menu leads with **Copy Email Address** / **Copy Link** and takes just that value out of whatever text surrounds it, which nothing else in a `.csv` can do without a careful drag.
 - **Live preview** that updates as you type, with editor and preview scroll kept in sync.
-- **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown, CSV, TSV, or LaTeX file opens the preview beside it, or retargets an already-open preview to it, without moving your cursor or opening a new column. Close a preview and it stays closed for that file until you reopen it.
+- **Auto-open preview**, on by default (`markcopy.autoPreview`). Opening or focusing a Markdown, CSV, or TSV file shows the rendered document in that file's own tab: one tab, one editor group, nothing split off to the side. **Show Source** in the title bar gets you back to the text, and keeps you there for that file. A tab you have pinned, or one with unsaved changes, stays in the text editor untouched. LaTeX is the exception, and opens beside its source rather than over it. Turn the setting off and the preview is still a click away on the **Show Preview** button, or a **MarkCopy: Open Rich Preview to the Side** away if you want the two-column layout.
 - **GitHub-accurate styling** for output that pastes cleanly into docs and email.
 - **First-class light and dark.** The preview matches your theme with a GitHub-light or GitHub-dark palette, and copied rich text is always light-safe, so it stays readable when pasted into a white document even from a dark preview. A **green-on-black** terminal palette is available too (`markcopy.theme: green`, or **Green on black** under **Preferences > Theme**).
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
@@ -99,20 +99,36 @@ See the full breakdown in the [Copy Matrix](docs/COPY-MATRIX.md): every action, 
 ## Getting started
 
 1. Install the extension (see [Install](#install)).
-2. Open any `.md`, `.csv`, `.tsv`, or `.tex` file. The preview opens automatically beside it (`markcopy.autoPreview`), or run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf`, `.stl`, and video files open straight in their own viewers. A `.tex` file is different again: it is a file you also edit, so the source stays open in the text editor and the preview opens beside it rather than replacing it. See [LaTeX preview](#latex-preview).)
+2. Open any `.md`, `.csv`, or `.tsv` file. Its tab shows the rendered preview (`markcopy.autoPreview`), and **Show Source** in the title bar swaps back to the text. For the two-column layout instead, run **MarkCopy: Open Rich Preview to the Side** from the Command Palette or the right-click menu in the editor or Explorer. (`.pdf`, `.stl`, and video files open straight in their own viewers. A `.tex` file is different again: it is a file you also edit, and its preview is a compiled PDF, so the source stays in the text editor and the preview opens beside it rather than over it. See [LaTeX preview](#latex-preview).)
 3. **Right-click inside the preview.** The menu options change based on whether you clicked a code block, table, diagram, plain block, or a text selection.
 
 To grab everything at once, run **MarkCopy: Copy Whole Document as Rich Text**, or **MarkCopy: Save as PDF** to export the whole preview to a PDF file.
 
 Local images in the document render automatically, and the right-click menu's **Preferences** submenu (or the gear icon in the preview's title bar) lets you change theme, sync scroll, math, and auto-preview without leaving the preview.
 
-**To read a document full width, open the preview as the tab itself.** Click the `...` in the editor title bar, choose **Reopen Editor With...**, and pick **MarkCopy Markdown Preview** (or **MarkCopy CSV Preview**); **Set Default for '\*.md'** in that same menu makes it the editor a double-click opens from then on. It is the same preview, with the same right-click menu and the same editable CSV grid, and it keeps re-rendering as you edit the file in any other editor.
+**The tab swaps between the two views; it never splits.** Two buttons share the leftmost slot in the editor title bar: **Show Preview** (`$(open-preview)`) turns a `.md`, `.csv` or `.tsv` tab into the rendered document, and **Show Source** (`$(go-to-file)`) turns it back. Only one of them shows at a time, so it reads as one toggle. Neither opens a second editor group, and neither leaves you with two tabs on one file. A tab you have pinned, or a source with unsaved changes, is left open rather than closed.
+
+With `markcopy.autoPreview` on (the default), opening one of those files does the **Show Preview** half for you, so you land on the rendered document without asking. **Show Source** takes you to the text and keeps you there for that file: MarkCopy will not swap it back on the next focus change.
+
+It is the same preview either way, with the same right-click menu, the same **Save as PDF** and settings buttons, and the same editable CSV grid, and it keeps re-rendering as you edit the file in any other editor.
+
+**For the old two-column layout**, run **MarkCopy: Open Rich Preview to the Side**: that command still opens the preview beside the source and retargets it as you move between files.
+
+MarkCopy does not change what VS Code's _file association_ opens; the swap above is the extension acting after the fact, and turning `markcopy.autoPreview` off stops it. To change the association itself, **Reopen Editor With...** > **Set Default for '\*.md'** in the editor title menu does it per glob, or `settings.json`:
+
+```json
+{
+  "workbench.editorAssociations": { "*.md": "markcopy.markdownPreview" }
+}
+```
 
 ## Commands
 
 | Command                                    | ID                                | What it does                                                          |
 | ------------------------------------------ | --------------------------------- | --------------------------------------------------------------------- |
 | MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor.                     |
+| MarkCopy: Show Preview                     | `markcopy.openRendered`           | Swaps a Markdown, CSV, or TSV tab to the rendered preview, in place.  |
+| MarkCopy: Show Source                      | `markcopy.openSource`             | Swaps a preview tab back to the text, in place.                       |
 | MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                     |
 | MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it. |
 | MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                 |
@@ -126,7 +142,7 @@ Local images in the document render automatically, and the right-click menu's **
 | ------------------------------ | -------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `markcopy.styleProfile`        | `github`                                                                   | `github`  | Rendering style. `github` matches GitHub Markdown (best for pasting into docs and email).                                                                                                                                                                                 |
 | `markcopy.syncScroll`          | boolean                                                                    | `true`    | Keep the preview scroll position in sync with the editor.                                                                                                                                                                                                                 |
-| `markcopy.autoPreview`         | boolean                                                                    | `true`    | Automatically open the preview beside the editor when you focus a Markdown, CSV, TSV, or LaTeX file, and keep it targeted on whichever file has focus. Turn off to open previews manually.                                                                                |
+| `markcopy.autoPreview`         | boolean                                                                    | `true`    | Show the preview automatically when you focus a Markdown, CSV, or TSV file, in that file's own tab rather than a split beside it. Pinned and unsaved tabs are left alone; LaTeX previews beside its source. Turn off to open previews by hand.                            |
 | `markcopy.theme`               | `auto` \| `light` \| `dark` \| `green`                                     | `auto`    | Preview palette. `auto` follows your VS Code theme; `light`, `dark`, and `green` (green-on-black terminal style) force it. Copies stay light-safe either way.                                                                                                             |
 | `markcopy.mermaid`             | object                                                                     | `{}`      | Extra Mermaid config merged into `mermaid.initialize` (for example `fontFamily`, `flowchart`, or `themeVariables`). Diagrams follow the light/dark palette by default.                                                                                                    |
 | `markcopy.math`                | boolean                                                                    | `true`    | Render `$...$` and `$$...$$` Markdown math as KaTeX equations. Turn off for documents that use literal dollar signs.                                                                                                                                                      |

@@ -59,8 +59,62 @@ function customTabs(): { viewType: string; uri: string }[] {
     .map((input) => ({ viewType: input.viewType, uri: input.uri.toString() }));
 }
 
+/** The uris of every plain text-editor tab currently open. */
+function textTabs(): string[] {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .map((tab) => tab.input)
+    .filter((input): input is vscode.TabInputText => input instanceof vscode.TabInputText)
+    .map((input) => input.uri.toString());
+}
+
+type EditorKind = 'text' | 'custom';
+
+function isEditorOn(input: unknown, uri: vscode.Uri, kind: EditorKind): boolean {
+  const wanted = kind === 'text' ? vscode.TabInputText : vscode.TabInputCustom;
+  return input instanceof wanted && input.uri.toString() === uri.toString();
+}
+
+/** The group holding a text or custom editor on `uri`, if one is open. */
+function groupOf(uri: vscode.Uri, kind: EditorKind): vscode.TabGroup | undefined {
+  return vscode.window.tabGroups.all.find((group) =>
+    group.tabs.some((tab) => isEditorOn(tab.input, uri, kind)),
+  );
+}
+
+/** Every text or custom editor open on `uri`, labelled, for assertion messages. */
+function tabsFor(uri: vscode.Uri): string[] {
+  return vscode.window.tabGroups.all.flatMap((group) =>
+    group.tabs
+      .filter((tab) => isEditorOn(tab.input, uri, 'text') || isEditorOn(tab.input, uri, 'custom'))
+      .map(
+        (tab) =>
+          `${isEditorOn(tab.input, uri, 'text') ? 'text' : 'custom'}:${tab.label}@${group.viewColumn}`,
+      ),
+  );
+}
+
 async function closeEverything(): Promise<void> {
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+}
+
+/**
+ * Run `body` with `markcopy.autoPreview` off, then put the setting back.
+ *
+ * Auto-preview swaps a Markdown or CSV tab to the preview a moment after it is
+ * focused, which would otherwise decide the outcome of tests that are about
+ * something else: what the *file association* resolves to, and what the two
+ * title-bar buttons do when clicked. Without this those tests pass or fail on
+ * whether the assertion beat the swap.
+ */
+async function withoutAutoPreview(body: () => Promise<void>): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('markcopy');
+  await cfg.update('autoPreview', false, vscode.ConfigurationTarget.Global);
+  try {
+    await body();
+  } finally {
+    await cfg.update('autoPreview', undefined, vscode.ConfigurationTarget.Global);
+  }
 }
 
 suite('MarkCopy custom editors', () => {
@@ -195,20 +249,99 @@ suite('MarkCopy custom editors', () => {
 
     // "priority": "option" is the whole point of this pair: the editor picker
     // offers MarkCopy, and until someone picks it (or sets it as the default for
-    // *.md), opening a Markdown file goes on landing in the text editor.
-    await vscode.commands.executeCommand('vscode.open', uri);
-    assert.ok(
-      !customTabs().some((tab) => tab.uri === uri.toString()),
-      `a plain open of sample.md should stay in the text editor, saw: ${JSON.stringify(customTabs())}`,
-    );
+    // *.md), the association a plain open resolves to is still the text editor.
+    // This was briefly `default`, and the reason it went back is worth pinning: a
+    // .md is a file people edit all day, and taking over every one of them on an
+    // extension update is not a thing to do quietly. Auto-preview is off here
+    // because it swaps the tab afterwards by an entirely different route, and
+    // with it on this test would be racing that swap rather than reading the
+    // manifest.
+    await withoutAutoPreview(async () => {
+      await vscode.commands.executeCommand('vscode.open', uri);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.ok(
+        !customTabs().some((tab) => tab.uri === uri.toString()),
+        `a plain open of sample.md should stay in the text editor, saw: ${JSON.stringify(customTabs())}`,
+      );
 
-    await closeEverything();
+      await closeEverything();
+      await vscode.commands.executeCommand('vscode.openWith', uri, MARKDOWN_VIEW);
+
+      const tab = await waitFor(() =>
+        customTabs().find((candidate) => candidate.uri === uri.toString()),
+      );
+      assert.strictEqual(tab?.viewType, MARKDOWN_VIEW, 'sample.md did not open in the preview');
+    });
+  });
+
+  test('Show Source swaps the preview for the text, in the same tab', async () => {
+    const uri = fixture('sample.md');
     await vscode.commands.executeCommand('vscode.openWith', uri, MARKDOWN_VIEW);
+    await waitFor(() => customTabs().find((candidate) => candidate.uri === uri.toString()));
 
-    const tab = await waitFor(() =>
-      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    // Counted before and after rather than asserted as 1, so a stray group left
+    // over from an earlier test fails this for the right reason or not at all.
+    const groups = vscode.window.tabGroups.all.length;
+    await vscode.commands.executeCommand('markcopy.openSource', uri);
+
+    assert.ok(
+      await waitFor(() => (textTabs().includes(uri.toString()) ? true : undefined)),
+      'markcopy.openSource did not open the source',
     );
-    assert.strictEqual(tab?.viewType, MARKDOWN_VIEW, 'sample.md did not open in the preview');
+    assert.strictEqual(
+      vscode.window.tabGroups.all.length,
+      groups,
+      'markcopy.openSource opened a new group instead of the one the preview was in',
+    );
+    // VS Code keeps one editor per resource per group, so the text takes the
+    // preview's tab rather than landing beside it. That is the behaviour the
+    // button is documented on, so it is pinned here: two tabs for one file would
+    // be a different feature and a worse one.
+    assert.ok(
+      !customTabs().some((candidate) => candidate.uri === uri.toString()),
+      `the source should take over the preview's tab, saw: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('Show Source and Show Preview toggle one tab, not two', async () => {
+    const uri = fixture('sample.md');
+    // The round trip the two buttons are for, driven by hand with auto-preview
+    // out of the way: text, preview, source, preview. Each step has to land in
+    // the tab the last one was in, or the pair is not a toggle, just two ways to
+    // litter a group with editors on the same file.
+    await withoutAutoPreview(async () => {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc);
+      const opened = await waitFor(() => groupOf(uri, 'text'));
+      assert.ok(opened, 'sample.md did not open in the text editor');
+      const column = opened.viewColumn;
+
+      await vscode.commands.executeCommand('markcopy.openRendered', uri);
+      assert.ok(
+        await waitFor(() => groupOf(uri, 'custom')),
+        'markcopy.openRendered did not open the preview',
+      );
+
+      await vscode.commands.executeCommand('markcopy.openSource', uri);
+      assert.ok(
+        await waitFor(() => groupOf(uri, 'text')),
+        'markcopy.openSource did not open the source',
+      );
+
+      await vscode.commands.executeCommand('markcopy.openRendered', uri);
+      const back = await waitFor(() => groupOf(uri, 'custom'));
+      assert.ok(back, 'markcopy.openRendered did not reopen the preview');
+      assert.strictEqual(
+        back.viewColumn,
+        column,
+        'the preview came back in a different group from the source it replaced',
+      );
+      assert.strictEqual(
+        tabsFor(uri).length,
+        1,
+        `one editor for the file, not a pile of them, saw: ${JSON.stringify(tabsFor(uri))}`,
+      );
+    });
   });
 
   test('a CSV file opens as a MarkCopy tab when asked', async () => {

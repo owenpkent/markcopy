@@ -3,7 +3,7 @@ import {
   classifyLink,
   localImageRef,
   previewKind,
-  shouldAutoPreview,
+  autoPreviewKind,
   isTexDocument,
 } from '../src/preview-utils';
 
@@ -134,7 +134,7 @@ describe('previewKind', () => {
   });
 });
 
-describe('shouldAutoPreview', () => {
+describe('autoPreviewKind', () => {
   const base = {
     enabled: true,
     languageId: 'markdown',
@@ -144,32 +144,32 @@ describe('shouldAutoPreview', () => {
   };
 
   it('opens for an on-disk markdown file when enabled', () => {
-    expect(shouldAutoPreview(base)).toBe(true);
+    expect(autoPreviewKind(base)).toBe('markdown');
   });
 
   it('is suppressed when the setting is off', () => {
-    expect(shouldAutoPreview({ ...base, enabled: false })).toBe(false);
+    expect(autoPreviewKind({ ...base, enabled: false })).toBeUndefined();
   });
 
   it('ignores documents MarkCopy cannot render', () => {
-    expect(shouldAutoPreview({ ...base, languageId: 'plaintext' })).toBe(false);
+    expect(autoPreviewKind({ ...base, languageId: 'plaintext' })).toBeUndefined();
   });
 
   it('opens for CSV and TSV documents too', () => {
-    expect(shouldAutoPreview({ ...base, languageId: 'csv' })).toBe(true);
-    expect(shouldAutoPreview({ ...base, languageId: 'tsv' })).toBe(true);
+    expect(autoPreviewKind({ ...base, languageId: 'csv' })).toBe('csv');
+    expect(autoPreviewKind({ ...base, languageId: 'tsv' })).toBe('csv');
   });
 
   it('falls back to the file extension when the language id is not ours', () => {
-    expect(shouldAutoPreview({ ...base, languageId: 'plaintext', path: '/a/data.csv' })).toBe(true);
+    expect(autoPreviewKind({ ...base, languageId: 'plaintext', path: '/a/data.csv' })).toBe('csv');
   });
 
   it('ignores non-file schemes (untitled, output, git, etc.)', () => {
-    expect(shouldAutoPreview({ ...base, scheme: 'untitled' })).toBe(false);
+    expect(autoPreviewKind({ ...base, scheme: 'untitled' })).toBeUndefined();
   });
 
   it('does not reopen a document the user dismissed', () => {
-    expect(shouldAutoPreview({ ...base, dismissed: new Set([base.docKey]) })).toBe(false);
+    expect(autoPreviewKind({ ...base, dismissed: new Set([base.docKey]) })).toBeUndefined();
   });
 });
 

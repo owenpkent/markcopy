@@ -11,11 +11,12 @@ import {
   type PageSize,
 } from './pdfExport';
 import {
+  autoPreviewKind,
   classifyLink,
   isTexDocument,
   localImageRef,
+  type PreviewKind,
   previewKind,
-  shouldAutoPreview,
 } from './preview-utils';
 import {
   applyCsvEdits,
@@ -84,6 +85,11 @@ const dismissedPreviews = new Set<string>();
 // LaTeX previews whose `openWith` is in flight. See `openTexPreview`.
 const openingTex = new Set<string>();
 
+// Markdown and CSV documents whose swap to the rendered preview is in flight.
+// The same synchronous claim `openingTex` stakes, for the same reason: see
+// `showRendered`.
+const openingRendered = new Set<string>();
+
 export function activate(context: vscode.ExtensionContext): void {
   // Proxies are deleted when their panel closes, so this normally finds nothing.
   // It is here for the window that was killed rather than closed, which never got
@@ -151,10 +157,16 @@ export function activate(context: vscode.ExtensionContext): void {
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
 
-    // Markdown and CSV files can also be opened *as* a MarkCopy preview, from the
-    // editor picker's "Reopen Editor With..." (and for good, from its "Set Default
-    // for '*.md'"). Contributed at "option" priority, so nothing about what a
-    // double-click in the Explorer does changes until someone asks for it.
+    // Markdown and CSV files can also be opened *as* a MarkCopy preview: the same
+    // webview the side panel uses, in the document's own tab rather than beside it.
+    // Both are contributed at "option" priority, so nothing about what a
+    // double-click in the Explorer does changes until someone asks for it, by
+    // "Reopen Editor With..." or the `markcopy.openRendered` button below, or for
+    // good from the picker's "Set Default for '*.md'". "Default" was tried and
+    // reverted: a .md is a file people edit all day, unlike the .pdf and .xlsx
+    // this provider sits next to, and quietly taking over every Markdown file on
+    // an extension update is a bigger thing to do than a one-click button is
+    // worth. The button gets a reader to the same place without the ambush.
     vscode.window.registerCustomEditorProvider(
       MARKDOWN_VIEW_TYPE,
       new PreviewEditorProvider(context),
@@ -183,6 +195,66 @@ export function activate(context: vscode.ExtensionContext): void {
           'MarkCopy: open a Markdown, CSV, or LaTeX file first.',
         );
       }
+    }),
+
+    // The way back out of a preview that *is* the tab, however the reader got
+    // there: the openRendered button, "Reopen Editor With...", or a "Set Default
+    // for '*.md'" they set months ago and have stopped thinking about. Without it
+    // the only route to the text is that same picker, two menus deep. Opens in
+    // the active group, which is the preview's own, so asking for the source never
+    // splits the editor, and `showTextDocument` takes over the preview's tab
+    // rather than opening a second editor on the same file beside it, so this is
+    // a swap. `markcopy.openRendered` swaps it back.
+    vscode.commands.registerCommand('markcopy.openSource', async (uri?: vscode.Uri) => {
+      // `focusedPreview`, not `activePreview`: this command swaps the preview the
+      // reader is looking at back to its text, so a preview that merely exists is
+      // not an answer. `activePreview` falls back to the side panel, which from
+      // the palette meant running Show Source with the cursor already in the text
+      // re-showed the editor that was focused anyway, closed nothing (the panel
+      // is a webview, not a custom tab), and recorded a dismissal that quietly
+      // turned auto-preview off for that file for the session.
+      const target = uri ?? focusedPreview()?.docUri;
+      if (!target) {
+        vscode.window.showInformationMessage('MarkCopy: focus a MarkCopy preview tab first.');
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(target);
+      await vscode.window.showTextDocument(doc, {
+        viewColumn: vscode.ViewColumn.Active,
+        preserveFocus: false,
+      });
+      await closeStaleEditor(target, 'custom');
+      // Asking for the source is a request to look at the text, not to be handed
+      // the preview again from the side. Without this, auto-preview would answer
+      // the click by opening the panel beside, which is the layout the reader
+      // just walked away from. Running "Open Rich Preview to the Side" clears the
+      // dismissal again, as it does for a preview closed by hand.
+      //
+      // Recorded only once the text is actually up. Doing it first meant a file
+      // deleted or renamed out from under its preview tab threw on the open and
+      // still left auto-preview disabled for it, with nothing to say why when the
+      // file came back.
+      dismissedPreviews.add(target.toString());
+    }),
+
+    // The mirror of openSource, and deliberately the same slot on the title bar:
+    // whichever way round the file is open, the leftmost button takes you to the
+    // other view, in place, so the pair reads as one toggle rather than two
+    // unrelated icons. Contributed on `editorLangId`, so it shows on the text
+    // editor and openSource shows on the preview tab, and never both at once.
+    vscode.commands.registerCommand('markcopy.openRendered', async (uri?: vscode.Uri) => {
+      const doc = pickDocument(uri);
+      const kind = doc && previewKind(doc.languageId, doc.uri.path);
+      if (!doc || !kind) {
+        vscode.window.showInformationMessage('MarkCopy: open a Markdown, CSV, or TSV file first.');
+        return;
+      }
+      // Asking for the preview is the explicit request that clears a dismissal,
+      // the same as "Open Rich Preview to the Side" does. Without this, showing
+      // the source and then coming back would leave auto-preview switched off for
+      // the document for the rest of the session.
+      dismissedPreviews.delete(doc.uri.toString());
+      await showRendered(doc, kind);
     }),
 
     vscode.commands.registerCommand('markcopy.recompileTex', () => {
@@ -260,8 +332,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
-    // Auto-open (or retarget) the preview when a Markdown editor gains focus,
-    // when enabled. Opens beside with focus preserved so the cursor stays put.
+    // Swap a Markdown, CSV or TSV editor to the preview when it gains focus, if
+    // auto-preview is on.
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       maybeAutoPreview(context, editor);
     }),
@@ -284,8 +356,8 @@ export function activate(context: vscode.ExtensionContext): void {
   maybeAutoPreview(context, vscode.window.activeTextEditor);
 }
 
-// Auto-open (or retarget) the preview for a Markdown editor when enabled. Opens
-// beside with focus preserved so the cursor stays put.
+// Show the preview for a Markdown, CSV or TSV editor when enabled, in that
+// editor's own tab. LaTeX still opens beside, for the reason given below.
 function maybeAutoPreview(
   context: vscode.ExtensionContext,
   editor: vscode.TextEditor | undefined,
@@ -296,17 +368,17 @@ function maybeAutoPreview(
   const doc = editor.document;
   const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
   if (isTexDocument(doc.languageId, doc.uri.path)) {
-    // LaTeX gets the same auto-preview bargain as Markdown and CSV, but by a
-    // different route: it is a custom editor rather than the shared panel, so
-    // there is no panel to retarget, just a tab to open beside. Being the one
-    // MarkCopy format that did not open on its own was the whole reason this
-    // looked broken.
+    // LaTeX gets the same auto-preview bargain as Markdown and CSV, but keeps the
+    // Beside layout the others gave up. Its preview is a compiled PDF rather than
+    // a view of the text, so swapping the .tex tab to it would leave the author
+    // nothing to edit: the one case where the split is the point rather than the
+    // problem.
     if (enabled && doc.uri.scheme === 'file' && !dismissedPreviews.has(doc.uri.toString())) {
       openTexPreview(doc.uri, true);
     }
     return;
   }
-  const eligible = shouldAutoPreview({
+  const kind = autoPreviewKind({
     enabled,
     languageId: doc.languageId,
     scheme: doc.uri.scheme,
@@ -314,9 +386,69 @@ function maybeAutoPreview(
     path: doc.uri.path,
     dismissed: dismissedPreviews,
   });
-  if (eligible) {
-    openPreview(context, doc);
+  if (!kind) {
+    return;
   }
+  // A reader who ran "Open Rich Preview to the Side" asked for two columns, so
+  // keep that bargain and retarget the panel rather than swapping this tab.
+  // Swapping instead would leave the panel rendering a document that is no
+  // longer open anywhere while the file the reader just clicked became a preview
+  // in the other column: two previews, no source, and neither of them the one
+  // they were pointing at.
+  if (side) {
+    openPreview(context, doc);
+    return;
+  }
+  if (!swappable(doc, editor)) {
+    return;
+  }
+  // Swap the tab to the rendered document rather than opening a panel beside it,
+  // so focusing a Markdown file leaves you with one group instead of two.
+  showRendered(doc, kind).then(undefined, () => {
+    // A focus change is not a request, so a refused open is not worth a message.
+    // Swallowed rather than left to `void`, which would surface it as an
+    // unhandled rejection in the extension host and tell the reader nothing.
+  });
+}
+
+/**
+ * Whether focusing `doc` should swap its tab to the preview.
+ *
+ * Every no here is the reader saying they are working in the text, and the
+ * answer to all of them is not to swap at all rather than merely to leave the
+ * source tab open alongside. Show Preview still works in each case: it is a
+ * click, not a focus change, and a click is an answer.
+ */
+function swappable(doc: vscode.TextDocument, editor: vscode.TextEditor): boolean {
+  // Unsaved changes, read off the document rather than off its tab. The tab only
+  // reports `isDirty` for a plain text editor in the active group, so asking it
+  // missed a dirty document opened in a diff or in a group other than the
+  // focused one, which is exactly when it mattered most.
+  if (doc.isDirty) {
+    return false;
+  }
+  // Pinning is the reader saying "keep this one", and a pinned source that
+  // flipped to the preview every time it was clicked would be unusable.
+  if (activeTabOn(doc.uri, 'text')?.isPinned) {
+    return false;
+  }
+  // A diff is a view of the text by definition. Clicking a modified .md in the
+  // Source Control list focuses the working-tree side of a `TabInputTextDiff`,
+  // so without this the preview opened over the diff and took the focus, and
+  // reviewing a Markdown change was impossible with the setting at its default.
+  if (activeDiffTabOn(doc.uri)) {
+    return false;
+  }
+  // A cursor that is not at the top of the file means something put it there:
+  // a Find-in-Files hit, `Ctrl+P` with a `:120`, a go-to-definition, a problem
+  // in the list. All of them opened the text editor *at a line*, and swapping
+  // the tab throws that line away, since the swap closes the editor before its
+  // visible range can sync to the preview. Following a search result into a
+  // Markdown file has to land on the search result.
+  if (editor.selection.active.line > 0 || !editor.selection.isEmpty) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -397,10 +529,9 @@ class PreviewEditorProvider implements vscode.CustomTextEditorProvider {
 // the side panel. A custom editor's webview reports `active` exactly as a panel
 // does, so this follows the reader rather than guessing.
 function activePreview(): PreviewState | undefined {
-  for (const state of previews) {
-    if (state.panel.active) {
-      return state;
-    }
+  const focused = focusedPreview();
+  if (focused) {
+    return focused;
   }
   if (side) {
     return side;
@@ -411,6 +542,117 @@ function activePreview(): PreviewState | undefined {
   return doc ? previewsOf(doc.uri)[0] : undefined;
 }
 
+/**
+ * The MarkCopy preview the reader is actually looking at, if any.
+ *
+ * The strict half of `activePreview`, for the commands that act *on* a preview
+ * rather than merely near one. A custom editor's webview reports `active`
+ * exactly as the side panel does, so this is the same question for both.
+ */
+function focusedPreview(): PreviewState | undefined {
+  for (const state of previews) {
+    if (state.panel.active) {
+      return state;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Close a leftover editor on `uri` in the active group, so Show Source and Show
+ * Preview swap a tab rather than stacking two editors on one file.
+ *
+ * Whether opening one takes over the other's tab turns out to depend on VS Code's
+ * preview mode, the italic tab a single click opens: `vscode.open` gives you one,
+ * and the next open replaces it, while `vscode.openWith` and anything the reader
+ * has pinned are permanent and get opened alongside instead. A button cannot know
+ * which it is looking at, so the leftover is closed here rather than hoped away.
+ *
+ * A pinned tab is left alone, since pinning is the reader saying "keep this one",
+ * and so is a dirty text editor, whose unsaved changes are not a layout button's
+ * to discard. A preview tab needs no such guard: it is a view of a document that
+ * stays open as the text editor this was called for, so closing it loses nothing.
+ */
+async function closeStaleEditor(uri: vscode.Uri, kind: 'text' | 'custom'): Promise<void> {
+  const stale = vscode.window.tabGroups.activeTabGroup.tabs.filter(
+    (tab) => tabIsOn(tab, uri, kind) && !tab.isPinned && !(kind === 'text' && tab.isDirty),
+  );
+  if (stale.length > 0) {
+    await vscode.window.tabGroups.close(stale, true);
+  }
+}
+
+/**
+ * Swap `doc`'s tab to the rendered preview, in the group it is already in.
+ *
+ * Shared by the **Show Preview** button and by auto-preview, so the deliberate
+ * route and the automatic one cannot drift into putting the document in two
+ * different places. `ViewColumn.Active` is what keeps either from splitting the
+ * editor; `markcopy.openPreview` is still there for anyone who wants the
+ * source-left/preview-right layout on purpose.
+ */
+async function showRendered(doc: vscode.TextDocument, kind: PreviewKind): Promise<void> {
+  const key = doc.uri.toString();
+  // Auto-preview calls this on every active-editor change and nothing is awaited
+  // between them, so restoring a folder full of editors can reach the same
+  // document several times over before the first `openWith` resolves. Each of
+  // those opens is a retained-context webview, and `ViewColumn.Active` is
+  // evaluated per call, so a focus change mid-flight lands the second one in a
+  // different group: two live previews of one file, both re-rendering on every
+  // keystroke. Claimed synchronously here, as `openTexPreview` does.
+  if (openingRendered.has(key)) {
+    return;
+  }
+  openingRendered.add(key);
+  try {
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      doc.uri,
+      kind === 'csv' ? CSV_VIEW_TYPE : MARKDOWN_VIEW_TYPE,
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+    );
+    // Only once the preview is really there. `previewKind` answers for a language
+    // id as well as an extension, and VS Code's own Markdown grammar claims files
+    // the custom-editor selector in package.json does not (.mdwn, .workbook, and
+    // whatever a `files.associations` entry points at markdown), so `openWith`
+    // can decline to resolve the viewType and hand back the plain text editor.
+    // Closing regardless took the file's only tab away as it was opened.
+    if (activeTabOn(doc.uri, 'custom')) {
+      await closeStaleEditor(doc.uri, 'text');
+    }
+  } finally {
+    // Released on failure too, so one refused open does not wedge this document
+    // out of ever previewing again for the rest of the session.
+    openingRendered.delete(key);
+  }
+}
+
+/** Whether `tab` is a `kind` editor open on `uri`. */
+function tabIsOn(tab: vscode.Tab, uri: vscode.Uri, kind: 'text' | 'custom'): boolean {
+  const key = uri.toString();
+  const input = tab.input;
+  if (kind === 'text') {
+    return input instanceof vscode.TabInputText && input.uri.toString() === key;
+  }
+  return input instanceof vscode.TabInputCustom && input.uri.toString() === key;
+}
+
+/** The tab in the active group holding a `kind` editor on `uri`, if there is one. */
+function activeTabOn(uri: vscode.Uri, kind: 'text' | 'custom'): vscode.Tab | undefined {
+  return vscode.window.tabGroups.activeTabGroup.tabs.find((tab) => tabIsOn(tab, uri, kind));
+}
+
+/** Whether the focused tab is a diff with `uri` on either side of it. */
+function activeDiffTabOn(uri: vscode.Uri): boolean {
+  const key = uri.toString();
+  const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+  const input = tab?.input;
+  return (
+    input instanceof vscode.TabInputTextDiff &&
+    (input.modified.toString() === key || input.original.toString() === key)
+  );
+}
+
 // The live previews showing a document: the side panel when it is pointed at it,
 // plus any editor tabs opened on it.
 function previewsOf(uri: vscode.Uri): PreviewState[] {
@@ -419,14 +661,31 @@ function previewsOf(uri: vscode.Uri): PreviewState[] {
 }
 
 function pickDocument(uri?: vscode.Uri): vscode.TextDocument | undefined {
-  const active = vscode.window.activeTextEditor;
   if (uri && uri.scheme === 'file') {
-    return vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
+    return openDocumentOn(uri);
   }
   // Whatever is in front of the reader. `update` decides how to render it, so
   // there is nothing to gate on here: a document MarkCopy does not recognize is
   // previewed as Markdown rather than refused.
-  return active?.document;
+  const active = vscode.window.activeTextEditor;
+  if (active) {
+    return active.document;
+  }
+  // `activeTextEditor` is undefined while a custom editor holds the focus, so
+  // stopping there left every command that starts here inert in exactly the
+  // state auto-preview puts the reader in: "Open Rich Preview to the Side" on a
+  // Markdown file already showing as a MarkCopy tab answered "open a Markdown,
+  // CSV, or LaTeX file first" about the file on the screen. A custom *text*
+  // editor is a view of a TextDocument, so the document is open and the preview
+  // knows which one it is.
+  const focused = focusedPreview();
+  return focused && openDocumentOn(focused.docUri);
+}
+
+/** The already-open TextDocument for `uri`, if VS Code is holding one. */
+function openDocumentOn(uri: vscode.Uri): vscode.TextDocument | undefined {
+  const key = uri.toString();
+  return vscode.workspace.textDocuments.find((doc) => doc.uri.toString() === key);
 }
 
 function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument): void {
@@ -519,7 +778,11 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
     previews.delete(state);
     if (side === state) {
       // Remember the dismissal so auto-preview does not immediately reopen it.
-      // An editor tab is not auto-anything, so closing one means only itself.
+      // A preview that is an editor tab needs no such record even though
+      // auto-preview opens those too now: closing one closes the document with
+      // it, so there is no focused editor left for auto-preview to answer. Show
+      // Source is how you keep the file open without the preview, and it records
+      // the dismissal itself.
       dismissedPreviews.add(state.docUri.toString());
       side = undefined;
     }

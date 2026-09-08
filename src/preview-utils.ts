@@ -157,15 +157,18 @@ export interface AutoPreviewInput {
   dismissed: ReadonlySet<string>;
 }
 
-// Whether focusing a document should auto-open (or retarget) the preview.
+// How focusing a document should be previewed, or undefined if it should not be.
 // Gated by the setting, restricted to on-disk documents MarkCopy can render,
 // and suppressed for any document the user has deliberately closed so we never
 // fight them.
-export function shouldAutoPreview(input: AutoPreviewInput): boolean {
-  return (
-    input.enabled &&
-    previewKind(input.languageId, input.path ?? '') !== undefined &&
-    input.scheme === 'file' &&
-    !input.dismissed.has(input.docKey)
-  );
+//
+// Returns the kind rather than a yes/no so the caller does not have to ask
+// `previewKind` the same question over again to find out how to render what this
+// just approved, and then carry a branch for an answer that cannot come back
+// undefined.
+export function autoPreviewKind(input: AutoPreviewInput): PreviewKind | undefined {
+  if (!input.enabled || input.scheme !== 'file' || input.dismissed.has(input.docKey)) {
+    return undefined;
+  }
+  return previewKind(input.languageId, input.path ?? '');
 }

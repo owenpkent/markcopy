@@ -100,6 +100,18 @@
         "icon": "$(book)"
       },
       {
+        "command": "markcopy.openSource",
+        "title": "MarkCopy: Show Source",
+        "category": "MarkCopy",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "markcopy.openRendered",
+        "title": "MarkCopy: Show Preview",
+        "category": "MarkCopy",
+        "icon": "$(open-preview)"
+      },
+      {
         "command": "markcopy.copyDocumentAsRichText",
         "title": "MarkCopy: Copy Whole Document as Rich Text",
         "category": "MarkCopy"
@@ -255,6 +267,16 @@
     "menus": {
       "editor/title": [
         {
+          "command": "markcopy.openSource",
+          "when": "activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
+          "group": "navigation@0"
+        },
+        {
+          "command": "markcopy.openRendered",
+          "when": "editorLangId == markdown || editorLangId == mdx || editorLangId == csv || editorLangId == tsv || resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mdx|csv|tsv|tab)$/i",
+          "group": "navigation@0"
+        },
+        {
           "command": "markcopy.saveAsPdf",
           "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
           "group": "navigation@1"
@@ -309,7 +331,7 @@
         "markcopy.autoPreview": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically open the MarkCopy preview to the side when you open a Markdown, CSV, or TSV file. The preview follows the focused editor and keeps your cursor in place. Turn off to open previews manually."
+          "markdownDescription": "Show the MarkCopy preview automatically when you open a Markdown, CSV, or TSV file, in that file's own tab rather than as a split beside it. A tab you have pinned, or one with unsaved changes, is left in the text editor. Turn off to reach the preview only from the **Show Preview** button, **Reopen Editor With...**, or **MarkCopy: Open Rich Preview to the Side**, which still opens the side-by-side layout on request. A `.tex` file previews beside its source instead: its preview is a compiled PDF, so putting it over the source would leave nothing to edit."
         },
         "markcopy.theme": {
           "type": "string",
