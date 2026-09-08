@@ -4,25 +4,28 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.11.0] - 2026-09-08
+
 ### Added
 
 - **A rendered/source toggle in the editor title bar.** **MarkCopy: Show Source** (`markcopy.openSource`, `$(go-to-file)`) appears on a preview tab, **MarkCopy: Show Preview** (`markcopy.openRendered`, `$(open-preview)`) on a Markdown, CSV, or TSV text editor. Each swaps the tab to the other view **in place**: same group, same tab, nothing split off to the side and no second editor left open on the file. They are contributed to the same slot on the title bar and never both show at once, so the pair reads as one button that changes what it does.
   - A source tab you have **pinned**, or one with **unsaved changes**, is left open rather than closed, because a button about layout should not spend either.
   - Showing the source stops auto-preview from opening the side panel for that document, since asking for the source is asking not to be handed the preview straight back. Showing the preview clears that again, as **MarkCopy: Open Rich Preview to the Side** already did.
   - **What opens on a double-click is unchanged.** MarkCopy does not touch VS Code's file associations; Markdown, CSV, and TSV still resolve to the text editor. **Reopen Editor With...** > **Set Default for '\*.md'** still makes the preview the default for a glob if you want that.
+  - Both work from the Command Palette as well as the title bar, including from a preview tab, where VS Code reports no active text editor and MarkCopy's commands used to answer "open a Markdown, CSV, or LaTeX file first" about the file already on screen.
 
 ### Changed
 
 - **Auto-preview no longer splits the editor.** With `markcopy.autoPreview` on (still the default), opening or focusing a Markdown, CSV, or TSV file now swaps that file's tab to the rendered preview, in the group it is already in, instead of opening a second editor group beside it. One tab, one group, and **Show Source** to get at the text.
   - **Show Source keeps you there.** Once you have asked for the text on a file, MarkCopy stops swapping it back on the next focus change, the same dismissal a closed preview already recorded. **Show Preview**, or **MarkCopy: Open Rich Preview to the Side**, clears it.
-  - **Pinned tabs and unsaved changes are left alone.** Auto-preview skips the swap entirely for either, rather than pulling an editor you are working in out from under you. The buttons still work on those tabs, because a click is an answer and a focus change is not.
-  - **The two-column layout is still there on request**: **MarkCopy: Open Rich Preview to the Side** opens the side panel and retargets it as you move between files, exactly as before.
+  - **Anything that says you are working in the text is left alone.** Auto-preview skips the swap entirely, rather than pulling an editor out from under you, for a file with unsaved changes, a pinned tab, an open diff (clicking a modified `.md` in **Source Control** shows you the diff, not a preview over the top of it), and a cursor that is not at the top of the file. That last one is what a **Find in Files** hit or a `Ctrl+P` > `notes.md:120` leaves behind: following a search result into a Markdown file lands on the search result. The buttons still work in every one of those cases, because a click is an answer and a focus change is not.
+  - **The two-column layout is still there on request**: **MarkCopy: Open Rich Preview to the Side** opens the side panel and retargets it as you move between files, exactly as before. While that panel is open it is what auto-preview feeds: focusing another Markdown file retargets the panel and leaves that file's own tab in the text editor, so asking for two columns keeps two columns.
   - **LaTeX still previews beside its source.** Its preview is a compiled PDF rather than a view of the text, so putting it over the `.tex` would leave nothing to edit.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.10.0] - 2026-09-06
 
@@ -288,7 +291,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/owenpkent/markcopy/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/owenpkent/markcopy/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/owenpkent/markcopy/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/owenpkent/markcopy/compare/v0.8.1...v0.8.2
