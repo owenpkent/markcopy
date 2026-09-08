@@ -273,7 +273,7 @@
         },
         {
           "command": "markcopy.openRendered",
-          "when": "editorLangId == markdown || editorLangId == mdx || editorLangId == csv || editorLangId == tsv",
+          "when": "editorLangId == markdown || editorLangId == mdx || editorLangId == csv || editorLangId == tsv || resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mdx|csv|tsv|tab)$/i",
           "group": "navigation@0"
         },
         {

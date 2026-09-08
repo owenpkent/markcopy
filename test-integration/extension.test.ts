@@ -86,6 +86,39 @@ suite('MarkCopy integration', () => {
   });
 
   /**
+   * Poll `probe` until it reports true, or give up after `timeoutMs`.
+   *
+   * Waiting on the condition rather than on a stopwatch is what keeps a loaded
+   * CI runner from failing a test that is only ever about tab bookkeeping. The
+   * swap is two awaits deep (`vscode.openWith` resolves, then the source tab is
+   * closed), so a fixed sleep either has to be long enough for the worst runner
+   * or it flakes on the assertion that the source tab is gone.
+   */
+  async function waitUntil(probe: () => boolean, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!probe() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  const allTabs = (): readonly vscode.Tab[] =>
+    vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+
+  const customTabsOn = (uri: vscode.Uri, viewType: string): readonly vscode.Tab[] =>
+    allTabs().filter(
+      (tab) =>
+        tab.input instanceof vscode.TabInputCustom &&
+        tab.input.viewType === viewType &&
+        tab.input.uri.toString() === uri.toString(),
+    );
+
+  const textTabsOn = (uri: vscode.Uri): readonly vscode.Tab[] =>
+    allTabs().filter(
+      (tab) =>
+        tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString(),
+    );
+
+  /**
    * Assert that focusing `file` swapped its tab to the `viewType` preview.
    *
    * Both halves matter and only together: that the preview opened is the easy
@@ -93,27 +126,27 @@ suite('MarkCopy integration', () => {
    * in one group rather than the split auto-preview used to open.
    */
   async function assertSwapsToPreview(file: string, viewType: string): Promise<void> {
+    // The swap is what auto-preview does when there is no side panel; with one
+    // open it retargets that panel instead, which is the bargain "Open Rich
+    // Preview to the Side" makes. An earlier test in this suite leaves a panel
+    // behind, so clear the slate rather than testing the other branch by
+    // accident.
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await waitUntil(() => allTabs().length === 0);
+
     const uri = vscode.Uri.file(file);
     const doc = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(doc);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await waitUntil(() => customTabsOn(uri, viewType).length > 0 && textTabsOn(uri).length === 0);
 
-    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
-    const seen = JSON.stringify(tabs.map((tab) => tab.label));
+    const seen = JSON.stringify(allTabs().map((tab) => tab.label));
     assert.ok(
-      tabs.some(
-        (tab) =>
-          tab.input instanceof vscode.TabInputCustom &&
-          tab.input.viewType === viewType &&
-          tab.input.uri.toString() === uri.toString(),
-      ),
+      customTabsOn(uri, viewType).length > 0,
       `expected ${path.basename(file)} to swap to the ${viewType} preview, saw: ${seen}`,
     );
-    assert.ok(
-      !tabs.some(
-        (tab) =>
-          tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString(),
-      ),
+    assert.strictEqual(
+      textTabsOn(uri).length,
+      0,
       `the source tab should have been swapped, not joined, saw: ${seen}`,
     );
   }
@@ -132,5 +165,35 @@ suite('MarkCopy integration', () => {
     fs.writeFileSync(file, 'region,units\n"North, America",1284\nEMEA,976\n');
 
     await assertSwapsToPreview(file, 'markcopy.csvPreview');
+  });
+
+  test('a burst of swap requests still leaves exactly one preview', async () => {
+    // The same shape the LaTeX path needed `openingTex` for, on the Markdown one:
+    // restoring a folder churns the active editor several times with nothing
+    // awaited between passes, `vscode.openWith` is asynchronous, and its target
+    // group is re-evaluated per call. Without a synchronous claim each pass sees
+    // "no preview yet" and starts another, and one file ends up with two live
+    // retained-context webviews re-rendering on every keystroke. Firing without
+    // awaiting is the whole point; awaiting between calls hides the bug.
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await waitUntil(() => allTabs().length === 0);
+
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'burst.md');
+    fs.writeFileSync(file, '# Burst\n\nOpened eight times at once.\n');
+    const uri = vscode.Uri.file(file);
+    await vscode.workspace.openTextDocument(uri);
+
+    for (let i = 0; i < 8; i++) {
+      void vscode.commands.executeCommand('markcopy.openRendered', uri);
+    }
+    await waitUntil(() => customTabsOn(uri, 'markcopy.markdownPreview').length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const previews = customTabsOn(uri, 'markcopy.markdownPreview');
+    assert.strictEqual(
+      previews.length,
+      1,
+      `a burst should collapse to one preview, saw ${previews.length}`,
+    );
   });
 });
