@@ -20,6 +20,8 @@ suite('MarkCopy integration', () => {
       commands.includes('markcopy.copyDocumentAsRichText'),
       'markcopy.copyDocumentAsRichText missing',
     );
+    assert.ok(commands.includes('markcopy.openSource'), 'markcopy.openSource missing');
+    assert.ok(commands.includes('markcopy.openRendered'), 'markcopy.openRendered missing');
     assert.ok(commands.includes('markcopy.openSettings'), 'markcopy.openSettings missing');
   });
 
@@ -83,39 +85,52 @@ suite('MarkCopy integration', () => {
     await vscode.commands.executeCommand('markcopy.copyDocumentAsRichText');
   });
 
-  test('auto-opens a preview when an on-disk Markdown file is focused', async () => {
+  /**
+   * Assert that focusing `file` swapped its tab to the `viewType` preview.
+   *
+   * Both halves matter and only together: that the preview opened is the easy
+   * one, and that the text editor it replaced is gone is what makes this a swap
+   * in one group rather than the split auto-preview used to open.
+   */
+  async function assertSwapsToPreview(file: string, viewType: string): Promise<void> {
+    const uri = vscode.Uri.file(file);
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+    const seen = JSON.stringify(tabs.map((tab) => tab.label));
+    assert.ok(
+      tabs.some(
+        (tab) =>
+          tab.input instanceof vscode.TabInputCustom &&
+          tab.input.viewType === viewType &&
+          tab.input.uri.toString() === uri.toString(),
+      ),
+      `expected ${path.basename(file)} to swap to the ${viewType} preview, saw: ${seen}`,
+    );
+    assert.ok(
+      !tabs.some(
+        (tab) =>
+          tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString(),
+      ),
+      `the source tab should have been swapped, not joined, saw: ${seen}`,
+    );
+  }
+
+  test('focusing an on-disk Markdown file swaps its tab to the preview', async () => {
     // Auto-preview only fires for real files on disk (scheme 'file'), so write a
     // temp file rather than using an untitled document.
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'auto.md');
     fs.writeFileSync(file, '# Auto\n\nOpened by focus, no command needed.\n');
 
-    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-    await vscode.window.showTextDocument(doc);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-
-    const labels = vscode.window.tabGroups.all
-      .flatMap((group) => group.tabs)
-      .map((tab) => tab.label);
-    assert.ok(
-      labels.some((label) => label === 'Preview auto.md'),
-      `expected an auto-opened preview for auto.md, saw: ${JSON.stringify(labels)}`,
-    );
+    await assertSwapsToPreview(file, 'markcopy.markdownPreview');
   });
 
-  test('auto-opens a preview when an on-disk CSV file is focused', async () => {
+  test('focusing an on-disk CSV file swaps its tab to the grid', async () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-')), 'sales.csv');
     fs.writeFileSync(file, 'region,units\n"North, America",1284\nEMEA,976\n');
 
-    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-    await vscode.window.showTextDocument(doc);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-
-    const labels = vscode.window.tabGroups.all
-      .flatMap((group) => group.tabs)
-      .map((tab) => tab.label);
-    assert.ok(
-      labels.some((label) => label === 'Preview sales.csv'),
-      `expected an auto-opened preview for sales.csv, saw: ${JSON.stringify(labels)}`,
-    );
+    await assertSwapsToPreview(file, 'markcopy.csvPreview');
   });
 });
