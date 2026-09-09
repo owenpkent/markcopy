@@ -4,12 +4,45 @@ import { SaxesParser } from 'saxes';
 import { htmlToDocx, reportSummary } from '../src/docxExport';
 import { imageSize } from '../src/docx/media';
 import { bookmarkName } from '../src/docx/ooxml';
-import { cssColor } from '../src/docx/build';
+import { columnCount, cssColor } from '../src/docx/build';
 
 /** A 1x1 PNG, as the webview would inline it. */
 const PNG_1x1 =
   'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/**
+ * A PNG header with the given intrinsic size, and nothing else.
+ *
+ * Enough for the writer, which reads the size out of the IHDR and stores the
+ * bytes verbatim. Two of these differ in their bytes without differing in their
+ * extension, which is what makes a media part name collision visible.
+ */
+function pngDataUri(width: number, height: number): string {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`;
+}
+
+/** A GIF header with the given logical screen size, which may be a broken one. */
+function gifDataUri(width: number, height: number): string {
+  const bytes = new Uint8Array([
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    width & 0xff,
+    width >> 8,
+    height & 0xff,
+    height >> 8,
+  ]);
+  return `data:image/gif;base64,${Buffer.from(bytes).toString('base64')}`;
+}
 
 function docx(body: string) {
   const { bytes, report } = htmlToDocx(`<div>${body}</div>`, {
@@ -85,8 +118,11 @@ describe('headings', () => {
 
   it('anchors a bookmark on a heading id so in-document links resolve', () => {
     const { document } = docx('<h2 id="setup">Setup</h2><p><a href="#setup">jump</a></p>');
-    expect(document).toContain('<w:bookmarkStart w:id="0" w:name="setup"/>');
-    expect(document).toContain('<w:hyperlink w:anchor="setup">');
+    const name = bookmarkName('setup');
+    expect(document).toContain(`<w:bookmarkStart w:id="0" w:name="${name}"/>`);
+    // The link has to derive the same name from the same anchor, or it lands
+    // nowhere; that both sides call one pure function is the whole guarantee.
+    expect(document).toContain(`<w:hyperlink w:anchor="${name}">`);
   });
 });
 
@@ -103,6 +139,36 @@ describe('images', () => {
     const { report } = docx(`<p><img src="${PNG_1x1}" alt=""/></p>`);
     expect(report.imagesMissingAlt).toBe(1);
     expect(reportSummary(report)).toContain('1 image without alt text');
+  });
+
+  it('gives an image inside a table cell a media part of its own', () => {
+    const { parts, text } = docx(
+      `<p><img src="${PNG_1x1}" alt="body"/></p>` +
+        `<table><tr><td><img src="${pngDataUri(2, 2)}" alt="cell"/></td></tr></table>`,
+    );
+    expect(
+      Object.keys(parts)
+        .filter((name) => name.startsWith('word/media/'))
+        .sort(),
+    ).toEqual(['word/media/image1.png', 'word/media/image2.png']);
+    const rels = text('word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="media/image1.png"');
+    expect(rels).toContain('Target="media/image2.png"');
+  });
+
+  it('lays out an image whose header reports a zero side', () => {
+    const { document } = docx(`<p><img src="${gifDataUri(0, 10)}" width="50" alt="broken"/></p>`);
+    expect(document).not.toContain('Infinity');
+    // 50px square: there is no aspect ratio to scale by, so the given side is
+    // used for both rather than multiplied by a ratio that is not a number.
+    expect(document).toContain('<wp:extent cx="476250" cy="476250"/>');
+  });
+
+  it('keeps the line breaks of multi-line alt text out of attribute normalization', () => {
+    const { document } = docx(`<p><img src="${PNG_1x1}" alt="graph TD&#10;  A--&gt;B"/></p>`);
+    // A literal newline here would be normalized to a space when Word reads the
+    // attribute back, flattening a diagram's source into one run-on line.
+    expect(document).toContain('descr="graph TD&#10;  A--&gt;B"');
   });
 
   it('stores a repeated image once', () => {
@@ -172,6 +238,37 @@ describe('tables', () => {
     expect(document).toContain('<w:jc w:val="right"/>');
   });
 
+  it('writes justification after the paragraph style, as CT_PPr requires', () => {
+    const { document } = docx(
+      '<table><tr><th style="text-align:center">H</th></tr>' +
+        '<tr><td style="text-align:right">9</td></tr></table>',
+    );
+    // CT_PPr is a sequence: jc follows pStyle. Word offers to repair a document
+    // that puts them the other way round.
+    expect(document).toContain(
+      '<w:pPr><w:pStyle w:val="TableHeader"/><w:jc w:val="center"/></w:pPr>',
+    );
+    expect(document).toContain('<w:pPr><w:pStyle w:val="TableText"/><w:jc w:val="right"/></w:pPr>');
+  });
+
+  it('counts the columns a rowspan occupies, so no cell is dropped', () => {
+    const { document } = docx(
+      '<table><tr><td rowspan="2">A</td></tr><tr><td>B</td><td>C</td></tr></table>',
+    );
+    expect(document.match(/<w:gridCol /g)).toHaveLength(3);
+    expect(document).toContain('<w:t xml:space="preserve">C</w:t>');
+  });
+
+  it('measures a table with more rows than a spread can pass as arguments', () => {
+    type Rows = Parameters<typeof columnCount>[0];
+    const rows = Array.from({ length: 200_000 }, () => ({
+      cells: [
+        { el: { kind: 'element', name: 'td', attrs: {}, children: [] }, colspan: 1, rowspan: 1 },
+      ],
+    })) as unknown as Rows;
+    expect(columnCount(rows)).toBe(1);
+  });
+
   it('follows a table with a paragraph, which Word requires', () => {
     const { document } = docx('<table><tr><td>a</td></tr></table>');
     expect(document).toContain('</w:tbl><w:p/>');
@@ -197,6 +294,26 @@ describe('lists', () => {
   it('honors an explicit start attribute', () => {
     const { text } = docx('<ol start="5"><li>five</li></ol>');
     expect(text('word/numbering.xml')).toContain('<w:startOverride w:val="5"/>');
+  });
+
+  it('keeps an explicit start of zero rather than restarting at one', () => {
+    const { text } = docx('<ol start="0"><li>zero</li></ol>');
+    expect(text('word/numbering.xml')).toContain('<w:startOverride w:val="0"/>');
+  });
+
+  it('numbers a list item once when its first block is a heading', () => {
+    const { document } = docx('<ol><li><h2>Head</h2><p>Body</p></li></ol>');
+    // One item, one number. Two would mean the marker outlived the paragraph
+    // that spent it, turning one item into two.
+    expect(document.match(/<w:numPr>/g)).toHaveLength(1);
+    // And the heading keeps its style, which is where its outline level lives.
+    expect(document).toContain('<w:pStyle w:val="Heading2"/><w:numPr>');
+  });
+
+  it('keeps a code block inside a list item on the code style', () => {
+    const { document } = docx('<ul><li><pre><code>x = 1\ny = 2</code></pre></li></ul>');
+    expect(document.match(/<w:pStyle w:val="HTMLPreformatted"\/>/g)).toHaveLength(2);
+    expect(document).not.toContain('ListParagraph');
   });
 
   it('nests a sublist one level deeper', () => {
@@ -230,6 +347,15 @@ describe('inline formatting', () => {
     expect(document).toContain('<w:b/>');
     expect(document).toContain('<w:i/>');
     expect(document).toContain('<w:strike/>');
+  });
+
+  it('writes one character style for a code span inside a link', () => {
+    const { document } = docx('<p><a href="https://x.test"><code>npm i</code></a></p>');
+    // CT_RPr allows a single rStyle. Code keeps it and the link's underline is
+    // added as direct formatting, so the run reads as both without two of them.
+    expect(document.match(/<w:rStyle /g)).toHaveLength(1);
+    expect(document).toContain('<w:rStyle w:val="HTMLCode"/>');
+    expect(document).toContain('<w:u w:val="single"/>');
   });
 
   it('nests formatting rather than losing the outer one', () => {
@@ -317,6 +443,16 @@ describe('hostile and odd input', () => {
     expect(document).toContain('beforeafter');
   });
 
+  it('drops a lone surrogate but keeps a well-formed pair', () => {
+    // Half an emoji, the shape a truncating paste leaves behind. XML 1.0 forbids
+    // an unpaired surrogate as firmly as it forbids a 0x0B.
+    const lone = String.fromCharCode(0xd83d);
+    const pair = String.fromCharCode(0xd83d, 0xde00);
+    const { document } = docx(`<p>ok${lone} and ${pair}</p>`);
+    expect(() => assertWellFormed(document)).not.toThrow();
+    expect(document).toContain(`<w:t xml:space="preserve">ok and ${pair}</w:t>`);
+  });
+
   it('escapes markup-like text rather than injecting it', () => {
     const { document } = docx('<p>&lt;/w:t&gt;&lt;/w:r&gt;&lt;w:r&gt;</p>');
     expect(() => assertWellFormed(document)).not.toThrow();
@@ -386,12 +522,22 @@ describe('image header sniffing', () => {
 });
 
 describe('helpers', () => {
-  it('keeps a short anchor as-is', () => {
-    expect(bookmarkName('setup')).toBe('setup');
+  it('keeps a short anchor readable, with the hash that disambiguates it', () => {
+    expect(bookmarkName('setup')).toMatch(/^setup_[0-9a-z]+$/);
   });
 
   it('prefixes an anchor that does not start with a letter', () => {
-    expect(bookmarkName('1-intro')).toBe('mc_1_intro');
+    expect(bookmarkName('1-intro')).toMatch(/^mc_1_intro_[0-9a-z]+$/);
+  });
+
+  it('does not collapse two short anchors that differ only in punctuation', () => {
+    // All three clean to `a_b`. Without the hash Word would keep one bookmark
+    // and send every link to any of the three headings to that one.
+    const names = new Set([bookmarkName('a-b'), bookmarkName('a.b'), bookmarkName('a b')]);
+    expect(names.size).toBe(3);
+    for (const name of names) {
+      expect(name.length).toBeLessThanOrEqual(40);
+    }
   });
 
   it('caps a long anchor at what Word accepts, without collapsing two of them', () => {

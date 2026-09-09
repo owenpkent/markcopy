@@ -108,6 +108,8 @@ export interface BuildResult {
 }
 
 interface RunFmt {
+  /** Inside an <a>: the run wears the link's appearance as well as its own. */
+  hyperlink?: boolean;
   bold?: boolean;
   italic?: boolean;
   strike?: boolean;
@@ -117,17 +119,39 @@ interface RunFmt {
   color?: string;
 }
 
+/**
+ * The number or bullet owed to the first paragraph of a list item.
+ *
+ * A shared mutable object rather than a plain value, because a context is copied
+ * (`{ ...ctx, style }`) on the way into almost every block. Marking the marker
+ * spent has to be visible to the copy the caller kept, or a heading or a code
+ * block inside a list item numbers every paragraph it produces.
+ */
+interface ListMarker {
+  numId: number;
+  ilvl: number;
+  /**
+   * The style in effect where the item began. A block inside the item that sets
+   * its own style differs from it, and that style outranks ListParagraph.
+   */
+  baseStyle?: string;
+  /** True until a paragraph has carried the marker. */
+  pending: boolean;
+}
+
 interface BlockCtx {
   /** Paragraph style id applied to plain paragraphs in this container. */
   style?: string;
   /** Extra left indent in twips, for nested quotes and list continuations. */
   indent?: number;
-  /** Set on the first paragraph of a list item, then cleared. */
-  marker?: { numId: number; ilvl: number };
+  /** Owed to the first paragraph of a list item; see ListMarker. */
+  marker?: ListMarker;
   /** Nesting depth of the enclosing list, for a nested list's level. */
   listDepth?: number;
   /** HTML id to anchor a bookmark on, so in-document links can reach it. */
   bookmarkId?: string;
+  /** Justification for every paragraph in this container, for an aligned cell. */
+  align?: 'center' | 'right';
 }
 
 interface TableCell {
@@ -169,9 +193,10 @@ class Builder {
   };
 
   finish(): BuildResult {
-    // A body whose last element is a table confuses Word, and an empty body is
-    // not a document at all. One trailing paragraph settles both.
-    if (this.out.length === 0 || this.out[this.out.length - 1].startsWith('<w:tbl>')) {
+    // An empty body is not a document at all. A body ending in a table, which
+    // Word is equally unhappy with, cannot happen here: `table` writes the
+    // paragraph that has to follow one.
+    if (this.out.length === 0) {
       this.out.push('<w:p/>');
     }
     return {
@@ -251,7 +276,6 @@ class Builder {
           ...ctx,
           style: 'Quote',
           indent: (ctx.indent ?? 0) + (ctx.style === 'Quote' ? 360 : 0),
-          marker: ctx.marker,
         });
         return;
       case 'ul':
@@ -264,7 +288,10 @@ class Builder {
         this.blocks(el.children, ctx);
         return;
       case 'hr':
-        this.out.push('<w:p><w:pPr><w:pStyle w:val="HorizontalRule"/></w:pPr></w:p>');
+        // Through paragraphProps rather than written out flat, so a rule inside
+        // an aligned cell or a list item is not the one paragraph that misses
+        // the container's justification or keeps its item's number alive.
+        this.out.push(`<w:p>${this.paragraphProps({ ...ctx, style: 'HorizontalRule' })}</w:p>`);
         return;
       case 'table':
         this.table(el, ctx);
@@ -304,25 +331,41 @@ class Builder {
     }
 
     this.out.push(`<w:p>${this.paragraphProps(ctx)}${inner}</w:p>`);
-    ctx.marker = undefined;
   }
 
-  /** <w:pPr>, with children in the order the schema demands. */
+  /**
+   * <w:pPr>, with children in the order the schema demands.
+   *
+   * CT_PPr is a sequence, not a bag: pStyle, then numPr, then ind, then jc. Word
+   * validates the order and offers to repair a document that gets it wrong, so
+   * this stays the only place a paragraph property is written.
+   *
+   * Emitting the numbering is also what spends the list marker, because this is
+   * the single point at which it can be spent.
+   */
   private paragraphProps(ctx: BlockCtx): string {
     const parts: string[] = [];
-    // A list item keeps its own indent from the numbering definition, so the
-    // ListParagraph style stands in for whatever style the container asked for.
-    const style = ctx.marker ? 'ListParagraph' : ctx.style;
+    const marker = ctx.marker?.pending === true ? ctx.marker : undefined;
+    // A list item keeps its own indent from the numbering definition, so
+    // ListParagraph stands in for the style the container asked for -- but only
+    // while the item is still wearing that style. A heading, a code block or a
+    // quote inside the item has chosen its own, and overriding it would cost
+    // exactly the outline level and the shading this export exists to carry.
+    const style = marker && ctx.style === marker.baseStyle ? 'ListParagraph' : ctx.style;
     if (style && style !== 'Normal') {
       parts.push(`<w:pStyle w:val="${style}"/>`);
     }
-    if (ctx.marker) {
+    if (marker) {
       parts.push(
-        `<w:numPr><w:ilvl w:val="${ctx.marker.ilvl}"/><w:numId w:val="${ctx.marker.numId}"/></w:numPr>`,
+        `<w:numPr><w:ilvl w:val="${marker.ilvl}"/><w:numId w:val="${marker.numId}"/></w:numPr>`,
       );
+      marker.pending = false;
     }
     if (ctx.indent) {
       parts.push(`<w:ind w:left="${ctx.indent}"/>`);
+    }
+    if (ctx.align) {
+      parts.push(`<w:jc w:val="${ctx.align}"/>`);
     }
     return parts.length === 0 ? '' : `<w:pPr>${parts.join('')}</w:pPr>`;
   }
@@ -336,12 +379,9 @@ class Builder {
    */
   private codeBlock(el: DocxElement, ctx: BlockCtx): void {
     const lines = codeLines(el);
-    lines.forEach((line, i) => {
-      const props = this.paragraphProps({
-        ...ctx,
-        style: 'HTMLPreformatted',
-        marker: i === 0 ? ctx.marker : undefined,
-      });
+    lines.forEach((line) => {
+      // The first line spends the item's marker; the rest see it already spent.
+      const props = this.paragraphProps({ ...ctx, style: 'HTMLPreformatted' });
       const runs =
         line.length === 0
           ? ''
@@ -355,15 +395,15 @@ class Builder {
               .join('');
       this.out.push(`<w:p>${props}${runs}</w:p>`);
     });
-    if (lines.length > 0) {
-      ctx.marker = undefined;
-    }
   }
 
   private list(el: DocxElement, ctx: BlockCtx): void {
     const ordered = el.name === 'ol';
     const depth = Math.min(ctx.listDepth ?? 0, MAX_LIST_LEVEL);
-    const start = Number.parseInt(el.attrs.start ?? '1', 10) || 1;
+    // `|| 1` would be wrong here: `0.` is a legal markdown list start and zero
+    // is falsy, so an explicit `<ol start="0">` would silently restart at one.
+    const parsed = Number.parseInt(el.attrs.start ?? '1', 10);
+    const start = Number.isFinite(parsed) ? parsed : 1;
 
     // A fresh numbering instance per list element, not per document. Two lists
     // sharing one instance would number continuously across the prose between
@@ -396,8 +436,9 @@ class Builder {
       // Content after the first paragraph lines up under the marker rather than
       // falling back to the margin.
       indent: undefined,
-      marker: { numId, ilvl: depth },
+      marker: { numId, ilvl: depth, baseStyle: ctx.style, pending: true },
       listDepth: depth + 1,
+      align: ctx.align,
     };
     this.blocks(li.children, itemCtx);
   }
@@ -413,10 +454,7 @@ class Builder {
     }
     this.report.tables++;
 
-    const cols = Math.max(
-      1,
-      ...rows.map((row) => row.cells.reduce((sum, cell) => sum + cell.colspan, 0)),
-    );
+    const cols = columnCount(rows);
     const colWidth = Math.floor(CONTENT_WIDTH_TWIPS / cols);
 
     const parts: string[] = [
@@ -485,7 +523,11 @@ class Builder {
     this.out.push(parts.join(''));
     // Word needs a paragraph between a table and whatever follows it.
     this.out.push('<w:p/>');
-    ctx.marker = undefined;
+    // A table cannot carry a number, so a list item that opens with one spends
+    // its marker on nothing rather than passing it to the paragraph after.
+    if (ctx.marker) {
+      ctx.marker.pending = false;
+    }
   }
 
   private tableCell(
@@ -509,53 +551,32 @@ class Builder {
     // Every <w:tc> must hold at least one paragraph, empty or not.
     let body = '<w:p/>';
     if (cell && vMerge !== 'continue') {
-      const nested = new Builder();
-      nested.adopt(this);
-      nested.blocks(cell.el.children, {
+      const rendered = this.capture(cell.el.children, {
         style: cell.header || headerRow ? 'TableHeader' : 'TableText',
+        align: cell.align === 'left' ? undefined : cell.align,
       });
-      const result = nested.finish();
-      this.absorb(nested, result);
-      body = result.bodyXml.trim() === '' ? '<w:p/>' : result.bodyXml;
-      if (cell.align && cell.align !== 'left') {
-        body = alignParagraphs(body, cell.align);
+      if (rendered !== '') {
+        body = rendered;
       }
     }
 
     return `<w:tc><w:tcPr>${props.join('')}</w:tcPr>${body}</w:tc>`;
   }
 
-  /** Share the parent's id counters so a nested builder mints unique ids. */
-  private adopt(parent: Builder): void {
-    this.relSeq = parent.relSeq;
-    this.bookmarkSeq = parent.bookmarkSeq;
-    this.drawingSeq = parent.drawingSeq;
-    this.numSeq = parent.numSeq;
-    for (const [uri, id] of parent.imageRels) {
-      this.imageRels.set(uri, id);
-    }
-  }
-
-  /** Take back everything a nested builder created, counters included. */
-  private absorb(child: Builder, result: BuildResult): void {
-    this.relSeq = child.relSeq;
-    this.bookmarkSeq = child.bookmarkSeq;
-    this.drawingSeq = child.drawingSeq;
-    this.numSeq = child.numSeq;
-    for (const [uri, id] of child.imageRels) {
-      this.imageRels.set(uri, id);
-    }
-    // A nested builder only ever holds relationships and media the parent has
-    // not seen: `adopt` copied the image map across, so a repeat is deduped
-    // there and never reaches this list.
-    this.media.push(...result.media);
-    this.rels.push(...result.rels);
-    this.nums.push(...result.nums);
-    this.report.images += result.report.images;
-    this.report.imagesMissingAlt += result.report.imagesMissingAlt;
-    this.report.imagesSkipped += result.report.imagesSkipped;
-    this.report.headings += result.report.headings;
-    this.report.tables += result.report.tables;
+  /**
+   * Render nodes into a fragment instead of into the body.
+   *
+   * A cell's contents are part of the same document as everything around them:
+   * the same media, the same relationship ids, the same image dedup map, the
+   * same report. Taking the tail of `out` keeps all of that shared, where a
+   * second Builder per cell had to copy state in and out -- and got the media
+   * part names wrong doing it, because a fresh builder numbers `image1.png` from
+   * its own empty list and overwrites the one the body already stored there.
+   */
+  private capture(nodes: DocxNode[], ctx: BlockCtx): string {
+    const start = this.out.length;
+    this.blocks(nodes, ctx);
+    return this.out.splice(start).join('');
   }
 
   // -------------------------------------------------------------------------
@@ -646,11 +667,16 @@ class Builder {
 
   private hyperlink(el: DocxElement, fmt: RunFmt): { xml: string; visible: boolean } {
     const href = el.attrs.href ?? '';
-    const inner = this.runs(el.children, { ...fmt, color: undefined });
+    // The Hyperlink character style rides down with the run format rather than
+    // being patched into the finished runs: `runProps` is where the schema's
+    // ordering of <w:rPr> children is already understood, and it is the only
+    // place that can see a run is both code and a link, which the schema allows
+    // only one <w:rStyle> for.
+    const inner = this.runs(el.children, { ...fmt, color: undefined, hyperlink: true });
     if (inner.xml === '') {
       return inner;
     }
-    const styled = withHyperlinkStyle(inner.xml);
+    const styled = inner.xml;
 
     if (href.startsWith('#')) {
       // An in-document link (a table of contents, a footnote reference). It has
@@ -772,11 +798,18 @@ class Builder {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** <w:rPr>, children in schema order (rStyle, rFonts, b, i, strike, color, vertAlign). */
+/** <w:rPr>, children in schema order (rStyle, b, i, strike, color, u, vertAlign). */
 function runProps(fmt: RunFmt): string {
   const parts: string[] = [];
+  // CT_RPr allows one rStyle, so a code span inside a link cannot wear both
+  // character styles. Code keeps the slot, because monospace and shading are the
+  // more distinctive treatment and the <w:hyperlink> around the run is what
+  // makes it clickable either way; the link's underline is added back below as
+  // direct formatting so the run still reads as a link.
   if (fmt.code) {
     parts.push('<w:rStyle w:val="HTMLCode"/>');
+  } else if (fmt.hyperlink) {
+    parts.push('<w:rStyle w:val="Hyperlink"/>');
   }
   if (fmt.bold) {
     parts.push('<w:b/>');
@@ -790,34 +823,15 @@ function runProps(fmt: RunFmt): string {
   if (fmt.color) {
     parts.push(`<w:color w:val="${fmt.color}"/>`);
   }
+  if (fmt.code && fmt.hyperlink) {
+    parts.push('<w:u w:val="single"/>');
+  }
   if (fmt.sup) {
     parts.push('<w:vertAlign w:val="superscript"/>');
   } else if (fmt.sub) {
     parts.push('<w:vertAlign w:val="subscript"/>');
   }
   return parts.length === 0 ? '' : `<w:rPr>${parts.join('')}</w:rPr>`;
-}
-
-/**
- * Add the Hyperlink character style to every run in a link's contents.
- *
- * Applying it as a run format instead would fight the caller: a link's text can
- * already be bold or code, and those runs are built before we know they sit
- * inside an <a>.
- */
-function withHyperlinkStyle(xml: string): string {
-  return xml
-    .replace(/<w:r><w:rPr>/g, '<w:r><w:rPr><w:rStyle w:val="Hyperlink"/>')
-    .replace(/<w:r>(?!<w:rPr>)/g, '<w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr>');
-}
-
-/** Set justification on every paragraph in a fragment (used for aligned cells). */
-function alignParagraphs(xml: string, align: 'center' | 'right'): string {
-  const jc = `<w:jc w:val="${align}"/>`;
-  return xml
-    .replace(/<w:p><w:pPr>/g, `<w:p><w:pPr>${jc}`)
-    .replace(/<w:p>(?!<w:pPr>)/g, `<w:p><w:pPr>${jc}</w:pPr>`)
-    .replace(/<w:p\/>/g, `<w:p><w:pPr>${jc}</w:pPr></w:p>`);
 }
 
 /** Viewer furniture that is not part of the document. */
@@ -948,6 +962,41 @@ function collectRows(table: DocxElement): TableRow[] {
   return rows;
 }
 
+/**
+ * The grid width of a table, in columns.
+ *
+ * The sum of a row's own colspans is not the answer: a rowspan from an earlier
+ * row occupies a column in this row too, so a `<td rowspan="2">` above a row of
+ * two cells makes a three-column table. Undercounting is not a layout nit -- the
+ * placement loop stops at the width, so every cell past it is dropped from the
+ * document entirely.
+ *
+ * A loop rather than `Math.max(...rows.map(...))`, because the spread passes one
+ * argument per row and overflows the call stack somewhere north of a hundred
+ * thousand of them, a size `markcopy.csv.maxRows` can be set to.
+ */
+export function columnCount(rows: TableRow[]): number {
+  let cols = 1;
+  // Rows still to come that each column owes to a rowspan above it.
+  let carried: number[] = [];
+
+  for (const row of rows) {
+    let col = 0;
+    for (const cell of row.cells) {
+      while ((carried[col] ?? 0) > 0) {
+        col++;
+      }
+      for (let i = 0; i < cell.colspan; i++) {
+        carried[col + i] = Math.max(carried[col + i] ?? 0, cell.rowspan);
+      }
+      col += cell.colspan;
+    }
+    cols = Math.max(cols, col);
+    carried = carried.map((left) => Math.max(0, left - 1));
+  }
+  return cols;
+}
+
 function toCell(el: DocxElement): TableCell {
   return {
     el,
@@ -972,14 +1021,20 @@ function displaySize(el: DocxElement, decoded: DecodedImage): [number, number] {
   if (width && height) {
     return [width, height];
   }
+  // A header can report a zero side: a truncated GIF whose logical screen
+  // descriptor never arrived, a PNG with a malformed IHDR. Dividing by it gives
+  // Infinity, which Math.round and Math.max both pass straight through into a
+  // wp:extent that is not a valid coordinate and that Word refuses to draw.
+  const ratio =
+    decoded.widthPx > 0 && decoded.heightPx > 0 ? decoded.widthPx / decoded.heightPx : undefined;
   // Only one given: keep the aspect ratio of the actual bytes.
   if (width) {
-    return [width, Math.max(1, Math.round((decoded.heightPx / decoded.widthPx) * width))];
+    return [width, ratio ? Math.max(1, Math.round(width / ratio)) : width];
   }
   if (height) {
-    return [Math.max(1, Math.round((decoded.widthPx / decoded.heightPx) * height)), height];
+    return [ratio ? Math.max(1, Math.round(height * ratio)) : height, height];
   }
-  return [decoded.widthPx, decoded.heightPx];
+  return [Math.max(1, decoded.widthPx), Math.max(1, decoded.heightPx)];
 }
 
 /** A bare-number HTML size attribute. A percentage or `auto` means "no answer". */

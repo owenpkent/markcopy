@@ -13,7 +13,7 @@ import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { escapeHtml } from './render';
+import { escapeHtml } from './escape';
 
 // A floor for "the browser created the file but never finished writing it".
 //

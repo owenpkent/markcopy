@@ -8,7 +8,7 @@
 // menu treats the result as an ordinary table (copy as rich text / CSV / TSV /
 // PNG all work without knowing where the table came from).
 
-import { escapeAttr, escapeHtml } from './render';
+import { escapeAttr, escapeHtml } from './escape';
 
 /** The delimiters we sniff for, in tie-break order. */
 export const DELIMITERS = [',', '\t', ';', '|'] as const;

@@ -12,7 +12,7 @@
 //     a binary workbook, not a text file with addressable lines.
 //   - `data-source-line`, because there is no source text and no visible editor,
 //     so the sheet must contribute nothing to scroll sync.
-import { escapeAttr, escapeHtml } from '../render';
+import { escapeAttr, escapeHtml } from '../escape';
 import { covered, type Sheet } from './sheet';
 import type { SheetRef } from './workbook';
 
