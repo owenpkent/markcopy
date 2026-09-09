@@ -124,7 +124,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    ```
    Open a Markdown file, a CSV, and a PDF; confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
-9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it.
+9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying: none of those three failures says what it means.
 10. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).
 11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
     ```bash
@@ -135,6 +135,63 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
     npx vsce show OwenPKent.markcopy
     curl -s https://open-vsx.org/api/OwenPKent/markcopy
     ```
+
+## Troubleshooting Phase 2
+
+All three of these came out of the 0.11.0 release, and none of them says what it means.
+
+### `Request timeout: /_apis/gallery` can mean the PAT expired
+
+An expired Marketplace PAT does **not** reliably fail with a 401. It can hang instead, and `vsce` reports the hang rather than the reason:
+
+```
+ERROR  Request timeout: /_apis/gallery          # publish
+ERROR  Request timeout: /_apis/securityroles    # vsce verify-pat
+```
+
+The real message is only visible on a request that happens to get a response:
+
+```
+Access Denied: The Personal Access Token used has expired.
+```
+
+So **check the token's expiry before believing the timeout.** The token list at <https://dev.azure.com/owenpkent/_usersSettings/tokens> shows Status and "Expires on" per token, which is faster and more definitive than any amount of retrying. Delete expired tokens once replaced, so the live one cannot be confused with a dead one at the next release.
+
+Since the token is read from `.env`, confirm the file actually changed after editing it, without printing the secret:
+
+```bash
+set -a; source .env; set +a
+python -c "import os,hashlib; t=os.environ['VSCE_PAT']; print(len(t), hashlib.sha256(t.encode()).hexdigest()[:12])"
+```
+
+### Authenticated Marketplace calls can hang while anonymous ones answer
+
+Independently of the token, requests to the Marketplace's authenticated API can stall for minutes and then time out, while unauthenticated requests to the same host answer in ~0.1s (those are served from the edge and never reach the origin). This is intermittent and clears on its own; it is not something to fix locally.
+
+Confirmed **not** to make a difference: disabling the tool sandbox, forcing IPv4 or IPv6 (`curl -4` / `-6`), `NODE_OPTIONS=--dns-result-order=ipv4first`, `curl` instead of `vsce`, and re-minting the token. Ten-odd attempts failed over roughly an hour and then one succeeded with nothing changed on this side.
+
+A quick way to tell a network stall from a rejected credential, since it answers immediately either way when the path is healthy:
+
+```bash
+set -a; source .env; set +a
+curl -s -o /dev/null -w '%{http_code} in %{time_total}s\n' \
+  -u ":$VSCE_PAT" \
+  -H 'Accept: application/json;api-version=3.0-preview.1' \
+  'https://marketplace.visualstudio.com/_apis/gallery/publishers/OwenPKent/extensions?api-version=3.0-preview.1' \
+  --max-time 30
+```
+
+`000` after the full timeout is the network stall: retry later. A `401` or a JSON error body is an answer, and the body names the actual problem.
+
+### After a successful publish, the version flaps
+
+`vsce publish` printing `DONE Published OwenPKent.markcopy v<version>` is authoritative for the upload. The read APIs are **not** immediately consistent afterwards: `npx vsce show` and the gallery `extensionquery` endpoint alternate between the old and new version for a while, because the replicas propagate independently. Immediately after the 0.11.0 publish, six consecutive queries returned the new version once and the old version five times.
+
+So do not read a single stale response as a failed publish, and do not republish on the strength of one. Sample it a few times instead: any replica reporting the new version means it is published and still propagating, since an unpublished version appears on none of them. `lastUpdated` lags too, so it is not a tiebreaker.
+
+```bash
+for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
+```
 
 ## Notes
 
