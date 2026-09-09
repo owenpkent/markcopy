@@ -138,7 +138,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ## Troubleshooting Phase 2
 
-All three of these came out of the 0.11.0 release, and none of them says what it means.
+The first three came out of the 0.11.0 release and the fourth out of 0.12.0. None of them says what it means.
 
 ### `Request timeout: /_apis/gallery` can mean the PAT expired
 
@@ -155,7 +155,7 @@ The real message is only visible on a request that happens to get a response:
 Access Denied: The Personal Access Token used has expired.
 ```
 
-So **check the token's expiry before believing the timeout.** The token list at <https://dev.azure.com/owenpkent/_usersSettings/tokens> shows Status and "Expires on" per token, which is faster and more definitive than any amount of retrying. Delete expired tokens once replaced, so the live one cannot be confused with a dead one at the next release.
+So **check the token before believing the timeout.** `npx vsce verify-pat OwenPKent` answers this in seconds and without a browser, and it stays useful even while `publish` is timing out (see [verify-pat is the fast way](#verify-pat-answers-while-publish-is-still-timing-out)). If it too hangs, the token list at <https://dev.azure.com/owenpkent/_usersSettings/tokens> shows Status and "Expires on" per token, which is more definitive than any amount of retrying. Delete expired tokens once replaced, so the live one cannot be confused with a dead one at the next release.
 
 Since the token is read from `.env`, confirm the file actually changed after editing it, without printing the secret:
 
@@ -183,11 +183,36 @@ curl -s -o /dev/null -w '%{http_code} in %{time_total}s\n' \
 
 `000` after the full timeout is the network stall: retry later. A `401` or a JSON error body is an answer, and the body names the actual problem.
 
+### `verify-pat` answers while `publish` is still timing out
+
+`vsce verify-pat` and `vsce publish` hit **different endpoints** (`/_apis/securityroles` and `/_apis/gallery`), and in 0.12.0 the first answered normally through a stretch where the second timed out every time. That makes `verify-pat` the fast, browser-free way to split the two causes the timeout can have:
+
+```bash
+set -a; source .env; set +a
+npx vsce verify-pat OwenPKent
+```
+
+- **It succeeds** -> the token is fine and this is the gallery stall. Retry the publish; nothing local needs changing.
+- **It reports Access Denied / an expired token** -> mint a new PAT.
+- **It hangs too** -> fall back to the token list in the browser.
+
+A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further.
+
+Because the packaged `.vsix` from step 7 already exists by then, retry with it rather than rebuilding each time:
+
+```bash
+npx vsce publish --packagePath markcopy-<version>.vsix
+```
+
+That also guarantees the bytes published are the ones smoke-tested, instead of a fresh build made minutes later.
+
 ### After a successful publish, the version flaps
 
 `vsce publish` printing `DONE Published OwenPKent.markcopy v<version>` is authoritative for the upload. The read APIs are **not** immediately consistent afterwards: `npx vsce show` and the gallery `extensionquery` endpoint alternate between the old and new version for a while, because the replicas propagate independently. Immediately after the 0.11.0 publish, six consecutive queries returned the new version once and the old version five times.
 
-So do not read a single stale response as a failed publish, and do not republish on the strength of one. Sample it a few times instead: any replica reporting the new version means it is published and still propagating, since an unpublished version appears on none of them. `lastUpdated` lags too, so it is not a tiebreaker.
+0.12.0 was worse: **all six** samples taken right after `DONE Published` reported the old version, and it was still the old version on every read for some minutes after that. So a clean sweep of stale answers is not evidence of a failed publish either -- zero-of-six is a reading this section has seen follow a publish that had in fact succeeded.
+
+So do not read a stale response as a failed publish, and do not republish on the strength of one -- republishing a version number that did upload is the one mistake this section exists to prevent, since the number cannot be reused. Sample it a few times instead: any replica reporting the new version means it is published and still propagating, since an unpublished version appears on none of them. `lastUpdated` lags too, so it is not a tiebreaker.
 
 ```bash
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
