@@ -4,6 +4,22 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Save as Word (`.docx`).** **MarkCopy: Save as Word Document** (`markcopy.saveAsDocx`), and **Save as Word…** in the preview's right-click menu, export the rendered preview to a Word document: pick where to save it and MarkCopy writes it, then opens it. It needs nothing installed, not Word, not Pandoc, not a browser; the file is assembled in memory.
+
+  It exists alongside **Save as PDF**, not instead of it, because the two answer different questions. A PDF is a picture of a page: it keeps the layout and the images, and a screen reader has to infer the reading order from where the ink landed. A `.docx` keeps the **structure**, which is what assistive software reads, and is still editable when it arrives.
+
+  - **Headings become the built-in Heading 1-6 styles**, which carry an outline level, so they fill Word's Navigation Pane and let a screen reader move section to section.
+  - **A table's header row is marked as one** (`<w:tblHeader/>`), so a reader hears the column label with the value, and Word repeats the row across page breaks.
+  - **Images carry their alt text**, which is what Read Aloud speaks and what Word's Accessibility Checker looks for.
+  - **Lists are real numbering**, not a bullet character typed into the text. Separate ordered lists restart at 1, `4.` starts at four, and nested lists get their own level.
+  - **Links keep their targets**, and a link to a heading in the same document becomes a bookmark reference that lands on it.
+  - **Mermaid diagrams and equations are rasterized with their source as alt text**, so a diagram reads aloud as its Mermaid source and an equation as its LaTeX rather than being silent.
+  - **Code blocks keep their syntax colors** and become one paragraph per line, so a reader can step through them a line at a time.
+  - **Images with no alt text are counted and reported** after the export ("exported report.docx, but 3 images without alt text"), because an empty `![](x.png)` is the one defect that quietly undoes the reason to export a Word document at all, and it is fixable in the Markdown in seconds.
+  - Works from the Markdown, CSV, TSV, and Excel previews alike; a sheet becomes a Word table with its header row marked.
+
 ### Planned
 
 - PlantUML support.

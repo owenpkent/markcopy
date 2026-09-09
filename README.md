@@ -46,6 +46,7 @@ Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that
 | STL 3D model preview                     |    No    |            No             | **Yes**  |
 | QuickTime (.mov) video preview           |    No    |            No             | **Yes**  |
 | Copy a video frame as PNG                |    No    |            No             | **Yes**  |
+| Export to Word (.docx)                   |    No    |        Via Pandoc         | **Yes**  |
 
 ## Why it exists
 
@@ -64,6 +65,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
   - Any other block: top level copies **Rich Text**; **Copy as** has **Markdown source** and **PNG**.
 - **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
 - **Save as PDF.** Export the rendered preview straight to a PDF file: pick where to save it and MarkCopy writes it, then opens it. No print dialog to work through and no filename header or URL footer on the pages, with equations, diagrams, highlighted code, and local images intact and the text still selectable. See [Save as PDF](#save-as-pdf).
+- **Save as Word.** Export the rendered preview to a `.docx` file. Unlike the PDF, what lands is a real document rather than a picture of one: headings are Word headings, tables have a marked header row, lists are lists, and every image carries its alt text, so **Read Aloud**, Immersive Reader, and screen readers can read it and Word's own Accessibility Checker passes it. It is also still editable. Mermaid diagrams and equations become images described by the source they came from, so a diagram is not simply silent. See [Save as Word](#save-as-word).
 - **Excel preview.** Open an `.xlsx` or `.xlsm` and it renders as a grid, with sheet tabs along the top and the column letters and row numbers a spreadsheet shows. Values appear the way the workbook formats them, so a date is a date and not `45000`, a percentage is `15.3%` and not `0.153`, and a formula shows its stored result. Merged cells stay merged, and anything the author hid (rows, columns, or whole sheets) stays hidden. Then right-click and take the whole sheet out as rich text, Markdown, CSV, TSV, or PNG.
 
   The preview is **read-only by design**: MarkCopy never writes to your workbook, so it cannot corrupt one. See [Settings](#settings) for `markcopy.xlsx.*`.
@@ -124,15 +126,16 @@ MarkCopy does not change what VS Code's _file association_ opens; the swap above
 
 ## Commands
 
-| Command                                    | ID                                | What it does                                                          |
-| ------------------------------------------ | --------------------------------- | --------------------------------------------------------------------- |
-| MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor.                     |
-| MarkCopy: Show Preview                     | `markcopy.openRendered`           | Swaps a Markdown, CSV, or TSV tab to the rendered preview, in place.  |
-| MarkCopy: Show Source                      | `markcopy.openSource`             | Swaps a preview tab back to the text, in place.                       |
-| MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                     |
-| MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it. |
-| MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                 |
-| MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                                          |
+| Command                                    | ID                                | What it does                                                              |
+| ------------------------------------------ | --------------------------------- | ------------------------------------------------------------------------- |
+| MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor.                         |
+| MarkCopy: Show Preview                     | `markcopy.openRendered`           | Swaps a Markdown, CSV, or TSV tab to the rendered preview, in place.      |
+| MarkCopy: Show Source                      | `markcopy.openSource`             | Swaps a preview tab back to the text, in place.                           |
+| MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                         |
+| MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it.     |
+| MarkCopy: Save as Word Document            | `markcopy.saveAsDocx`             | Exports the rendered preview to a `.docx` file you choose, then opens it. |
+| MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                     |
+| MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                                              |
 
 ## Settings
 
@@ -199,6 +202,24 @@ It renders with a headless Chrome, Edge, or Chromium already installed on your m
 - **Backgrounds survive.** Code blocks, table headers, and blockquotes keep their fill, which a browser print drops unless you remember to ask for it.
 
 `markcopy.pdf.pageSize` sets the paper size (Letter, A4, or Legal). If your browser is installed somewhere unusual, point `markcopy.pdf.browserPath` at it. With no Chromium-family browser installed at all, MarkCopy falls back to opening the preview in your default browser for you to print by hand.
+
+## Save as Word
+
+**MarkCopy: Save as Word Document** (or **Save as Word…** in the preview's right-click menu) asks where to save, writes a `.docx`, and opens it.
+
+This is the export to reach for when the document has to be **read aloud**, or edited after it lands. A PDF keeps the layout and the images and nothing else: it is a picture of a page, and a screen reader has to infer the reading order from where the ink fell. A `.docx` keeps the structure, and structure is what assistive software actually reads:
+
+- **Headings are Word headings.** `#` through `######` become the built-in Heading 1-6 styles, which carry an outline level. That is what fills the Navigation Pane and what lets a screen reader jump from section to section instead of arrowing through the prose.
+- **Tables declare their header row.** The header row is marked as one, so a reader hears "Revenue, 4.2m" rather than "4.2m", and Word repeats it across page breaks.
+- **Images carry their alt text.** `![A chart of revenue by region](chart.png)` arrives with that sentence attached, which is what Read Aloud speaks and what the Accessibility Checker looks for.
+- **Lists are lists**, numbered by Word rather than by a bullet character typed into the text, so each one is announced with its position and count. Separate numbered lists restart at 1, and `4.` starts at four.
+- **Links keep their targets**, and a link to a heading in the same document lands on that heading.
+
+Mermaid diagrams and equations have no Word equivalent, so they are rasterized. Their **alt text is the source they came from**: a flowchart reads aloud as its Mermaid source and an equation as its LaTeX, which is a good deal better than silence. Code blocks keep their syntax colors and become one paragraph per line, so a reader can step through them a line at a time.
+
+**Alt text is the one thing MarkCopy cannot supply for you.** `![](chart.png)` with an empty alt is the norm in Markdown, and it is exactly what makes a document stop being audible. So the export counts them and tells you: _"exported report.docx, but 3 images without alt text (a screen reader will skip past them)."_ Fix them in the Markdown and export again.
+
+Everything is written in memory and needs nothing installed: no Word, no Pandoc, no browser. The same export works from the CSV, TSV, and Excel previews, where the sheet becomes a Word table with its header row marked.
 
 ## PDF preview
 

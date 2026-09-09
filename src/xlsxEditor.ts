@@ -18,14 +18,17 @@ const REDRAW_SETTINGS = [
 /** Hand the finished export page back to the host's PDF pipeline. */
 export type ExportPdf = (docUri: vscode.Uri, bodyHtml: string) => void;
 
+/** The same, for the Word pipeline, which takes serialized XML rather than HTML. */
+export type ExportDocx = (docUri: vscode.Uri, bodyXhtml: string) => void;
+
 // A read-only custom editor for .xlsx / .xlsm workbooks.
 //
 // Unlike the PDF viewer, this ships no webview bundle of its own: it serves the
 // same htmlShell() as the Markdown/CSV preview and drives media/webview.js. The
 // host renders a sheet into the CSV grid's markup, so the sheet inherits the
-// context menu, every Copy as flavor, column resizing, the four themes, and Save
-// as PDF without a line of new webview code. src/webview/pdf.ts is a thousand
-// lines largely because that reuse was not attempted there.
+// context menu, every Copy as flavor, column resizing, the four themes, and both
+// the PDF and Word exports without a line of new webview code. src/webview/pdf.ts
+// is a thousand lines largely because that reuse was not attempted there.
 //
 // A workbook is binary, so it never becomes a TextDocument and none of the
 // preview's live-update, scroll-sync, or cell-writeback machinery applies. That
@@ -36,6 +39,7 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly exportPdf: ExportPdf,
+    private readonly exportDocx: ExportDocx,
   ) {}
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
@@ -110,6 +114,8 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
           }
         } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
           this.exportPdf(document.uri, msg.bodyHtml);
+        } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {
+          this.exportDocx(document.uri, msg.bodyXhtml);
         } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
           await applyMarkcopySetting(msg.key, msg.value, document.uri);
         } else if (msg?.type === 'openSettings') {

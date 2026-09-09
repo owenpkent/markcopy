@@ -149,8 +149,11 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 | ------------------- | -------------------------- | --------------------------------- |
 | Copy Whole Document | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
 | Save as PDF…        | A `.pdf` file              | Wherever you save it, then opens  |
+| Save as Word…       | A `.docx` file             | Wherever you save it, then opens  |
 
-Both are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text** and **MarkCopy: Save as PDF**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
+All three are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**, **MarkCopy: Save as PDF**, and **MarkCopy: Save as Word Document**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
+
+**Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and every image carries its alt text. Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](../README.md#save-as-word).
 
 ## Notes
 
