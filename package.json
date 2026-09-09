@@ -287,11 +287,6 @@
           "group": "navigation@1"
         },
         {
-          "command": "markcopy.saveAsDocx",
-          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
-          "group": "navigation@2"
-        },
-        {
           "command": "markcopy.recompileTex",
           "when": "activeCustomEditorId == markcopy.texPreview",
           "group": "navigation@1"
