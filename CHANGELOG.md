@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.12.0] - 2026-09-09
+
 ### Added
 
 - **Save as Word (`.docx`).** **MarkCopy: Save as Word Document** (`markcopy.saveAsDocx`), and **Save as Word…** in the preview's right-click menu, export the rendered preview to a Word document: pick where to save it and MarkCopy writes it, then opens it. It needs nothing installed, not Word, not Pandoc, not a browser; the file is assembled in memory.
@@ -19,11 +26,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - **Code blocks keep their syntax colors** and become one paragraph per line, so a reader can step through them a line at a time.
   - **Images with no alt text are counted and reported** after the export ("exported report.docx, but 3 images without alt text"), because an empty `![](x.png)` is the one defect that quietly undoes the reason to export a Word document at all, and it is fixable in the Markdown in seconds.
   - Works from the Markdown, CSV, TSV, and Excel previews alike; a sheet becomes a Word table with its header row marked.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.11.0] - 2026-09-08
 
@@ -307,7 +309,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/owenpkent/markcopy/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/owenpkent/markcopy/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/owenpkent/markcopy/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/owenpkent/markcopy/compare/v0.8.2...v0.9.0
