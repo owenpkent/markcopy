@@ -4,6 +4,7 @@ import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from 'markdown-it';
 import anchor from 'markdown-it-anchor';
 import texmath from 'markdown-it-texmath';
 import hljs from 'highlight.js';
+import { escapeAttr, escapeHtml } from './escape';
 
 export interface MarkdownItOptions {
   // Parse `$...$` / `$$...$$` as math. On by default; the `markcopy.math` setting
@@ -133,12 +134,4 @@ function addSourceLineMapping(md: MarkdownItInstance): void {
         : self.renderToken(tokens, idx, options);
     };
   }
-}
-
-export function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-export function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, '&quot;');
 }

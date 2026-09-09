@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createMarkdownIt, escapeHtml, escapeAttr } from '../src/render';
+import { createMarkdownIt } from '../src/render';
+import { escapeAttr, escapeHtml } from '../src/escape';
 
 describe('createMarkdownIt', () => {
   const md = createMarkdownIt();

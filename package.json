@@ -123,6 +123,11 @@
         "icon": "$(file-pdf)"
       },
       {
+        "command": "markcopy.saveAsDocx",
+        "title": "MarkCopy: Save as Word Document",
+        "category": "MarkCopy"
+      },
+      {
         "command": "markcopy.recompileTex",
         "title": "MarkCopy: Recompile LaTeX",
         "category": "MarkCopy",
@@ -282,6 +287,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "markcopy.saveAsDocx",
+          "when": "activeWebviewPanelId == markcopy.preview || activeCustomEditorId == markcopy.markdownPreview || activeCustomEditorId == markcopy.csvPreview",
+          "group": "navigation@2"
+        },
+        {
           "command": "markcopy.recompileTex",
           "when": "activeCustomEditorId == markcopy.texPreview",
           "group": "navigation@1"
@@ -300,6 +310,11 @@
         },
         {
           "command": "markcopy.saveAsPdf",
+          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
+          "group": "1_markcopy"
+        },
+        {
+          "command": "markcopy.saveAsDocx",
           "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
           "group": "1_markcopy"
         }

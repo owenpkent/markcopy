@@ -124,6 +124,9 @@ window.addEventListener('message', (e: MessageEvent) => {
     case 'exportPdf':
       void exportPdf();
       break;
+    case 'exportDocx':
+      void exportDocx();
+      break;
   }
 });
 
@@ -872,6 +875,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   // Always-available document-level actions.
   entries.push({ kind: 'item', label: 'Copy Whole Document', run: () => copyRichText(content) });
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
+  entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'divider' });
   entries.push({ kind: 'submenu', label: 'Preferences', entries: buildSettingsEntries() });
   return entries;
@@ -1207,6 +1211,182 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
   } finally {
     await initMermaid();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Word (.docx) export
+// ---------------------------------------------------------------------------
+// Where the PDF export hands the host a page to photograph, this one hands it
+// the document's *structure* to rebuild: headings stay headings, a table's
+// header row stays a header row, and every picture carries the words that
+// describe it. That is what makes the file readable by Word's Read Aloud and by
+// a screen reader, which a printed page never is. See src/docxExport.ts.
+//
+// Three things have to happen in the webview because only a browser can do them:
+// Mermaid and KaTeX have to be rasterized (Word has no renderer for either, and
+// their alt text is the source they came from, so an equation still reads aloud
+// as something); images have to end up as png/jpeg/gif data URIs, since those
+// are the formats a .docx can hold as a part; and the result has to be
+// serialized as XML rather than HTML, because `innerHTML` writes `<img src="x">`
+// unclosed and the host parses with a strict XML parser.
+async function exportDocx(): Promise<void> {
+  const clone = content.cloneNode(true) as HTMLElement;
+  clone.removeAttribute('id');
+  clone.classList.add('mc-force-light', 'mc-copy-clean');
+  clone
+    .querySelectorAll('[data-source-line]')
+    .forEach((el) => el.removeAttribute('data-source-line'));
+  stripViewerChrome(clone);
+
+  // Rasterizing needs layout, and layout needs the clone to be in the document.
+  // It is staged offscreen at the width of the Word text column (6.5in at 96dpi,
+  // matching CONTENT_WIDTH_PX in src/docx/media.ts) so a diagram is drawn at the
+  // size it will occupy on the page rather than at the preview's width.
+  const stage = document.createElement('div');
+  stage.setAttribute('aria-hidden', 'true');
+  stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:624px;pointer-events:none;';
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
+
+  try {
+    await relightMermaid(clone);
+    await rasterizeFigures(clone);
+    await inlineImages(clone);
+    await toEmbeddableImages(clone);
+    inlineCodeColors(clone);
+    vscode.postMessage({
+      type: 'docxXhtml',
+      bodyXhtml: new XMLSerializer().serializeToString(clone),
+    });
+    toast('Exporting Word document…');
+  } catch {
+    toast('Word export failed');
+  } finally {
+    stage.remove();
+  }
+}
+
+/**
+ * Replace every Mermaid diagram and KaTeX equation with a PNG that carries its
+ * source as alt text.
+ *
+ * The alt text is the point. Word cannot render either one, so they have to
+ * become pictures; a picture of an equation is silent, but a picture whose
+ * description is `E = mc^2` is not. Anything that fails to rasterize is left
+ * alone, and the host falls back to writing the source as text.
+ */
+async function rasterizeFigures(root: HTMLElement): Promise<void> {
+  const figures: { el: HTMLElement; alt: string }[] = [
+    ...Array.from(root.querySelectorAll<HTMLElement>('.mc-mermaid')).map((el) => ({
+      el,
+      alt: el.dataset.mermaidSrc ?? '',
+    })),
+    ...Array.from(root.querySelectorAll<HTMLElement>('.mc-math')).map((el) => ({
+      el,
+      alt: el.dataset.tex ?? el.textContent ?? '',
+    })),
+  ];
+  if (figures.length === 0) {
+    return;
+  }
+
+  const { toPng } = await import('html-to-image');
+  for (const { el, alt } of figures) {
+    const rect = el.getBoundingClientRect();
+    const width = Math.round(rect.width);
+    const height = Math.round(rect.height);
+    if (width < 1 || height < 1) {
+      continue;
+    }
+    try {
+      // Drawn at 2x so it stays sharp when Word scales it for print, then
+      // pinned back to its CSS size with width/height so the host lays it out
+      // at the size it had on screen rather than at twice that.
+      const src = await toPng(el, { pixelRatio: 2, backgroundColor: '#ffffff' });
+      const img = document.createElement('img');
+      img.setAttribute('src', src);
+      img.setAttribute('alt', alt.trim());
+      img.setAttribute('width', String(width));
+      img.setAttribute('height', String(height));
+      el.replaceWith(img);
+    } catch {
+      /* leave the source markup in place for the host to fall back on */
+    }
+  }
+}
+
+/** The image types a .docx can store directly; everything else is redrawn. */
+const DOCX_IMAGE_TYPES = /^data:image\/(png|jpeg|jpg|gif)[;,]/i;
+
+/**
+ * Redraw any inlined image Word has no part for (SVG, WebP, AVIF) as a PNG.
+ *
+ * Word does take an SVG, but only alongside a raster fallback part, which is a
+ * lot of package machinery for a format the browser can already rasterize.
+ */
+async function toEmbeddableImages(root: HTMLElement): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img'));
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute('src') ?? '';
+      if (!src.startsWith('data:') || DOCX_IMAGE_TYPES.test(src)) {
+        return;
+      }
+      try {
+        img.setAttribute('src', await redrawAsPng(src, img));
+      } catch {
+        /* the host counts it as an image it could not embed and says so */
+      }
+    }),
+  );
+}
+
+function redrawAsPng(src: string, target: HTMLImageElement): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const probe = new Image();
+    probe.onload = () => {
+      // An SVG with only a viewBox decodes to 0x0, so fall back to the size the
+      // preview actually gave it.
+      const rect = target.getBoundingClientRect();
+      const width = Math.round(probe.naturalWidth || rect.width) || 1;
+      const height = Math.round(probe.naturalHeight || rect.height) || 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = width * 2;
+      canvas.height = height * 2;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('no 2d context'));
+        return;
+      }
+      ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
+      target.setAttribute('width', String(width));
+      target.setAttribute('height', String(height));
+      try {
+        resolve(canvas.toDataURL('image/png'));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    probe.onerror = () => reject(new Error('image decode failed'));
+    probe.src = src;
+  });
+}
+
+/**
+ * Write each highlighted token's computed color into its style attribute.
+ *
+ * highlight.js colors code through the stylesheet, which does not travel. The
+ * host reads the color back off the style attribute, so without this the export
+ * would be correct and colorless: a visible regression against Save as PDF,
+ * which gets the stylesheet injected for it.
+ */
+function inlineCodeColors(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement>('pre code span').forEach((span) => {
+    const color = window.getComputedStyle(span).color;
+    if (color) {
+      span.style.color = color;
+    }
+  });
 }
 
 // Replace webview-hosted image srcs with data URIs so they load from a plain

@@ -109,6 +109,23 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Exporting over an existing PDF that then fails leaves the old file intact: point `markcopy.pdf.browserPath` at a nonsense path, export onto a PDF you already have, dismiss the error, and confirm the original still opens and is unchanged.
 - [ ] Exporting a CSV grid wider than the page fits every column onto the paper rather than cutting off the right-hand ones, including after dragging a column divider to widen it in the preview first.
 
+### Save as Word
+
+Most of this is automated in `tests/docxExport.test.ts`, which asserts against the generated OOXML. What it cannot check is whether Word agrees, so open the file and look. A `.docx` that Word refuses is the failure mode to watch for: it presents as a repair prompt or a flat "cannot be opened", never as a partial render.
+
+- [ ] **MarkCopy: Save as Word Document** asks where to save, writes a `.docx`, and opens it. Word opens it **without a repair prompt**.
+- [ ] ★ Headings appear in Word's **Navigation Pane** (View > Navigation Pane), nested by level, and clicking one jumps to it.
+- [ ] ★ **Read Aloud** (Review > Read Aloud) reads the document in order, announces headings, and speaks each image's alt text rather than skipping it.
+- [ ] ★ Word's **Accessibility Checker** (Review > Check Accessibility) reports no missing alt text and no missing document title for a document whose images all have alt text.
+- [ ] Exporting a document with an image whose alt text is empty finishes, but the notification says so and gives the count.
+- [ ] A table arrives as a real Word table with its header row **bold and shaded**, and selecting the header row shows **Repeat Header Rows** turned on (Layout > Repeat Header Rows).
+- [ ] Bulleted and numbered lists are real Word lists (the marker is not selectable as text), nested items are indented a level, and two separate numbered lists both start at 1.
+- [ ] A Mermaid diagram and an equation both arrive as images; right-click each and check **View Alt Text** shows the Mermaid source and the LaTeX respectively.
+- [ ] Code blocks are monospace and shaded, keep their syntax colors, and keep their indentation.
+- [ ] Links are clickable and land on the right target; a link to a heading in the same document jumps to that heading rather than opening a browser.
+- [ ] The exported file opens in **Google Docs** and **LibreOffice Writer** too, with headings, tables, lists and images intact.
+- [ ] **Save as Word…** from the right-click menu of a CSV grid and of a sheet preview exports the grid as a Word table, with no row-number gutter and no tab strip.
+
 ## Spreadsheet preview (.xlsx)
 
 Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden), a merged title, dates, currency, a percentage, a formula with a stored result, and a formula without one.

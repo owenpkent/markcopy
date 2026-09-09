@@ -29,6 +29,7 @@ import {
 } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
+import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
 import { XlsxEditorProvider } from './xlsxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
@@ -114,10 +115,10 @@ export function activate(context: vscode.ExtensionContext): void {
       XlsxEditorProvider.viewType,
       new XlsxEditorProvider(
         context,
-        (docUri, bodyHtml) =>
-          // Injected rather than imported, so xlsxEditor.ts does not have to import
-          // this module back and close a cycle.
-          void exportPdf(context, docUri, bodyHtml),
+        // Injected rather than imported, so xlsxEditor.ts does not have to import
+        // this module back and close a cycle.
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
       ),
       {
         supportsMultipleEditorsPerDocument: false,
@@ -294,6 +295,20 @@ export function activate(context: vscode.ExtensionContext): void {
       const state = activePreview();
       if (state) {
         state.panel.webview.postMessage({ type: 'exportPdf' });
+      } else {
+        vscode.window.showInformationMessage(
+          'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
+        );
+      }
+    }),
+
+    // Export the preview as a Word document. Same round trip as the PDF export
+    // above, but the webview serializes the structure rather than the styling;
+    // see exportDocx below and src/docxExport.ts.
+    vscode.commands.registerCommand('markcopy.saveAsDocx', () => {
+      const state = activePreview();
+      if (state) {
+        state.panel.webview.postMessage({ type: 'exportDocx' });
       } else {
         vscode.window.showInformationMessage(
           'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
@@ -762,6 +777,8 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         void openLink(context, state, msg.href);
       } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
         void exportPdf(context, state.docUri, msg.bodyHtml);
+      } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {
+        void exportDocx(state.docUri, msg.bodyXhtml);
       } else if (msg?.type === 'editCell') {
         void applyCellEdit(state, msg);
       } else if (msg?.type === 'gridOp') {
@@ -1200,7 +1217,7 @@ async function runExport(
 ): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('markcopy');
   const pageSize = cfg.get<PageSize>('pdf.pageSize', 'Letter');
-  const name = basename(docUri).replace(/\.(md|markdown|mdown|mkd|csv|tsv|tab|xlsx|xlsm)$/i, '');
+  const name = exportBaseName(docUri);
 
   const browser = await findBrowser(cfg.get<string>('pdf.browserPath', ''));
   if (!browser) {
@@ -1209,7 +1226,7 @@ async function runExport(
   }
 
   const target = await vscode.window.showSaveDialog({
-    defaultUri: defaultPdfUri(docUri, name),
+    defaultUri: defaultExportUri(docUri, name, 'pdf'),
     filters: { 'PDF document': ['pdf'] },
     saveLabel: 'Export PDF',
     title: 'Export preview as PDF',
@@ -1273,15 +1290,83 @@ async function runExport(
   vscode.window.setStatusBarMessage(`MarkCopy: exported ${basename(target)}.`, 6000);
 }
 
+let exportingDocx = false;
+
+// Export the preview as a Word document.
+//
+// The counterpart to exportPdf above, and much shorter than it, because there is
+// no browser to find and no subprocess to babysit: the webview hands over the
+// serialized document and src/docxExport.ts turns it into the bytes of a .docx
+// in memory. What the PDF export spends its length on is getting a faithful
+// *picture* of the page; what this one is for is keeping the structure, so the
+// file can be read aloud, navigated by heading, and edited when it lands.
+export async function exportDocx(docUri: vscode.Uri, bodyXhtml: string): Promise<void> {
+  if (exportingDocx) {
+    void vscode.window.showInformationMessage('MarkCopy: a Word export is already in progress.');
+    return;
+  }
+  exportingDocx = true;
+  try {
+    await runDocxExport(docUri, bodyXhtml);
+  } finally {
+    exportingDocx = false;
+  }
+}
+
+async function runDocxExport(docUri: vscode.Uri, bodyXhtml: string): Promise<void> {
+  const name = exportBaseName(docUri);
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: defaultExportUri(docUri, name, 'docx'),
+    filters: { 'Word document': ['docx'] },
+    saveLabel: 'Export Word document',
+    title: 'Export preview as a Word document',
+  });
+  if (!target) {
+    return; // cancelled
+  }
+
+  let report: DocxReport;
+  try {
+    // Converted before the file is touched, so a document this cannot handle
+    // fails without having already replaced whatever was at that path.
+    const result = htmlToDocx(bodyXhtml, { title: name || 'Document' });
+    report = result.report;
+    await vscode.workspace.fs.writeFile(target, Buffer.from(result.bytes));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`MarkCopy: could not export the Word document: ${message}`);
+    return;
+  }
+
+  void vscode.env.openExternal(target);
+
+  // Missing alt text is worth interrupting for: it is the one defect that
+  // quietly undoes the reason to export a Word document instead of a PDF, and
+  // it is fixable in the Markdown source in a few seconds.
+  const note = reportSummary(report);
+  if (note) {
+    void vscode.window.showWarningMessage(`MarkCopy: exported ${basename(target)}, but ${note}.`);
+  } else {
+    vscode.window.setStatusBarMessage(`MarkCopy: exported ${basename(target)}.`, 6000);
+  }
+}
+
 // Where the save dialog starts: beside the source document, or failing that in the
 // first workspace folder.
-function defaultPdfUri(docUri: vscode.Uri, name: string): vscode.Uri {
-  const safe = `${name.replace(/[^\w.\- ]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy'}.pdf`;
+function defaultExportUri(docUri: vscode.Uri, name: string, ext: string): vscode.Uri {
+  const stem = name.replace(/[^\w.\- ]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
+  const safe = `${stem}.${ext}`;
   if (docUri.scheme === 'file') {
     return vscode.Uri.joinPath(docUri, '..', safe);
   }
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder ? vscode.Uri.joinPath(folder.uri, safe) : vscode.Uri.file(safe);
+}
+
+// The document's name with the source extension taken off, used both as the
+// suggested filename and as the title written into the .docx properties.
+function exportBaseName(docUri: vscode.Uri): string {
+  return basename(docUri).replace(/\.(md|markdown|mdown|mkd|mdx|csv|tsv|tab|xlsx|xlsm)$/i, '');
 }
 
 // The manual route, kept for machines with no Chromium-family browser installed

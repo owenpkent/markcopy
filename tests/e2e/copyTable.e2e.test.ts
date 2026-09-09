@@ -131,7 +131,7 @@ describe('copy from a CSV cell being edited', () => {
 
   // The rows every menu ends with, whatever was right-clicked. An open editor
   // swaps out the copy rows above them; it does not take the place of the menu.
-  const DOCUMENT_ROWS = ['Copy Whole Document', 'Save as PDF…', 'Preferences'];
+  const DOCUMENT_ROWS = ['Copy Whole Document', 'Save as PDF…', 'Save as Word…', 'Preferences'];
 
   /** Double-click the first data cell, the way a reader starts editing. */
   function edit(): HTMLTextAreaElement {
