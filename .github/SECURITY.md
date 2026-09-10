@@ -1,5 +1,16 @@
 # Security
 
+## Dependency monitoring
+
+Dependabot security alerts and automatic security update pull requests are enabled.
+Weekly version updates are configured in `dependabot.yml`, with compatibility
+exclusions for dependencies tied to the project's Node and VS Code versions.
+
+The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
+`diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
+these overrides when the CLI adopts patched versions upstream. The direct Mocha
+dependency uses version 12 and does not need these overrides.
+
 ## Threat model
 
 MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.

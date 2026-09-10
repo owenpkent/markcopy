@@ -558,6 +558,14 @@
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
+  "overrides": {
+    "@vscode/test-cli": {
+      "mocha": {
+        "diff": "^8.0.4",
+        "serialize-javascript": "^7.0.6"
+      }
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/katex": "^0.16.8",
@@ -581,6 +589,6 @@
     "prettier": "^3.9.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
-    "vitest": "^5.0.0"
+    "vitest": "^4.1.11"
   }
 }
