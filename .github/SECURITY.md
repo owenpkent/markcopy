@@ -8,7 +8,7 @@ exclusions for dependencies tied to the project's Node and VS Code versions.
 
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
-these overrides when the CLI adopts patched versions upstream. The direct Mocha
+these overrides when the CLI resolves patched versions without them. The direct Mocha
 dependency uses version 12 and does not need these overrides.
 
 ## Threat model
