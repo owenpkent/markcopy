@@ -13,7 +13,10 @@ letters rather than the first row of data, since a sheet does not declare whethe
 it has one; that made `data-mc-ignore` cover the whole header row and required
 `tableToDelimited` to drop rows contributing no data cells.
 
-## Verdict
+The implementation plan below is retained as historical context. Its completed steps describe
+the current feature; follow-ups and risks are the remaining ideas, limits, or maintenance work.
+
+## Original verdict
 
 Build it. Register a `CustomReadonlyEditorProvider` for `*.xlsx` / `*.xlsm` that points its
 webview at the **existing** `media/webview.js` bundle and `htmlShell()`, parse host-side with a
@@ -227,9 +230,10 @@ Land first, with `npm test`, the integration suite, and a manual F5 pass on `sam
     viewport-tall scroller), hidden-row de-emphasis, and the not-calculated marker. Verify all
     four `markcopy.theme` values including green.
 14. `package.json`: the `customEditors` entry; settings `markcopy.xlsx.maxRows` (5000),
-    `markcopy.xlsx.maxColumns` (200), `markcopy.xlsx.showFormulas` (false). Deliberately no
+    `markcopy.xlsx.maxColumns` (200). Deliberately no
     `markcopy.xlsx.headerRow`: the file says whether it has one. Update `displayName` and
-    `description` (currently "Rich Markdown, CSV & PDF Preview"), categories, keywords. Add
+    `description` (currently the full Markdown, CSV, Excel, PDF, LaTeX, STL, and video preview
+    description), categories, keywords. Add
     `fflate`, `saxes`, `numfmt` to `dependencies`.
 15. Tests: vitest against `src/xlsx/*` with golden fixtures built by **real Excel**, not a writer
     library. Serials 1/59/60/61, a 1904 file, `[h]:mm:ss`, Japanese furigana, `t="str"` vs
@@ -302,22 +306,19 @@ Land first, with `npm test`, the integration suite, and a manual F5 pass on `sam
   11 first** with a hardcoded 2x2 table and confirm the grid, right-click menu, and Save as PDF
   all work before writing a line of parser.
 
-## Open questions for the repo owner
+## Decisions and remaining questions
 
-1. **`priority: "default"` or `"option"`?** Default hijacks `.xlsx` for everyone who installed
-   MarkCopy for Markdown. Leaning default (VS Code ships no competing handler, and MarkCopy
-   already claims `.pdf` at default), but it is a product call.
+1. **Editor priority:** resolved to `"default"` for `.xlsx` and `.xlsm`, so workbooks open in
+   the sheet preview rather than as binary text. Markdown and CSV remain `"option"`.
 2. **Formula injection on the copy-out path.** Fields beginning with `=`, `+`, `-`, `@`, TAB, or
    CR are emitted verbatim by `escapeField` (`table.ts:26-35`) **today**, for CSV, independent of
    this feature. Spreadsheets are full of formulas, so xlsx raises the stakes. Fix now as its own
    PR, or accept and document? A `markcopy.copy.neutralizeFormulas` setting is the middle path.
 3. **Should hidden rows and hidden sheets ever be revealable?** Hiding them by default is clearly
    right. A toggle is cheap but needs a call on whether MarkCopy is a viewer or a forensic tool.
-4. **Commit `sample.xlsx` as a binary, or generate it via a script?** Generating needs a writer
-   devDependency and produces a file that does not exercise Excel's own quirks. Leaning commit,
-   plus real-Excel golden fixtures under `tests/fixtures/xlsx/`.
-5. **`.xlsm`**: claim it (one line, byte-identical SpreadsheetML) but the macros are invisible in
-   the preview. Silent render, or a one-line banner?
+4. **Fixture:** `sample.xlsx` is committed, while focused reader tests use generated OOXML
+   fixtures under `tests/xlsx/fixture.ts`.
+5. **`.xlsm`:** the same read-only preview claims it. Macros are not executed or displayed.
 
 ## Market context
 

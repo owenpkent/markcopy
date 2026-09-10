@@ -2,6 +2,8 @@
 
 Thanks for helping improve MarkCopy. This guide covers the local setup, the build, debugging, and the release flow.
 
+Repository guidance for coding agents is in [AGENTS.md](../AGENTS.md).
+
 ## Prerequisites
 
 - Node.js 20 or newer (matches the version CI builds and tests on).
@@ -10,8 +12,10 @@ Thanks for helping improve MarkCopy. This guide covers the local setup, the buil
 ## Setup
 
 ```bash
-npm install
+npm ci
 ```
+
+Use `npm install` when intentionally refreshing the lockfile after changing dependencies.
 
 ## Build
 
@@ -151,13 +155,13 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 Full steps (publisher setup, both registries, verified-publisher badge) are in [RELEASING.md](../docs/RELEASING.md). In short:
 
 ```bash
-npm version patch                # bump version + tag
+npm version patch --no-git-tag-version # bump version without tagging
 npm run vsix                     # build + package -> markcopy-<version>.vsix
-npm run publish:vsce             # VS Code Marketplace (needs vsce login OwenPKent)
-npm run publish:ovsx             # Open VSX (needs an Open VSX token)
+npm run publish:vsce -- --packagePath markcopy-<version>.vsix # VS Code Marketplace
+npm run publish:ovsx -- markcopy-<version>.vsix               # Open VSX
 ```
 
-Move the `[Unreleased]` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version before releasing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
+Move the `[Unreleased]` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version, commit the version and changelog, then create the release tag before publishing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
 
 ## Filing issues
 

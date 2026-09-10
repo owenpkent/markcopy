@@ -1,6 +1,6 @@
 # Testing MarkCopy
 
-How MarkCopy gets verified, from the automated suites to the manual checklist that gates a release. The automated layers run on every push; the manual checklist below is what "tested" means before publishing (see the [pre-release checklist](RELEASING.md#pre-release-checklist) in RELEASING.md).
+How MarkCopy gets verified, from the automated suites to the manual checklist that gates a release. The automated layers run for pull requests and pushes to `main` (and can be started manually); the manual checklist below is what "tested" means before publishing (see the [pre-release checklist](RELEASING.md#pre-release-checklist) in RELEASING.md).
 
 ## The four layers
 
@@ -11,7 +11,7 @@ How MarkCopy gets verified, from the automated suites to the manual checklist th
 | Integration (VS Code)  | `npm run test:integration`, CI   | Activation, command registration, configuration defaults, the preview panel opening, and which editor claims a `.xlsx`/`.xlsm`/`.pdf`/`.stl`/`.mov`/`.mp4`, inside a real downloaded VS Code.                                                                                                                                                                                                                                                                                                                                   |
 | Manual (this document) | Before every release, by a human | What none of the above can see: rendering fidelity, theme legibility, the PDF viewer's canvas, the STL viewer's WebGL output and orbit feel, whether a video actually plays and yields a frame, and how the clipboard flavors actually paste into Word or Gmail.                                                                                                                                                                                                                                                                |
 
-The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), a real media pipeline (playback and the frame grab, which jsdom cannot reach at all), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. Everything else about the webviews is now driven automatically.
+The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), a real media pipeline (playback and the frame grab, which jsdom cannot reach at all), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. The automated webview coverage is limited to the menu, clipboard, sheet-grid, and scroll-sync surfaces listed above.
 
 ### The webview E2E layer
 
