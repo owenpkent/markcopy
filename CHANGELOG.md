@@ -4,6 +4,11 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Maintenance
+
+- Update production and development dependencies and refresh vulnerable transitive dependencies. Keep Vitest on version 4 for Node 20 compatibility.
+- Enable Dependabot security alerts and automatic security update pull requests.
+
 ### Planned
 
 - PlantUML support.

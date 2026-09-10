@@ -24,6 +24,11 @@ updates:
       # unpin when the project's Node floor moves.
       - dependency-name: 'jsdom'
         update-types: ['version-update:semver-major']
+      # Vitest 5 requires Node 22.12+ and @types/node 22+, but CI and the
+      # extension host type definitions still target Node 20. Raise this
+      # deliberately when the project's Node floor moves.
+      - dependency-name: 'vitest'
+        update-types: ['version-update:semver-major']
       # typescript-eslint 8 peers on `typescript >=4.8.4 <6.1.0`, so a bump to 7
       # cannot install at all: npm ci fails with ERESOLVE and both CI jobs die
       # before running a test. TypeScript 6 installs but cannot see @types/node
