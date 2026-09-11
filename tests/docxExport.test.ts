@@ -126,6 +126,84 @@ describe('headings', () => {
   });
 });
 
+describe('footnote anchors', () => {
+  it('bookmarks a footnote item and its own back-reference, not just headings', () => {
+    const { document } = docx(
+      '<p>Body text.<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup></p>' +
+        '<hr class="footnotes-sep"/>' +
+        '<section class="footnotes">' +
+        '<ol class="footnotes-list">' +
+        '<li id="fn1" class="footnote-item" data-source-line="7">' +
+        '<p>The note text.</p>' +
+        ' <a href="#fnref1" class="footnote-backref">↩</a>' +
+        '</li>' +
+        '</ol>' +
+        '</section>',
+    );
+    const fn1 = bookmarkName('fn1');
+    const fnref1 = bookmarkName('fnref1');
+
+    // Neither the <li> nor the <a> is a heading, so a bookmark on either one
+    // only happens because the general "something links here" rule fires, not
+    // because of any footnote-specific special case. The exact w:id sequence
+    // number depends on which of the two is converted first, which is not
+    // worth pinning down, so it is matched rather than hardcoded.
+    expect(document).toMatch(new RegExp(`<w:bookmarkStart w:id="\\d+" w:name="${fn1}"/>`));
+    expect(document).toMatch(new RegExp(`<w:bookmarkStart w:id="\\d+" w:name="${fnref1}"/>`));
+
+    // Each link derives the same name from the anchor it targets, the same
+    // guarantee the heading test above pins down.
+    expect(document).toContain(`<w:hyperlink w:anchor="${fn1}">`);
+    expect(document).toContain(`<w:hyperlink w:anchor="${fnref1}">`);
+
+    // Hand-written bookmark XML around a multi-paragraph <li> is exactly the
+    // kind of change a mismatched tag would slip through silently.
+    expect(() => assertWellFormed(document)).not.toThrow();
+  });
+
+  // The invariant rather than the instance. Every w:anchor Word is told to jump
+  // to has to name a bookmark this document actually writes, or the link renders
+  // as a live-looking link that goes nowhere (or "Error! Bookmark not defined").
+  // Asserted over the whole document so it keeps holding for link kinds added
+  // later, and exercised here with a repeated reference, whose `fnref1:1` id
+  // carries a colon that is illegal in a bookmark name and so has to survive
+  // bookmarkName()'s normalization identically on both sides.
+  it('writes a bookmark for every anchor it links to', () => {
+    const { document } = docx(
+      '<p>First.<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>' +
+        ' Again.<sup class="footnote-ref"><a href="#fn1" id="fnref1:1">[1]</a></sup></p>' +
+        '<h2 id="a-heading">A heading</h2>' +
+        '<p><a href="#a-heading">Back to the heading</a></p>' +
+        '<section class="footnotes"><ol class="footnotes-list">' +
+        '<li id="fn1" class="footnote-item"><p>Note one.</p><p>Note two.</p>' +
+        ' <a href="#fnref1" class="footnote-backref">↩</a>' +
+        ' <a href="#fnref1:1" class="footnote-backref">↩</a>' +
+        '</li>' +
+        '</ol></section>',
+    );
+
+    const anchors = [...document.matchAll(/<w:hyperlink w:anchor="([^"]+)"/g)].map((m) => m[1]);
+    const bookmarks = new Set(
+      [...document.matchAll(/<w:bookmarkStart w:id="\d+" w:name="([^"]+)"/g)].map((m) => m[1]),
+    );
+
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(anchors.filter((a) => !bookmarks.has(a))).toEqual([]);
+    // The colon really did get normalized away rather than reaching the file.
+    expect(bookmarks.has(bookmarkName('fnref1:1'))).toBe(true);
+    for (const name of bookmarks) {
+      expect(name).toMatch(/^[A-Za-z][A-Za-z0-9_]*$/);
+    }
+    expect(() => assertWellFormed(document)).not.toThrow();
+  });
+
+  it('still bookmarks a heading id unconditionally even when nothing links to it', () => {
+    const { document } = docx('<h2 id="lonely">Lonely</h2>');
+    const name = bookmarkName('lonely');
+    expect(document).toContain(`<w:bookmarkStart w:id="0" w:name="${name}"/>`);
+  });
+});
+
 describe('images', () => {
   it('embeds the bytes and carries the alt text as descr', () => {
     const { document, parts, report } = docx(`<p><img src="${PNG_1x1}" alt="A red dot"/></p>`);

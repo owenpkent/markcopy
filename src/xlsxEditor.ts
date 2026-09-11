@@ -91,6 +91,7 @@ export class XlsxEditorProvider implements vscode.CustomReadonlyEditorProvider {
         syncScroll: cfg.get<boolean>('syncScroll', true),
         autoPreview: cfg.get<boolean>('autoPreview', true),
         math: cfg.get<boolean>('math', true),
+        footnotes: cfg.get<boolean>('footnotes', true),
         // What this surface does, which is a different question from what the
         // user has enabled. A sheet has no TextDocument to reveal into.
         supportsSync: false,
