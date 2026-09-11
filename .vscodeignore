@@ -19,6 +19,7 @@ sample.mov
 sample.tex
 *.vsix
 .github/**
+AGENTS.md
 docs/**
 .editorconfig
 .gitattributes

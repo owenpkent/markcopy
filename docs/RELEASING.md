@@ -77,7 +77,7 @@ Both registries need a token (see [One-time setup](#one-time-setup) for how to m
    "vsce=$([bool]$env:VSCE_PAT) ovsx=$([bool]$env:OVSX_PAT)"
    ```
 
-With `.env` loaded, the publish steps below are just `npm run publish:vsce` and `npm run publish:ovsx` with no `-p` flag. If you would rather not use a file, pass the token inline instead (`npm run publish:vsce -- -p <PAT>`) or run `vsce login` once; the `.env` flow is only a convenience.
+With `.env` loaded, the publish steps below need no `-p` flag. They pass the packaged `.vsix` to each registry so both receive the artifact you smoke-tested. If you would rather not use a file, run `npx vsce login OwenPKent` for the Marketplace and supply `OVSX_PAT` through your shell or secret manager for Open VSX.
 
 ## Pre-release checklist
 
@@ -103,14 +103,14 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 ### Phase 1: cut the release in git
 
 1. Start from a clean `main` with green CI and the [pre-release checklist](#pre-release-checklist) done.
-2. Bump the version: `npm version patch` (or `minor` / `major`). This updates `package.json` and `package-lock.json`; it also creates a git tag unless you pass `--no-git-tag-version` (useful when you want to tag by hand after the changelog edit).
+2. Bump the version: `npm version patch --no-git-tag-version` (or `minor` / `major`). This updates `package.json` and `package-lock.json` without committing or tagging. Create the tag in step 6 after the changelog and any regenerated assets are committed, so the tag contains the complete release.
 3. Update [CHANGELOG.md](../CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
 4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
 5. If visuals changed, regenerate assets: `npm run icon` and `npm run screenshot`.
 6. Commit, tag, and push:
    ```bash
    git add -A && git commit -m "chore: release x.y.z"
-   git tag -a vx.y.z -m vx.y.z   # skip if `npm version` already created the tag
+   git tag -a vx.y.z -m vx.y.z
    git push --follow-tags
    ```
    The release now exists in git, but **it is not published**. Nothing is live to users yet.
@@ -124,8 +124,8 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    ```
    Open a Markdown file, a CSV, and a PDF; confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
-9. Publish to the Marketplace: `npm run publish:vsce` (reads `VSCE_PAT`; or pass `-- -p <PAT>` inline). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal, and the version is live once `npx vsce show OwenPKent.markcopy` reports it. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying: none of those three failures says what it means.
-10. Publish to Open VSX: `npm run publish:ovsx` (reads `OVSX_PAT`; or `npx ovsx publish markcopy-<version>.vsix -p <OVSX_TOKEN>`).
+9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
+10. Publish the same artifact to Open VSX: `npm run publish:ovsx -- markcopy-<version>.vsix` (reads `OVSX_PAT`).
 11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
     ```bash
     gh release create v<version> markcopy-<version>.vsix --notes-from-tag
@@ -198,13 +198,11 @@ npx vsce verify-pat OwenPKent
 
 A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further.
 
-Because the packaged `.vsix` from step 7 already exists by then, retry with it rather than rebuilding each time:
+Step 9 already publishes this way, so retrying is just running that same command again rather than rebuilding:
 
 ```bash
 npx vsce publish --packagePath markcopy-<version>.vsix
 ```
-
-That also guarantees the bytes published are the ones smoke-tested, instead of a fresh build made minutes later.
 
 ### After a successful publish, the version flaps
 
@@ -220,7 +218,7 @@ for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'v
 
 ## Notes
 
-- `vscode:prepublish` runs `npm run package` automatically, so `vsce`/`ovsx` always ship a fresh production build.
+- Packaging from source runs `vscode:prepublish`, which invokes `npm run package` to make a production build. Publishing an existing `.vsix` skips rebuilding and uploads that artifact; the release steps above use this path for both registries.
 - The Marketplace and Open VSX both sign extensions server-side on publish; there is no publisher-managed signing key to configure.
 - Both registries require a token for this MSA-owned publisher: a Marketplace **PAT** for VS Code and an **Open VSX token** for Open VSX. Keep both out of git via a local `.env` (see [Publishing secrets](#publishing-secrets-env)); `.env` is gitignored and `.vscodeignore` keeps it out of the `.vsix`.
 - Truly token-free (Entra ID / OIDC) publishing would require moving the publisher to an organizational Entra tenant with a service principal added as a publisher member. Not worth it for a solo publisher; revisit only if this becomes a CI pipeline.

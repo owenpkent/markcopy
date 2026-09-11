@@ -15,6 +15,11 @@ dependency uses version 12 and does not need these overrides.
 
 MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
+LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
+engine against the opened source and its included files. Video preview hands
+media to Chromium and can optionally run ffprobe and ffmpeg. Word export parses
+webview-produced XHTML and writes an OOXML package, including external links.
+
 ## Content Security Policy
 
 The webview is served with a strict CSP and a fresh nonce per load:
@@ -25,17 +30,17 @@ img-src ${cspSource} https: data: blob:;
 style-src ${cspSource} 'unsafe-inline';
 font-src  ${cspSource} data:;
 connect-src ${cspSource};
-script-src 'nonce-${nonce}';
+script-src 'nonce-${nonce}' 'strict-dynamic';
 ```
 
-- Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute.
+- Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute. `'strict-dynamic'` lets that nonce'd entry module import its own code-split chunks (`media/chunk-*.js`) without each one needing its own nonce; it does not relax anything else the policy already refuses.
 - `img-src` allows `https:`, `data:`, and `blob:` so remote images, embedded images, Mermaid SVGs, and html-to-image output display.
 - `connect-src ${cspSource}` is scoped to the webview's own origin only. It exists so `html-to-image` can fetch and embed KaTeX's web fonts when rasterizing a math equation to PNG (**Copy Equation as PNG**); Mermaid never needed this directive because it renders with system fonts. Being same-origin, it cannot be used to reach any external host.
-- All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`, and `localResourceRoots` is limited to the extension's `media` folder.
+- All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`. `localResourceRoots` itself is not one fixed folder: it always includes the extension's own `media` folder, and the Markdown/CSV preview also grants the document's workspace folder (or, lacking one, the document's own directory) so relative local images resolve. The read-only PDF, LaTeX, STL, and spreadsheet editors keep `localResourceRoots` to just `media`, since each receives its content as bytes (or, for the spreadsheet, already-rendered markup) rather than a document-relative URI. The video editor also adds the video's own directory and the ffmpeg proxy directory, since it streams the file by URI rather than loading it into memory.
 
-The PDF preview uses the same policy plus `worker-src ${cspSource} blob:` (for the pdf.js worker) and `connect-src ${cspSource} blob: data:`. It does not add `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
+The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the three: `default-src 'none'`, a nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src` and no `connect-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch.
+The STL preview is the most restrictive of the five webview surfaces (shared preview, PDF, LaTeX, video, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 
@@ -43,11 +48,27 @@ Mermaid is initialized with `securityLevel: 'strict'`, which sanitizes diagram-s
 
 ## PDF preview
 
-PDFs open in a read-only custom editor. The extension host reads the file with `workspace.fs.readFile` and hands the bytes to the webview; pdf.js parses and rasterises them entirely locally, with no network fetch. pdf.js is a large parser and therefore the widest attack surface here, but it runs under the same strict CSP as the rest of the webview: with no `'unsafe-eval'`, pdf.js detects the restriction and disables its eval-based fast paths. Parsing and rasterising run off the main thread in a worker loaded from the bundled `media/pdf.worker.js`. The editor is read-only and never writes back to the PDF.
+PDFs open in a read-only custom editor. The extension host reads the file with `workspace.fs.readFile` and hands the bytes to the webview; pdf.js parses and rasterises them entirely locally, with no network fetch. It runs under the same strict CSP as the rest of the webview: with no `'unsafe-eval'`, pdf.js detects the restriction and disables its eval-based fast paths. PDF parsing runs in a worker loaded from the bundled `media/pdf.worker.js`; page canvas rendering runs in the webview. The editor is read-only and never writes back to the PDF.
+
+## LaTeX preview
+
+Opening a `.tex`, `.ltx`, or `.latex` file can run `latexmk`, Tectonic, or a
+bare TeX engine in the source file's directory. The selected executable comes
+from the machine-scoped `markcopy.tex.enginePath` setting or fixed discovery,
+and is launched with an argument array rather than a shell. MarkCopy does not
+add `-shell-escape` (or its equivalent), but this is not an OS sandbox: TeX
+engines can read files available to the process and use their own file
+primitives, and local engine or latexmk configuration can affect a run.
+
+Treat untrusted LaTeX as code and open it only with the same trust you would
+give an installed compiler. Output is kept
+under a hashed temporary directory, compilation is stopped after 45 seconds
+without output or on cancellation, and the directory is removed when the last
+preview closes (abandoned directories are swept after 24 hours).
 
 ## PDF export
 
-**Save as PDF** is the one place MarkCopy starts another program: it writes the export page to a temporary directory and runs an installed Chrome, Edge, or Chromium over it with `--headless --print-to-pdf` (see [PDF export](../docs/ARCHITECTURE.md#pdf-export) for the full command line).
+**Save as PDF** starts an installed Chrome, Edge, or Chromium: it writes the export page to a temporary directory and runs the browser over it with `--headless --print-to-pdf` (see [PDF export](../docs/ARCHITECTURE.md#pdf-export) for the full command line). LaTeX and video preview can also start locally installed tools.
 
 - **The executable is not taken from the document.** It is either the `markcopy.pdf.browserPath` setting or one of a fixed list of known install paths for the platform, and it is spawned with an argument array, never through a shell, so nothing in a document can influence the command. That setting is machine-scoped, so it can only come from your own user settings: a `.vscode/settings.json` travelling with a cloned repository cannot point MarkCopy at a program to run, even in a workspace you have trusted.
 - **The page carries no scripts.** The exported body is the preview's own DOM, which has already been through DOMPurify, so a `<script>` in the source Markdown is long gone before the export sees it. The one exception is the fallback route (no browser installed), whose page carries a `window.print()` MarkCopy wrote itself. The only other setting reaching that page, `markcopy.pdf.pageSize`, is checked against the three values it may take before it is written into a `<style>`, since the `enum` in package.json constrains the settings editor and not the file.
@@ -57,7 +78,38 @@ PDFs open in a read-only custom editor. The extension host reads the file with `
 
 ## HTML in Markdown
 
-`markdown-it` is configured with `html: true`, so raw HTML in a document is passed through to the preview. The CSP prevents any inline script in that HTML from running, but be aware that raw HTML is rendered. If you open Markdown from an untrusted source, this is the surface to keep in mind. A future option may add an opt-in sanitizer for fully untrusted input.
+`markdown-it` is configured with `html: true`, so raw HTML in a document is passed through to the preview before the rendered result is sanitized by DOMPurify. The CSP prevents any inline script in that HTML from running, but be aware that raw HTML is still rendered and remote images may load. If you open Markdown from an untrusted source, this is the surface to keep in mind.
+
+## Video preview
+
+The video webview receives a VS Code webview resource URI rooted at the video's own
+directory and uses a CSP with `media-src` limited to that origin and `blob:`;
+it does not fetch arbitrary network media. The browser's media demuxer and
+decoder still process the file, so malformed media can consume resources or
+trigger a vulnerability in the host's Chromium build.
+
+When Chromium cannot decode a file, MarkCopy may probe and transcode it with
+the machine-scoped `markcopy.video.ffmpegPath` executable (or fixed discovery).
+ffprobe and ffmpeg receive the source and destination as argument-vector
+values, never through a shell. The proxy is written under a temporary
+directory, is subject to a 120-second no-progress cancellation, and is
+deleted when the preview closes. This does not sandbox ffmpeg or limit the
+source file's size; use a trusted ffmpeg build and treat untrusted media as
+hostile input.
+
+## Word export
+
+Save as Word converts the sanitized, serialized preview XHTML in memory and
+writes the resulting `.docx` only after the user chooses a destination. The
+host parser uses the same XML handling as the workbook reader, so DTD entity
+expansion and XXE are not enabled. Images are accepted only as validated PNG,
+JPEG, or GIF data, and unsupported or remote image sources are skipped by the
+host rather than embedded. Remote images may still have been fetched by the
+preview webview while the export clone was being prepared.
+
+Links are preserved as external Word relationships. Opening an exported file
+in Word or another office application may therefore follow those links or
+prompt for network access; exporting does not make linked content trusted.
 
 ## CSV grid and cell editing
 
