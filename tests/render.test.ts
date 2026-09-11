@@ -30,6 +30,24 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('<th>A</th>');
   });
 
+  it('renders footnote references and their definitions', () => {
+    const html = md.render(
+      'Switch access is system-wide.[^apple][^android]\n\n' +
+        '[^apple]: Apple Switch Control.\n' +
+        '[^android]: Android Switch Access.\n',
+    );
+
+    expect(html).toContain('<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>');
+    expect(html).toContain('<sup class="footnote-ref"><a href="#fn2" id="fnref2">[2]</a></sup>');
+    expect(html).toContain('<section class="footnotes">');
+    expect(html).toContain('<li id="fn1" class="footnote-item">');
+    expect(html).toContain('Apple Switch Control.');
+    expect(html).toContain('Android Switch Access.');
+    expect(html).toContain('<a href="#fnref1" class="footnote-backref">');
+    expect(html).not.toContain('[^apple]');
+    expect(html).not.toContain('[^android]');
+  });
+
   it('turns inline $...$ into a non-display math placeholder', () => {
     const html = md.render('Euler: $e^{i\\pi}+1=0$ done.\n');
     expect(html).toContain('<span class="mc-math" data-display="0">');

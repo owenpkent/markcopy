@@ -2,6 +2,7 @@
 // not a class, so the instance type has to be imported separately by name.
 import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from 'markdown-it';
 import anchor from 'markdown-it-anchor';
+import footnote from 'markdown-it-footnote';
 import texmath from 'markdown-it-texmath';
 import hljs from 'highlight.js';
 import { escapeAttr, escapeHtml } from './escape';
@@ -49,6 +50,7 @@ export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownItInstan
   // rendered the same but only type-checked because markdown-it 14 declared
   // `use(plugin, ...params: any[])` and never validated plugin options.
   md.use(anchor, { tabIndex: false });
+  md.use(footnote);
 
   if (opts.math !== false) {
     addMath(md);

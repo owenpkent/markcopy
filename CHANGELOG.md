@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Render `[^note]` footnote references as numbered links to their definitions instead of showing the reference markers as raw text.
+
 ### Maintenance
 
 - Update production and development dependencies and refresh vulnerable transitive dependencies. Keep Vitest on version 4 for Node 20 compatibility.

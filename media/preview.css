@@ -430,6 +430,19 @@ body.mc-csv-resizing {
 .markdown-body a:hover {
   text-decoration: underline;
 }
+.markdown-body .footnotes-sep {
+  margin-top: 24px;
+}
+.markdown-body .footnotes {
+  color: var(--mc-quote-fg);
+  font-size: 0.9em;
+}
+.markdown-body .footnote-ref {
+  line-height: 0;
+}
+.markdown-body .footnote-item p {
+  margin: 0;
+}
 .mc-mermaid {
   margin: 0 0 16px 0;
   text-align: center;
