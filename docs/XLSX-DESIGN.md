@@ -311,7 +311,7 @@ Land first, with `npm test`, the integration suite, and a manual F5 pass on `sam
 1. **Editor priority:** resolved to `"default"` for `.xlsx` and `.xlsm`, so workbooks open in
    the sheet preview rather than as binary text. Markdown and CSV remain `"option"`.
 2. **Formula injection on the copy-out path.** Fields beginning with `=`, `+`, `-`, `@`, TAB, or
-   CR are emitted verbatim by `escapeField` (`table.ts:26-35`) **today**, for CSV, independent of
+   CR are emitted verbatim by `escapeField` (`table.ts:226-235`) **today**, for CSV, independent of
    this feature. Spreadsheets are full of formulas, so xlsx raises the stakes. Fix now as its own
    PR, or accept and document? A `markcopy.copy.neutralizeFormulas` setting is the middle path.
 3. **Should hidden rows and hidden sheets ever be revealable?** Hiding them by default is clearly

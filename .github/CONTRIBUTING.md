@@ -56,7 +56,7 @@ npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
-Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), and the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`).
+Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), link and email-address detection (`src/webview/links.ts`), the shared context-menu engine (`src/webview/menu.ts`), what the PDF export and rich-text clipboard payload strip from the live preview DOM (`src/webview/main.ts`), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`), the Word export writer (`src/docxExport.ts`, `src/docx/`), LaTeX engine discovery, the per-engine command line, and compile-log parsing (`src/texCompile.ts`, `src/texInfo.ts`), and the video preview's ffmpeg discovery, probing, and transcode command line (`src/videoProxy.ts`).
 
 Two kinds of logic are deliberately kept in files with no `vscode` import and no DOM dependency, so they can be tested like this: geometry and mapping arithmetic (`scrollSync.ts`), and anything describing a command line or generated document (`pdfExport.ts`). When you find yourself wanting to assert on a string the extension builds, that is the signal to move its construction into such a file.
 
@@ -156,12 +156,16 @@ Full steps (publisher setup, both registries, verified-publisher badge) are in [
 
 ```bash
 npm version patch --no-git-tag-version # bump version without tagging
+# move the [Unreleased] entries in CHANGELOG.md under the new version
+git add -A && git commit -m "chore: release x.y.z"
+git tag -a vx.y.z -m vx.y.z
+git push --follow-tags
 npm run vsix                     # build + package -> markcopy-<version>.vsix
 npm run publish:vsce -- --packagePath markcopy-<version>.vsix # VS Code Marketplace
 npm run publish:ovsx -- markcopy-<version>.vsix               # Open VSX
 ```
 
-Move the `[Unreleased]` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version, commit the version and changelog, then create the release tag before publishing. Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` if visuals changed.
+Regenerate the icon or screenshots with `npm run icon` / `npm run screenshot` before committing if visuals changed. The release is cut in git before anything is published; see [RELEASING.md](../docs/RELEASING.md) for the full two-phase walkthrough.
 
 ## Filing issues
 

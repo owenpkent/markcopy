@@ -30,17 +30,17 @@ img-src ${cspSource} https: data: blob:;
 style-src ${cspSource} 'unsafe-inline';
 font-src  ${cspSource} data:;
 connect-src ${cspSource};
-script-src 'nonce-${nonce}';
+script-src 'nonce-${nonce}' 'strict-dynamic';
 ```
 
-- Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute.
+- Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute. `'strict-dynamic'` lets that nonce'd entry module import its own code-split chunks (`media/chunk-*.js`) without each one needing its own nonce; it does not relax anything else the policy already refuses.
 - `img-src` allows `https:`, `data:`, and `blob:` so remote images, embedded images, Mermaid SVGs, and html-to-image output display.
 - `connect-src ${cspSource}` is scoped to the webview's own origin only. It exists so `html-to-image` can fetch and embed KaTeX's web fonts when rasterizing a math equation to PNG (**Copy Equation as PNG**); Mermaid never needed this directive because it renders with system fonts. Being same-origin, it cannot be used to reach any external host.
-- All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`, and `localResourceRoots` is limited to the extension's `media` folder.
+- All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`. `localResourceRoots` itself is not one fixed folder: it always includes the extension's own `media` folder, and the Markdown/CSV preview also grants the document's workspace folder (or, lacking one, the document's own directory) so relative local images resolve. The read-only PDF, LaTeX, STL, and spreadsheet editors keep `localResourceRoots` to just `media`, since each receives its content as bytes (or, for the spreadsheet, already-rendered markup) rather than a document-relative URI. The video editor also adds the video's own directory and the ffmpeg proxy directory, since it streams the file by URI rather than loading it into memory.
 
-The PDF preview uses the same policy plus `worker-src ${cspSource} blob:` (for the pdf.js worker) and `connect-src ${cspSource} blob: data:`. It does not add `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
+The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the three: `default-src 'none'`, a nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src` and no `connect-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch.
+The STL preview is the most restrictive of the five webview surfaces (shared preview, PDF, LaTeX, video, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 

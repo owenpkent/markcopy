@@ -124,7 +124,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    ```
    Open a Markdown file, a CSV, and a PDF; confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
-9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 while it indexes. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
+9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
 10. Publish the same artifact to Open VSX: `npm run publish:ovsx -- markcopy-<version>.vsix` (reads `OVSX_PAT`).
 11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
     ```bash
@@ -198,13 +198,11 @@ npx vsce verify-pat OwenPKent
 
 A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further.
 
-Because the packaged `.vsix` from step 7 already exists by then, retry with it rather than rebuilding each time:
+Step 9 already publishes this way, so retrying is just running that same command again rather than rebuilding:
 
 ```bash
 npx vsce publish --packagePath markcopy-<version>.vsix
 ```
-
-That also guarantees the bytes published are the ones smoke-tested, instead of a fresh build made minutes later.
 
 ### After a successful publish, the version flaps
 
