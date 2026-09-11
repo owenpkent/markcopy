@@ -1139,3 +1139,172 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   content: '\2026';
   opacity: 0.45;
 }
+
+/* ---------------------------------------------------------------------------
+   PowerPoint preview
+   ---------------------------------------------------------------------------
+   A deck renders as one scrollable column of slides inside the ordinary
+   .markdown-body flow, not a viewport-tall working surface like the
+   spreadsheet grid above: the point is reading a deck end to end and getting
+   its content out (Copy as Rich Text, Save as PDF, Save as Word all want the
+   whole thing), not paging through it. Every position and size on a shape is
+   a percentage of `.mc-pptx-canvas`, and every font size is `cqw` against it
+   -- see docs/PPTX-DESIGN.md -- so this needs no resize handler to stay
+   correct under html-to-image's PNG capture or headless Chrome's PDF print,
+   which both render this exact markup. */
+
+.mc-pptx-deck {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding: 4px 0 8px;
+}
+
+.mc-pptx-slide {
+  width: 100%;
+  max-width: 920px;
+}
+
+/* Viewer chrome, not deck content: data-mc-ignore keeps it out of every copy
+   flavor and the PDF/PNG export, the same as the CSV grid's row-number
+   gutter (src/csv.ts). */
+.mc-pptx-number {
+  margin: 0 2px 4px;
+  font-size: 11px;
+  text-align: right;
+  color: var(--mc-muted-fg);
+  user-select: none;
+}
+
+/* A slide is a page, the same idea as the PDF viewer's .mc-page: a fixed
+   white(-ish) ground and a visible edge regardless of the preview's own
+   theme. Unlike a PDF page (already-rasterised pixels a dark-mode filter can
+   safely invert), a slide's white background is content -- it's what makes
+   the deck's own dark-on-light text and colours legible -- so it stays white
+   even when the rest of the preview is dark or green-on-black.
+   `container-type: inline-size` is what makes every shape's `cqw` font size
+   resolve against the slide's own width rather than the viewport's. */
+.mc-pptx-canvas {
+  position: relative;
+  container-type: inline-size;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+}
+
+.mc-pptx-shape {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  color: #1f2328;
+}
+
+.mc-pptx-title {
+  font-size: 4cqw;
+  /* Browsers bold <h2> by default; the run's own resolved weight (render.ts
+     wraps a bold run in <strong>) is what should decide this, not the
+     element, so the user-agent default is undone here the same way it is
+     for .mc-pptx-table th below. Most real themes set titles in a regular
+     weight, and leaving the 600 this rule used to carry would make every
+     title in every deck look bolder than the file actually says. */
+  font-weight: normal;
+  line-height: 1.15;
+}
+
+.mc-pptx-body {
+  font-size: 2.4cqw;
+  line-height: 1.3;
+}
+ul.mc-pptx-body,
+ol.mc-pptx-body {
+  padding-left: 1.1em;
+}
+.mc-pptx-body p {
+  margin: 0 0 0.4em;
+}
+.mc-pptx-body p:last-child {
+  margin-bottom: 0;
+}
+.mc-pptx-body ul,
+.mc-pptx-body ol {
+  margin: 0.15em 0;
+  padding-left: 1.1em;
+}
+.mc-pptx-body li {
+  margin: 0 0 0.15em;
+}
+
+.mc-pptx-pic {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.mc-pptx-table {
+  border-collapse: collapse;
+  font-size: 1.8cqw;
+}
+.mc-pptx-table th,
+.mc-pptx-table td {
+  border: 1px solid #999;
+  padding: 0.2em 0.4em;
+  text-align: left;
+  vertical-align: top;
+  /* Undo the user-agent default that bolds every <th>; a header run's own
+     resolved weight (render.ts's <strong>) is what should decide this. */
+  font-weight: normal;
+}
+.mc-pptx-table thead th {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Chart / SmartArt / OLE / video: named rather than blank, per "What it will
+   not draw" in docs/PPTX-DESIGN.md. */
+.mc-pptx-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #99a1a8;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.03);
+  color: #57606a;
+  font-size: 1.6cqw;
+  text-align: center;
+  padding: 4px;
+}
+
+.mc-pptx-notes {
+  margin: 8px 2px 0;
+  font-size: 13px;
+  color: var(--mc-quote-fg);
+  white-space: pre-line;
+}
+
+.mc-pptx-note {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--mc-quote-fg);
+}
+
+/* Save as PDF: the deck already flows as ordinary content, one slide after
+   another, so nothing here needs unwrapping the way the CSV grid's
+   viewport-tall scroller does in its own @media print block above. The only
+   thing worth asking for is not splitting a slide's canvas across a page
+   break, which would cut every shape's absolute box in half. */
+@media print {
+  .mc-pptx-slide {
+    break-inside: avoid;
+  }
+}
+
+/* Force-light (rich-text copy): a shape's own color is almost always the
+   CSS default above (dark-on-white, already what force-light would flatten
+   it to), so only the canvas background needs restating -- the blanket
+   `background-color: transparent` a few rules up would otherwise punch a
+   hole in the page the same way it would the CSV grid's zebra stripe. */
+.mc-force-light .mc-pptx-canvas {
+  background-color: #fff !important;
+}
