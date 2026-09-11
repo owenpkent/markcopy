@@ -1,5 +1,5 @@
 // Reading one worksheet into a bounded grid of display strings.
-import { attr, boolAttr, intAttr, walkXml } from './xml';
+import { attr, boolAttr, intAttr, walkXml } from '../ooxml/xml';
 import { formatCodeFor, formatValue, type Styles } from './styles';
 
 export interface Cell {

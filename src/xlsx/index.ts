@@ -5,13 +5,19 @@
 // serial-to-date arithmetic, format-code resolution, merge geometry, and the
 // t="s" / t="str" distinction are where this feature's bugs will live, and none
 // of them need a webview or a running editor to exercise.
-import { openZip, partText, resolveTarget, WorkbookError, type ZipLimits } from './zip';
+import {
+  openZip,
+  OpcError as WorkbookError,
+  partText,
+  resolveTarget,
+  type ZipLimits,
+} from '../ooxml/zip';
 import { readWorkbook, findPart, type SheetRef } from './workbook';
 import { readStyles } from './styles';
 import { readSheet, type SheetLimits } from './sheet';
 import { renderSheetHtml } from './render';
 
-export { WorkbookError } from './zip';
+export { OpcError as WorkbookError } from '../ooxml/zip';
 export type { SheetRef } from './workbook';
 
 export interface ReadOptions extends Partial<SheetLimits> {
@@ -33,7 +39,11 @@ export function renderWorkbookHtml(bytes: Uint8Array, opts: ReadOptions = {}): W
     maxColumns: Math.max(1, opts.maxColumns ?? 200),
   };
 
-  const parts = openZip(bytes, opts.zipLimits);
+  const parts = openZip(bytes, {
+    limits: opts.zipLimits,
+    noun: 'workbook',
+    notZip: 'this file is not an .xlsx workbook (the older .xls format is not supported).',
+  });
   const workbook = readWorkbook(parts);
 
   // Land on a visible sheet. The requested index can point at a hidden one (or

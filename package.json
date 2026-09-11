@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PDF, LaTeX, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, PDF, LaTeX, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview",
+  "description": "One-stop Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
   "version": "0.12.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -28,6 +28,11 @@
     "xlsx",
     "spreadsheet",
     "excel viewer",
+    "pptx",
+    "powerpoint",
+    "pptx viewer",
+    "slides",
+    "presentation",
     "pdf",
     "pdf viewer",
     "latex",
@@ -128,6 +133,11 @@
         "category": "MarkCopy"
       },
       {
+        "command": "markcopy.saveAsPptx",
+        "title": "MarkCopy: Save as PowerPoint",
+        "category": "MarkCopy"
+      },
+      {
         "command": "markcopy.recompileTex",
         "title": "MarkCopy: Recompile LaTeX",
         "category": "MarkCopy",
@@ -206,7 +216,32 @@
             "filenamePattern": "*.xlsx"
           },
           {
+            "filenamePattern": "*.XLSX"
+          },
+          {
             "filenamePattern": "*.xlsm"
+          },
+          {
+            "filenamePattern": "*.XLSM"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "markcopy.pptxPreview",
+        "displayName": "MarkCopy PowerPoint Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.pptx"
+          },
+          {
+            "filenamePattern": "*.PPTX"
+          },
+          {
+            "filenamePattern": "*.pptm"
+          },
+          {
+            "filenamePattern": "*.PPTM"
           }
         ],
         "priority": "default"
@@ -310,6 +345,11 @@
         },
         {
           "command": "markcopy.saveAsDocx",
+          "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
+          "group": "1_markcopy"
+        },
+        {
+          "command": "markcopy.saveAsPptx",
           "when": "editorLangId == markdown || editorLangId == csv || editorLangId == tsv",
           "group": "1_markcopy"
         }
@@ -417,6 +457,26 @@
           "default": 200,
           "minimum": 1,
           "description": "Maximum number of columns to render from a spreadsheet sheet."
+        },
+        "markcopy.pptx.maxSlides": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "description": "Maximum number of slides to render from a presentation. The preview says how many it is hiding; raise this to show more, at the cost of a slower preview on very long decks."
+        },
+        "markcopy.pptx.showNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each slide's speaker notes under it in the preview. They are part of what a deck has to say, and they come along when you copy the slide."
+        },
+        "markcopy.pptx.slideSize": {
+          "type": "string",
+          "enum": [
+            "16:9",
+            "4:3"
+          ],
+          "default": "16:9",
+          "markdownDescription": "Slide size for **Save as PowerPoint**. `16:9` is widescreen (13.3 x 7.5in), `4:3` the older standard (10 x 7.5in). This does not affect previewing an existing deck, which is always shown at the size the file declares."
         },
         "markcopy.stl.showGrid": {
           "type": "boolean",

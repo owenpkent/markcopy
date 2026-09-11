@@ -129,6 +129,9 @@ window.addEventListener('message', (e: MessageEvent) => {
     case 'exportDocx':
       void exportDocx();
       break;
+    case 'exportPptx':
+      void exportPptx();
+      break;
   }
 });
 
@@ -880,6 +883,7 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Copy Whole Document', run: () => copyRichText(content) });
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
+  entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
   entries.push({ kind: 'divider' });
   entries.push({ kind: 'submenu', label: 'Preferences', entries: buildSettingsEntries() });
   return entries;
@@ -1234,7 +1238,46 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
 // are the formats a .docx can hold as a part; and the result has to be
 // serialized as XML rather than HTML, because `innerHTML` writes `<img src="x">`
 // unclosed and the host parses with a strict XML parser.
+/**
+ * The two structure exports differ by almost nothing: both need the same clone,
+ * the same rasterized diagrams and the same inlined images, and both hand the
+ * host a serialized tree rather than a picture. Only the width they are staged
+ * at and the message they post are their own.
+ */
+interface ExportTarget {
+  /** Message the host listens for. */
+  type: string;
+  /**
+   * Offscreen width to lay the clone out at, in CSS pixels. This sets the
+   * resolution a diagram is rasterized at, not its final size: both writers
+   * rescale an image to their own content box.
+   */
+  stageWidthPx: number;
+  /** How the toast names the file being written. */
+  label: string;
+}
+
+// 6.5in at 96dpi, matching CONTENT_WIDTH_PX in src/docx/media.ts, so a diagram
+// is drawn at the size it will occupy in the Word text column.
+const WORD_TARGET: ExportTarget = { type: 'docxXhtml', stageWidthPx: 624, label: 'Word document' };
+
+// A slide is wider than a page and a diagram on one is usually the whole point
+// of the slide, so it is worth rasterizing at 10in rather than 6.5.
+const PPTX_TARGET: ExportTarget = {
+  type: 'pptxXhtml',
+  stageWidthPx: 960,
+  label: 'PowerPoint deck',
+};
+
 async function exportDocx(): Promise<void> {
+  await exportStructured(WORD_TARGET);
+}
+
+async function exportPptx(): Promise<void> {
+  await exportStructured(PPTX_TARGET);
+}
+
+async function exportStructured(target: ExportTarget): Promise<void> {
   const clone = content.cloneNode(true) as HTMLElement;
   clone.removeAttribute('id');
   clone.classList.add('mc-force-light', 'mc-copy-clean');
@@ -1243,13 +1286,13 @@ async function exportDocx(): Promise<void> {
     .forEach((el) => el.removeAttribute('data-source-line'));
   stripViewerChrome(clone);
 
-  // Rasterizing needs layout, and layout needs the clone to be in the document.
-  // It is staged offscreen at the width of the Word text column (6.5in at 96dpi,
-  // matching CONTENT_WIDTH_PX in src/docx/media.ts) so a diagram is drawn at the
-  // size it will occupy on the page rather than at the preview's width.
+  // Rasterizing needs layout, and layout needs the clone to be in the document,
+  // so it is staged offscreen at the target's own width: a diagram is then drawn
+  // at the size it will occupy in the exported file rather than at whatever width
+  // the preview panel happens to be.
   const stage = document.createElement('div');
   stage.setAttribute('aria-hidden', 'true');
-  stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:624px;pointer-events:none;';
+  stage.style.cssText = `position:fixed;left:-10000px;top:0;width:${target.stageWidthPx}px;pointer-events:none;`;
   stage.appendChild(clone);
   document.body.appendChild(stage);
 
@@ -1260,12 +1303,12 @@ async function exportDocx(): Promise<void> {
     await toEmbeddableImages(clone);
     inlineCodeColors(clone);
     vscode.postMessage({
-      type: 'docxXhtml',
+      type: target.type,
       bodyXhtml: new XMLSerializer().serializeToString(clone),
     });
-    toast('Exporting Word document…');
+    toast(`Exporting ${target.label}…`);
   } catch {
-    toast('Word export failed');
+    toast(`${target.label} export failed`);
   } finally {
     stage.remove();
   }

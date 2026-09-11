@@ -12,7 +12,7 @@
 //    and 47 (elapsed time) and the 27-36 / 50-58 East Asian date blocks, and
 //    anything from 164 up is custom, meaning whatever that file says it means. So
 //    ids here only ever resolve to a format *code*, and the code decides.
-import { attr, intAttr, walkXml } from './xml';
+import { attr, intAttr, walkXml } from '../ooxml/xml';
 import { format as formatNumber, isDateFormat } from 'numfmt';
 
 /** The builtin number formats a file may reference without declaring. */

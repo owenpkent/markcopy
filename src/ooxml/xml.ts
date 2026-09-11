@@ -54,9 +54,12 @@ export function localName(name: string): string {
 /**
  * Look an attribute up by local name.
  *
- * Relationship ids in particular are namespaced (`r:id`), and the prefix is only
- * conventional, so a plain `attrs['r:id']` misses the workbooks that bind it to
- * something else.
+ * This is the wrong tool for a relationship-namespaced attribute like `r:id`:
+ * asking for the qualified string `'r:id'` only ever matches that literal key
+ * (its local name is `'id'`, which never equals the qualified name it is
+ * compared against), and asking for the bare local name `'id'` risks matching
+ * an unrelated, unprefixed attribute of the same name on the same element. Use
+ * relAttr for those instead.
  */
 export function attr(attrs: Record<string, string>, name: string): string | undefined {
   const direct = attrs[name];
@@ -65,6 +68,31 @@ export function attr(attrs: Record<string, string>, name: string): string | unde
   }
   for (const key of Object.keys(attrs)) {
     if (localName(key) === name) {
+      return attrs[key];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Look up a relationship-namespaced attribute (conventionally `r:id`,
+ * `r:embed`, and so on) by its local name, under whatever prefix the package
+ * actually bound that namespace to.
+ *
+ * `<p:sldId id="256" r:id="rId2"/>` is the collision this exists to avoid:
+ * two attributes here have the local name `id`, the slide's own and the
+ * relationship's, and only the relationship one carries a namespace prefix.
+ * `attr(attrs, 'id')` would happily return the slide id instead, and
+ * `attr(attrs, 'r:id')` only matches the literal prefix `r:`, which a package
+ * is free to bind to something else entirely (`rel:embed`, say). Matching on
+ * "local name equals `name`, AND the key carries some prefix" is what makes
+ * this immune to both: a bare, unprefixed `id` can never be mistaken for a
+ * relationship id, under any prefix the file chooses to use.
+ */
+export function relAttr(attrs: Record<string, string>, name: string): string | undefined {
+  for (const key of Object.keys(attrs)) {
+    const colon = key.indexOf(':');
+    if (colon !== -1 && key.slice(colon + 1) === name) {
       return attrs[key];
     }
   }

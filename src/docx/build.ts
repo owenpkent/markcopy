@@ -15,7 +15,13 @@
 //
 // A fixed-layout export cannot do any of that, which is the whole reason this
 // exists alongside Save as PDF rather than replacing it.
-import { hasClass, isElement, textOf, type DocxElement, type DocxNode } from './parse';
+import {
+  hasClass,
+  isElement,
+  textOf,
+  type XhtmlElement as DocxElement,
+  type XhtmlNode as DocxNode,
+} from '../ooxml/xhtml';
 import { decodeImage, displayExtent, type DecodedImage } from './media';
 import { bookmarkName, CONTENT_WIDTH_TWIPS, escapeAttr, escapeXml } from './ooxml';
 

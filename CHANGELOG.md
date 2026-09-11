@@ -6,6 +6,15 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Added
 
+- **PowerPoint preview (`.pptx` / `.pptm`).** A read-only preview (`markcopy.pptxPreview`) renders the whole deck as one scrollable column of slides, rather than one slide at a time behind a tab strip: a deck is read end to end, and rendering it that way is what lets Copy as Rich Text, Save as PDF, and Save as Word all take the whole deck in one go. Slides keep their real layout, but the markup underneath is semantic and in reading order, so a title placeholder becomes a heading, body text becomes paragraphs and lists, a slide table becomes a real table, and a picture keeps its alt text.
+  - Every slide is its own right-click block, so Copy Rich Text, Markdown, and PNG all work per slide, and a table on a slide gets the full table menu (CSV, TSV, PNG).
+  - Speaker notes appear under each slide by default (`markcopy.pptx.showNotes`).
+  - Charts, SmartArt, OLE objects, and embedded media are drawn as labelled placeholders naming what they are, never as blanks; transitions and animations are not rendered.
+  - New settings: `markcopy.pptx.maxSlides` (default 100) and `markcopy.pptx.showNotes` (default `true`).
+- **Save as PowerPoint (`.pptx`).** **MarkCopy: Save as PowerPoint** (`markcopy.saveAsPptx`), and **Save as PowerPoint…** in the preview's right-click menu, export the rendered preview to a PowerPoint deck: pick where to save it and MarkCopy writes it, then opens it. Like Save as Word, what lands is a real, editable deck rather than a picture of one: headings become slide titles, lists are bulleted paragraphs at their real indent levels, tables are PowerPoint tables with a marked header row, images carry their alt text as the shape description, and links stay clickable.
+  - A thematic break (`---`) or an `<h1>` / `<h2>` starts a new slide, which becomes the slide's title. Content that overflows a slide is left overflowing rather than silently repaginated, since splitting a slide would scramble a deliberate build.
+  - It needs nothing installed, not PowerPoint, not Pandoc, not a browser; the file is assembled in memory.
+  - New setting: `markcopy.pptx.slideSize` (`16:9` default, or `4:3`).
 - **Footnote support.** `[^note]` references and `[^note]: text` definitions render as GitHub does: numbered links to a footnotes section at the end of the document, with back-links from each definition to its reference. A definition with no reference stays in place as plain text instead of disappearing. The plugin's separate `^[...]` inline footnote shorthand is deliberately left off, since nothing in this repo documents it and `^[` shows up in ordinary regex prose. Toggle the feature with `markcopy.footnotes` (on by default) for documents that use literal `[^...]` text.
 
 ### Maintenance

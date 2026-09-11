@@ -30,7 +30,9 @@ import {
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
+import { htmlToPptx, reportSummary as pptxReportSummary, type PptxReport } from './pptxExport';
 import { XlsxEditorProvider } from './xlsxEditor';
+import { PptxEditorProvider } from './pptxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { sweepProxyDir } from './videoProxy';
@@ -121,6 +123,22 @@ export function activate(context: vscode.ExtensionContext): void {
         // this module back and close a cycle.
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Presentations open in the MarkCopy slide preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      PptxEditorProvider.viewType,
+      new PptxEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
       ),
       {
         supportsMultipleEditorsPerDocument: false,
@@ -311,6 +329,20 @@ export function activate(context: vscode.ExtensionContext): void {
       const state = activePreview();
       if (state) {
         state.panel.webview.postMessage({ type: 'exportDocx' });
+      } else {
+        vscode.window.showInformationMessage(
+          'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
+        );
+      }
+    }),
+
+    // Export the preview as a PowerPoint deck. The same round trip again: the
+    // webview serializes the structure once and the host decides what to make of
+    // it, which is why adding a third format cost a message name and nothing else.
+    vscode.commands.registerCommand('markcopy.saveAsPptx', () => {
+      const state = activePreview();
+      if (state) {
+        state.panel.webview.postMessage({ type: 'exportPptx' });
       } else {
         vscode.window.showInformationMessage(
           'MarkCopy: open the preview first (MarkCopy: Open Rich Preview).',
@@ -781,6 +813,8 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         void exportPdf(context, state.docUri, msg.bodyHtml);
       } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {
         void exportDocx(state.docUri, msg.bodyXhtml);
+      } else if (msg?.type === 'pptxXhtml' && typeof msg.bodyXhtml === 'string') {
+        void exportPptx(state.docUri, msg.bodyXhtml);
       } else if (msg?.type === 'editCell') {
         void applyCellEdit(state, msg);
       } else if (msg?.type === 'gridOp') {
@@ -1349,6 +1383,68 @@ async function runDocxExport(docUri: vscode.Uri, bodyXhtml: string): Promise<voi
   // quietly undoes the reason to export a Word document instead of a PDF, and
   // it is fixable in the Markdown source in a few seconds.
   const note = reportSummary(report);
+  if (note) {
+    void vscode.window.showWarningMessage(`MarkCopy: exported ${basename(target)}, but ${note}.`);
+  } else {
+    vscode.window.setStatusBarMessage(`MarkCopy: exported ${basename(target)}.`, 6000);
+  }
+}
+
+let exportingPptx = false;
+
+// Export the preview as a PowerPoint deck.
+//
+// Structure again rather than a picture, like the Word export, but cut a
+// different way: a document is one flow and a deck is a sequence, so the only
+// real work beyond exportDocx is deciding where one slide ends and the next
+// begins. src/pptx/write/ does that; see docs/PPTX-DESIGN.md for the rules.
+export async function exportPptx(docUri: vscode.Uri, bodyXhtml: string): Promise<void> {
+  if (exportingPptx) {
+    void vscode.window.showInformationMessage(
+      'MarkCopy: a PowerPoint export is already in progress.',
+    );
+    return;
+  }
+  exportingPptx = true;
+  try {
+    await runPptxExport(docUri, bodyXhtml);
+  } finally {
+    exportingPptx = false;
+  }
+}
+
+async function runPptxExport(docUri: vscode.Uri, bodyXhtml: string): Promise<void> {
+  const name = exportBaseName(docUri);
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: defaultExportUri(docUri, name, 'pptx'),
+    filters: { 'PowerPoint presentation': ['pptx'] },
+    saveLabel: 'Export PowerPoint deck',
+    title: 'Export preview as a PowerPoint deck',
+  });
+  if (!target) {
+    return; // cancelled
+  }
+
+  const cfg = vscode.workspace.getConfiguration('markcopy', docUri);
+  let report: PptxReport;
+  try {
+    // Converted before the file is touched, so a document this cannot handle
+    // fails without having already replaced whatever was at that path.
+    const result = htmlToPptx(bodyXhtml, {
+      title: name || 'Presentation',
+      slideSize: cfg.get<'16:9' | '4:3'>('pptx.slideSize', '16:9'),
+    });
+    report = result.report;
+    await vscode.workspace.fs.writeFile(target, Buffer.from(result.bytes));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`MarkCopy: could not export the deck: ${message}`);
+    return;
+  }
+
+  void vscode.env.openExternal(target);
+
+  const note = pptxReportSummary(report);
   if (note) {
     void vscode.window.showWarningMessage(`MarkCopy: exported ${basename(target)}, but ${note}.`);
   } else {
