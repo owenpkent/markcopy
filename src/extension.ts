@@ -74,10 +74,12 @@ const previews = new Set<PreviewState>();
 // The "to the side" panel: the single preview openPreview retargets rather than
 // duplicating. A preview opened as an editor tab is never this one.
 let side: PreviewState | undefined;
-// Rebuilt in update() only when the `markcopy.math` setting flips, so toggling
-// math on/off takes effect without reloading the window.
+// Rebuilt in update() only when the `markcopy.math` or `markcopy.footnotes`
+// setting flips, so toggling either on/off takes effect without reloading the
+// window.
 let md = createMarkdownIt();
 let mdMath = true;
+let mdFootnotes = true;
 
 // Documents whose preview the user closed this session. Auto-preview skips these
 // so a dismissed preview does not spring back open on the next focus change.
@@ -854,9 +856,11 @@ function update(state: PreviewState): void {
   const webview = state.panel.webview;
   const cfg = vscode.workspace.getConfiguration('markcopy');
   const math = cfg.get<boolean>('math', true);
-  if (math !== mdMath) {
-    md = createMarkdownIt({ math });
+  const footnotes = cfg.get<boolean>('footnotes', true);
+  if (math !== mdMath || footnotes !== mdFootnotes) {
+    md = createMarkdownIt({ math, footnotes });
     mdMath = math;
+    mdFootnotes = footnotes;
   }
   // Both kinds end up as HTML in the same `render` message; the webview only
   // needs `kind` to pick the layout (a CSV is a full-width, self-scrolling grid).
@@ -895,6 +899,7 @@ function update(state: PreviewState): void {
     syncScroll: cfg.get<boolean>('syncScroll', true),
     autoPreview: cfg.get<boolean>('autoPreview', true),
     math,
+    footnotes,
   });
 }
 

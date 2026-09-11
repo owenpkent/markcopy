@@ -430,6 +430,24 @@ body.mc-csv-resizing {
 .markdown-body a:hover {
   text-decoration: underline;
 }
+.markdown-body .footnotes-sep {
+  margin-top: 24px;
+  /* Otherwise an unstyled <hr> falls back to the browser's own inset bevel,
+     which does not follow any of the three palettes below. GitHub's own
+     treatment: a flat rule colored from the palette's border variable. */
+  height: 0.25em;
+  background-color: var(--mc-border);
+  border: 0;
+}
+.markdown-body .footnotes {
+  color: var(--mc-quote-fg);
+  font-size: 0.9em;
+}
+.markdown-body .footnote-item p:last-child {
+  /* Only the trailing margin: zeroing every paragraph's margin (as this used
+     to) ran a multi-paragraph footnote's text together as a single block. */
+  margin-bottom: 0;
+}
 .mc-mermaid {
   margin: 0 0 16px 0;
   text-align: center;

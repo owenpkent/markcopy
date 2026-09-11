@@ -63,6 +63,7 @@ const RENDER_DEFAULTS = {
   syncScroll: true,
   autoPreview: true,
   math: true,
+  footnotes: true,
   theme: 'auto',
   styleProfile: 'github',
   mermaidConfig: {},
@@ -88,6 +89,7 @@ export interface RenderOptions {
   docKey?: string;
   docVersion?: number;
   math?: boolean;
+  footnotes?: boolean;
 }
 
 /** A menu panel stack, driven the way a pointer drives it. */

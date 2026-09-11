@@ -168,9 +168,36 @@ interface TableRow {
 }
 
 export function buildDocument(root: DocxElement): BuildResult {
-  const builder = new Builder();
+  const builder = new Builder(root);
   builder.blocks(root.children, {});
   return builder.finish();
+}
+
+/**
+ * Every fragment id some `href="#..."` in the document targets.
+ *
+ * Run once, before any conversion happens, because whether an element earns a
+ * bookmark can depend on markup anywhere else in the document: a footnote's
+ * back-reference arrow sits right after the note text it targets, while the
+ * note text's own `<li id>` is what the reference up at the top of the
+ * document links to. Neither side can answer the question on its own during a
+ * single top-to-bottom walk, so the whole tree is scanned for link targets
+ * before conversion decides what earns a bookmark.
+ */
+function collectReferencedAnchors(root: DocxElement): Set<string> {
+  const ids = new Set<string>();
+  const walk = (node: DocxNode): void => {
+    if (!isElement(node)) {
+      return;
+    }
+    const href = node.attrs.href;
+    if (href && href.startsWith('#') && href.length > 1) {
+      ids.add(href.slice(1));
+    }
+    node.children.forEach(walk);
+  };
+  walk(root);
+  return ids;
 }
 
 class Builder {
@@ -180,6 +207,16 @@ class Builder {
   private readonly nums: NumInstance[] = [];
   /** Data URI -> relationship id, so the same image is stored once. */
   private readonly imageRels = new Map<string, string>();
+  /**
+   * Fragment ids some `href="#..."` in the document targets, collected once by
+   * collectReferencedAnchors() before conversion starts. A heading earns a
+   * bookmark unconditionally regardless of this set (see block()); every other
+   * element that can carry an id -- a footnote's <li>, a footnote reference's
+   * own <a> -- earns one only when this set says something actually links
+   * there, so a document with no in-document links writes no bookmarks it does
+   * not need.
+   */
+  private readonly referencedAnchors: Set<string>;
   private relSeq = 0;
   private bookmarkSeq = 0;
   private drawingSeq = 0;
@@ -191,6 +228,10 @@ class Builder {
     headings: 0,
     tables: 0,
   };
+
+  constructor(root: DocxElement) {
+    this.referencedAnchors = collectReferencedAnchors(root);
+  }
 
   finish(): BuildResult {
     // An empty body is not a document at all. A body ending in a table, which
@@ -440,6 +481,26 @@ class Builder {
       listDepth: depth + 1,
       align: ctx.align,
     };
+
+    // A footnote's <li id="fn1"> is a real link target, but it cannot borrow
+    // BlockCtx.bookmarkId the way a heading does: paragraph() spends that field
+    // on exactly one <w:p>, and a footnote's body can hold more than one
+    // paragraph. Stamping the same bookmark name (bookmarkName() is deterministic
+    // on the id) onto more than one <w:p> is invalid OOXML, since bookmark names
+    // must be unique. Pushing the bookmark straight onto `out` around the whole
+    // item sidesteps that: <w:bookmarkStart>/<w:bookmarkEnd> are valid direct
+    // children of <w:body> and may span as many paragraphs as they need to,
+    // which is exactly what Word itself writes for a bookmark placed over a
+    // multi-paragraph selection.
+    if (li.attrs.id && this.referencedAnchors.has(li.attrs.id)) {
+      const id = this.bookmarkSeq++;
+      const name = escapeAttr(bookmarkName(li.attrs.id));
+      this.out.push(`<w:bookmarkStart w:id="${id}" w:name="${name}"/>`);
+      this.blocks(li.children, itemCtx);
+      this.out.push(`<w:bookmarkEnd w:id="${id}"/>`);
+      return;
+    }
+
     this.blocks(li.children, itemCtx);
   }
 
@@ -678,24 +739,33 @@ class Builder {
     }
     const styled = inner.xml;
 
+    let xml: string;
     if (href.startsWith('#')) {
       // An in-document link (a table of contents, a footnote reference). It has
       // to become w:anchor rather than an external target, or Word opens a
       // browser at a URL that does not exist.
       const anchor = escapeAttr(bookmarkName(href.slice(1)));
-      return {
-        xml: `<w:hyperlink w:anchor="${anchor}">${styled}</w:hyperlink>`,
-        visible: inner.visible,
-      };
-    }
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+      xml = `<w:hyperlink w:anchor="${anchor}">${styled}</w:hyperlink>`;
+    } else if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
       // A relative path: meaningless once the document leaves the workspace, so
       // the text stays and the dead link goes.
-      return { xml: styled, visible: inner.visible };
+      xml = styled;
+    } else {
+      const relId = this.addRel({ kind: 'hyperlink', target: href, external: true });
+      xml = `<w:hyperlink r:id="${relId}">${styled}</w:hyperlink>`;
     }
 
-    const id = this.addRel({ kind: 'hyperlink', target: href, external: true });
-    return { xml: `<w:hyperlink r:id="${id}">${styled}</w:hyperlink>`, visible: inner.visible };
+    // The element can be a link target as well as a link: a footnote reference's
+    // own <a id="fnref1"> is exactly this, since the "back to text" arrow links
+    // to it. Bookmark tags are valid siblings to <w:r> runs inside a paragraph
+    // too, so wrapping the finished hyperlink needs no <w:p> of its own.
+    if (el.attrs.id && this.referencedAnchors.has(el.attrs.id)) {
+      const id = this.bookmarkSeq++;
+      const name = escapeAttr(bookmarkName(el.attrs.id));
+      xml = `<w:bookmarkStart w:id="${id}" w:name="${name}"/>${xml}<w:bookmarkEnd w:id="${id}"/>`;
+    }
+
+    return { xml, visible: inner.visible };
   }
 
   private image(el: DocxElement): { xml: string; visible: boolean } {

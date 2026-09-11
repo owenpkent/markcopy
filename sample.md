@@ -4,9 +4,11 @@ A quick file to exercise every copy path. Right-click things in the preview.
 
 ## Text
 
-This paragraph has **bold**, _italic_, `inline code`, and a [link](https://example.com).
+This paragraph has **bold**, _italic_, `inline code`, a [link](https://example.com), and a footnote.[^sample]
 
 > A blockquote to copy as rich text.
+
+[^sample]: Footnote references link to definitions, with a return link back to the prose.
 
 ## Table
 

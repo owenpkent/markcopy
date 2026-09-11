@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Footnote support.** `[^note]` references and `[^note]: text` definitions render as GitHub does: numbered links to a footnotes section at the end of the document, with back-links from each definition to its reference. A definition with no reference stays in place as plain text instead of disappearing. The plugin's separate `^[...]` inline footnote shorthand is deliberately left off, since nothing in this repo documents it and `^[` shows up in ordinary regex prose. Toggle the feature with `markcopy.footnotes` (on by default) for documents that use literal `[^...]` text.
+
 ### Maintenance
 
 - Update production and development dependencies and refresh vulnerable transitive dependencies. Keep Vitest on version 4 for Node 20 compatibility.

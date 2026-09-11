@@ -28,7 +28,7 @@ Its blind spots are jsdom's: no layout (scroll sync runs against a synthetic one
    Changing `package.json` contributions (languages, activation events, menus, settings) only takes effect when the dev host **process** starts. After editing the manifest, close the dev host window and press F5 again; a reload is not always enough.
 
 2. Fixtures:
-   - [sample.md](../sample.md) (repo root) exercises the Markdown surface: tables, code, Mermaid, math, images.
+   - [sample.md](../sample.md) (repo root) exercises the Markdown surface: tables, code, footnotes, Mermaid, math, images.
    - [sample.csv](../sample.csv) (repo root) exercises the CSV grid: quoted commas, escaped quotes, a newline inside a cell, currency/percent/negative numbers, a ragged row, and non-ASCII text.
    - `sample.pdf` (repo root, gitignored): generate it once with `node scripts/make-sample-pdf.js`. Twelve pages, each labeled with its page number, so the page indicator and go-to-page are easy to eyeball.
    - [sample.stl](../sample.stl) (repo root) exercises the STL viewer: a 12-triangle binary unit cube, small enough that a wrong scale, a mis-fitted camera, or a grid drawn in the wrong plane is obvious at a glance.
@@ -44,10 +44,11 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 ### Rendering
 
 - [ ] ★ Open `sample.md`; its tab shows the rendered preview (`markcopy.autoPreview`), in one editor group, with no split and no text editor left beside it.
-- [ ] Headings, lists, task lists, blockquotes, and links render GitHub-style.
+- [ ] Headings, lists, task lists, blockquotes, links, and footnotes render GitHub-style.
 - [ ] Fenced code blocks are syntax-highlighted.
 - [ ] Mermaid diagrams render and re-theme when the VS Code theme changes.
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
+- [ ] `[^note]` footnote references and definitions render as a numbered footnotes section, with back-links to the prose; an unreferenced `[^orphan]:` definition stays visible as plain text instead of disappearing, and `^[...]` inline footnote shorthand stays literal. Turning `markcopy.footnotes` off shows literal `[^note]` text again.
 - [ ] Relative and absolute local images render; remote images still load.
 
 ### Where the preview opens
