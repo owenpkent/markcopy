@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel, PDF, LaTeX, STL & Video Preview
+# MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, STL models in a 3D viewer, and `.mov` / `.mp4` video in a player you can grab a frame from, so one extension previews them all.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs and Excel workbooks as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, a PowerPoint deck as one scrollable column of slides, STL models in a 3D viewer, and `.mov` / `.mp4` video in a player you can grab a frame from, so one extension previews them all.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -47,6 +47,8 @@ Open a `.csv` or `.tsv` and you get a proper grid: a header and row numbers that
 | QuickTime (.mov) video preview           |    No    |            No             | **Yes**  |
 | Copy a video frame as PNG                |    No    |            No             | **Yes**  |
 | Export to Word (.docx)                   |    No    |        Via Pandoc         | **Yes**  |
+| PowerPoint (.pptx) preview               |    No    |            No             | **Yes**  |
+| Export to PowerPoint (.pptx)             |    No    |        Via Pandoc         | **Yes**  |
 
 ## Why it exists
 
@@ -66,9 +68,14 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Copy as raw Markdown**, for a selection or a single block, from the **Copy as** submenu.
 - **Save as PDF.** Export the rendered preview straight to a PDF file: pick where to save it and MarkCopy writes it, then opens it. No print dialog to work through and no filename header or URL footer on the pages, with equations, diagrams, highlighted code, and local images intact and the text still selectable. See [Save as PDF](#save-as-pdf).
 - **Save as Word.** Export the rendered preview to a `.docx` file. Unlike the PDF, what lands is a real document rather than a picture of one: headings are Word headings, tables have a marked header row, lists are lists, and every image carries its alt text, so **Read Aloud**, Immersive Reader, and screen readers can read it and Word's own Accessibility Checker passes it. It is also still editable. Mermaid diagrams and equations become images described by the source they came from, so a diagram is not simply silent. See [Save as Word](#save-as-word).
+- **Save as PowerPoint.** Export the rendered preview to a `.pptx` file. Like Save as Word and unlike the PDF, what lands is a real, editable deck rather than a picture of one: headings become slide titles, lists are bulleted paragraphs at their real indent levels, tables are PowerPoint tables with a marked header row, images carry their alt text as the shape description, and links stay clickable. See [Save as PowerPoint](#save-as-powerpoint).
 - **Excel preview.** Open an `.xlsx` or `.xlsm` and it renders as a grid, with sheet tabs along the top and the column letters and row numbers a spreadsheet shows. Values appear the way the workbook formats them, so a date is a date and not `45000`, a percentage is `15.3%` and not `0.153`, and a formula shows its stored result. Merged cells stay merged, and anything the author hid (rows, columns, or whole sheets) stays hidden. Then right-click and take the whole sheet out as rich text, Markdown, CSV, TSV, or PNG.
 
   The preview is **read-only by design**: MarkCopy never writes to your workbook, so it cannot corrupt one. See [Settings](#settings) for `markcopy.xlsx.*`.
+
+- **PowerPoint preview.** Open a `.pptx` or `.pptm` and the whole deck renders as one scrollable column of slides, rather than one slide at a time behind a tab strip: a deck is read end to end, and rendering it that way is what lets **Copy as Rich Text**, **Save as PDF**, and **Save as Word** take the whole thing in one go instead of whichever slide happened to be on screen. Slides keep their real layout, but the markup underneath is semantic and in reading order, so a title placeholder becomes a heading, body text becomes paragraphs and lists, a slide table becomes a real table, and a picture keeps its alt text. Charts, SmartArt, OLE objects, and embedded media are drawn as labelled placeholders naming what they are, never as blanks; transitions and animations are not rendered. Speaker notes appear under each slide (`markcopy.pptx.showNotes`), and every slide is its own right-click block, so **Copy Rich Text / Markdown / PNG** work per slide, and a table on a slide gets the full table menu.
+
+  The preview is **read-only by design**: MarkCopy never writes to your presentation. See [Settings](#settings) for `markcopy.pptx.*`.
 
 - **CSV and TSV preview, with editing.** Open a `.csv` or `.tsv` and it renders as a spreadsheet-style grid instead of a wall of commas: a sticky header row and row-number gutter, alternating row colors, numeric columns aligned right, and long values clipped with an ellipsis so rows stay one line tall. The delimiter is detected automatically (comma, tab, semicolon, or pipe, with a `.tsv` always read as tab-separated) and quoted fields follow RFC 4180, so commas, quotes, and newlines inside a cell all survive. See [Settings](#settings) for `markcopy.csv.*`.
   - **Edit cells in place.** Click to select, then double-click, press Enter or F2, or just start typing. **Enter** commits and moves down, **Tab** commits and moves right, **Shift+Enter** puts a newline inside the cell, **Escape** discards, **Delete** clears, and the arrow keys move around. Headers are editable too. Edits go straight into the file as ordinary document changes, and only the edited field is rewritten: the rest of the row keeps its original bytes, quoting and line endings included.
@@ -85,7 +92,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, PDF, LaTeX, STL, and video.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video.
 - **LaTeX preview.** Open or focus a `.tex`, `.ltx`, or `.latex` file and the preview opens automatically beside it, the same as Markdown, CSV, and TSV (`markcopy.autoPreview`); it is also reachable by hand from **Reopen Editor With...**. The file itself still opens in the text editor, since it is contributed at `option` priority, not default: it is a file you spend most of the day editing, and the preview simply arrives as a second tab beside it. MarkCopy compiles it with an external LaTeX engine and shows the result through the very same PDF viewer above, inheriting all of it: text selection, **Copy Page as PNG**, comments, zoom, and the **Theme** submenu. It rebuilds on save, and a floating **Recompile** button, a toolbar icon, and a right-click **Recompile LaTeX** entry rebuild it without one. Requires a LaTeX engine on your machine already; see [LaTeX preview](#latex-preview) for what to install.
 - **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
 - **Video preview with frame grabs.** Open a `.mov`, `.mp4`, or `.m4v` and it plays inline with full transport controls, rather than opening as binary or not at all: VS Code ships no preview for QuickTime files. Right-click for **Copy Frame as PNG** and **Save Frame as PNG…**, so a still from a screen recording goes straight into a bug report. A **Playback** submenu sets looping and speed, and `,` and `.` step a frame at a time to line the shot up. A file VS Code cannot decode (ProRes, DNxHD, most HEVC) plays anyway when you have ffmpeg: MarkCopy builds a throwaway H.264 copy in a temp folder, laying a clip with an alpha channel over a transparency checkerboard rather than flattening it onto black. Without ffmpeg it says what is wrong and offers your default player. See [Video preview](#video-preview).
@@ -135,6 +142,7 @@ MarkCopy does not change what VS Code's _file association_ opens; the swap above
 | MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                         |
 | MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it.     |
 | MarkCopy: Save as Word Document            | `markcopy.saveAsDocx`             | Exports the rendered preview to a `.docx` file you choose, then opens it. |
+| MarkCopy: Save as PowerPoint               | `markcopy.saveAsPptx`             | Exports the rendered preview to a `.pptx` file you choose, then opens it. |
 | MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                     |
 | MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                                              |
 
@@ -155,6 +163,9 @@ MarkCopy does not change what VS Code's _file association_ opens; the swap above
 | `markcopy.csv.maxRows`         | number                                                                     | `5000`    | Maximum rows to render. The grid says how many rows it is hiding; raise it to show more, at the cost of a slower preview on very large files.                                                                                                                             |
 | `markcopy.xlsx.maxRows`        | number                                                                     | `5000`    | Maximum rows to render from a spreadsheet sheet. The grid says how many rows it is hiding.                                                                                                                                                                                |
 | `markcopy.xlsx.maxColumns`     | number                                                                     | `200`     | Maximum columns to render from a spreadsheet sheet.                                                                                                                                                                                                                       |
+| `markcopy.pptx.maxSlides`      | number                                                                     | `100`     | Maximum number of slides to render from a presentation. The preview says how many it is hiding; raise this to show more, at the cost of a slower preview on very long decks.                                                                                              |
+| `markcopy.pptx.showNotes`      | boolean                                                                    | `true`    | Show each slide's speaker notes under it in the preview. They are part of what a deck has to say, and they come along when you copy the slide.                                                                                                                            |
+| `markcopy.pptx.slideSize`      | `16:9` \| `4:3`                                                            | `16:9`    | Slide size for **Save as PowerPoint**. `16:9` is widescreen (13.3 x 7.5in), `4:3` the older standard (10 x 7.5in). This does not affect previewing an existing deck, which is always shown at the size the file declares.                                                 |
 | `markcopy.pdf.pageSize`        | `Letter` \| `A4` \| `Legal`                                                | `Letter`  | Paper size for **Save as PDF**.                                                                                                                                                                                                                                           |
 | `markcopy.pdf.browserPath`     | string                                                                     | `""`      | Path to the Chrome, Edge, or Chromium executable used to render the PDF. Empty detects one automatically.                                                                                                                                                                 |
 | `markcopy.tex.compile`         | `auto` \| `ask` \| `off`                                                   | `auto`    | When a LaTeX preview opens. `auto` compiles right away and again on every save; `ask` offers a button instead of starting on its own (good for a thesis-scale document); `off` never compiles.                                                                            |
@@ -220,7 +231,23 @@ Mermaid diagrams and equations have no Word equivalent, so they are rasterized. 
 
 **Alt text is the one thing MarkCopy cannot supply for you.** `![](chart.png)` with an empty alt is the norm in Markdown, and it is exactly what makes a document stop being audible. So the export counts them and tells you: _"exported report.docx, but 3 images without alt text (a screen reader will skip past them)."_ Fix them in the Markdown and export again.
 
-Everything is written in memory and needs nothing installed: no Word, no Pandoc, no browser. The same export works from the CSV, TSV, and Excel previews, where the sheet becomes a Word table with its header row marked.
+Everything is written in memory and needs nothing installed: no Word, no Pandoc, no browser. The same export works from the CSV, TSV, Excel, and PowerPoint previews, where a sheet becomes a Word table with its header row marked and a deck becomes one section per slide.
+
+## Save as PowerPoint
+
+**MarkCopy: Save as PowerPoint** (or **Save as PowerPoint…** in the preview's right-click menu) asks where to save, writes a `.pptx`, and opens it.
+
+Like [Save as Word](#save-as-word) and unlike Save as PDF, what lands is a real, editable deck rather than a picture of one:
+
+- **Headings become slide titles, and slides split where they should.** A thematic break (`---`) or an `<h1>` / `<h2>` starts a new slide, and a heading right after either becomes that slide's title. Content before the first boundary is its own slide, a title slide when it is only a heading. A deck written for a tool like Marp splits the same way, since its headings already sit one to a section.
+- **Lists are bulleted paragraphs at their real indent levels**, not a picture of bullets.
+- **Tables become PowerPoint tables**, with a marked header row.
+- **Images carry their alt text**, as the shape's own description.
+- **Links stay clickable.**
+
+Mermaid diagrams and equations have no PowerPoint equivalent any more than they have a Word one, so they are rasterized the same way. **Overflow is not repaginated**: a slide whose content runs past the bottom edge is left overflowing rather than silently split into two, since splitting one would scramble a deliberate build. The export counts what is worth knowing (images with no alt text, images it could not embed, slides that likely ran over) and reports it after saving, the same way Save as Word reports missing alt text.
+
+Everything is written in memory and needs nothing installed: no PowerPoint, no Pandoc, no browser. The same export works from the Markdown, CSV, TSV, and Excel previews too, not just the PowerPoint preview. `markcopy.pptx.slideSize` sets the slide size (`16:9` default, or `4:3`); it has no effect on previewing an existing deck, which always shows at the size the file declares.
 
 ## PDF preview
 
@@ -290,6 +317,23 @@ With none of those found, the preview says so and names these same options rathe
 The preview recompiles whenever you save the document, or a `.bib`, `.sty`, `.cls`, or `.tikz` file beside it, since a thesis is usually a root file that pulls in chapters and a bibliography. To recompile without saving, use the floating **Recompile** button, the refresh icon in the editor title bar, **MarkCopy: Recompile LaTeX** from the Command Palette, or **Recompile LaTeX** in the right-click menu. For a project where the file you are editing is a chapter rather than the document to compile, either add a `% !TEX root = ../main.tex` comment near the top of the chapter, or set `markcopy.tex.rootFile`; either way MarkCopy compiles the root file and still shows its PDF while you edit the chapter.
 
 Your source and its build files are never touched by any of this: MarkCopy compiles into a temporary folder of its own and deletes it when you close the preview.
+
+## PowerPoint preview
+
+MarkCopy registers as the editor for `.pptx` and `.pptm` files, so opening one renders the whole deck inline instead of leaving it as binary. The whole deck, deliberately, not one slide at a time behind a tab strip the way the [Excel preview](#features) shows one sheet: a deck is meant to be read end to end, and rendering it as one scrollable column of slides is what lets **Copy as Rich Text**, **Save as PDF**, and **Save as Word** take the entire deck in one go rather than whichever slide happened to be on screen.
+
+Slides keep their real layout, positioned the way the file positions them, but the markup underneath is semantic and in reading order rather than z-order, so what you paste out is a readable document and not a jumble:
+
+- **A title placeholder becomes a heading**, body text becomes paragraphs and lists.
+- **A slide table becomes a real table.**
+- **A picture keeps its alt text.**
+- **Speaker notes appear under each slide**, on by default (`markcopy.pptx.showNotes`); they come along whenever you copy the slide.
+
+Every slide is its own right-click block, so **Copy Rich Text**, **Copy as Markdown**, and **Copy as PNG** all work per slide exactly as they do for a block in the Markdown preview, and a table on a slide gets the same full table menu (CSV, TSV, PNG) a Markdown table does.
+
+**Charts, SmartArt, OLE objects, and embedded media are drawn as labelled placeholders** naming what they are, never as blanks. Pretending to render a chart would be worse than admitting there is one. Transitions and animations are not rendered either; a preview is a still document, not a player.
+
+The preview is **read-only by design**, and, like the Excel preview, needs nothing installed to show a deck: no PowerPoint, no Pandoc, no browser. `markcopy.pptx.maxSlides` caps how many slides render before the preview stops and says how many it hid. See [Settings](#settings) for `markcopy.pptx.*`.
 
 ## Documentation
 

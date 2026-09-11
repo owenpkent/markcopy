@@ -150,10 +150,13 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 | Copy Whole Document | `text/html` + `text/plain` | Word, Outlook, Gmail, Google Docs |
 | Save as PDF…        | A `.pdf` file              | Wherever you save it, then opens  |
 | Save as Word…       | A `.docx` file             | Wherever you save it, then opens  |
+| Save as PowerPoint… | A `.pptx` file             | Wherever you save it, then opens  |
 
-All three are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**, **MarkCopy: Save as PDF**, and **MarkCopy: Save as Word Document**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
+All four are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**, **MarkCopy: Save as PDF**, **MarkCopy: Save as Word Document**, and **MarkCopy: Save as PowerPoint**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
 
 **Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and every image carries its alt text. Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](../README.md#save-as-word).
+
+**Save as PowerPoint writes a `.pptx` in memory and needs nothing installed either.** Like Save as Word, it ships structure rather than a picture: headings become slide titles (a thematic break, `---`, also starts a new slide), lists are real bulleted paragraphs at their indent level, a table's header row is marked, images carry their alt text as the shape description, and links stay clickable. It differs from the docx export in one respect a page never has to worry about: a slide is a fixed canvas, not a flowing page, so content that overflows one is left overflowing rather than silently repaginated into a second slide, which would scramble a deliberate build. The export reports missing alt text the same way Save as Word does, plus images it could not embed and slides that likely ran past the bottom edge. See [Save as PowerPoint](../README.md#save-as-powerpoint).
 
 ## Notes
 
@@ -177,6 +180,18 @@ Three differences are worth stating explicitly.
 **Copy as Markdown** deserves a note of its own, because a sheet needs reshaping that a Markdown table does not. A GFM table cannot be headerless, and a sheet is one once its column letters are stripped: Turndown's table rule sees no header, declines the table, and returns the raw HTML. So `prepareTableForMarkdown` (`src/webview/table.ts`) promotes the first body row to the header and pads it out to the widest row, which matters when row 1 is a merged title spanning the sheet.
 
 There is no cell editing, so no equivalent of the CSV grid's writeback: the document behind a sheet is a binary workbook, and MarkCopy never writes to it.
+
+## Slides in the PowerPoint preview (.pptx / .pptm)
+
+A slide is a right-click block, so it offers exactly the same rows as [any other block](#any-other-block-paragraph-heading-list-blockquote-with-no-text-selected) above: **Copy Block** (`text/html` + `text/plain`) at the top level, and **Copy as** > **Markdown** and **PNG**. A table on a slide offers the full [table](#table) menu instead of the plain-block one: **Copy Table** at the top level, and **Copy as** > **Markdown**, **CSV**, **TSV**, and **PNG**, exactly as a Markdown table does.
+
+Three differences are worth stating explicitly, and they run the opposite way from the spreadsheet preview above:
+
+- **The whole deck is one copy surface, not slide-by-slide.** Each slide is its own block and carries its own menu, but there is no tab strip to switch between: the deck renders as one scrollable column, so Copy Whole Document, Save as PDF, Save as Word, and Save as PowerPoint all take every rendered slide in one go. A spreadsheet's equivalents cover the active sheet only; a deck's cover the whole thing, because that is the point of previewing one at all.
+- **Speaker notes come along.** With `markcopy.pptx.showNotes` on (the default), each slide's notes render as part of that slide's block, so copying a slide copies its notes with it.
+- **Charts, SmartArt, OLE objects, and embedded media copy as their placeholder**, since that is what is actually on the slide: a labelled box naming what the object is, never a blank. There is no route to the chart or the video itself, since the preview never rendered one.
+
+`markcopy.pptx.maxSlides` caps what there is to copy, the same way `markcopy.csv.maxRows` caps a grid: a deck past the cap has slides the preview never rendered, and Copy Whole Document and the three exports see only what rendered. There is no cell editing and no writeback, as with the spreadsheet preview: the document behind a deck is a binary presentation, and MarkCopy never writes to it (the export commands write a new file, never the one you opened).
 
 ## STL models (.stl)
 
