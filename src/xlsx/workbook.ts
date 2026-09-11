@@ -1,7 +1,14 @@
 // Reading a workbook's structure: which sheets it has, where their parts live,
 // which date system it uses, and its shared string table.
-import { attr, boolAttr, walkXml } from './xml';
-import { partForRels, partText, resolveTarget, WorkbookError, type Parts } from './zip';
+import { attr, boolAttr, walkXml } from '../ooxml/xml';
+import { readRels, relsPathFor, type Rels } from '../ooxml/rels';
+import {
+  OpcError as WorkbookError,
+  partForRels,
+  partText,
+  resolveTarget,
+  type Parts,
+} from '../ooxml/zip';
 
 export interface SheetRef {
   name: string;
@@ -26,9 +33,6 @@ export interface Workbook {
   sharedStrings: string[];
 }
 
-/** Relationship id -> target, resolved to a zip path. */
-export type Rels = Map<string, string>;
-
 export function readWorkbook(parts: Parts): Workbook {
   const workbookPath = findWorkbookPart(parts);
   const workbookXml = partText(parts, workbookPath);
@@ -36,8 +40,7 @@ export function readWorkbook(parts: Parts): Workbook {
     throw new WorkbookError('this workbook has no workbook part.');
   }
 
-  const relsPath = workbookPath.replace(/([^/]+)$/, '_rels/$1.rels');
-  const rels = readRels(parts, relsPath);
+  const rels = readRels(parts, relsPathFor(workbookPath));
 
   const sheets: SheetRef[] = [];
   let date1904 = false;
@@ -115,36 +118,6 @@ function findWorkbookPart(parts: Parts): string {
     return 'xl/workbook.xml';
   }
   throw new WorkbookError('this workbook has no workbook part.');
-}
-
-function readRels(parts: Parts, relsPath: string): Rels {
-  const out: Rels = new Map();
-  const xml = partText(parts, relsPath);
-  if (xml === undefined) {
-    return out;
-  }
-  walkXml(xml, {
-    open(name, attrs) {
-      if (name !== 'Relationship') {
-        return;
-      }
-      const id = attr(attrs, 'Id');
-      const target = attr(attrs, 'Target');
-      if (!id || !target) {
-        return;
-      }
-      // An external relationship points outside the package: another workbook on
-      // a share, a remote image, a DDE or OLE link. Following one would turn
-      // opening a file into a network fetch, which on Windows can leak
-      // credentials to whatever host it names. The preview reads the package and
-      // nothing else.
-      if (attr(attrs, 'TargetMode') === 'External') {
-        return;
-      }
-      out.set(id, resolveTarget(partForRels(relsPath), target));
-    },
-  });
-  return out;
 }
 
 /**
@@ -226,4 +199,4 @@ function relTypeOf(target: string): string {
   return '/' + file.replace(/\.xml$/i, '');
 }
 
-export { readRels };
+export type { Rels };

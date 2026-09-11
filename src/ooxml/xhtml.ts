@@ -3,7 +3,7 @@
 // The builder needs a tree, not a stream: a table's grid width is only known
 // once its widest row has been seen, and a run's formatting is the union of
 // every ancestor between it and its block. Building the tree is safe here for
-// the same reason it is not in the xlsx reader (src/xlsx/xml.ts): what arrives
+// the same reason it is not in the shared reader (src/ooxml/xml.ts): what arrives
 // is one rendered preview, capped by what a person is willing to read, not an
 // arbitrarily large sheet.
 //
@@ -17,36 +17,36 @@
 // behavior: saxes resolves the five predefined XML entities and expands nothing
 // from a DTD, which is what keeps billion-laughs and XXE inert. A second SAX
 // wrapper here would quietly drop that property.
-import { walkXml } from '../xlsx/xml';
-import { stripInvalidXml } from './ooxml';
+import { walkXml } from './xml';
+import { stripInvalidXml } from './write';
 
-export interface DocxText {
+export interface XhtmlText {
   kind: 'text';
   text: string;
 }
 
-export interface DocxElement {
+export interface XhtmlElement {
   kind: 'element';
   /** Lower-cased local name; XHTML carries no prefixes worth keeping. */
   name: string;
   attrs: Record<string, string>;
-  children: DocxNode[];
+  children: XhtmlNode[];
 }
 
-export type DocxNode = DocxElement | DocxText;
+export type XhtmlNode = XhtmlElement | XhtmlText;
 
-export function isElement(node: DocxNode): node is DocxElement {
+export function isElement(node: XhtmlNode): node is XhtmlElement {
   return node.kind === 'element';
 }
 
 /** Parse one well-formed XML element into a tree. Throws on malformed input. */
-export function parseXhtml(xhtml: string): DocxElement {
-  const root: DocxElement = { kind: 'element', name: '#root', attrs: {}, children: [] };
-  const stack: DocxElement[] = [root];
+export function parseXhtml(xhtml: string): XhtmlElement {
+  const root: XhtmlElement = { kind: 'element', name: '#root', attrs: {}, children: [] };
+  const stack: XhtmlElement[] = [root];
 
   walkXml(stripInvalidXml(xhtml), {
     open(name, attrs) {
-      const el: DocxElement = {
+      const el: XhtmlElement = {
         kind: 'element',
         name: name.toLowerCase(),
         attrs: lowerKeys(attrs),
@@ -84,7 +84,7 @@ function lowerKeys(attrs: Record<string, string>): Record<string, string> {
 }
 
 /** The concatenated text of a subtree, with no formatting applied. */
-export function textOf(node: DocxNode): string {
+export function textOf(node: XhtmlNode): string {
   if (node.kind === 'text') {
     return node.text;
   }
@@ -92,7 +92,7 @@ export function textOf(node: DocxNode): string {
 }
 
 /** Whether `el` carries `cls` in its class attribute. */
-export function hasClass(el: DocxElement, cls: string): boolean {
+export function hasClass(el: XhtmlElement, cls: string): boolean {
   const value = el.attrs.class;
   return value === undefined ? false : value.split(/\s+/).includes(cls);
 }

@@ -1,6 +1,7 @@
-// Unpacking the OPC (zip) container a workbook arrives in.
+// Unpacking the OPC (zip) container an Office document arrives in.
 //
-// An .xlsx is a zip of XML parts. That makes the file a hostile-input surface
+// An .xlsx, .docx and .pptx are all the same thing: a zip of XML parts. That
+// makes any of them a hostile-input surface
 // before a single tag is parsed: a few hundred kilobytes on disk can inflate to
 // gigabytes in memory, and the caller's only defence is to refuse early. Limits
 // are therefore applied in two layers: against the *declared* uncompressed size
@@ -36,23 +37,40 @@ export const DEFAULT_LIMITS: ZipLimits = {
   maxTotalBytes: 256 * 1024 * 1024,
 };
 
-export class WorkbookError extends Error {}
+/**
+ * A package we will not or cannot read, with a message written to be shown.
+ *
+ * One class for every format on purpose: each feature re-exports it under the
+ * noun its own callers use (`WorkbookError`, `DeckError`), so an `instanceof`
+ * check at the top of a preview keeps reading the way it always did. The cost
+ * is that the two names are the same class, which nothing needs to tell apart.
+ */
+export class OpcError extends Error {}
 
-/** The parts of a workbook, keyed by their zip path (`xl/workbook.xml`). */
+export interface OpenOptions {
+  limits?: ZipLimits;
+  /** How the refusal messages name the document: `workbook`, `presentation`. */
+  noun?: string;
+  /** Message for a file that is not a zip at all, naming the legacy format. */
+  notZip?: string;
+}
+
+/** The parts of a package, keyed by their zip path (`xl/workbook.xml`). */
 export type Parts = Map<string, Uint8Array>;
 
-export function openZip(bytes: Uint8Array, limits: ZipLimits = DEFAULT_LIMITS): Parts {
+export function openZip(bytes: Uint8Array, options: OpenOptions = {}): Parts {
+  const limits = options.limits ?? DEFAULT_LIMITS;
+  const noun = options.noun ?? 'file';
   if (bytes.length > limits.maxFileBytes) {
-    throw new WorkbookError(
-      `this workbook is ${mb(bytes.length)} MB, larger than the ${mb(limits.maxFileBytes)} MB preview limit.`,
+    throw new OpcError(
+      `this ${noun} is ${mb(bytes.length)} MB, larger than the ${mb(limits.maxFileBytes)} MB preview limit.`,
     );
   }
-  // Not a zip at all: .xls (BIFF/OLE2), .xlsb, or something misnamed. Say so,
-  // rather than letting the inflate fail with something unreadable.
+  // Not a zip at all: the pre-2007 OLE2 formats (.xls, .ppt), a binary variant
+  // (.xlsb), or something misnamed. Say so, rather than letting the inflate fail
+  // with something unreadable.
   if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
-    throw new WorkbookError(
-      'this file is not an .xlsx workbook (the older .xls format is not supported).',
-    );
+    throw new OpcError(options.notZip ?? `this file is not an Office ${noun}.`);
   }
 
   // Refuse on what the archive *declares* before anything is inflated. fflate
@@ -74,26 +92,26 @@ export function openZip(bytes: Uint8Array, limits: ZipLimits = DEFAULT_LIMITS): 
       filter(file) {
         entries++;
         if (entries > limits.maxEntries) {
-          throw new WorkbookError(
-            `this workbook has more than ${limits.maxEntries} parts, more than the preview reads.`,
+          throw new OpcError(
+            `this ${noun} has more than ${limits.maxEntries} parts, more than the preview reads.`,
           );
         }
         if (file.originalSize > limits.maxEntryBytes) {
-          throw new WorkbookError(`part "${file.name}" is too large to preview.`);
+          throw new OpcError(`part "${file.name}" is too large to preview.`);
         }
         declared += file.originalSize;
         if (declared > limits.maxTotalBytes) {
-          throw new WorkbookError('this workbook expands to more data than the preview can hold.');
+          throw new OpcError(`this ${noun} expands to more data than the preview can hold.`);
         }
         return true;
       },
     });
   } catch (err) {
     // A limit refusal is the answer, not an unpacking failure to be reworded.
-    if (err instanceof WorkbookError) {
+    if (err instanceof OpcError) {
       throw err;
     }
-    throw new WorkbookError(`this workbook could not be unpacked (${String(err)}).`);
+    throw new OpcError(`this ${noun} could not be unpacked (${String(err)}).`);
   }
 
   const names = Object.keys(raw);
@@ -103,11 +121,11 @@ export function openZip(bytes: Uint8Array, limits: ZipLimits = DEFAULT_LIMITS): 
   for (const name of names) {
     const data = raw[name];
     if (data.length > limits.maxEntryBytes) {
-      throw new WorkbookError(`part "${name}" is too large to preview.`);
+      throw new OpcError(`part "${name}" is too large to preview.`);
     }
     total += data.length;
     if (total > limits.maxTotalBytes) {
-      throw new WorkbookError('this workbook expands to more data than the preview can hold.');
+      throw new OpcError(`this ${noun} expands to more data than the preview can hold.`);
     }
     // Zip paths are '/'-separated by spec, but writers in the wild emit '\'.
     parts.set(normalizePath(name), data);

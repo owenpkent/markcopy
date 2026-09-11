@@ -16,7 +16,7 @@
 // unit-testable.
 import { buildDocument, type DocxReport } from './docx/build';
 import { buildPackage } from './docx/package';
-import { parseXhtml } from './docx/parse';
+import { parseXhtml } from './ooxml/xhtml';
 
 export type { DocxReport } from './docx/build';
 
