@@ -1,8 +1,8 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document action. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document actions. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
 
-The top level is short: it names whatever you clicked ("Copy Email Address", "Copy Link", "Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Link > Selection > Code > Table > Diagram > Equation > Block, so a selection inside a table still gets "Copy Selection" at the top, not "Copy Table", and a link takes the top from both: right-clicking one names a single element, where a selection names a range that may not have been aimed at anything.
+The top level is short: it names whatever you clicked ("Copy Email Address", "Copy Link", "Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Link > Selection > Code > a grid cell whose own text is a recognized email address or URL > Table > Diagram > Equation > Block. An ordinary grid cell, with no recognized address of its own, remains behind "Copy Table" and is reachable under **Copy as** > **Cell Text**. Thus a selection inside a table still gets "Copy Selection" at the top, not "Copy Table", and a link takes the top from both: right-clicking one names a single element, where a selection names a range that may not have been aimed at anything.
 
 ## When you right-click a...
 
@@ -68,7 +68,7 @@ Copy as:
 | TSV      | `text/plain` (tab-separated)             | Excel, Google Sheets (as real cells)   |
 | PNG      | `image/png`                              | Slides, chat, anywhere an image works  |
 
-This applies to the CSV/TSV grid too: a previewed `.csv` renders as a real table, so it offers exactly the same actions. Its row-number gutter is viewer chrome (marked `data-mc-ignore`) and is left out of every format, rich text and PNG included, so what you copy is the data in the file. Grid cell text is copied verbatim, so leading and trailing spaces inside a field survive; a Markdown table's cell whitespace is incidental to rendering and is still trimmed.
+This applies to the CSV/TSV/`.tab` grid too: a previewed `.csv`, `.tsv`, or `.tab` renders as a real table, so it offers exactly the same actions. Its row-number gutter is viewer chrome (marked `data-mc-ignore`) and is left out of every format, rich text and PNG included, so what you copy is the data in the file. Grid cell text is copied verbatim, so leading and trailing spaces inside a field survive; a Markdown table's cell whitespace is incidental to rendering and is still trimmed.
 
 A single cell is reachable too. **Copy as** carries a `CELL` section holding **Cell Text**, the clicked cell's own text; and when that text contains an email address or a URL, the menu leads with **Copy Email Address** / **Copy Link** for it instead of **Copy Table**. Nothing linkifies a grid, so an address in a `.csv` or a spreadsheet is plain characters with no link to right-click, and this is the only route to it that isn't a careful drag across part of a cell. An ordinary cell leaves **Copy Table** at the top where it has always been.
 
@@ -153,7 +153,7 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 
 All three are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**, **MarkCopy: Save as PDF**, and **MarkCopy: Save as Word Document**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
 
-**Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and every image carries its alt text. Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](../README.md#save-as-word).
+**Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and images retain their supplied alt text (MarkCopy cannot invent alt text an image never had). Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](../README.md#save-as-word).
 
 ## Notes
 
@@ -172,7 +172,7 @@ Three differences are worth stating explicitly.
 
 - **The header row is chrome, not data.** A CSV grid's header is the file's own first row, so it copies. A sheet's header is the column letters A, B, C, which label the grid rather than being part of it, so the whole row is marked `data-mc-ignore` and drops out of every copy. What you copy is the cells, starting at the sheet's first row.
 - **Cells copy as displayed, not as stored.** A date copies as `2023-03-15`, not as the serial `45000`, and a percentage as `15.3%`, not `0.153`. That is what the reader is looking at, and what a spreadsheet or document receiving the paste will interpret correctly.
-- **Copy Whole Document and Save as PDF cover the active sheet only.** Both serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
+- **Copy Whole Document, Save as PDF, and Save as Word cover the active sheet only.** All three serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
 
 **Copy as Markdown** deserves a note of its own, because a sheet needs reshaping that a Markdown table does not. A GFM table cannot be headerless, and a sheet is one once its column letters are stripped: Turndown's table rule sees no header, declines the table, and returns the raw HTML. So `prepareTableForMarkdown` (`src/webview/table.ts`) promotes the first body row to the header and pads it out to the widest row, which matters when row 1 is a merged title spanning the sheet.
 
@@ -182,7 +182,7 @@ There is no cell editing, so no equivalent of the CSV grid's writeback: the docu
 
 The STL viewer has **no copy actions**, and its absence from this matrix is deliberate rather than an omission. Every row above copies something the reader can identify and a receiving app can use: text, a table of cells, an image of a diagram. An STL is an unstructured list of triangles with no text, no structure, and no author-intended visual, so there is no format to offer that is not a screenshot of an arbitrary camera angle. Right-clicking in the viewer does nothing; its toolbar is view controls only.
 
-**Copy Whole Document as Rich Text** and **Save as PDF** do not apply either, for the same reason: both serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
+**Copy Whole Document as Rich Text**, **Save as PDF**, and **Save as Word** do not apply either, for the same reason: all three serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
 
 ## Video (.mov / .mp4 / .m4v)
 
@@ -202,4 +202,4 @@ Notes:
 - **Nudge with `,` and `.`** (roughly a frame at 30fps) to land on the frame you want before grabbing it.
 - **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
 
-**Copy Whole Document as Rich Text** and **Save as PDF** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
+**Copy Whole Document as Rich Text**, **Save as PDF**, and **Save as Word** do not apply here either: there is no HTML document to serialize, only a `<video>` element.

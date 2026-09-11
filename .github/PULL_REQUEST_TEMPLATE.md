@@ -16,9 +16,12 @@
 
 ## Checklist
 
-- [ ] `npm run check-types` passes.
-- [ ] `npm run compile` builds both bundles.
-- [ ] I tested in the Extension Development Host (F5) with `sample.md`.
+- [ ] `npm run lint` passes.
+- [ ] `npm run format:check` passes.
+- [ ] `npm test` passes.
+- [ ] `npm run compile` builds the extension and webview bundles.
+- [ ] `npm run test:integration` passes when the extension host or manifest changed.
+- [ ] For preview behavior changes, I tested in the Extension Development Host (F5) with the relevant sample files.
 - [ ] If I added or changed a copy action, I updated [docs/COPY-MATRIX.md](../docs/COPY-MATRIX.md).
 - [ ] If behavior changed, I updated the README and [CHANGELOG.md](../CHANGELOG.md).
 - [ ] No em dashes in text or comments.
