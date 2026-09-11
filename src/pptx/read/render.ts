@@ -48,15 +48,35 @@ export function renderDeck(sections: string[], truncationNoteHtml: string): stri
   return `<div class="mc-pptx-deck">${sections.join('')}${truncationNoteHtml}</div>`;
 }
 
-/** Same voice as the xlsx row-cap note in src/xlsx/render.ts. */
-export function truncationNote(rendered: number, total: number): string {
-  if (rendered >= total) {
-    return '';
+/**
+ * Same voice as the xlsx row-cap note in src/xlsx/render.ts.
+ *
+ * `cappedAt` and `rendered` are tracked separately on purpose: `cappedAt` is
+ * how many slides `maxSlides` let through (`Math.min(maxSlides, total)`),
+ * while `rendered` is how many of those actually had a readable part.
+ * Conflating them used to blame every gap on the setting -- a deck missing a
+ * slide part reported "raise markcopy.pptx.maxSlides", which does nothing for
+ * a missing part, said "first N" even when the missing slide was in the
+ * middle, and for an entirely unreadable deck said "showing the first 0 of N
+ * slides" instead of naming the actual problem.
+ */
+export function truncationNote(rendered: number, total: number, cappedAt: number): string {
+  const notes: string[] = [];
+  if (cappedAt < total) {
+    notes.push(
+      `Showing the first ${cappedAt} of ${total} slides. ` +
+        `Raise <code>markcopy.pptx.maxSlides</code> to show more.`,
+    );
   }
-  return (
-    `<p class="mc-pptx-note">Showing the first ${rendered} of ${total} slides. ` +
-    `Raise <code>markcopy.pptx.maxSlides</code> to show more.</p>`
-  );
+  const missing = cappedAt - rendered;
+  if (missing > 0) {
+    notes.push(
+      missing === 1
+        ? `1 slide could not be read and was skipped.`
+        : `${missing} slides could not be read and were skipped.`,
+    );
+  }
+  return notes.length === 0 ? '' : `<p class="mc-pptx-note">${notes.join(' ')}</p>`;
 }
 
 function renderNotes(notes: string[] | undefined): string {
@@ -182,13 +202,20 @@ function renderTableRow(
         return '';
       }
       const tag = isHeader ? 'th' : 'td';
-      const { html, align } = cellHtml(cell, size);
+      const { html, align, fontSize } = cellHtml(cell, size);
       const attrs: string[] = [];
       if (isHeader) {
         attrs.push(' scope="col"');
       }
+      const cellStyle: string[] = [];
       if (align !== undefined) {
-        attrs.push(` style="text-align:${align}"`);
+        cellStyle.push(`text-align:${align}`);
+      }
+      if (fontSize !== undefined) {
+        cellStyle.push(`font-size:${fontSize}cqw`);
+      }
+      if (cellStyle.length > 0) {
+        attrs.push(` style="${cellStyle.join(';')}"`);
       }
       if (cell.colspan > 1) {
         attrs.push(` colspan="${clampInt(cell.colspan, 1, 1000)}"`);
@@ -202,18 +229,28 @@ function renderTableRow(
   return `<tr>${cellsHtml}</tr>`;
 }
 
-function cellHtml(cell: TableCell, size: SlideSize): { html: string; align?: string } {
+function cellHtml(
+  cell: TableCell,
+  size: SlideSize,
+): { html: string; align?: string; fontSize?: string } {
   const base = firstDefinedSize(cell.paragraphs);
   const slideWidthPt = slideWidthPointsOf(size);
   const blocks = paragraphsToBlocks(cell.paragraphs, base, slideWidthPt);
+  // The cell's base size, same reasoning as baseSizeStyle for a title/body
+  // shape: runHtml suppresses a run's own inline font-size whenever it agrees
+  // with `base`, on the assumption that whatever calls it will put that size
+  // on the cell (or a wrapper) itself. Nothing did, so a cell whose runs all
+  // resolved to the same declared size rendered at the table's stylesheet
+  // default instead of that size.
+  const fontSize = base === undefined ? undefined : fmtNum(cqwFontSize(base, slideWidthPt));
   // A <td>/<th> is already the block container, so the common case -- one
   // plain paragraph -- needs no <p> wrapper inside it (its alignment moves to
   // the cell itself instead). A bulleted list, or a cell with more than one
   // paragraph, still gets real block markup.
   if (blocks.length === 1 && blocks[0].tag === 'p') {
-    return { html: blocks[0].html, align: blocks[0].align };
+    return { html: blocks[0].html, align: blocks[0].align, fontSize };
   }
-  return { html: blocks.map(wrapBlock).join('') };
+  return { html: blocks.map(wrapBlock).join(''), fontSize };
 }
 
 /**

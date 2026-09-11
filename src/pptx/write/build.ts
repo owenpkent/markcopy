@@ -197,7 +197,12 @@ function segmentSlides(root: XhtmlElement): Segment[] {
       segments.length === 0 &&
       content.length === 1 &&
       isElement(content[0]) &&
-      /^h[1-6]$/.test(content[0].name)
+      // Only h1/h2, matching splitOnBoundary's own idea of a boundary heading
+      // below: extractLeadingTitle (h1/h2 only) would never hand an h3-h6 the
+      // title-slide treatment, so this check must not either, or a lone h3
+      // opening the document gets the full-bleed centered title no ordinary
+      // h3 anywhere else in the deck ever gets.
+      /^h[12]$/.test(content[0].name)
     ) {
       segments.push({ title: textOf(content[0]).trim(), body: [], kind: 'title' });
       continue;
@@ -258,7 +263,15 @@ interface ParaRecord {
 
 type ShapeItem =
   | { kind: 'text'; paragraphs: ParaRecord[] }
-  | { kind: 'image'; src: string; decoded: DecodedImage; alt: string; sizePx: [number, number] }
+  | {
+      kind: 'image';
+      src: string;
+      decoded: DecodedImage;
+      alt: string;
+      sizePx: [number, number];
+      /** The rId of a hyperlink relationship this picture should be clickable through. */
+      hlink?: string;
+    }
   | { kind: 'table'; rows: TableRow[] };
 
 interface RunFmt {
@@ -429,7 +442,9 @@ class Builder {
           overflowed = true;
         }
         const relId = this.addImageRel(item.src, item.decoded);
-        parts.push(pictureShapeXml(this.nextId(), relId, item.alt, MARGIN_X, y, cx, cy));
+        parts.push(
+          pictureShapeXml(this.nextId(), relId, item.alt, MARGIN_X, y, cx, cy, item.hlink),
+        );
         y += cy + GAP_Y;
       } else {
         const { xml, cy } = this.tableShapeXml(this.nextId(), item.rows, MARGIN_X, y);
@@ -575,7 +590,12 @@ class Builder {
       case 'blockquote':
         this.buildBody(el.children, {
           ...ctx,
-          lvl: (ctx.lvl ?? 0) + 1,
+          // Every list path clamps to MAX_LIST_LEVEL before it reaches <a:pPr
+          // lvl="...">; a nested blockquote (or one inside a deep list item)
+          // has to clamp the same way, or ten of them in a row mints lvl="10",
+          // which is outside ST_TextIndentLevelType's 0..8 and is exactly the
+          // shape of error that makes PowerPoint refuse to open the file.
+          lvl: Math.min((ctx.lvl ?? 0) + 1, MAX_LIST_LEVEL),
           italic: true,
           bullet: 'none',
           listMarker: undefined,
@@ -659,13 +679,11 @@ class Builder {
 
   private emitImage(node: XhtmlElement, ctx: BodyCtx): void {
     void ctx;
-    const img =
-      node.name === 'img'
-        ? node
-        : node.children.find((c): c is XhtmlElement => isElement(c) && c.name === 'img');
-    if (!img) {
+    const found = blockImage(node);
+    if (!found) {
       return;
     }
+    const { img, href } = found;
     const alt = (img.attrs.alt ?? '').trim();
     const src = img.attrs.src ?? '';
     this.report.images++;
@@ -688,7 +706,19 @@ class Builder {
       this.report.imagesMissingAlt++;
     }
     this.flushText();
-    this.shapeQueue.push({ kind: 'image', src, decoded, alt, sizePx: displaySizePx(img, decoded) });
+    // The hyperlink relationship is only worth minting once the picture that
+    // will carry it is actually about to be queued -- see addHyperlinkRel's
+    // other caller in inlineElement for why an unreferenced rel is a problem
+    // PowerPoint's opener notices.
+    const hlink = href ? this.addHyperlinkRel(href) : undefined;
+    this.shapeQueue.push({
+      kind: 'image',
+      src,
+      decoded,
+      alt,
+      sizePx: displaySizePx(img, decoded),
+      hlink,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -717,7 +747,7 @@ class Builder {
 
     const carry = new Map<number, { left: number; span: number }>();
     const trXml: string[] = [];
-    for (const row of rows) {
+    rows.forEach((row, rowIndex) => {
       const cellsXml: string[] = [];
       const queue = [...row.cells];
       let col = 0;
@@ -725,8 +755,13 @@ class Builder {
         const carried = carry.get(col);
         if (carried) {
           for (let i = 0; i < carried.span; i++) {
+            // A vMerge continuation cell covers whatever the merged cell
+            // would have covered, header shading included -- hardcoding
+            // `false` here left a rowspan inside a <thead> losing its fill on
+            // every row after the first, so this has to carry the same
+            // row.header the missing-cell branch below it already does.
             cellsXml.push(
-              this.tcXml(undefined, false, i === 0 ? ' vMerge="1"' : ' hMerge="1" vMerge="1"'),
+              this.tcXml(undefined, row.header, i === 0 ? ' vMerge="1"' : ' hMerge="1" vMerge="1"'),
             );
           }
           if (--carried.left === 0) {
@@ -742,12 +777,17 @@ class Builder {
           continue;
         }
         const span = Math.max(1, Math.min(cell.colspan, cols - col));
-        if (cell.rowspan > 1) {
-          carry.set(col, { left: cell.rowspan - 1, span });
+        // colspan is clamped to the columns actually remaining; rowspan has to
+        // be clamped the same way to the rows actually remaining, or a
+        // rowspan larger than what is left below produces a <a:tc rowSpan="n">
+        // with too few vMerge continuation cells to match -- internally
+        // inconsistent merge geometry PowerPoint refuses to open.
+        const rowSpan = Math.max(1, Math.min(cell.rowspan, rows.length - rowIndex));
+        if (rowSpan > 1) {
+          carry.set(col, { left: rowSpan - 1, span });
         }
         const attrs =
-          (span > 1 ? ` gridSpan="${span}"` : '') +
-          (cell.rowspan > 1 ? ` rowSpan="${cell.rowspan}"` : '');
+          (span > 1 ? ` gridSpan="${span}"` : '') + (rowSpan > 1 ? ` rowSpan="${rowSpan}"` : '');
         cellsXml.push(this.tcXml(cell, row.header, attrs));
         for (let i = 1; i < span; i++) {
           cellsXml.push(this.tcXml(undefined, row.header, ' hMerge="1"'));
@@ -755,7 +795,7 @@ class Builder {
         col += span;
       }
       trXml.push(`<a:tr h="${ROW_H}">${cellsXml.join('')}</a:tr>`);
-    }
+    });
 
     const cy = ROW_H * rows.length;
     const gridCols = Array.from({ length: cols }, () => `<a:gridCol w="${colWidth}"/>`).join('');
@@ -854,6 +894,17 @@ class Builder {
           // nothing this machine's link would still mean on another one. The
           // text survives; only the click-through doesn't.
           return this.runs(el.children, fmt);
+        }
+        // Convert the children before minting a relationship for them: an
+        // anchor whose content collapses to nothing (an empty <a>, one
+        // wrapping only whitespace) must not leave a hyperlink relationship
+        // sitting in the slide's .rels with nothing in bodyXml pointing at it
+        // -- package.ts's own header comment names that shape of orphan as a
+        // "PowerPoint found a problem with content" trigger. src/docx/build.ts's
+        // `hyperlink` runs the identical check before its own addRel.
+        const probe = this.runs(el.children, fmt);
+        if (!probe.visible) {
+          return probe;
         }
         const rId = this.addHyperlinkRel(href);
         return this.runs(el.children, { ...fmt, hlink: rId });
@@ -980,11 +1031,17 @@ function pictureShapeXml(
   y: number,
   cx: number,
   cy: number,
+  hlink?: string,
 ): string {
   const descr = escapeAttr(alt);
+  // <p:cNvPr> shares CT_NonVisualDrawingProps with a run's <a:rPr>: the click
+  // action is a child, not an attribute, and (per that same schema) has to
+  // come before the sibling nvPicPr elements are even reachable -- there is
+  // nothing after it to order against here, unlike runProps's rPr.
+  const hlinkXml = hlink ? `<a:hlinkClick r:id="${hlink}"/>` : '';
   return (
     '<p:pic>' +
-    `<p:nvPicPr><p:cNvPr id="${id}" name="Picture ${id}" descr="${descr}"/>` +
+    `<p:nvPicPr><p:cNvPr id="${id}" name="Picture ${id}" descr="${descr}">${hlinkXml}</p:cNvPr>` +
     '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>' +
     `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
     `<p:spPr><a:xfrm><a:off x="${x}" y="${clampInt(y)}"/><a:ext cx="${clampInt(cx)}" cy="${clampInt(cy)}"/></a:xfrm>` +
@@ -1084,18 +1141,46 @@ function parseListStart(value: string | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// Whether a node is a standalone (block-level) image
+// Whether a node is a standalone (block-level) image, and whether it is
+// wrapped in a link worth carrying onto the picture
 // ---------------------------------------------------------------------------
 
 function isBlockImage(node: XhtmlElement): boolean {
+  return blockImage(node) !== undefined;
+}
+
+/**
+ * The image a standalone paragraph resolves to, and the href to hang off its
+ * picture when the whole paragraph is nothing but a link around that image.
+ *
+ * `[![Chart](chart.png)](https://example.test)` serializes to
+ * `<p><a href="..."><img .../></a></p>`: the paragraph's only child is `a`,
+ * not `img`, so without unwrapping the link here isBlockImage would say no
+ * and inlineElement's own `img` case would take over instead -- and that case
+ * exists to keep a *genuinely* inline image (mixed with running text) from
+ * becoming a positioned shape that would break the line around it, so its
+ * fallback is text, not a picture. A standalone linked image has no such
+ * surrounding text to preserve, and PowerPoint has no inline flow to put a
+ * linked picture inside anyway, so it becomes its own <p:pic> instead, with
+ * the link riding on the picture itself (see pictureShapeXml's hlinkClick).
+ */
+function blockImage(node: XhtmlElement): { img: XhtmlElement; href?: string } | undefined {
   if (node.name === 'img') {
-    return true;
+    return { img: node };
+  }
+  if (node.name === 'a') {
+    const kids = node.children.filter((c) => c.kind !== 'text' || c.text.trim() !== '');
+    if (kids.length !== 1 || !isElement(kids[0]) || kids[0].name !== 'img') {
+      return undefined;
+    }
+    const href = node.attrs.href ?? '';
+    return { img: kids[0], href: HYPERLINK_SCHEME.test(href) ? href : undefined };
   }
   if (node.name === 'p') {
     const kids = node.children.filter((c) => c.kind !== 'text' || c.text.trim() !== '');
-    return kids.length === 1 && isElement(kids[0]) && kids[0].name === 'img';
+    return kids.length === 1 && isElement(kids[0]) ? blockImage(kids[0]) : undefined;
   }
-  return false;
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

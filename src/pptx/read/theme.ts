@@ -24,17 +24,41 @@ const SLOTS = [
 ];
 
 export function readTheme(xml: string | undefined): Theme {
-  const colors: Record<string, string> = {};
+  // Object.create(null) rather than {}: `slot` below is a fixed name from
+  // SLOTS, never attacker-controlled, but resolveSchemeColor indexes this
+  // same map by a name taken straight from the file, and a plain object
+  // literal would let a hostile slot name (`"constructor"`) resolve through
+  // Object.prototype instead of coming back undefined the way a real miss
+  // does. See resolveSchemeColor below for the other half of that guard.
+  const colors: Record<string, string> = Object.create(null);
   if (xml === undefined) {
     return { colors };
   }
 
+  // Only the <a:clrScheme> that sits directly under <a:themeElements> is the
+  // deck's actual colour scheme. A theme1.xml converted from .ppt or authored
+  // in LibreOffice routinely also carries one or more
+  // <a:extraClrSchemeLst><a:extraClrScheme><a:clrScheme> entries (alternate
+  // palettes PowerPoint's "Colors" gallery offers but the deck isn't using),
+  // and matching on local name alone -- as this used to -- let the last of
+  // those silently overwrite the real scheme's colours.
+  let inThemeElements = false;
   let inScheme = false;
+  let doneScheme = false;
   let slot: string | undefined;
   walkXml(xml, {
     open(name, attrs) {
+      if (name === 'themeElements') {
+        inThemeElements = true;
+        return;
+      }
       if (name === 'clrScheme') {
-        inScheme = true;
+        // Refuse to re-enter even if another themeElements-shaped wrapper
+        // somehow appeared later in the part: the first clrScheme found under
+        // themeElements is final.
+        if (inThemeElements && !doneScheme) {
+          inScheme = true;
+        }
         return;
       }
       if (!inScheme) {
@@ -64,7 +88,12 @@ export function readTheme(xml: string | undefined): Theme {
       }
     },
     close(name) {
-      if (name === 'clrScheme') {
+      if (name === 'themeElements') {
+        inThemeElements = false;
+      } else if (name === 'clrScheme') {
+        if (inScheme) {
+          doneScheme = true;
+        }
         inScheme = false;
       } else if (SLOTS.includes(name)) {
         slot = undefined;
@@ -81,7 +110,11 @@ export type ClrMap = Record<string, string>;
 // Every named slot maps to itself except the four background/text pairs,
 // which is what a <p:clrMap> declares even when a master leaves it out
 // entirely (some do; the schema treats absence as "use the identity map").
-const IDENTITY_CLR_MAP: ClrMap = {
+// Object.create(null): resolveSchemeColor indexes this by a name taken
+// straight from a <a:schemeClr val="..."> in the file, so it needs the same
+// prototype-pollution guard as theme.colors above -- a plain object literal
+// would let `val="constructor"` resolve through Object.prototype.
+const IDENTITY_CLR_MAP: ClrMap = Object.assign(Object.create(null), {
   bg1: 'lt1',
   tx1: 'dk1',
   bg2: 'lt2',
@@ -94,7 +127,7 @@ const IDENTITY_CLR_MAP: ClrMap = {
   accent6: 'accent6',
   hlink: 'hlink',
   folHlink: 'folHlink',
-};
+});
 
 /** <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2"/>, a direct child of <p:sldMaster>. */
 export function readClrMap(masterXml: string | undefined): ClrMap {
@@ -107,7 +140,14 @@ export function readClrMap(masterXml: string | undefined): ClrMap {
       if (name !== 'clrMap' || map !== undefined) {
         return;
       }
-      map = { ...IDENTITY_CLR_MAP };
+      // A plain object spread (`{ ...IDENTITY_CLR_MAP }`) would recreate the
+      // very Object.prototype this map exists to avoid, so the copy is built
+      // the same null-prototype way as the source. The cast (rather than
+      // leaving Object.create's result as `any`) is what keeps `map` narrowed
+      // to ClrMap below instead of "possibly undefined": assigning an `any`
+      // doesn't narrow away the declared union the way assigning a concrete
+      // type does.
+      map = Object.assign(Object.create(null) as ClrMap, IDENTITY_CLR_MAP);
       for (const slotName of Object.keys(IDENTITY_CLR_MAP)) {
         const v = attr(attrs, slotName);
         if (v) {
@@ -127,16 +167,26 @@ export function readClrMap(masterXml: string | undefined): ClrMap {
  * literally "dk1"); accent1-6, hlink and folHlink are conventionally identity
  * mapped but are still looked up through the map, in case a master remaps
  * them too. A theme this reader could not resolve falls back to something
- * legible rather than throwing: white for the two background names, black for
- * everything else, which is what most authored decks actually use there.
+ * legible rather than throwing: white for the four light/background slots,
+ * black for everything else, which is what most authored decks actually use
+ * there. That fallback is judged on `slot` -- the *mapped* colour, which is
+ * what actually failed to resolve -- not on `name`, the pre-map value: a
+ * master with a non-identity map like `<p:clrMap tx1="lt1" bg1="dk1"/>` maps
+ * `tx1` to the light slot `lt1`, and judging by the name `tx1` instead would
+ * call that dark and hand back black text on a dark background.
  */
 export function resolveSchemeColor(theme: Theme, clrMap: ClrMap, name: string): string {
   const slot = clrMap[name] ?? name;
-  const hex = theme.colors[slot];
+  // Re-validated rather than trusted: `theme.colors[slot]` and `clrMap[name]`
+  // are indexed by names taken straight from the file, and even with the
+  // Object.create(null) maps above closing off the prototype-chain route,
+  // this is what actually stops a resolved "colour" from ever being anything
+  // but six hex digits before it reaches a style attribute.
+  const hex = normalizeHex(theme.colors[slot]);
   if (hex !== undefined) {
     return hex;
   }
-  return name === 'bg1' || name === 'lt1' ? 'FFFFFF' : '000000';
+  return slot === 'bg1' || slot === 'lt1' || slot === 'bg2' || slot === 'lt2' ? 'FFFFFF' : '000000';
 }
 
 export interface ColorMods {

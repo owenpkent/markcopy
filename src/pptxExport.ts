@@ -13,6 +13,7 @@
 import { buildDeck, type PptxReport } from './pptx/write/build';
 import { buildPackage } from './pptx/write/package';
 import { parseXhtml } from './ooxml/xhtml';
+import { isoSeconds } from './ooxml/write';
 
 export type { PptxReport } from './pptx/write/build';
 
@@ -79,9 +80,4 @@ export function reportSummary(report: PptxReport): string | undefined {
 
 function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-/** W3CDTF to the second, which is what the OPC core properties expect. */
-function isoSeconds(date: Date): string {
-  return `${date.toISOString().slice(0, 19)}Z`;
 }

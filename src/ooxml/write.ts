@@ -50,3 +50,15 @@ export function escapeAttr(s: string): string {
 }
 
 export const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n';
+
+/**
+ * W3CDTF to the second, which is what the OPC core properties expect.
+ *
+ * Shared by docxExport.ts and pptxExport.ts: both write the same timestamp
+ * shape into docProps/core.xml, and this module already exists to hold the
+ * OOXML writing concerns the two formats have in common rather than each
+ * other's.
+ */
+export function isoSeconds(date: Date): string {
+  return `${date.toISOString().slice(0, 19)}Z`;
+}

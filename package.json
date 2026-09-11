@@ -216,7 +216,13 @@
             "filenamePattern": "*.xlsx"
           },
           {
+            "filenamePattern": "*.XLSX"
+          },
+          {
             "filenamePattern": "*.xlsm"
+          },
+          {
+            "filenamePattern": "*.XLSM"
           }
         ],
         "priority": "default"
@@ -233,6 +239,9 @@
           },
           {
             "filenamePattern": "*.pptm"
+          },
+          {
+            "filenamePattern": "*.PPTM"
           }
         ],
         "priority": "default"

@@ -17,7 +17,7 @@
 // theme.ts owns the arithmetic (scheme lookup, clrMap, the lumMod/shade
 // family), this module owns finding that XML at each level of the chain.
 import { attr, intAttr } from '../../ooxml/xml';
-import { escapeHtml } from '../../escape';
+import { escapeAttr, escapeHtml } from '../../escape';
 import { child, children, type XNode } from './xnode';
 import {
   applyColorMods,
@@ -410,6 +410,15 @@ function renderListNodes(nodes: ListNode[]): Block[] {
   let i = 0;
   while (i < nodes.length) {
     const type = nodes[i].listType;
+    // The group's own alignment, for the <ul>/<ol> that wraps it: the first
+    // paragraph's, the same as every other "one value per block" property
+    // here. Leaving this unset (as this used to) made the styleAttr(b.align)
+    // call just below dead code -- the per-<li> alignment still applied, but
+    // a centred nested list lost its own <ul style="text-align:center">, and
+    // paragraphsToBlocks's caller in render.ts lost it too, since it reads
+    // this same field to align the top-level list when a shape is just one
+    // block.
+    const align = nodes[i].align;
     const tag: 'ul' | 'ol' = type === 'number' ? 'ol' : 'ul';
     let html = '';
     while (i < nodes.length && nodes[i].listType === type) {
@@ -420,7 +429,7 @@ function renderListNodes(nodes: ListNode[]): Block[] {
       html += `<li${styleAttr(n.align)}>${n.inner}${nested}</li>`;
       i++;
     }
-    out.push({ tag, html });
+    out.push({ tag, html, align });
   }
   return out;
 }
@@ -462,7 +471,15 @@ function runHtml(
   if (run.sz !== undefined && run.sz !== baseSizeHundredths) {
     style.push(`font-size:${fmtNum(cqwFontSize(run.sz, slideWidthPt))}cqw`);
   }
-  return style.length === 0 ? inner : `<span style="${style.join(';')}">${inner}</span>`;
+  // Every other style attribute in render.ts is either escaped (boxStyle) or
+  // built from a fixed vocabulary (styleAttr, the <td> align); this is the one
+  // place a run property reaches a style attribute directly. run.color is
+  // validated hex today, but escaping here rather than trusting that means a
+  // future loosening of what resolveColor can return (a gradient stop, an
+  // <a:prstClr> name) stays a cosmetic bug instead of attribute injection.
+  return style.length === 0
+    ? inner
+    : `<span style="${escapeAttr(style.join(';'))}">${inner}</span>`;
 }
 
 /** `sz` (hundredths of a point) -> cqw against a slide `slideWidthPt` points wide. */

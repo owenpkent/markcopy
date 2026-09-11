@@ -6,7 +6,7 @@
 // <a:xfrm> that must inherit one, a merged table cell, a colour that only
 // resolves through a master's <p:clrMap>, a slide order that disagrees with
 // slide*.xml filenames. A library would never produce most of these.
-import { strToU8, zipSync } from 'fflate';
+import { strToU8, unzipSync, zipSync } from 'fflate';
 
 const P_NS = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
 const A_NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
@@ -54,6 +54,14 @@ export interface PptxSpec {
   clrMapAttrs?: string;
   /** Inner XML of <a:clrScheme>, verbatim. */
   themeColors?: string;
+  /**
+   * Inner XML of an `<a:clrScheme>` under `<a:extraClrSchemeLst><a:extraClrScheme>`,
+   * verbatim -- an alternate palette PowerPoint's "Colors" gallery offers
+   * alongside the deck's real one, routine in decks converted from .ppt or
+   * authored in LibreOffice. Omitted entirely (no `<a:extraClrSchemeLst>` at
+   * all) unless a test asks for it.
+   */
+  extraClrScheme?: string;
   /** Inner XML of the master's <p:txStyles> (its titleStyle/bodyStyle/otherStyle), verbatim. */
   masterTxStyles?: string;
   /** Inner XML of the presentation's <p:defaultTextStyle>, verbatim. */
@@ -121,10 +129,17 @@ export function buildPptx(spec: PptxSpec): Uint8Array {
       '</Relationships>',
   );
 
+  const extraClrSchemeLst =
+    spec.extraClrScheme === undefined
+      ? ''
+      : '<a:extraClrSchemeLst><a:extraClrScheme>' +
+        `<a:clrScheme name="Extra">${spec.extraClrScheme}</a:clrScheme>` +
+        '</a:extraClrScheme></a:extraClrSchemeLst>';
   put(
     'ppt/theme/theme1.xml',
     `<?xml version="1.0" encoding="UTF-8"?><a:theme ${A_NS} name="Test">` +
       `<a:themeElements><a:clrScheme name="Test">${spec.themeColors ?? DEFAULT_THEME_COLORS}</a:clrScheme></a:themeElements>` +
+      extraClrSchemeLst +
       '</a:theme>',
   );
 
@@ -233,6 +248,21 @@ export function extraRel(id: string, type: string, target: string): string {
   return `<Relationship Id="${id}" Type="${REL}/${type}" Target="${target}"/>`;
 }
 
+/**
+ * Build a package, then delete one part outright.
+ *
+ * A real .pptx never has a <p:sldId>/<p:sldIdLst> entry pointing at a part
+ * that flatly does not exist in the zip -- that is a corrupt or truncated
+ * file, not something buildPptx's spec can express by leaving something out
+ * (every slide it's told about gets a part). Post-processing the zip is the
+ * only way to produce that shape of input.
+ */
+export function removePart(bytes: Uint8Array, path: string): Uint8Array {
+  const files = unzipSync(bytes);
+  delete files[path];
+  return zipSync(files);
+}
+
 // ---------------------------------------------------------------------------
 // Shape XML fragments. Kept intentionally low-level (callers assemble a full
 // <p:sp>/<p:pic>/<p:graphicFrame> themselves) the same way tests/xlsx/fixture.ts's
@@ -244,21 +274,34 @@ export function xfrmXml(x: number, y: number, cx: number, cy: number, attrs = ''
   return `<a:xfrm${attrs ? ' ' + attrs : ''}><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`;
 }
 
+/** A placeholder ref for spShape/picShape/tableFrameXml. */
+export interface PhSpec {
+  type?: string;
+  idx?: number;
+}
+
+/** `<p:ph .../>`, or '' for a shape that isn't a placeholder at all. */
+function phXml(ph?: PhSpec): string {
+  if (ph === undefined) {
+    return '';
+  }
+  const attrs =
+    (ph.type !== undefined ? ` type="${ph.type}"` : '') +
+    (ph.idx !== undefined ? ` idx="${ph.idx}"` : '');
+  return `<p:ph${attrs}/>`;
+}
+
 export function spShape(opts: {
   id?: number;
   name?: string;
-  ph?: { type?: string; idx?: number };
+  ph?: PhSpec;
   xfrm?: string;
   txBody?: string;
 }): string {
-  const phAttrs =
-    (opts.ph?.type !== undefined ? ` type="${opts.ph.type}"` : '') +
-    (opts.ph?.idx !== undefined ? ` idx="${opts.ph.idx}"` : '');
-  const phXml = opts.ph !== undefined ? `<p:ph${phAttrs}/>` : '';
   return (
     '<p:sp>' +
     `<p:nvSpPr><p:cNvPr id="${opts.id ?? 2}" name="${opts.name ?? 'Shape'}"/><p:cNvSpPr/>` +
-    `<p:nvPr>${phXml}</p:nvPr></p:nvSpPr>` +
+    `<p:nvPr>${phXml(opts.ph)}</p:nvPr></p:nvSpPr>` +
     `<p:spPr>${opts.xfrm ?? ''}</p:spPr>` +
     (opts.txBody ?? '') +
     '</p:sp>'
@@ -277,9 +320,12 @@ export function lvlPPrXml(level: number, defRPrAttrs = ''): string {
 export function paraXml(opts: {
   lvl?: number;
   bullet?: 'none' | 'char' | 'autoNum';
+  /** Raw `algn` value ("ctr", "r", "just", ...). */
+  algn?: string;
   runs?: string;
 }): string {
   const lvlAttr = opts.lvl ? ` lvl="${opts.lvl}"` : '';
+  const algnAttr = opts.algn !== undefined ? ` algn="${opts.algn}"` : '';
   let buXml = '';
   if (opts.bullet === 'none') {
     buXml = '<a:buNone/>';
@@ -288,7 +334,7 @@ export function paraXml(opts: {
   } else if (opts.bullet === 'autoNum') {
     buXml = '<a:buAutoNum type="arabicPeriod"/>';
   }
-  const pPr = lvlAttr || buXml ? `<a:pPr${lvlAttr}>${buXml}</a:pPr>` : '';
+  const pPr = lvlAttr || algnAttr || buXml ? `<a:pPr${lvlAttr}${algnAttr}>${buXml}</a:pPr>` : '';
   return `<a:p>${pPr}${opts.runs ?? ''}</a:p>`;
 }
 
@@ -301,15 +347,17 @@ export function runXml(text: string, rPrAttrs = '', rPrChildren = ''): string {
 export function picShape(opts: {
   name?: string;
   embedId: string;
-  xfrm: string;
+  /** Omitted for a picture placeholder that inherits its geometry from the layout/master instead. */
+  xfrm?: string;
+  ph?: PhSpec;
   descr?: string;
 }): string {
   return (
     '<p:pic>' +
     `<p:nvPicPr><p:cNvPr id="3" name="${opts.name ?? 'Pic'}"${opts.descr ? ` descr="${opts.descr}"` : ''}/>` +
-    '<p:cNvPicPr/><p:nvPr/></p:nvPicPr>' +
+    `<p:cNvPicPr/><p:nvPr>${phXml(opts.ph)}</p:nvPr></p:nvPicPr>` +
     `<p:blipFill><a:blip r:embed="${opts.embedId}"/><a:stretch/></p:blipFill>` +
-    `<p:spPr>${opts.xfrm}</p:spPr>` +
+    `<p:spPr>${opts.xfrm ?? ''}</p:spPr>` +
     '</p:pic>'
   );
 }
@@ -330,11 +378,16 @@ export function tcXml(opts: {
   return `<a:tc${attrs}>${body}</a:tc>`;
 }
 
-export function tableFrameXml(opts: { xfrm: string; tblXml: string }): string {
+export function tableFrameXml(opts: {
+  /** Omitted for a table placeholder that inherits its geometry from the layout/master instead. */
+  xfrm?: string;
+  tblXml: string;
+  ph?: PhSpec;
+}): string {
   return (
     '<p:graphicFrame>' +
-    '<p:nvGraphicFramePr><p:cNvPr id="4" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>' +
-    opts.xfrm +
+    `<p:nvGraphicFramePr><p:cNvPr id="4" name="Table"/><p:cNvGraphicFramePr/><p:nvPr>${phXml(opts.ph)}</p:nvPr></p:nvGraphicFramePr>` +
+    (opts.xfrm ?? '') +
     '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">' +
     opts.tblXml +
     '</a:graphicData></a:graphic>' +

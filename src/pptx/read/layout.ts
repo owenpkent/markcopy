@@ -7,7 +7,7 @@
 // it; src/pptx/read/shape.ts is the only caller.
 import { attr, boolAttr, intAttr, walkXml } from '../../ooxml/xml';
 import { partForRels, partText, resolveTarget, type Parts } from '../../ooxml/zip';
-import { relsPathFor } from '../../ooxml/rels';
+import { relsPathFor, type Rels } from '../../ooxml/rels';
 import { child, children, deep, findDeep, parseXml, type XNode } from './xnode';
 import { readClrMap, readTheme, type ClrMap, type Theme } from './theme';
 
@@ -73,9 +73,20 @@ export function readXfrm(spPrOrFrame: XNode | undefined, xfrmName = 'xfrm'): Geo
   };
 }
 
-/** A shape's `<p:ph>`, if it is a placeholder at all. */
-export function readPlaceholderRef(sp: XNode): PlaceholderRef | undefined {
-  const ph = deep(sp, 'nvSpPr', 'nvPr', 'ph');
+/**
+ * A shape's `<p:ph>`, if it is a placeholder at all.
+ *
+ * The `<p:nvXxxPr>` wrapper name depends on the shape kind -- `nvSpPr` for a
+ * `<p:sp>`, `nvPicPr` for a `<p:pic>`, `nvGraphicFramePr` for a
+ * `<p:graphicFrame>` -- but `<p:ph>` sits at the same `.../nvPr/ph` depth
+ * under all three, so trying each in turn covers every caller in shape.ts
+ * without needing to know which kind of shape it was handed.
+ */
+export function readPlaceholderRef(shapeLike: XNode): PlaceholderRef | undefined {
+  const ph =
+    deep(shapeLike, 'nvSpPr', 'nvPr', 'ph') ??
+    deep(shapeLike, 'nvPicPr', 'nvPr', 'ph') ??
+    deep(shapeLike, 'nvGraphicFramePr', 'nvPr', 'ph');
   if (ph === undefined) {
     return undefined;
   }
@@ -193,6 +204,60 @@ export function findRelByType(
   return found;
 }
 
+/** Everything index.ts needs out of one slide's own `.rels`. */
+export interface SlideRelInfo {
+  /** id -> target, for the picture/shape r:embed lookups in shape.ts. */
+  rels: Rels;
+  layoutPath?: string;
+  notesPath?: string;
+}
+
+/**
+ * The slide's own `.rels`, read in a single SAX pass for everything the
+ * reader needs out of it: the id -> target map (the same one
+ * `src/ooxml/rels.ts`'s `readRels` would produce) plus the slideLayout and
+ * notesSlide relationship targets, which have no id to look up by and would
+ * otherwise each cost `findRelByType` its own separate pass over this exact
+ * XML. Before this, a slide's `.rels` was parsed up to four times: once here,
+ * once more for the layout (to pick a resolveSlideContext cache key), again
+ * inside resolveSlideContext, and again inside readSpeakerNotes -- on a
+ * 100-slide deck that is 300-400 avoidable `strFromU8` + SAX passes over what
+ * is usually a handful of relationships.
+ */
+export function readSlideRelInfo(parts: Parts, slidePath: string): SlideRelInfo {
+  const relsPath = relsPathFor(slidePath);
+  const rels: Rels = new Map();
+  const info: SlideRelInfo = { rels };
+  const xml = partText(parts, relsPath);
+  if (xml === undefined) {
+    return info;
+  }
+  walkXml(xml, {
+    open(name, attrs) {
+      if (name !== 'Relationship') {
+        return;
+      }
+      const id = attr(attrs, 'Id');
+      const target = attr(attrs, 'Target');
+      // Same reasoning as readRels: never follow a relationship that points
+      // outside the package.
+      if (!id || !target || attr(attrs, 'TargetMode') === 'External') {
+        return;
+      }
+      const resolved = resolveTarget(partForRels(relsPath), target);
+      rels.set(id, resolved);
+      const type = attr(attrs, 'Type') ?? '';
+      if (info.layoutPath === undefined && type.endsWith('/slideLayout')) {
+        info.layoutPath = resolved;
+      }
+      if (info.notesPath === undefined && type.endsWith('/notesSlide')) {
+        info.notesPath = resolved;
+      }
+    },
+  });
+  return info;
+}
+
 /** The master's <p:txStyles>: the deck's own default formatting per placeholder category, by level. */
 export interface MasterTextStyles {
   titleStyle?: XNode;
@@ -227,9 +292,17 @@ export interface SlideContext {
   masterStyles: MasterTextStyles;
 }
 
-/** The full slide -> layout -> master -> theme resolution, in one call. */
-export function resolveSlideContext(parts: Parts, slidePath: string): SlideContext {
-  const layoutPath = findRelByType(parts, relsPathFor(slidePath), '/slideLayout');
+/**
+ * The full slide -> layout -> master -> theme resolution, in one call.
+ *
+ * Takes the slide's layout path already resolved, rather than an
+ * `r:id`/slide path to derive it from, because the caller (index.ts) has
+ * always already resolved it by the time this runs -- once to pick this
+ * context's cache key, and again for readSlideRelInfo's combined pass over
+ * the slide's own `.rels`. Deriving it a third time here would mean a third
+ * SAX pass over a `.rels` part this small deck may share across every slide.
+ */
+export function resolveSlideContext(parts: Parts, layoutPath: string | undefined): SlideContext {
   const layoutXml = layoutPath === undefined ? undefined : partText(parts, layoutPath);
 
   const masterPath =

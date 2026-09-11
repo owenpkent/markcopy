@@ -1,6 +1,6 @@
 // Reading a presentation's structure: its slide size, its slide order, and
 // where each slide's part lives.
-import { attr, intAttr, walkXml } from '../../ooxml/xml';
+import { attr, intAttr, relAttr, walkXml } from '../../ooxml/xml';
 import { readRels, relsPathFor, type Rels } from '../../ooxml/rels';
 import {
   OpcError as DeckError,
@@ -9,7 +9,7 @@ import {
   resolveTarget,
   type Parts,
 } from '../../ooxml/zip';
-import { findDeep, parseXml, type XNode } from './xnode';
+import { type XNode } from './xnode';
 
 export interface SlideSize {
   cx: number;
@@ -48,9 +48,31 @@ export function readDeck(parts: Parts): Deck {
 
   let size = DEFAULT_SIZE;
   const slides: SlideRef[] = [];
+  let defaultTextStyle: XNode | undefined;
+  // <p:defaultTextStyle> is the one part of this XML worth keeping as a tree
+  // (its lvl1pPr..lvl9pPr children are read later by layout.ts's fallback
+  // chain), so it is built here, inline, the moment it opens -- the same
+  // shape xnode.ts's parseXml builds, just scoped to this one subtree. That
+  // is what lets this stay a single walkXml pass: the old code walked once for
+  // sldSz/sldId and then parsed the whole part a second time with parseXml,
+  // building and discarding a full tree of everything else in it, purely to
+  // find this one element.
+  const dtsStack: XNode[] = [];
 
   walkXml(xml, {
     open(name, attrs) {
+      if (dtsStack.length > 0) {
+        const node: XNode = { name, attrs, children: [], text: '' };
+        dtsStack[dtsStack.length - 1].children.push(node);
+        dtsStack.push(node);
+        return;
+      }
+      if (name === 'defaultTextStyle') {
+        const node: XNode = { name, attrs, children: [], text: '' };
+        defaultTextStyle = node;
+        dtsStack.push(node);
+        return;
+      }
       if (name === 'sldSz') {
         const cx = intAttr(attrs, 'cx');
         const cy = intAttr(attrs, 'cy');
@@ -59,11 +81,12 @@ export function readDeck(parts: Parts): Deck {
         }
       } else if (name === 'sldId') {
         // <p:sldId id="256" r:id="rId2"/> carries two attributes whose local
-        // name is "id": the slide's own id and the relationship id. attr()
-        // matches an exact key before it falls back to local-name matching, so
-        // asking for the literal "r:id" key is what keeps this from resolving
-        // to the slide id instead of the relationship.
-        const rId = attr(attrs, 'r:id');
+        // name is "id": the slide's own id and the relationship id. Plain
+        // local-name matching would confuse the two, since neither carries a
+        // distinguishing local name of its own -- relAttr additionally
+        // requires the key to carry a namespace prefix, which only the
+        // relationship id does.
+        const rId = relAttr(attrs, 'id');
         const target = rId === undefined ? undefined : rels.get(rId);
         if (target !== undefined) {
           slides.push({ path: target });
@@ -74,13 +97,22 @@ export function readDeck(parts: Parts): Deck {
         // src/xlsx/workbook.ts: the rest of the deck is still worth showing.
       }
     },
+    text(t) {
+      if (dtsStack.length > 0) {
+        dtsStack[dtsStack.length - 1].text += t;
+      }
+    },
+    close() {
+      if (dtsStack.length > 0) {
+        dtsStack.pop();
+      }
+    },
   });
 
   if (slides.length === 0) {
     throw new DeckError('this presentation has no slides.');
   }
 
-  const defaultTextStyle = findDeep(parseXml(xml), 'defaultTextStyle');
   return { path, rels, size, slides, defaultTextStyle };
 }
 

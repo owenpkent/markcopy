@@ -7,13 +7,12 @@
 // Everything here is *model* -- geometry in EMU, paragraphs, table cells,
 // resolved image data URIs -- and nothing here builds HTML. src/pptx/read/render.ts
 // does that, so a change to the markup never has to touch how a shape is found.
-import { attr, boolAttr, intAttr } from '../../ooxml/xml';
-import { relsPathFor, type Rels } from '../../ooxml/rels';
+import { attr, boolAttr, intAttr, relAttr } from '../../ooxml/xml';
+import { type Rels } from '../../ooxml/rels';
 import { partText, type Parts } from '../../ooxml/zip';
 import { child, children, findDeep, parseXml, type XNode } from './xnode';
 import {
   buildLevelProviders,
-  findRelByType,
   readPlaceholderRef,
   readXfrm,
   resolvePlaceholderGeom,
@@ -80,6 +79,17 @@ export interface ShapeReadContext {
   /** The presentation's <p:defaultTextStyle>, the last fallback below the master's txStyles. */
   defaultTextStyle?: XNode;
   media: MediaBudget;
+  /**
+   * Target path -> already-encoded data URI, shared across every slide in the
+   * deck (the caller creates one and reuses it for the whole
+   * renderDeckHtml call, not one per slide). A media part reused across
+   * slides -- a logo on every slide, a repeated header image -- would
+   * otherwise be base64-encoded again, and charged against `media` again, on
+   * every single use: a 400 KB logo on 8 slides under a 1 MiB budget would
+   * render on the first couple of slides and then silently fall back to a
+   * placeholder on the rest, for no reason visible in the file itself.
+   */
+  imageCache: Map<string, string>;
 }
 
 /**
@@ -291,10 +301,19 @@ const IMAGE_MIME: Record<string, string> = {
 };
 
 function buildPicShape(pic: XNode, frame: GroupFrame, ctx: ShapeReadContext): RenderShape {
-  const raw = readXfrm(child(pic, 'spPr'));
-  // A picture with nothing to size it by cannot be drawn at all; render.ts
-  // needs *some* box, so fall back to a zero box rather than crashing the
-  // whole slide over one broken shape.
+  const ref = readPlaceholderRef(pic);
+  let raw = readXfrm(child(pic, 'spPr'));
+  // A picture placeholder (a layout's "Picture" content box, say) routinely
+  // carries no <a:xfrm> of its own on the slide, the same as a text
+  // placeholder: its position is inherited from the layout or master picture
+  // placeholder it fills, via <p:nvPicPr><p:nvPr><p:ph>. Without this, such a
+  // picture got geom {0,0,0,0} and rendered as an invisible, zero-size <img>.
+  if (raw === undefined && ref !== undefined) {
+    raw = resolvePlaceholderGeom(ref, ctx.chain);
+  }
+  // A picture with nothing to size it by even after that cannot be drawn at
+  // all; render.ts needs *some* box, so fall back to a zero box rather than
+  // crashing the whole slide over one broken shape.
   const geom = transformGeom(
     raw ?? { x: 0, y: 0, cx: 0, cy: 0, rot: 0, flipH: false, flipV: false },
     frame,
@@ -323,7 +342,7 @@ function buildPicShape(pic: XNode, frame: GroupFrame, ctx: ShapeReadContext): Re
   }
 
   const blip = child(child(pic, 'blipFill') ?? pic, 'blip');
-  const embedId = blip === undefined ? undefined : attr(blip.attrs, 'r:embed');
+  const embedId = blip === undefined ? undefined : relAttr(blip.attrs, 'embed');
   const dataUri = embedId === undefined ? undefined : resolveImageDataUri(embedId, ctx);
 
   return dataUri === undefined
@@ -342,6 +361,16 @@ function resolveImageDataUri(embedId: string, ctx: ShapeReadContext): string | u
   if (target === undefined) {
     return undefined;
   }
+  // Encode and charge each distinct media part once, no matter how many
+  // pictures across the deck embed it. A failed lookup (unsupported
+  // extension, missing part, over budget) is deliberately not cached: it
+  // costs nothing to re-check on the next reference, and caching it would
+  // mean a part that only narrowly missed the budget on first sight can never
+  // be retried.
+  const cached = ctx.imageCache.get(target);
+  if (cached !== undefined) {
+    return cached;
+  }
   const ext = target.slice(target.lastIndexOf('.') + 1).toLowerCase();
   const mime = IMAGE_MIME[ext];
   // EMF/WMF vector metafiles and anything else without a web-safe MIME type
@@ -358,7 +387,9 @@ function resolveImageDataUri(embedId: string, ctx: ShapeReadContext): string | u
     return undefined;
   }
   ctx.media.used += bytes.length;
-  return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
+  const dataUri = `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
+  ctx.imageCache.set(target, dataUri);
+  return dataUri;
 }
 
 function buildGraphicFrameShape(
@@ -369,7 +400,17 @@ function buildGraphicFrameShape(
   // A graphicFrame's transform is its own direct <p:xfrm>, not nested under a
   // <p:spPr> the way a plain shape's is; readXfrm only needs the right parent
   // node to look under, which here is the frame itself.
-  const raw = readXfrm(gf);
+  const ref = readPlaceholderRef(gf);
+  let raw = readXfrm(gf);
+  // A table placeholder with no <p:xfrm> of its own inherits its position
+  // from the layout/master the same way a text or picture placeholder does,
+  // via <p:nvGraphicFramePr><p:nvPr><p:ph>. Without this fallback the whole
+  // table vanished -- unlike a picture, there is no sensible zero-box
+  // fallback for a table, so if even the placeholder chain has nothing, the
+  // shape is left out entirely rather than drawn at some made-up size.
+  if (raw === undefined && ref !== undefined) {
+    raw = resolvePlaceholderGeom(ref, ctx.chain);
+  }
   if (raw === undefined) {
     return undefined;
   }
@@ -479,13 +520,17 @@ function sortForReadingOrder(shapes: RenderShape[]): void {
  * Speaker notes for one slide: the notesSlide part's body placeholder, as
  * plain lines.
  *
- * notesSlide is a relationship *type* lookup with no id to go by, the same as
- * slideLayout/slideMaster/theme in layout.ts, so it goes through
- * findRelByType against the slide's own `.rels` rather than the id-only Rels
- * map a caller might otherwise have lying around for that slide.
+ * Takes the notesSlide path already resolved, rather than the slide path to
+ * derive it from: notesSlide is a relationship *type* lookup with no id to go
+ * by, the same as slideLayout/slideMaster/theme in layout.ts, and the caller
+ * (index.ts) already resolves it via layout.ts's readSlideRelInfo as part of
+ * its one combined pass over the slide's own `.rels` -- looking it up again
+ * here would be a second SAX pass over that same, already-read part.
  */
-export function readSpeakerNotes(parts: Parts, slidePath: string): string[] | undefined {
-  const notesPath = findRelByType(parts, relsPathFor(slidePath), '/notesSlide');
+export function readSpeakerNotes(
+  parts: Parts,
+  notesPath: string | undefined,
+): string[] | undefined {
   const xml = notesPath === undefined ? undefined : partText(parts, notesPath);
   if (xml === undefined) {
     return undefined;

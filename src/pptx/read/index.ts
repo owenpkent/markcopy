@@ -5,10 +5,9 @@
 // EMU-to-percent conversion, bullet nesting, table merges, the media budget,
 // and scheme colour resolution are all exercised in tests/pptx without a
 // webview or a running editor.
-import { readRels, relsPathFor } from '../../ooxml/rels';
 import { openZip, partText, type Parts, type ZipLimits } from '../../ooxml/zip';
 import { readDeck, type SlideSize } from './deck';
-import { findRelByType, resolveSlideContext, type SlideContext } from './layout';
+import { readSlideRelInfo, resolveSlideContext, type SlideContext } from './layout';
 import { readSlideShapes, readSpeakerNotes, type MediaBudget } from './shape';
 import { renderDeck, renderSlide, truncationNote } from './render';
 
@@ -42,6 +41,10 @@ export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckH
     used: 0,
     max: Math.max(0, opts.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES),
   };
+  // One cache for the whole deck, not one per slide: a media part reused
+  // across slides (a logo, a repeated header image) is encoded once and
+  // charged against `media` once, no matter how many slides embed it.
+  const imageCache = new Map<string, string>();
 
   const parts = openZip(bytes, {
     limits: opts.zipLimits,
@@ -70,20 +73,26 @@ export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckH
       continue;
     }
 
+    // One pass over this slide's own .rels for everything it can answer: the
+    // r:embed/r:id map shapes need, the layout target (also this slide's
+    // context-cache key), and the notes target. Each used to cost its own
+    // separate SAX pass over the same small part.
+    const relInfo = readSlideRelInfo(parts, slidePath);
     const shapes = readSlideShapes(slideXml, {
       parts,
-      slideRels: readRels(parts, relsPathFor(slidePath)),
+      slideRels: relInfo.rels,
       media,
+      imageCache,
       defaultTextStyle: deck.defaultTextStyle,
-      ...slideContextFor(parts, slidePath, contextCache),
+      ...slideContextFor(parts, relInfo.layoutPath, contextCache),
     });
-    const notes = showNotes ? readSpeakerNotes(parts, slidePath) : undefined;
+    const notes = showNotes ? readSpeakerNotes(parts, relInfo.notesPath) : undefined;
     sections.push(renderSlide(shapes, notes, i, deck.size));
   }
 
   const rendered = sections.length;
   return {
-    html: renderDeck(sections, truncationNote(rendered, totalSlides)),
+    html: renderDeck(sections, truncationNote(rendered, totalSlides, toRender.length)),
     slides: totalSlides,
     rendered,
   };
@@ -91,16 +100,19 @@ export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckH
 
 function slideContextFor(
   parts: Parts,
-  slidePath: string,
+  layoutPath: string | undefined,
   cache: Map<string, SlideContext>,
 ): SlideContext {
-  const layoutPath = findRelByType(parts, relsPathFor(slidePath), '/slideLayout');
-  const key = layoutPath ?? `#no-layout:${slidePath}`;
+  // Every slide with no resolvable layout gets the exact same context (an
+  // empty theme, the identity colour map, an empty placeholder chain): none
+  // of that depends on which slide asked, only on there being no layout to
+  // resolve. A single shared key for all of them is correct, not just cheap.
+  const key = layoutPath ?? '#no-layout';
   const cached = cache.get(key);
   if (cached !== undefined) {
     return cached;
   }
-  const context = resolveSlideContext(parts, slidePath);
+  const context = resolveSlideContext(parts, layoutPath);
   cache.set(key, context);
   return context;
 }

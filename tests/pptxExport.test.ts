@@ -235,19 +235,27 @@ describe('slide splitting', () => {
     expect(slide(1)).not.toContain('y="1825625"');
   });
 
-  it('gives an h1 and an h3 the same centered treatment when either opens the document alone', () => {
+  it('gives an h1 the title-slide treatment when it opens the document alone', () => {
     // h1/h2 are themselves boundaries, so a leading one only ever reaches the
-    // title-only path when its own group is the first *emitted* segment (the
-    // empty group in front of it, which the boundary it fired created, having
-    // been skipped without ever pushing one); h3-h6 reach the same path more
-    // directly, never having been a boundary in the first place. Pinning both
-    // is what catches a regression where only one of the two still works.
-    const h1 = pptx('<h1>Title</h1><hr/><h2>A</h2>');
-    const h3 = pptx('<h3>Title</h3><hr/><h2>A</h2>');
-    for (const { slide } of [h1, h3]) {
-      expect(slide(1)).toContain('<a:t>Title</a:t>');
-      expect(slide(1)).not.toContain('y="1825625"');
-    }
+    // title-only path when its own group is the first *emitted* segment: the
+    // empty group in front of it, which the boundary it fired created, is
+    // skipped without ever pushing one.
+    const { slide } = pptx('<h1>Title</h1><hr/><h2>A</h2>');
+    expect(slide(1)).toContain('<a:t>Title</a:t>');
+    expect(slide(1)).not.toContain('y="1825625"');
+  });
+
+  it('does not give a lone h3 the title-slide treatment, matching splitOnBoundary', () => {
+    // The "is this a title slide" check used to accept h1-h6 while
+    // splitOnBoundary and extractLeadingTitle only ever treat h1/h2 as a
+    // slide boundary/title -- so a document opening on a bare `### Preface`
+    // got the full-bleed centered title only a boundary heading should earn.
+    // An h3 here has to fall through to the same bold-lead body treatment
+    // every other h3 in the deck gets, landing at the ordinary body position.
+    const { slide } = pptx('<h3>Title</h3><hr/><h2>A</h2>');
+    expect(slide(1)).toContain('<a:t>Title</a:t>');
+    expect(slide(1)).not.toContain('<p:ph type="title"/>');
+    expect(slide(1)).toContain('y="1825625"');
   });
 
   it('keeps a heading followed by a subtitle paragraph an ordinary content slide', () => {
@@ -360,6 +368,30 @@ describe('lists', () => {
   });
 });
 
+describe('blockquotes', () => {
+  it('clamps nesting depth to what ST_TextIndentLevelType allows', () => {
+    // Every list path already clamps to MAX_LIST_LEVEL (8) before writing
+    // <a:pPr lvl="...">; ten nested blockquotes with no clamp of their own
+    // would reach lvl="10", outside the schema's 0..8 range and exactly the
+    // shape of error that makes PowerPoint offer to repair the file.
+    let html = '<p>deep</p>';
+    for (let i = 0; i < 10; i++) {
+      html = `<blockquote>${html}</blockquote>`;
+    }
+    const { slide } = pptx(html);
+    const levels: number[] = [];
+    walkXml(slide(1), {
+      open(name, attrs) {
+        if (name === 'pPr' && attrs.lvl !== undefined) {
+          levels.push(Number.parseInt(attrs.lvl, 10));
+        }
+      },
+    });
+    expect(levels.length).toBeGreaterThan(0);
+    expect(Math.max(...levels)).toBeLessThanOrEqual(8);
+  });
+});
+
 describe('tables', () => {
   it('marks a header row with firstRow so it can be styled as one', () => {
     const { slide } = pptx(
@@ -390,6 +422,43 @@ describe('tables', () => {
     );
     expect(slide(1)).toContain('rowSpan="2"');
     expect(slide(1)).toContain('vMerge="1"');
+  });
+
+  it('clamps a rowspan to the rows actually remaining', () => {
+    // colspan was already clamped to the columns remaining; rowspan was not,
+    // so rowSpan="9" over a two-row table left too few vMerge continuation
+    // cells to match it -- internally inconsistent merge geometry PowerPoint
+    // refuses to open.
+    const { slide } = pptx(
+      '<table><tr><td rowspan="9">a</td><td>b</td></tr><tr><td>c</td></tr></table>',
+    );
+    const xml = slide(1);
+    const rowSpans = [...xml.matchAll(/rowSpan="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(rowSpans).toEqual([2]);
+    // One row remains under the clamped span, so exactly one vMerge
+    // continuation cell should claim it.
+    expect(xml.match(/vMerge="1"/g)).toHaveLength(1);
+  });
+
+  it('carries the header fill onto a vMerge continuation cell inside a header row', () => {
+    // The carry branch hardcoded `header: false` for a vMerge continuation
+    // cell while the neighbouring missing-cell branch correctly passed
+    // row.header, so a <th rowspan="2"> in a two-row thead left row 2's
+    // covered cell without the header shading.
+    const { slide } = pptx(
+      '<table><thead>' +
+        '<tr><th rowspan="2">R</th><th>Col</th></tr>' +
+        '<tr><th>Col2</th></tr>' +
+        '</thead></table>',
+    );
+    const xml = slide(1);
+    // `<a:tc[ >]` rather than `<a:tc` alone, or every <a:tcPr> child would be
+    // double-counted as a cell of its own.
+    const tcCount = (xml.match(/<a:tc[ >]/g) ?? []).length;
+    const fillCount = (xml.match(/<a:solidFill><a:srgbClr val="F6F8FA"\/><\/a:solidFill>/g) ?? [])
+      .length;
+    expect(tcCount).toBe(4);
+    expect(fillCount).toBe(4);
   });
 });
 
@@ -438,6 +507,38 @@ describe('images', () => {
     // relationships are file-scoped even though the media they point at isn't.
     expect(slideRels(2)).toContain('Target="../media/image1.png"');
   });
+
+  it('turns a linked image into a real picture with the hyperlink on it', () => {
+    // `[![Chart](chart.png)](https://example.test)` used to disappear
+    // entirely: the paragraph's only child is `a`, not `img`, so it never
+    // reached the picture path, and inlineElement's own `[image: alt]` bracket
+    // fallback for a *genuinely inline* image doesn't apply to a whole
+    // paragraph that is nothing but a link around one.
+    const { parts, slide, slideRels, report } = pptx(
+      `<p><a href="https://example.test"><img src="${PNG_1x1}" alt="Chart"/></a></p>`,
+    );
+    expect(parts['ppt/media/image1.png']).toBeDefined();
+    expect(slide(1)).toContain('<p:pic>');
+    expect(slide(1)).toContain('descr="Chart"');
+    const match = /<a:hlinkClick r:id="(rId\d+)"\/>/.exec(slide(1));
+    expect(match).not.toBeNull();
+    expect(slideRels(1)).toContain(`Id="${match?.[1]}"`);
+    expect(report.images).toBe(1);
+  });
+
+  it('keeps a linked image with no alt text a real picture instead of dropping it', () => {
+    // With alt="" the old [image: alt] fallback run was `{xml: '', visible:
+    // false}`, which made the whole paragraph invisible and dropped it --
+    // pics=0, media=0, report.images=0. A standalone image is worth keeping
+    // as a picture regardless of whether its alt text is empty.
+    const { parts, slide, report } = pptx(
+      `<p><a href="https://example.test"><img src="${PNG_1x1}" alt=""/></a></p>`,
+    );
+    expect(parts['ppt/media/image1.png']).toBeDefined();
+    expect(slide(1)).toContain('<p:pic>');
+    expect(report.images).toBe(1);
+    expect(report.imagesMissingAlt).toBe(1);
+  });
 });
 
 describe('hyperlinks', () => {
@@ -476,6 +577,16 @@ describe('hyperlinks', () => {
   it("places hlinkClick after the run's typeface, as CT_TextCharacterProperties requires", () => {
     const { slide } = pptx('<p><a href="https://x.test"><code>npm i</code></a></p>');
     expect(slide(1)).toContain('<a:latin typeface="Consolas"/><a:hlinkClick');
+  });
+
+  it('does not leave an orphan hyperlink relationship when the link has nothing visible in it', () => {
+    // addHyperlinkRel used to run before the anchor's children were converted,
+    // so a link around content that resolves to nothing left a relationship
+    // in the slide's .rels with nothing in bodyXml pointing at it -- exactly
+    // the shape of orphan package.ts's own header comment warns about.
+    const { slide, slideRels } = pptx('<p><a href="https://x.test"></a></p>');
+    expect(slide(1)).not.toContain('<a:hlinkClick');
+    expect(slideRels(1)).not.toContain('hyperlink');
   });
 });
 

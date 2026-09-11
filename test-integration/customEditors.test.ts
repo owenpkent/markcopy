@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 const XLSX_VIEW = 'markcopy.xlsxPreview';
+const PPTX_VIEW = 'markcopy.pptxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
@@ -169,6 +170,48 @@ suite('MarkCopy custom editors', () => {
     assert.ok(
       customTabs().some((tab) => tab.viewType === XLSX_VIEW),
       `expected a ${XLSX_VIEW} tab for .xlsm, saw: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('an uppercase extension still opens in the sheet preview', async () => {
+    // package.json's selector matching is the same globbing as
+    // files.associations, which does not fold case: on a case-sensitive
+    // filesystem (Linux, notably) *.xlsx alone would leave a workbook saved
+    // as Book1.XLSX opening as binary junk. Pinned here rather than trusted
+    // to stay wired up, the same way .xlsm is above.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const uri = vscode.Uri.file(path.join(dir, 'Book1.XLSX'));
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.xlsx'), uri.fsPath);
+
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === XLSX_VIEW && tab.uri === uri.toString()),
+      `expected a ${XLSX_VIEW} tab for Book1.XLSX, saw: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('.pptm and its uppercase form both open in the slide preview', async () => {
+    // Mirrors the .xlsx/.XLSX case above for the pptx selector's second
+    // extension, which package.json previously left with no uppercase entry
+    // at all: a Deck.PPTM would have opened as binary junk on a
+    // case-sensitive filesystem while Deck.PPTX quietly worked.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const lower = vscode.Uri.file(path.join(dir, 'deck.pptm'));
+    const upper = vscode.Uri.file(path.join(dir, 'Deck.PPTM'));
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.pptx'), lower.fsPath);
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.pptx'), upper.fsPath);
+
+    await vscode.commands.executeCommand('vscode.open', lower);
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === PPTX_VIEW && tab.uri === lower.toString()),
+      `expected a ${PPTX_VIEW} tab for deck.pptm, saw: ${JSON.stringify(customTabs())}`,
+    );
+
+    await vscode.commands.executeCommand('vscode.open', upper);
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === PPTX_VIEW && tab.uri === upper.toString()),
+      `expected a ${PPTX_VIEW} tab for Deck.PPTM, saw: ${JSON.stringify(customTabs())}`,
     );
   });
 
