@@ -56,6 +56,7 @@ let currentTheme = 'auto';
 let currentSyncScroll = true;
 let currentAutoPreview = true;
 let currentMath = true;
+let currentFootnotes = true;
 // The document version the grid on screen was drawn from. Only the context menu
 // reads it, and only while building itself, which is why a global is safe here
 // where the cell editor deliberately closes over its own render version instead:
@@ -109,6 +110,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         msg.supportsSync === undefined ? true : Boolean(msg.supportsSync),
         Boolean(msg.autoPreview),
         msg.math === undefined ? true : Boolean(msg.math),
+        msg.footnotes === undefined ? true : Boolean(msg.footnotes),
         (msg.docKey as string) ?? '',
         (msg.kind as string) ?? 'markdown',
         Number(msg.docVersion ?? -1),
@@ -158,6 +160,7 @@ async function render(
   supportsSync: boolean,
   autoPreview: boolean,
   math: boolean,
+  footnotes: boolean,
   docKey: string,
   // What the host rendered: 'markdown' or 'csv'. Drives the full-width,
   // self-scrolling grid layout in preview.css; the rest of the webview treats
@@ -179,6 +182,7 @@ async function render(
   surfaceSyncs = supportsSync;
   currentAutoPreview = autoPreview;
   currentMath = math;
+  currentFootnotes = footnotes;
   currentDocVersion = docVersion;
   // Defense in depth. The host renders Markdown with `html: true`, so raw HTML
   // in the document reaches us untrusted. The webview CSP already blocks script
@@ -1012,6 +1016,7 @@ function buildSettingsEntries(): MenuEntry[] {
     checkboxEntry('Sync scroll', currentSyncScroll, 'syncScroll'),
     checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
     checkboxEntry('Math ($ LaTeX)', currentMath, 'math'),
+    checkboxEntry('Footnotes ([^note])', currentFootnotes, 'footnotes'),
     { kind: 'divider' },
     {
       kind: 'item',

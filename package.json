@@ -402,6 +402,11 @@
           "default": true,
           "markdownDescription": "Render LaTeX math with [KaTeX](https://katex.org). Inline `$...$` and display `$$...$$` become equations you can right-click to copy as an image or as LaTeX. Turn off for documents that use literal dollar signs."
         },
+        "markcopy.footnotes": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Render `[^note]` footnote references and `[^note]: text` definitions as a numbered footnotes section. Turn off for documents that use literal `[^...]` text for something else."
+        },
         "markcopy.csv.delimiter": {
           "type": "string",
           "enum": [

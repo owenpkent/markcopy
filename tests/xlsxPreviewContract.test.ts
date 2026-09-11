@@ -46,6 +46,7 @@ async function renderSheet(html: string): Promise<void> {
         syncScroll: true,
         autoPreview: true,
         math: true,
+        footnotes: true,
         supportsSync: false,
         theme: 'auto',
         styleProfile: 'github',

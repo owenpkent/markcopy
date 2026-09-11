@@ -48,6 +48,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Fenced code blocks are syntax-highlighted.
 - [ ] Mermaid diagrams render and re-theme when the VS Code theme changes.
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
+- [ ] `[^note]` footnote references and definitions render as a numbered footnotes section, with back-links to the prose; an unreferenced `[^orphan]:` definition stays visible as plain text instead of disappearing, and `^[...]` inline footnote shorthand stays literal. Turning `markcopy.footnotes` off shows literal `[^note]` text again.
 - [ ] Relative and absolute local images render; remote images still load.
 
 ### Where the preview opens

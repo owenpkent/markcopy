@@ -15,10 +15,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - A thematic break (`---`) or an `<h1>` / `<h2>` starts a new slide, which becomes the slide's title. Content that overflows a slide is left overflowing rather than silently repaginated, since splitting a slide would scramble a deliberate build.
   - It needs nothing installed, not PowerPoint, not Pandoc, not a browser; the file is assembled in memory.
   - New setting: `markcopy.pptx.slideSize` (`16:9` default, or `4:3`).
-
-### Fixed
-
-- Render `[^note]` footnote references as numbered links to their definitions instead of showing the reference markers as raw text.
+- **Footnote support.** `[^note]` references and `[^note]: text` definitions render as GitHub does: numbered links to a footnotes section at the end of the document, with back-links from each definition to its reference. A definition with no reference stays in place as plain text instead of disappearing. The plugin's separate `^[...]` inline footnote shorthand is deliberately left off, since nothing in this repo documents it and `^[` shows up in ordinary regex prose. Toggle the feature with `markcopy.footnotes` (on by default) for documents that use literal `[^...]` text.
 
 ### Maintenance
 

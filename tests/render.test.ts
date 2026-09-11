@@ -39,13 +39,77 @@ describe('createMarkdownIt', () => {
 
     expect(html).toContain('<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>');
     expect(html).toContain('<sup class="footnote-ref"><a href="#fn2" id="fnref2">[2]</a></sup>');
-    expect(html).toContain('<section class="footnotes">');
-    expect(html).toContain('<li id="fn1" class="footnote-item">');
+    // The section and each definition carry the source line they came from
+    // (lines 2 and 3), so the webview's block copy, scroll-sync anchors, and
+    // context menu all reach inside the footnotes section like they do
+    // everywhere else in the document. See addFootnotes in src/render.ts.
+    expect(html).toContain('<section class="footnotes" data-source-line="2">');
+    expect(html).toContain('<li id="fn1" class="footnote-item" data-source-line="2">');
+    expect(html).toContain('<li id="fn2" class="footnote-item" data-source-line="3">');
     expect(html).toContain('Apple Switch Control.');
     expect(html).toContain('Android Switch Access.');
     expect(html).toContain('<a href="#fnref1" class="footnote-backref">');
     expect(html).not.toContain('[^apple]');
     expect(html).not.toContain('[^android]');
+  });
+
+  it('keeps a repeated reference numbered like GitHub, not sub-indexed', () => {
+    // The plugin's own default renders `[1]` then `[1:1]` for a second use of
+    // the same label; footnote_caption is overridden to always show just the
+    // number, matching what GitHub renders for the same Markdown.
+    const html = md.render('Para A[^x] and again[^x].\n\n[^x]: Shared note.\n');
+    expect(html).toContain('<a href="#fn1" id="fnref1">[1]</a>');
+    expect(html).toContain('<a href="#fn1" id="fnref1:1">[1]</a>');
+    expect(html).not.toContain('[1:1]');
+    // The two backref anchors still have to stay distinct, or the second one
+    // has nowhere of its own to point back to.
+    expect(html).toContain('id="fnref1"');
+    expect(html).toContain('id="fnref1:1"');
+  });
+
+  it('leaves an unreferenced footnote definition in place as ordinary text', () => {
+    // Before this plugin, `[^orphan]: ...` was not special syntax at all and
+    // rendered as a plain paragraph. footnote_tail (markdown-it-footnote's own
+    // core rule) silently drops a definition that nothing ever references,
+    // which in a live preview reads as the author's text vanishing off the
+    // page for no visible reason. footnoteFixups re-parses it as if the
+    // footnote plugin were not there, prefix and all, instead.
+    const html = md.render('[^orphan]: This text has no reference.\n');
+    // Still a top-level paragraph, so it carries data-source-line like any
+    // other (addSourceLineMapping), rather than the level-1 wrapper the
+    // footnote plugin would otherwise have left it nested inside.
+    expect(html).toContain('<p data-source-line="0">[^orphan]: This text has no reference.</p>');
+    expect(html).not.toContain('footnote');
+  });
+
+  it('keeps an unreferenced definition inline while a referenced one still moves to the footnotes section', () => {
+    const html = md.render(
+      'See the note.[^a]\n\n[^a]: Referenced note.\n\n[^b]: Never referenced.\n',
+    );
+    // [^a] is used, so it becomes a real footnote reference and definition.
+    expect(html).toContain('<sup class="footnote-ref"><a href="#fn1" id="fnref1">[1]</a></sup>');
+    expect(html).toContain('<section class="footnotes"');
+    expect(html).toContain('Referenced note.');
+    // [^b] is not, so its line stays a plain paragraph in place, exactly where
+    // it sits in the source, rather than disappearing.
+    expect(html).toContain('<p data-source-line="4">[^b]: Never referenced.</p>');
+    expect(html).not.toContain('[^a]:');
+  });
+
+  it('leaves ^[...] inline footnote shorthand as literal text', () => {
+    // markdown-it-footnote's `^[...]` inline syntax is not documented anywhere
+    // in this repo (only [^note] is) and `^[` shows up constantly in prose
+    // about regular expressions, so it is deliberately disabled.
+    const html = md.render('The pattern ^[A-Z]+ matches capitals.\n');
+    expect(html).toContain('^[A-Z]+ matches capitals.');
+    expect(html).not.toContain('footnote');
+  });
+
+  it('disables the whole footnote feature when markcopy.footnotes is off', () => {
+    const off = createMarkdownIt({ footnotes: false });
+    const html = off.render('Body.[^note]\n\n[^note]: Definition text.\n');
+    expect(html).toContain('[^note]');
+    expect(html).not.toContain('footnote');
   });
 
   it('turns inline $...$ into a non-display math placeholder', () => {
