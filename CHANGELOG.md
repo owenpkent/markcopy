@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.13.0] - 2026-09-14
+
 ### Added
 
 - **PowerPoint preview (`.pptx` / `.pptm`).** A read-only preview (`markcopy.pptxPreview`) renders the whole deck as one scrollable column of slides, rather than one slide at a time behind a tab strip: a deck is read end to end, and rendering it that way is what lets Copy as Rich Text, Save as PDF, and Save as Word all take the whole deck in one go. Slides keep their real layout, but the markup underneath is semantic and in reading order, so a title placeholder becomes a heading, body text becomes paragraphs and lists, a slide table becomes a real table, and a picture keeps its alt text.
@@ -22,16 +29,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - Clicking a web link in the preview no longer opens the page and then asks "Do you want Code to open the external website?" as well. `vscode:` links still open as before.
 - A link or search whose address contains an encoded `&`, `+`, or `=` in its query now arrives in the browser intact, rather than decoded into a different address.
+
 ### Maintenance
 
 - Update production and development dependencies and refresh vulnerable transitive dependencies. Keep Vitest on version 4 for Node 20 compatibility.
 - Enable Dependabot security alerts and automatic security update pull requests.
 - Refresh feature, security, and testing documentation. Correct release tagging order and publish the smoke-tested VSIX to both registries.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- Fix the `.pptm` integration test on Windows, where its two files differed only in case and so were the same file.
 
 ## [0.12.0] - 2026-09-09
 
@@ -333,7 +337,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/owenpkent/markcopy/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/owenpkent/markcopy/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/owenpkent/markcopy/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/owenpkent/markcopy/compare/v0.9.0...v0.10.0
