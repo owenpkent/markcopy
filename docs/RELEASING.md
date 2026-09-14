@@ -107,11 +107,17 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 3. Update [CHANGELOG.md](../CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
 4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
 5. If visuals changed, regenerate assets: `npm run icon` and `npm run screenshot`.
-6. Commit, tag, and push:
+6. Commit on a release branch, merge it through a pull request, then tag the merge commit. `main` is protected (a pull request and green CI are required, for admins too), so the release commit cannot be pushed to it directly, and the tag has to wait for the merge so it lands on the commit that is actually on `main`:
    ```bash
+   git checkout -b release/x.y.z
    git add -A && git commit -m "chore: release x.y.z"
+   git push -u origin release/x.y.z
+   gh pr create --base main --title "chore: release x.y.z" --body "..."
+   # once CI is green:
+   gh pr merge --squash
+   git checkout main && git pull --ff-only
    git tag -a vx.y.z -m vx.y.z
-   git push --follow-tags
+   git push origin vx.y.z
    ```
    The release now exists in git, but **it is not published**. Nothing is live to users yet.
 
@@ -138,7 +144,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ## Troubleshooting Phase 2
 
-The first three came out of the 0.11.0 release and the fourth out of 0.12.0. None of them says what it means.
+The first three came out of the 0.11.0 release, the fourth out of 0.12.0, and the last out of 0.13.0. None of them says what it means.
 
 ### `Request timeout: /_apis/gallery` can mean the PAT expired
 
@@ -194,9 +200,9 @@ npx vsce verify-pat OwenPKent
 
 - **It succeeds** -> the token is fine and this is the gallery stall. Retry the publish; nothing local needs changing.
 - **It reports Access Denied / an expired token** -> mint a new PAT.
-- **It hangs too** -> fall back to the token list in the browser.
+- **It hangs too** -> try it a few more times, a minute apart, before falling back to the token list in the browser. In 0.13.0 it hung on two attempts and then succeeded, with anonymous requests to the Marketplace answering in under 0.2s throughout, so a hang on its own is the stall more often than a dead token.
 
-A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further.
+A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further. 0.13.0 went the same way: a loop that checked the live version, ran `verify-pat`, and published the moment it succeeded got through on its third pass, about two minutes in.
 
 Step 9 already publishes this way, so retrying is just running that same command again rather than rebuilding:
 
@@ -212,8 +218,18 @@ npx vsce publish --packagePath markcopy-<version>.vsix
 
 So do not read a stale response as a failed publish, and do not republish on the strength of one -- republishing a version number that did upload is the one mistake this section exists to prevent, since the number cannot be reused. Sample it a few times instead: any replica reporting the new version means it is published and still propagating, since an unpublished version appears on none of them. `lastUpdated` lags too, so it is not a tiebreaker.
 
+0.13.0 showed both patterns in one release: straight after `DONE Published`, one of four reads returned the new version, and a batch of six taken a few minutes later all returned the old one.
+
 ```bash
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
+```
+
+### Open VSX 404s a new version for a few minutes
+
+`ovsx publish` printing `Published OwenPKent.markcopy v<version>` does not mean the version is readable yet. After the 0.13.0 publish, `https://open-vsx.org/api/OwenPKent/markcopy/<version>` returned `404 Extension not found` and the extension's own endpoint kept reporting the previous version as latest for about four minutes, then both switched over at once. Wait it out rather than republishing:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://open-vsx.org/api/OwenPKent/markcopy/<version>
 ```
 
 ## Notes
