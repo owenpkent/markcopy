@@ -343,6 +343,15 @@ class Builder {
   /** src -> rId, reset per slide: rels are file-scoped even when the media isn't. */
   private slideImageRels = new Map<string, string>();
   /**
+   * href -> rId, reset per slide for the same reason. A deck that links the
+   * same URL from several runs on one slide wants one relationship pointing
+   * at it, not one per run, and inlineElement's `case 'a'` converts an
+   * anchor's children twice (once to find out whether anything visible comes
+   * of them, once for real), so minting has to be idempotent per slide or the
+   * discarded pass could leave a second relationship behind.
+   */
+  private slideHyperlinkRels = new Map<string, string>();
+  /**
    * src -> media part name, package-wide and never reset. A logo repeated on
    * every slide is one part with a relationship per slide pointing at it,
    * not ten copies of the same bytes -- the same reasoning docx/build.ts's
@@ -365,6 +374,7 @@ class Builder {
     this.relSeq = 0;
     this.idSeq = 1;
     this.slideImageRels = new Map();
+    this.slideHyperlinkRels = new Map();
     this.shapeQueue = [];
     this.textBuf = [];
 
@@ -490,7 +500,13 @@ class Builder {
    * doesn't.
    */
   private addHyperlinkRel(href: string): string {
-    return this.addRel('hyperlink', href, true);
+    const existing = this.slideHyperlinkRels.get(href);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const id = this.addRel('hyperlink', href, true);
+    this.slideHyperlinkRels.set(href, id);
+    return id;
   }
 
   private addRel(kind: SlideRel['kind'], target: string, external: boolean): string {
@@ -902,6 +918,11 @@ class Builder {
         // -- package.ts's own header comment names that shape of orphan as a
         // "PowerPoint found a problem with content" trigger. src/docx/build.ts's
         // `hyperlink` runs the identical check before its own addRel.
+        //
+        // The probe is thrown away and the children are converted a second
+        // time, so anything `runs` records has to be idempotent: addHyperlinkRel
+        // dedups per slide for exactly that reason. Keep it that way if this
+        // ever grows a counter.
         const probe = this.runs(el.children, fmt);
         if (!probe.visible) {
           return probe;
