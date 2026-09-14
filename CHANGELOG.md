@@ -16,7 +16,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - It needs nothing installed, not PowerPoint, not Pandoc, not a browser; the file is assembled in memory.
   - New setting: `markcopy.pptx.slideSize` (`16:9` default, or `4:3`).
 - **Footnote support.** `[^note]` references and `[^note]: text` definitions render as GitHub does: numbered links to a footnotes section at the end of the document, with back-links from each definition to its reference. A definition with no reference stays in place as plain text instead of disappearing. The plugin's separate `^[...]` inline footnote shorthand is deliberately left off, since nothing in this repo documents it and `^[` shows up in ordinary regex prose. Toggle the feature with `markcopy.footnotes` (on by default) for documents that use literal `[^...]` text.
+- **Search Google from the preview.** Select some text and right-click: **Search Google for "…"** opens a Google search for it in the browser. It works in the Markdown, CSV, Excel, and PowerPoint previews. The query skips what is not words on the page (the hidden MathML behind an equation, a grid's row numbers and column letters), and only the first 200 characters are used, which is more than Google reads anyway.
 
+### Fixed
+
+- Clicking a web link in the preview no longer opens the page and then asks "Do you want Code to open the external website?" as well. `vscode:` links still open as before.
+- A link or search whose address contains an encoded `&`, `+`, or `=` in its query now arrives in the browser intact, rather than decoded into a different address.
 ### Maintenance
 
 - Update production and development dependencies and refresh vulnerable transitive dependencies. Keep Vitest on version 4 for Node 20 compatibility.

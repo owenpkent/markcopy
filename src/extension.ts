@@ -29,6 +29,7 @@ import {
 } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
+import { openExternalLink } from './externalLink';
 import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
 import { htmlToPptx, reportSummary as pptxReportSummary, type PptxReport } from './pptxExport';
 import { XlsxEditorProvider } from './xlsxEditor';
@@ -1122,18 +1123,7 @@ async function openLink(
     return;
   }
   if (target.kind === 'external') {
-    // Only hand real web/mail schemes to the OS. markdown-it + DOMPurify already
-    // strip javascript:/vbscript: hrefs upstream, so this just bounds the blast
-    // radius (and drops degenerate `?query`-only hrefs that carry no scheme).
-    let parsed: vscode.Uri | undefined;
-    try {
-      parsed = vscode.Uri.parse(target.href, true);
-    } catch {
-      parsed = undefined;
-    }
-    if (parsed && /^(https?|mailto)$/i.test(parsed.scheme)) {
-      void vscode.env.openExternal(parsed);
-    }
+    openExternalLink(target.href);
     return;
   }
   const targetUri = target.absolute

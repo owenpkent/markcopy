@@ -6,7 +6,15 @@ import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
 import { createMenu, type MenuEntry } from './menu';
-import { markdownLink, nounFor, refFromHref, refFromText } from './links';
+import {
+  anchorHref,
+  hostFollowsLink,
+  markdownLink,
+  nounFor,
+  refFromHref,
+  refFromText,
+} from './links';
+import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
@@ -495,21 +503,34 @@ function scrollToAnchor(rawId: string): void {
 // the browser or retargets the preview to a linked local document. The default
 // action is broken inside the webview (relative hrefs resolve against the
 // vscode-webview:// base), so we always intercept.
-content.addEventListener('click', (e) => {
+//
+// Registered on the document, not on #content, because it stops propagation.
+// VS Code's webview shell listens for link clicks on the window, and routes them
+// through its own "open external website?" prompt whether or not the default was
+// prevented, so a link the host opens must never reach it, or the reader gets the
+// page and then a prompt for it. Stopping the click here still lets every other
+// document listener run, the one that closes the context menu included; stopping
+// it on #content would not.
+//
+// The one exception is a scheme the host does not open (`vscode:` and the like),
+// which is left to bubble on to the shell untouched, since the shell is what
+// opens those.
+document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0) {
     return;
   }
-  const anchor = (e.target as HTMLElement).closest?.('a');
-  const href = anchor?.getAttribute('href');
-  if (!anchor || !href) {
+  const anchor = (e.target as Element).closest?.('a');
+  const href = anchor && content.contains(anchor) ? anchorHref(anchor) : null;
+  if (href === null || !hostFollowsLink(href)) {
     return;
   }
   e.preventDefault();
-  // VS Code's webview shell listens for link clicks on the window too, and
-  // routes them through its own "open external website?" prompt whether or not
-  // the default was prevented. The host opens the link below, so the shell must
-  // never see the click, or the reader gets the page and then a prompt for it.
   e.stopPropagation();
+  if (!href.trim()) {
+    // `href=""` points back at the page itself, which inside a webview is the
+    // vscode-webview:// document: nothing a reader could want opened.
+    return;
+  }
   if (href.startsWith('#')) {
     scrollToAnchor(href.slice(1));
   } else {
@@ -615,11 +636,10 @@ interface CopyGroup {
 
 // The copy groups that apply to the clicked element, most specific first.
 // Several can apply at once — selecting text inside a table yields both — and
-// the first one drives the menu's primary row.
-function copyGroups(target: HTMLElement): CopyGroup[] {
+// the first one drives the menu's primary row. `hasSelection` is whether the
+// reader has selected any visible text, which buildMenu has already read.
+function copyGroups(target: HTMLElement, hasSelection: boolean): CopyGroup[] {
   const groups: CopyGroup[] = [];
-  const selection = window.getSelection();
-  const hasSelection = !!selection && selection.toString().trim().length > 0;
   const block = target.closest<HTMLElement>('[data-source-line]');
   const code = target.closest<HTMLElement>('pre.hljs, pre code');
   const table = target.closest<HTMLElement>('table');
@@ -861,27 +881,24 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   // about the grid or the document, has nothing to do with the textarea, and the
   // menu is the only route to most of it.
   const cellEditor = editorIn(target);
-  const copies = cellEditor ? buildCellEditorEntries(cellEditor) : buildCopyEntries(target);
+  // Read once, and only as far as a search can use: a select-all over a large
+  // sheet is every cell in it, and this runs on every right-click.
+  const query = cellEditor ? '' : selectionSearchText(window.getSelection());
+  const copies = cellEditor
+    ? buildCellEditorEntries(cellEditor)
+    : buildCopyEntries(target, query.length > 0);
   if (copies.length > 0) {
     entries.push(...copies, { kind: 'divider' });
   }
 
   // Look the selected words up on the web. The host opens the URL, through the
   // same https-only path a clicked link takes.
-  const query = cellEditor
-    ? ''
-    : (window.getSelection()?.toString() ?? '').replace(/\s+/g, ' ').trim();
   if (query) {
-    const shown = query.length > 30 ? `${query.slice(0, 30).trimEnd()}…` : query;
     entries.push(
       {
         kind: 'item',
-        label: `Search Google for “${shown}”`,
-        run: () =>
-          vscode.postMessage({
-            type: 'openLink',
-            href: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-          }),
+        label: searchLabel(query),
+        run: () => vscode.postMessage({ type: 'openLink', href: googleSearchUrl(query) }),
       },
       { kind: 'divider' },
     );
@@ -918,8 +935,8 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
 // The copy rows for whatever was clicked: the primary "Copy X" for the most
 // specific thing under the pointer, then a "Copy as" submenu holding its other
 // formats and every format of the less specific things around it.
-function buildCopyEntries(target: HTMLElement): MenuEntry[] {
-  const groups = copyGroups(target);
+function buildCopyEntries(target: HTMLElement, hasSelection: boolean): MenuEntry[] {
+  const groups = copyGroups(target, hasSelection);
   if (groups.length === 0) {
     return [];
   }

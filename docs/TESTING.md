@@ -57,6 +57,8 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] The tab's own title bar still has the **Save as PDF** and settings buttons, and right-clicking inside it gives the usual copy menu.
 - [ ] With the tab open, edit `sample.md` in a second editor group: the tab re-renders as you type.
 - [ ] Clicking a link to another Markdown file from the tab opens that file as a MarkCopy tab, landing at the linked heading.
+- [ ] Clicking an `https://` link opens it in the browser once, with no "Do you want Code to open the external website?" prompt after it. A `vscode:extension/<id>` link still opens that extension's page in VS Code.
+- [ ] Right-click to open the menu, then left-click a link: the link opens and the menu closes.
 - [ ] Same check on [sample.csv](../sample.csv) with **MarkCopy CSV Preview**: the grid opens in the tab, a cell edit writes back, and **Ctrl+Z** in the tab takes it back.
 - [ ] Closing a preview tab and reopening `sample.md` shows the preview again: closing the tab closed the file, which is not the same as asking for the text.
 - [ ] ★ On the preview tab, that leftmost slot is now a **Show Source** button (`$(go-to-file)`): clicking it swaps back to the text, in the same group and the same tab. Click the two a few times: the tab count never grows and no group is ever added. The side panel does not spring open on the way to the source either.
@@ -89,6 +91,9 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] ★ **Copy Whole Document** (top-level menu, or the command palette's **Copy Whole Document as Rich Text**), paste into an email draft: formatting intact.
 - [ ] Every successful copy shows a toast.
 - [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
+- [ ] Select `AT&T C++` in the prose, right-click -> **Search Google for "AT&T C++"**: the browser opens a Google search for exactly `AT&T C++`, not for `AT`. Selecting a long passage shows only its first 30 characters in the row, and the search still opens.
+- [ ] Select a sentence containing an inline equation, then search it: the query has the equation once, not its hidden MathML twin as well. In a CSV grid, a selection across rows searches the cell text without the row numbers.
+- [ ] In an Excel sheet and a PowerPoint deck, **Search Google** opens the browser too.
 
 ### Settings, themes, and sync
 
