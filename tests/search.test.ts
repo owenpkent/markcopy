@@ -129,6 +129,49 @@ describe('selectionSearchText', () => {
   });
 });
 
+describe('a <br> as a word boundary', () => {
+  it('joins the two lines of a PowerPoint title split by <br>', () => {
+    // The shape src/pptx/read/render.ts actually emits: one <h2> whose lines
+    // are joined with <br> rather than separate <p> blocks (see the comment
+    // above buildTitleHtml there).
+    const div = mount('<h2 class="mc-pptx-title">Quarterly<br>Results</h2>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('Quarterly Results');
+  });
+
+  it('joins across a <br> even with styled runs on both sides', () => {
+    const div = mount('<p><b>Quar</b>terly<br><i>Res</i>ults</p>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('Quarterly Results');
+  });
+
+  it('still adds no break for inline markup with no <br> between the runs', () => {
+    const div = mount('wo<b>rd</b>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('word');
+  });
+
+  it('does not double a space that already sits next to the <br>', () => {
+    const div = mount('<p>Quarterly <br> Results</p>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('Quarterly Results');
+  });
+
+  it('adds no leading space for a <br> inside data-mc-ignore', () => {
+    // Without the closest(SKIP) guard on the BR branch, this ignored break
+    // would still splice a space into text that has none of its own.
+    const div = mount('<p>Quarterly<span data-mc-ignore><br></span>Results</p>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('QuarterlyResults');
+  });
+
+  it('adds no leading space for a <br> at the very start of the selection', () => {
+    const div = mount('<p><br>Quarterly Results</p>');
+    selectAll(div);
+    expect(selectionSearchText(window.getSelection())).toBe('Quarterly Results');
+  });
+});
+
 describe('truncate', () => {
   it('leaves short text alone', () => {
     expect(truncate('hello', 10)).toBe('hello');

@@ -110,6 +110,23 @@ describe('the Search Google row', () => {
     await menu.click(searchLabel('Tom & Jerry'));
     expect(lastHref()).toContain('%26');
   });
+
+  it('joins the words on either side of a <br> into one query', async () => {
+    // src/webview/search.ts treats a <br> between text nodes as a word break;
+    // this pins that all the way through to the URL the menu row posts.
+    await h.render({ html: '<p>Quarterly<br>Results</p>', source: '', kind: 'markdown' });
+    const range = document.createRange();
+    range.selectNodeContents(h.find('p'));
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+
+    const menu = h.rightClick(h.content());
+    await menu.click(searchLabel('Quarterly Results'));
+
+    expect(lastHref()).toBe(googleSearchUrl('Quarterly Results'));
+    expect(lastHref()).toBe('https://www.google.com/search?q=Quarterly%20Results');
+  });
 });
 
 describe('link clicks', () => {
@@ -117,15 +134,17 @@ describe('link clicks', () => {
     await h.render({ html: PROSE_HTML, source: PROSE_SOURCE, kind: 'markdown' });
   });
 
-  it('intercepts an http link, posts openLink, and keeps the shell from seeing it', () => {
+  it('intercepts an http link, posts exactly one openLink, and keeps the shell from seeing it', () => {
     const anchor = link('https://example.com/docs');
     const shellSaw = vi.fn();
     window.addEventListener('click', shellSaw);
+    const postedBefore = h.posted.length;
     const event = leftClick(anchor);
     window.removeEventListener('click', shellSaw);
 
     expect(event.defaultPrevented).toBe(true);
     expect(shellSaw).not.toHaveBeenCalled();
+    expect(h.posted.length).toBe(postedBefore + 1);
     expect(h.posted.at(-1)).toEqual({ type: 'openLink', href: 'https://example.com/docs' });
   });
 
@@ -155,5 +174,31 @@ describe('link clicks', () => {
 
     expect(menu.open()).toBe(false);
     expect(h.posted.at(-1)).toEqual({ type: 'openLink', href: 'https://example.com/docs' });
+  });
+
+  it('closes the menu, scrolls to the target, and posts nothing for an in-page fragment link', async () => {
+    // scrollToAnchor in src/webview/main.ts resolves the id with
+    // document.getElementById, so what matters here is that DOMPurify's
+    // default sanitize keeps a plain id attribute through render().
+    await h.render({
+      html: '<p><a href="#destination">Jump</a></p><h2 id="destination">Destination</h2>',
+      source: '',
+      kind: 'markdown',
+    });
+    const anchor = h.find('a[href="#destination"]');
+    const destination = h.find('#destination');
+    const scrollIntoView = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    const callsBefore = scrollIntoView.mock.calls.length;
+    const menu = h.rightClick(h.content());
+    expect(menu.open()).toBe(true);
+    const postedBefore = h.posted.length;
+
+    leftClick(anchor);
+
+    expect(menu.open()).toBe(false);
+    expect(h.posted.length).toBe(postedBefore);
+    const newCalls = scrollIntoView.mock.calls.length - callsBefore;
+    expect(newCalls).toBe(1);
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(destination);
   });
 });

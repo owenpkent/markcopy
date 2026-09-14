@@ -58,7 +58,16 @@ export function selectionSearchText(selection: Selection | null, max = SEARCH_QU
 function appendRange(text: string, range: Range, budget: number): string {
   const root = range.commonAncestorContainer;
   const doc = root.ownerDocument ?? document;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  // Text, plus `<br>`: a line break is a word break too, and unlike a block it
+  // sits between the text nodes either side of it rather than around them, so
+  // the closest(BLOCK) test below cannot see it. A PowerPoint title or speaker
+  // note joins its lines with one (src/pptx/read/render.ts).
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (n) =>
+      n.nodeType === Node.TEXT_NODE || n.nodeName === 'BR'
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_SKIP,
+  });
   // Start at the range rather than at the top of its common ancestor, which
   // for a selection deep in a long document is the whole document.
   const start = range.startContainer;
@@ -80,6 +89,12 @@ function appendRange(text: string, range: Range, budget: number): string {
     // Before its start, which only happens when the range opens at the end of
     // an element and the walk above began inside it.
     if (!range.intersectsNode(node)) {
+      continue;
+    }
+    if (node.nodeType !== Node.TEXT_NODE) {
+      if (text && !text.endsWith(' ') && !(node as Element).closest(SKIP)) {
+        text += ' ';
+      }
       continue;
     }
     const parent = node.parentElement;

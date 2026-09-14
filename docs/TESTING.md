@@ -93,7 +93,7 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
 - [ ] Select `AT&T C++` in the prose, right-click -> **Search Google for "AT&T C++"**: the browser opens a Google search for exactly `AT&T C++`, not for `AT`. Selecting a long passage shows only its first 30 characters in the row, and the search still opens.
 - [ ] Select a sentence containing an inline equation, then search it: the query has the equation once, not its hidden MathML twin as well. In a CSV grid, a selection across rows searches the cell text without the row numbers.
-- [ ] In an Excel sheet and a PowerPoint deck, **Search Google** opens the browser too.
+- [ ] In an Excel sheet and a PowerPoint deck, **Search Google** opens the browser too. Selecting a slide title that wraps onto a second line with a manual line break searches its words with a space between the lines, not run together.
 
 ### Settings, themes, and sync
 
