@@ -196,9 +196,13 @@ suite('MarkCopy custom editors', () => {
     // extension, which package.json previously left with no uppercase entry
     // at all: a Deck.PPTM would have opened as binary junk on a
     // case-sensitive filesystem while Deck.PPTX quietly worked.
+    //
+    // The two files need different names, not just different case: on a
+    // case-insensitive filesystem (Windows, macOS by default) deck.pptm and
+    // Deck.PPTM are one file, so the second open only focused the first tab.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
     const lower = vscode.Uri.file(path.join(dir, 'deck.pptm'));
-    const upper = vscode.Uri.file(path.join(dir, 'Deck.PPTM'));
+    const upper = vscode.Uri.file(path.join(dir, 'Slides.PPTM'));
     fs.copyFileSync(path.resolve(__dirname, '..', 'sample.pptx'), lower.fsPath);
     fs.copyFileSync(path.resolve(__dirname, '..', 'sample.pptx'), upper.fsPath);
 
@@ -211,7 +215,7 @@ suite('MarkCopy custom editors', () => {
     await vscode.commands.executeCommand('vscode.open', upper);
     assert.ok(
       customTabs().some((tab) => tab.viewType === PPTX_VIEW && tab.uri === upper.toString()),
-      `expected a ${PPTX_VIEW} tab for Deck.PPTM, saw: ${JSON.stringify(customTabs())}`,
+      `expected a ${PPTX_VIEW} tab for Slides.PPTM, saw: ${JSON.stringify(customTabs())}`,
     );
   });
 
