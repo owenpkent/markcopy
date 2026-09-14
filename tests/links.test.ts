@@ -6,7 +6,16 @@
 // somewhere else: a `mailto:` left on the front, a sentence's full stop stuck to
 // the end, a percent-escape never decoded.
 import { describe, it, expect } from 'vitest';
-import { refFromHref, refFromText, nounFor, markdownLink } from '../src/webview/links';
+import {
+  refFromHref,
+  refFromText,
+  nounFor,
+  markdownLink,
+  anchorHref,
+  hostFollowsLink,
+} from '../src/webview/links';
+
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
 
 describe('refFromHref', () => {
   it('reads the bare address out of a mailto:', () => {
@@ -136,5 +145,55 @@ describe('markdownLink', () => {
     expect(markdownLink('odd', 'https://example.com/a(b)>c')).toBe(
       '[odd](https://example.com/a%28b%29>c)',
     );
+  });
+});
+
+describe('anchorHref', () => {
+  it('reads an ordinary HTML href', () => {
+    const a = document.createElement('a');
+    a.setAttribute('href', 'https://example.com');
+    expect(anchorHref(a)).toBe('https://example.com');
+  });
+
+  it('falls back to xlink:href on an SVG link', () => {
+    // A Mermaid node or an inline diagram carries its target this way;
+    // getAttribute('href') does not see it.
+    const a = document.createElementNS('http://www.w3.org/2000/svg', 'a');
+    a.setAttributeNS(XLINK_NS, 'xlink:href', 'https://example.com/svg');
+    expect(anchorHref(a)).toBe('https://example.com/svg');
+  });
+
+  it('has nothing to offer for an anchor with neither', () => {
+    const a = document.createElement('a');
+    expect(anchorHref(a)).toBeNull();
+  });
+});
+
+describe('hostFollowsLink', () => {
+  // No scheme at all -- relative, an in-page fragment, protocol-relative, or a
+  // Windows drive letter, which is one letter short of the two the scheme
+  // pattern requires -- plus the two schemes the host actually opens.
+  it.each([
+    '',
+    '#heading',
+    './notes.md',
+    '../notes.md',
+    '//example.com/path',
+    'C:\\Users\\bob\\notes.md',
+    'https://example.com',
+    'HTTPS://example.com',
+    'http://example.com',
+    'mailto:bob@example.com',
+  ])('follows %j', (href) => {
+    expect(hostFollowsLink(href)).toBe(true);
+  });
+
+  it.each([
+    'vscode:extension/foo.bar',
+    'vscode-insiders:extension/foo.bar',
+    'tel:+15551234567',
+    'ftp://example.com',
+  ])('leaves %j to the shell', (href) => {
+    expect(hostFollowsLink(href)).toBe(false);
   });
 });

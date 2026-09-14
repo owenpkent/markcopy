@@ -145,3 +145,31 @@ export function markdownLink(text: string, href: string): string {
   );
   return `[${label}](${target})`;
 }
+
+/**
+ * The target an anchor was written with, or null when it has none.
+ *
+ * An SVG link (an inline diagram, a Mermaid node with a click target) can carry
+ * its address as `xlink:href` instead, which `getAttribute('href')` does not see.
+ */
+export function anchorHref(anchor: Element): string | null {
+  return (
+    anchor.getAttribute('href') ?? anchor.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+  );
+}
+
+/**
+ * Whether the host follows a link clicked in the preview, rather than VS Code's
+ * webview shell.
+ *
+ * The host takes in-page fragments, local paths, and the web and mail schemes it
+ * hands the OS (openLink in src/extension.ts). A link to any other scheme,
+ * `vscode:` above all, is left to the shell, whose opener knows the editor's own
+ * schemes and has no trusted-domain prompt for them. The scheme test matches
+ * localImageRef in src/preview-utils.ts, which is what the host classifies by: a
+ * single letter is a Windows drive, not a scheme.
+ */
+export function hostFollowsLink(href: string): boolean {
+  const scheme = /^([a-z][a-z0-9+.-]+):/i.exec(href.trim())?.[1];
+  return !scheme || /^(https?|mailto)$/i.test(scheme);
+}

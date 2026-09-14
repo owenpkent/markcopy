@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
+import { openExternalLink } from './externalLink';
+import { classifyLink } from './preview-utils';
 
 const { basename } = posix;
 
@@ -169,6 +171,14 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
           void vscode.commands.executeCommand('markcopy.openSettings');
         } else if (msg?.type === 'toast') {
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
+        } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
+          // The menu's Search Google row, which the shared webview offers on every
+          // surface. Only web and mail links are followed here: nothing in a sheet
+          // or deck renders as a local link for the host to resolve.
+          const target = classifyLink(msg.href);
+          if (target?.kind === 'external') {
+            openExternalLink(target.href);
+          }
         } else if (session.handleMessage) {
           await session.handleMessage(msg, draw);
         }
