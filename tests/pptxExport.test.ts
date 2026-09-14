@@ -588,6 +588,43 @@ describe('hyperlinks', () => {
     expect(slide(1)).not.toContain('<a:hlinkClick');
     expect(slideRels(1)).not.toContain('hyperlink');
   });
+
+  it('mints one relationship for a URL linked more than once on a slide', () => {
+    // inlineElement converts an anchor's children twice (a visibility probe,
+    // then the real pass), so minting has to be idempotent or the discarded
+    // pass leaves a relationship behind. Two separate links to the same URL
+    // exercise the same dedup from the other direction.
+    const { slide, slideRels } = pptx(
+      '<p><a href="https://x.test">one</a> and <a href="https://x.test">two</a> ' +
+        'and <a href="https://y.test">three</a></p>',
+    );
+    const rels = slideRels(1);
+    expect(rels.match(/Target="https:\/\/x\.test"/g)).toHaveLength(1);
+    expect(rels.match(/Target="https:\/\/y\.test"/g)).toHaveLength(1);
+
+    // Both runs point at that one relationship, and every id the body cites
+    // is actually declared in the .rels part.
+    const cited = [...slide(1).matchAll(/<a:hlinkClick r:id="([^"]+)"\/>/g)].map((m) => m[1]);
+    expect(cited).toHaveLength(3);
+    expect(new Set(cited).size).toBe(2);
+    for (const id of cited) {
+      expect(rels).toContain(`Id="${id}"`);
+    }
+  });
+
+  it('gives each slide its own relationship for the same URL', () => {
+    // A rels part belongs to one slide, so the dedup map has to reset with it:
+    // reusing slide 1's rId on slide 2 would cite an id slide 2 never declares.
+    const { slide, slideRels } = pptx(
+      '<p><a href="https://x.test">one</a></p><hr/><p><a href="https://x.test">two</a></p>',
+    );
+    for (const n of [1, 2]) {
+      const cited = [...slide(n).matchAll(/<a:hlinkClick r:id="([^"]+)"\/>/g)].map((m) => m[1]);
+      expect(cited).toHaveLength(1);
+      expect(slideRels(n)).toContain(`Id="${cited[0]}"`);
+      expect(slideRels(n).match(/Target="https:\/\/x\.test"/g)).toHaveLength(1);
+    }
+  });
 });
 
 describe('code blocks', () => {
