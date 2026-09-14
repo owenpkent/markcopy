@@ -505,6 +505,11 @@ content.addEventListener('click', (e) => {
     return;
   }
   e.preventDefault();
+  // VS Code's webview shell listens for link clicks on the window too, and
+  // routes them through its own "open external website?" prompt whether or not
+  // the default was prevented. The host opens the link below, so the shell must
+  // never see the click, or the reader gets the page and then a prompt for it.
+  e.stopPropagation();
   if (href.startsWith('#')) {
     scrollToAnchor(href.slice(1));
   } else {
@@ -859,6 +864,27 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   const copies = cellEditor ? buildCellEditorEntries(cellEditor) : buildCopyEntries(target);
   if (copies.length > 0) {
     entries.push(...copies, { kind: 'divider' });
+  }
+
+  // Look the selected words up on the web. The host opens the URL, through the
+  // same https-only path a clicked link takes.
+  const query = cellEditor
+    ? ''
+    : (window.getSelection()?.toString() ?? '').replace(/\s+/g, ' ').trim();
+  if (query) {
+    const shown = query.length > 30 ? `${query.slice(0, 30).trimEnd()}…` : query;
+    entries.push(
+      {
+        kind: 'item',
+        label: `Search Google for “${shown}”`,
+        run: () =>
+          vscode.postMessage({
+            type: 'openLink',
+            href: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+          }),
+      },
+      { kind: 'divider' },
+    );
   }
 
   // Row and column edits, when the pointer is over a grid that can take them.
