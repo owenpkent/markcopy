@@ -53,6 +53,10 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 let sourceLines: string[] = [];
 let mermaidConfig: Record<string, unknown> = {};
+// Mermaid 12 defaults to ELK layout and the "neo" look. MarkCopy keeps the
+// classic dagre output unless `markcopy.mermaid` (or a diagram's frontmatter)
+// opts in, so these sit before the user config at every initialize call.
+const MERMAID_DEFAULTS = { layout: 'dagre', look: 'classic' } as const;
 // Identity of the document currently shown, so a render that swaps to a new
 // document can reset scroll to the top (or a linked heading) instead of keeping
 // the previous document's position. Empty until the first render.
@@ -96,6 +100,7 @@ async function initMermaid(): Promise<void> {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    ...MERMAID_DEFAULTS,
     theme: isDark() ? 'dark' : 'default',
     ...mermaidConfig,
   } as Parameters<typeof mermaid.initialize>[0]);
@@ -1244,6 +1249,7 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
+    ...MERMAID_DEFAULTS,
     ...mermaidConfig,
     theme: 'default',
   } as Parameters<typeof mermaid.initialize>[0]);
