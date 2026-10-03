@@ -14,6 +14,7 @@ import {
   refFromHref,
   refFromText,
 } from './links';
+import { splitMermaidConfig } from './mermaidDefaults';
 import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 // Type only: the host owns the grid operations, and naming them in one place
@@ -53,10 +54,6 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 let sourceLines: string[] = [];
 let mermaidConfig: Record<string, unknown> = {};
-// Mermaid 12 defaults to ELK layout and the "neo" look. MarkCopy keeps the
-// classic dagre output unless `markcopy.mermaid` (or a diagram's frontmatter)
-// opts in, so these sit before the user config at every initialize call.
-const MERMAID_DEFAULTS = { layout: 'dagre', look: 'classic' } as const;
 // Identity of the document currently shown, so a render that swaps to a new
 // document can reset scroll to the top (or a linked heading) instead of keeping
 // the previous document's position. Empty until the first render.
@@ -93,17 +90,32 @@ function isDark(): boolean {
   );
 }
 
+// Initialize Mermaid with `config`, then apply the layout and look as site
+// config, which initialize() resets; see mermaidDefaults.ts for why.
+function configureMermaid(
+  mermaid: typeof MermaidApi,
+  config: Record<string, unknown>,
+  site: Record<string, unknown>,
+): void {
+  mermaid.initialize(config as Parameters<typeof mermaid.initialize>[0]);
+  mermaid.mermaidAPI.updateSiteConfig(site);
+}
+
 // (Re)initialize Mermaid so diagrams match the current theme, merging any
 // user-supplied `markcopy.mermaid` config on top.
 async function initMermaid(): Promise<void> {
   const mermaid = await getMermaid();
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    ...MERMAID_DEFAULTS,
-    theme: isDark() ? 'dark' : 'default',
-    ...mermaidConfig,
-  } as Parameters<typeof mermaid.initialize>[0]);
+  const { init, site } = splitMermaidConfig(mermaidConfig);
+  configureMermaid(
+    mermaid,
+    {
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: isDark() ? 'dark' : 'default',
+      ...init,
+    },
+    site,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,13 +1258,17 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
   }
   const mermaid = await getMermaid();
   // `theme` last so it wins over any user `markcopy.mermaid` theme for the print.
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    ...MERMAID_DEFAULTS,
-    ...mermaidConfig,
-    theme: 'default',
-  } as Parameters<typeof mermaid.initialize>[0]);
+  const { init, site } = splitMermaidConfig(mermaidConfig);
+  configureMermaid(
+    mermaid,
+    {
+      startOnLoad: false,
+      securityLevel: 'strict',
+      ...init,
+      theme: 'default',
+    },
+    site,
+  );
   try {
     for (let i = 0; i < hosts.length; i++) {
       const src = hosts[i].dataset.mermaidSrc;
