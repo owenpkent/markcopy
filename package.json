@@ -609,18 +609,18 @@
     "publish:ovsx": "ovsx publish"
   },
   "dependencies": {
-    "dompurify": "^3.4.15",
+    "dompurify": "^3.4.16",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
-    "katex": "^0.18.7",
-    "markdown-it": "^15.0.1",
+    "katex": "^0.18.9",
+    "markdown-it": "^15.0.2",
     "markdown-it-anchor": "^10.0.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-texmath": "^1.0.0",
     "numfmt": "^3.2.6",
     "pdfjs-dist": "^6.3.289",
     "saxes": "^6.0.0",
-    "three": "^0.185.1",
+    "three": "^0.186.1",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"
   },
