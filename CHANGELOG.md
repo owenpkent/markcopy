@@ -6,7 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Changed
 
-- **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*`, `aligned`, and rows whose number is suppressed are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
+- **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*` and `aligned` are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
 
 ### Security
 
