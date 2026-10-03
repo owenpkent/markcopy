@@ -43,9 +43,9 @@ updates:
       - dependency-name: '@vscode/vsce'
         update-types: ['version-update:semver-major']
       # Mermaid is bundled into the preview, and 12 changes what readers see:
-      # ELK replaces dagre as the default layout and a new "neo" look recolours
-      # every diagram, so existing flowcharts, class and state diagrams re-lay
-      # out on update. It also removes the `defaultRenderer` option the 0.9.0
+      # ELK replaces dagre as the default layout and a new "neo" look takes over,
+      # so existing flowcharts, class and state diagrams re-lay out and recolour
+      # on update. It also removes the `defaultRenderer` option the 0.9.0
       # changelog tells readers to set, and its new parser brings a lodash-es
       # with open high-severity advisories. Move to 12 in a deliberate PR that
       # picks the default layout and look and documents the change.
