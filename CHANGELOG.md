@@ -9,6 +9,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.14.1] - 2026-10-03
+
+### Fixed
+
+- **Release packages no longer carry leftover build output.** The webview build named its code-split chunks by content hash and never removed the previous build's, so old chunks were packaged with each release: the 0.13.0 download held 865 files and 10.24 MB, where 0.14.0, packaged after a manual clean, held 185 files and 3.54 MB. The build now clears them itself, so every package stays that size. The extension's code is unchanged from 0.14.0.
+
 ## [0.14.0] - 2026-10-03
 
 ### Changed
@@ -356,7 +362,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/owenpkent/markcopy/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/owenpkent/markcopy/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/owenpkent/markcopy/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/owenpkent/markcopy/compare/v0.11.0...v0.12.0
