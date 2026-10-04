@@ -404,7 +404,7 @@
           "type": "object",
           "default": {},
           "additionalProperties": true,
-          "markdownDescription": "Extra [Mermaid configuration](https://mermaid.js.org/config/schema-docs/config.html) merged into `mermaid.initialize` (for example `flowchart`, `fontFamily`, `themeVariables`, or a fixed `theme`). Diagrams already follow the light/dark palette by default; set `theme` here to override."
+          "markdownDescription": "Extra [Mermaid configuration](https://mermaid.js.org/config/schema-docs/config.html) merged into `mermaid.initialize` (for example `flowchart`, `fontFamily`, `themeVariables`, or a fixed `theme`). Diagrams already follow the light/dark palette by default; set `theme` here to override. MarkCopy keeps Mermaid's classic dagre layout and look by default; `\"layout\": \"elk\"` or `\"look\": \"neo\"` opt into Mermaid 12's new ones. Mindmaps keep their radial layout either way."
         },
         "markcopy.math": {
           "type": "boolean",
@@ -648,7 +648,7 @@
     "globals": "^17.12.0",
     "html-to-image": "^1.11.11",
     "jsdom": "^29.1.1",
-    "mermaid": "^11.17.2",
+    "mermaid": "^12.1.0",
     "mocha": "^12.0.2",
     "npm-run-all": "^4.1.5",
     "ovsx": "^1.2.0",

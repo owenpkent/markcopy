@@ -6,6 +6,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Changed
 
+- **Mermaid updated to 12.1**, which adds UML use case diagrams and shows the actual parse error message in the error diagram instead of only "Syntax error in text".
+  - Diagrams keep their layout engine and colors by default. Mermaid 12 switched to the ELK layout and a new "neo" look, so MarkCopy sets `layout: 'dagre'` and `look: 'classic'` unless you say otherwise; a diagram's own frontmatter (`config: layout: elk`) still takes precedence. Mindmaps keep their own radial layout, whatever `markcopy.mermaid` sets. Mermaid 12 sizes some shapes differently even so: nodes stacked in one column of a flowchart now share a width, and state and ER boxes are a little wider, so an existing diagram can come out slightly wider than before.
+  - ELK now ships inside Mermaid, so `"markcopy.mermaid": { "layout": "elk" }` works without any setup for every diagram type that offers a layout choice except mindmaps, and `"markcopy.mermaid": { "look": "neo" }` opts into the new appearance.
+  - Mermaid removed the `defaultRenderer` option, so the `"class": { "defaultRenderer": "dagre-d3" }` setting suggested under 0.9.0 no longer has any effect: class diagrams always use Mermaid's unified renderer, laid out with dagre by default.
 - **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*` and `aligned` are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
 
 ### Security
