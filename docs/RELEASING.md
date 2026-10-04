@@ -139,7 +139,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    code --extensions-dir <tmp>/ext --user-data-dir <tmp>/ud sample.md
    ```
 
-   Glance at the file count `vsce` prints while packaging, too: 0.14.0 was 185 files and 3.54 MB. A count hundreds higher than the last release means old build output is being packaged (see [A VSIX much larger than the last one](#a-vsix-much-larger-than-the-last-one)).
+   Glance at the file count and size `vsce` prints while packaging, too: 0.14.0 was 185 files and 3.54 MB. A jump of hundreds of files that no dependency change explains means old build output is being packaged (see [A VSIX much larger than the last one](#a-vsix-much-larger-than-the-last-one)).
 
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section). Then check both before publishing; each answers in seconds and neither publishes anything: `npx vsce verify-pat OwenPKent` and `npx ovsx verify-pat OwenPKent`.
 9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
@@ -236,7 +236,7 @@ So do not read a stale response as a failed publish, and do not republish on the
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
 ```
 
-0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version settles the question without sampling, because it is a yes or no rather than a replica's opinion. It returns 200 for a version that was published and 404 for one that was not. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0:
+0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. A 404 does not prove the opposite: how soon after `DONE Published` the URL starts answering has not been measured, so a 404 is no more a reason to republish than a stale listing is:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -L \
@@ -255,7 +255,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://open-vsx.org/api/OwenPKent/mark
 
 ### A VSIX much larger than the last one
 
-`vsce package` ships everything in `media/` except source maps, and the webview build names its split chunks by content hash (`media/chunk-[name]-[hash].js`). Until #94, each build wrote new chunks beside the previous build's and nothing removed them, so every leftover went out with the next release. The 0.13.0 VSIX on GitHub holds 865 files and 10.7 MB, with eight KaTeX and eleven Mermaid chunks; a clean build of 0.14.0 is 185 files and 3.7 MB with one of each. Nothing broke, because the entry bundles never load a stale chunk, but every download was about three times larger than it needed to be.
+`vsce package` ships everything in `media/` except source maps, and the webview build names its split chunks by content hash (`media/chunk-[name]-[hash].js`). Until #94, each build wrote new chunks beside the previous build's and nothing removed them, so every leftover went out with the next release. The 0.13.0 VSIX on GitHub holds 865 files and 10.24 MB (sizes here are in the units `vsce` prints), with eight KaTeX and eleven Mermaid chunks; the clean 0.14.0 package is 185 files and 3.54 MB with one of each. Nothing broke, because the entry bundles never load a stale chunk, but 0.13.0's download was about three times the size of 0.14.0's.
 
 `esbuild.web.js` now clears `media/chunk-*.js` before each build, and `vscode:prepublish` runs a full build before packaging, so this should not recur. If a packaged count still jumps, list what is new and clear the generated files. `git clean -fdX` removes only gitignored files, never the tracked ones in `media/`:
 
