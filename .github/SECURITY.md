@@ -6,6 +6,16 @@ Dependabot security alerts and automatic security update pull requests are enabl
 Weekly version updates are configured in `dependabot.yml`, with compatibility
 exclusions for dependencies tied to the project's Node and VS Code versions.
 
+`npm audit` reports one advisory with no fixed release: `braces`
+(GHSA-vfj7-8cjw-p6xm, stack exhaustion on deeply nested brace patterns), which
+covers every published version. It is a development dependency only, reached through
+`@vscode/vsce` 3, `secretlint`, `globby`, `fast-glob` and `micromatch`, where it
+expands the globs `vsce package` uses to scan the package for secrets. Those
+patterns come from vsce and this repository, not from documents MarkCopy opens, and
+nothing from that chain is bundled into the extension. It goes away once vsce 4,
+which requires Node 22, replaces vsce 3 both directly and inside `ovsx`; revisit it
+when the project's Node floor moves.
+
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
 these overrides when the CLI resolves patched versions without them. The direct Mocha
