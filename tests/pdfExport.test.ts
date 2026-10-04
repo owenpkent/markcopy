@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserCandidates, buildPdfPage, findBrowser, pdfCss, printArgs } from '../src/pdfExport';
@@ -226,6 +226,19 @@ describe('buildPdfPage', () => {
 
   it('forces the light palette whatever the preview was showing', () => {
     expect(page()).toContain('<body class="mc-force-light" data-mc-theme="light">');
+  });
+
+  it('leaves Mermaid edge-label backgrounds out of the force-light flattening', async () => {
+    // The export body carries `mc-force-light`, whose blanket `background-color:
+    // transparent !important` beat Mermaid's `.labelBkg` / `.edgeLabel` rules inside
+    // a foreignObject and printed the edge line straight through the label text.
+    const css = await readFile(join(__dirname, '..', 'media', 'preview.css'), 'utf8');
+    expect(css).toMatch(
+      /\.mc-force-light \*:not\(:where\(body\.mc-force-light \.mc-mermaid foreignObject \*\)\)\s*\{\s*background-color: transparent !important;/,
+    );
+    // The exemption must not be a second blanket: only the colour rule may touch `*`
+    // for everything else.
+    expect(css).not.toMatch(/\.mc-force-light \*\s*\{[^}]*background-color/);
   });
 
   it('escapes the title', () => {
