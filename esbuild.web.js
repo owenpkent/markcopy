@@ -23,6 +23,21 @@ function copyKatexAssets() {
   fs.cpSync(path.join(src, 'fonts'), path.join(dest, 'fonts'), { recursive: true });
 }
 
+// Code splitting names each chunk by content hash (`chunk-[name]-[hash]`), so a
+// rebuild writes new files beside the old ones instead of over them. Clear the
+// previous build's chunks first: `vsce package` ships everything in `media/`, and
+// leftovers grew the 0.13.0 VSIX to 865 files and 10.7 MB, where a clean build is
+// 185 files and 3.7 MB. Only these gitignored names are removed; a watch session
+// still accumulates chunks until the next full build.
+function removeStaleChunks() {
+  const dir = path.join(__dirname, 'media');
+  for (const name of fs.readdirSync(dir)) {
+    if (/^chunk-.+\.js(\.map)?$/.test(name)) {
+      fs.rmSync(path.join(dir, name), { force: true });
+    }
+  }
+}
+
 const shared = {
   bundle: true,
   platform: 'browser',
@@ -43,6 +58,7 @@ async function run(options) {
 }
 
 async function main() {
+  removeStaleChunks();
   copyKatexAssets();
   await Promise.all([
     // Markdown preview: ES module with code splitting so mermaid, katex,
