@@ -4,6 +4,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*` and `aligned` are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
+
+### Security
+
+- **Mismatched quotes no longer slow the preview down.** MarkCopy renders with typographic quotes on, and markdown-it's smart-quotes pass took quadratic time when an opening and closing quote did not match, so a long document with many stray quotes could stall rendering. Fixed upstream in markdown-it 15.0.2, which also caps the stack of unmatched opening quotes at 1000.
+
 ### Planned
 
 - PlantUML support.
