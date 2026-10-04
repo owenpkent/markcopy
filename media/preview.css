@@ -508,6 +508,18 @@ pre.mermaid-src {
 .mc-force-light * {
   color: #1f2328 !important;
   border-color: #d1d9e0 !important;
+}
+/* Split from the rule above so the PDF export page can exempt one thing from it.
+   Mermaid draws edge labels as HTML inside an SVG foreignObject and gives them a
+   background box (`.labelBkg`, `.edgeLabel`) so the edge line does not run through
+   the text. An `!important` transparent here beats Mermaid's own stylesheet, so
+   in the PDF (whose body carries this class) the boxes vanished. The exemption is
+   limited to the export body: the copy paths add the class to a subtree and
+   rasterize diagrams in the preview's own, possibly dark, theme. `:where()` keeps
+   the :not() at the specificity of `*`, so the `pre`/`code`/`th` backgrounds below
+   still win over it. */
+.mc-force-light,
+.mc-force-light *:not(:where(body.mc-force-light .mc-mermaid foreignObject *)) {
   background-color: transparent !important;
 }
 .mc-force-light pre,

@@ -12,6 +12,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - Mermaid removed the `defaultRenderer` option, so the `"class": { "defaultRenderer": "dagre-d3" }` setting suggested under 0.9.0 no longer has any effect: class diagrams always use Mermaid's unified renderer, laid out with dagre by default.
 - **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*` and `aligned` are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
 
+### Fixed
+
+- **Save as PDF prints the background behind Mermaid edge labels.** The export page's blanket "transparent background" rule overrode the box Mermaid draws behind a label such as `open`, `places` or `contains`, so the edge line ran through the text in the PDF. The labels now keep their background in the PDF; checked on state, class and ER diagrams.
+
 ### Security
 
 - **Mismatched quotes no longer slow the preview down.** MarkCopy renders with typographic quotes on, and markdown-it's smart-quotes pass took quadratic time when an opening and closing quote did not match, so a long document with many stray quotes could stall rendering. Fixed upstream in markdown-it 15.0.2, which also caps the stack of unmatched opening quotes at 1000.
