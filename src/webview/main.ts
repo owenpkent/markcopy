@@ -652,7 +652,7 @@ interface CopyGroup {
 }
 
 // The copy groups that apply to the clicked element, most specific first.
-// Several can apply at once — selecting text inside a table yields both — and
+// Several can apply at once (selecting text inside a table yields both), and
 // the first one drives the menu's primary row. `hasSelection` is whether the
 // reader has selected any visible text, which buildMenu has already read.
 function copyGroups(target: HTMLElement, hasSelection: boolean): CopyGroup[] {

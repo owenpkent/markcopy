@@ -1042,7 +1042,7 @@ function rerenderPages(): void {
 document.addEventListener('click', () => contextMenu.hide());
 
 // ---------------------------------------------------------------------------
-// Hand tool (drag to scroll) — active only in hand mode
+// Hand tool (drag to scroll): active only in hand mode
 // ---------------------------------------------------------------------------
 let panning = false;
 let panPointer = -1;
