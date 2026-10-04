@@ -21,6 +21,13 @@ The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions 
 these overrides when the CLI resolves patched versions without them. The direct Mocha
 dependency uses version 12 and does not need these overrides.
 
+The `package.json` override for `mermaid` makes it use the project's own `katex`
+(`"$katex"` resolves to the direct dependency's version) instead of a nested copy
+from its `^0.16` range. This keeps one KaTeX version in the lockfile, so Mermaid's
+math labels use the same markup as the KaTeX CSS the preview loads, and the webview
+build emits one KaTeX chunk instead of two. Remove this override when Mermaid's own
+`katex` range includes the project's version.
+
 ## Threat model
 
 MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
