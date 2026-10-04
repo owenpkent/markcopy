@@ -124,12 +124,24 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 ### Phase 2: publish to the registries
 
 7. Package and smoke-test:
+
    ```bash
    npm run vsix
    code --install-extension markcopy-<version>.vsix
    ```
+
    Open a Markdown file, a CSV, and a PDF; confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
-8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section).
+
+   To check the artifact without replacing the copy in your own profile, install it into a throwaway one instead, and open files with the same two flags (0.14.0 was checked this way):
+
+   ```bash
+   code --extensions-dir <tmp>/ext --user-data-dir <tmp>/ud --install-extension markcopy-<version>.vsix
+   code --extensions-dir <tmp>/ext --user-data-dir <tmp>/ud sample.md
+   ```
+
+   Glance at the file count and size `vsce` prints while packaging, too: 0.14.0 was 185 files and 3.54 MB. A jump of hundreds of files that no dependency change explains means old build output is being packaged (see [A VSIX much larger than the last one](#a-vsix-much-larger-than-the-last-one)).
+
+8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section). Then check both before publishing; each answers in seconds and neither publishes anything: `npx vsce verify-pat OwenPKent` and `npx ovsx verify-pat OwenPKent`.
 9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
 10. Publish the same artifact to Open VSX: `npm run publish:ovsx -- markcopy-<version>.vsix` (reads `OVSX_PAT`).
 11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
@@ -144,7 +156,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ## Troubleshooting Phase 2
 
-The first three came out of the 0.11.0 release, the fourth out of 0.12.0, and the last out of 0.13.0. None of them says what it means.
+The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, and the last out of 0.14.0. None of them says what it means.
 
 ### `Request timeout: /_apis/gallery` can mean the PAT expired
 
@@ -202,7 +214,7 @@ npx vsce verify-pat OwenPKent
 - **It reports Access Denied / an expired token** -> mint a new PAT.
 - **It hangs too** -> try it a few more times, a minute apart, before falling back to the token list in the browser. In 0.13.0 it hung on two attempts and then succeeded, with anonymous requests to the Marketplace answering in under 0.2s throughout, so a hang on its own is the stall more often than a dead token.
 
-A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further. 0.13.0 went the same way: a loop that checked the live version, ran `verify-pat`, and published the moment it succeeded got through on its third pass, about two minutes in.
+A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further. 0.13.0 went the same way: a loop that checked the live version, ran `verify-pat`, and published the moment it succeeded got through on its third pass, about two minutes in. In 0.14.0 the authenticated path was healthy throughout: `verify-pat` answered at once and the publish went through on the first attempt.
 
 Step 9 already publishes this way, so retrying is just running that same command again rather than rebuilding:
 
@@ -224,12 +236,34 @@ So do not read a stale response as a failed publish, and do not republish on the
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
 ```
 
+0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. A 404 does not prove the opposite: how soon after `DONE Published` the URL starts answering has not been measured, so a 404 is no more a reason to republish than a stale listing is:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -L \
+  "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/OwenPKent/vsextensions/markcopy/<version>/vspackage"
+```
+
 ### Open VSX 404s a new version for a few minutes
 
 `ovsx publish` printing `Published OwenPKent.markcopy v<version>` does not mean the version is readable yet. After the 0.13.0 publish, `https://open-vsx.org/api/OwenPKent/markcopy/<version>` returned `404 Extension not found` and the extension's own endpoint kept reporting the previous version as latest for about four minutes, then both switched over at once. Wait it out rather than republishing:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://open-vsx.org/api/OwenPKent/markcopy/<version>
+```
+
+0.14.0 switched over the same way, all at once, after about three minutes.
+
+### A VSIX much larger than the last one
+
+`vsce package` ships everything in `media/` except source maps, and the webview build names its split chunks by content hash (`media/chunk-[name]-[hash].js`). Until #94, each build wrote new chunks beside the previous build's and nothing removed them, so every leftover went out with the next release. The 0.13.0 VSIX on GitHub holds 865 files and 10.24 MB (sizes here are in the units `vsce` prints), with eight KaTeX and eleven Mermaid chunks; the clean 0.14.0 package is 185 files and 3.54 MB with one of each. Nothing broke, because the entry bundles never load a stale chunk, but 0.13.0's download was about three times the size of 0.14.0's.
+
+`esbuild.web.js` now clears `media/chunk-*.js` before each build, and `vscode:prepublish` runs a full build before packaging, so this should not recur. If a packaged count still jumps, list what is new and clear the generated files. `git clean -fdX` removes only gitignored files, never the tracked ones in `media/`:
+
+```bash
+unzip -l markcopy-<version>.vsix | tail -1                     # files in the package
+unzip -l markcopy-<version>.vsix | rg -c 'chunk-katex'         # one per KaTeX version in use
+git clean -ndX -- media dist                                    # dry run: what would be removed
+git clean -fdX -- media dist && npm run vsix
 ```
 
 ## Notes
