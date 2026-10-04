@@ -4,12 +4,20 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.14.0] - 2026-10-03
+
 ### Changed
 
 - **Mermaid updated to 12.1**, which adds UML use case diagrams and shows the actual parse error message in the error diagram instead of only "Syntax error in text".
   - Diagrams keep their layout engine and colors by default. Mermaid 12 switched to the ELK layout and a new "neo" look, so MarkCopy sets `layout: 'dagre'` and `look: 'classic'` unless you say otherwise; a diagram's own frontmatter (`config: layout: elk`) still takes precedence. Mindmaps keep their own radial layout, whatever `markcopy.mermaid` sets. Mermaid 12 sizes some shapes differently even so: nodes stacked in one column of a flowchart now share a width, and state and ER boxes are a little wider, so an existing diagram can come out slightly wider than before.
   - ELK now ships inside Mermaid, so `"markcopy.mermaid": { "layout": "elk" }` works without any setup for every diagram type that offers a layout choice except mindmaps, and `"markcopy.mermaid": { "look": "neo" }` opts into the new appearance.
   - Mermaid removed the `defaultRenderer` option, so the `"class": { "defaultRenderer": "dagre-d3" }` setting suggested under 0.9.0 no longer has any effect: class diagrams always use Mermaid's unified renderer, laid out with dagre by default.
+  - Math in a diagram label (`$$...$$`) is typeset by the same KaTeX as the rest of the preview, so it matches the page's math. Mermaid used to bring its own older copy (0.16) alongside the preview's.
 - **Math is rendered by KaTeX 0.18.10.** A numbered `align` whose last row ends in a bare `\\` now keeps that empty final row, equation number included, the way LaTeX does; KaTeX used to drop it. `align*` and `aligned` are unchanged. KaTeX's stylesheet also tries the system math font before Times New Roman if its own fonts fail to load.
 
 ### Fixed
@@ -19,11 +27,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ### Security
 
 - **Mismatched quotes no longer slow the preview down.** MarkCopy renders with typographic quotes on, and markdown-it's smart-quotes pass took quadratic time when an opening and closing quote did not match, so a long document with many stray quotes could stall rendering. Fixed upstream in markdown-it 15.0.2, which also caps the stack of unmatched opening quotes at 1000.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.13.0] - 2026-09-14
 
@@ -353,7 +356,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/owenpkent/markcopy/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/owenpkent/markcopy/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/owenpkent/markcopy/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/owenpkent/markcopy/compare/v0.10.0...v0.11.0
