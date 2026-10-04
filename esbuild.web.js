@@ -26,9 +26,9 @@ function copyKatexAssets() {
 // Code splitting names each chunk by content hash (`chunk-[name]-[hash]`), so a
 // rebuild writes new files beside the old ones instead of over them. Clear the
 // previous build's chunks first: `vsce package` ships everything in `media/`, and
-// leftovers grew the 0.13.0 VSIX to 865 files and 10.7 MB, where a clean build is
-// 185 files and 3.7 MB. Only these gitignored names are removed; a watch session
-// still accumulates chunks until the next full build.
+// leftovers grew the 0.13.0 VSIX to 865 files, where a clean 0.14.0 build is 185.
+// Only these gitignored names are removed; a watch session still accumulates
+// chunks until the next full build.
 function removeStaleChunks() {
   const dir = path.join(__dirname, 'media');
   for (const name of fs.readdirSync(dir)) {
