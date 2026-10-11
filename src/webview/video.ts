@@ -71,8 +71,9 @@ let proxyNote = '';
 // second `error` (the proxy's own, or a retry) does not start the conversation
 // over from the top.
 let proxyAsked = false;
-// Whether the host has been told that the original loaded, so a seek that
-// re-fires `loadeddata` does not repeat the report. Reset on every load.
+// Whether the host has been told that the original loaded, so the report is made
+// once per source however many times the element re-reads its metadata. Reset on
+// every load.
 let playableReported = false;
 // Where the reader was when a sound copy replaced the original, applied once the
 // new source has metadata to seek in. Undefined for an ordinary load. The rate
@@ -80,6 +81,23 @@ let playableReported = false;
 // puts `playbackRate` back to `defaultPlaybackRate`: a 2x clip would otherwise
 // drop to normal speed the moment its sound arrived.
 let resumeAt: { time: number; playing: boolean; rate: number } | undefined;
+
+// The markcopy.video.autoplay setting as the reader last saw or toggled it,
+// seeded from every load message. The menu flips it for the next video opened;
+// it never starts or stops the one on screen.
+let autoplay = false;
+// Set by an ordinary (non-swap) load that should start playing, and consumed by
+// the `loadedmetadata` handler: the attempt waits for metadata so `play()` has a
+// source to start, and a swap or a later reload must not repeat it.
+let autoplayPending = false;
+// Our own pending `video.muted` write and the value it set, so the
+// `volumechange` listener can tell that echo from the reader pressing the
+// control's mute button.
+let mutedEchoPending = false;
+let mutedWritten = false;
+// Armed when autoplay had to fall back to muted: the first click or key press
+// anywhere in the preview turns the sound on, unless the reader got there first.
+let unmuteArmed = false;
 
 // The active markcopy.theme, seeded from the host and changed via the menu.
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
@@ -309,19 +327,90 @@ function load(msg: LoadMessage): void {
   frameCopyBlocked = false;
 
   video.loop = msg.loop;
-  // Chromium only honours autoplay without a user gesture while muted, so an
-  // unmuted autoplay request would reject and leave a still frame with no
-  // explanation. Muting is the honest reading of "start playing on open". A swap
-  // is not an open: it keeps whatever mute state the reader has chosen, and
-  // resumes by itself below.
-  video.autoplay = swap ? false : msg.autoplay;
+  autoplay = msg.autoplay;
+  // A new file ends a pending "unmute on first gesture": it belonged to the
+  // previous source's autoplay. A swap does not, because the sound copy of a
+  // muted autoplay is exactly where the promised click has to work, and the swap
+  // keeps the muted state that click is meant to undo.
   if (!swap) {
-    video.muted = msg.autoplay;
+    unmuteArmed = false;
+  }
+  // An unmuted `play()` without a user gesture rejects with NotAllowedError in a
+  // webview while a muted one succeeds, so the `autoplay` attribute (which would
+  // silently stay a still frame) is not used. The attempt is made unmuted in the
+  // `loadedmetadata` handler and only falls back to muted if it is refused. A
+  // swap is not an open: it keeps whatever mute state the reader has chosen, and
+  // resumes by itself below.
+  video.autoplay = false;
+  autoplayPending = !swap && msg.autoplay;
+  if (!swap) {
+    setMuted(false);
   }
   video.crossOrigin = 'anonymous';
   video.src = sourceUri;
   updateStatus();
 }
+
+/** Write `video.muted` in a way the `volumechange` listener can recognise as ours. */
+function setMuted(value: boolean): void {
+  if (video.muted === value) {
+    return;
+  }
+  // `volumechange` is queued as a task rather than fired inline, so a flag
+  // cleared right after the write would never be seen set. The echo is matched
+  // by value instead: an event that finds the element in a state we did not
+  // write is the reader's.
+  mutedEchoPending = true;
+  mutedWritten = value;
+  video.muted = value;
+}
+
+video.addEventListener('volumechange', () => {
+  if (mutedEchoPending && video.muted === mutedWritten) {
+    mutedEchoPending = false;
+    return;
+  }
+  // The reader used the control (or a key) themselves: whatever they chose is
+  // not ours to undo on their next click.
+  mutedEchoPending = false;
+  unmuteArmed = false;
+});
+
+/**
+ * Autoplay with sound when the browser allows it, muted when it does not.
+ * Fallback on the first refusal rather than guessing: whether a gesture counts
+ * depends on the host, so the attempt is the only reliable test.
+ */
+function startAutoplay(): void {
+  void video.play().catch(() => {
+    setMuted(true);
+    video.play().catch(() => undefined);
+    toast('Playing muted · click anywhere for sound', 4000);
+    unmuteArmed = true;
+  });
+}
+
+// Unmute on the first gesture, capture phase so nothing in the preview can stop
+// it. The unmute is deferred a tick and re-checked: a click on the native mute
+// button would otherwise be unmuted on pointerdown and then re-muted by the
+// control itself. By the time the timeout runs the control's `volumechange` has
+// disarmed us, so the reader's choice stands.
+function onFirstGesture(event: Event): void {
+  if (!unmuteArmed) {
+    return;
+  }
+  if (event instanceof KeyboardEvent && ['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) {
+    return;
+  }
+  window.setTimeout(() => {
+    if (unmuteArmed && video.muted) {
+      unmuteArmed = false;
+      setMuted(false);
+    }
+  }, 0);
+}
+document.addEventListener('click', onFirstGesture, true);
+document.addEventListener('keydown', onFirstGesture, true);
 
 video.addEventListener('loadedmetadata', () => {
   stage.hidden = false;
@@ -345,16 +434,21 @@ video.addEventListener('loadedmetadata', () => {
       void video.play().catch(() => undefined);
     }
   }
-});
 
-// The original has data to show. It is the host's cue to check the soundtrack:
-// a file whose picture plays can still be silent, and only ffprobe can say.
-video.addEventListener('loadeddata', () => {
-  if (proxyNote || playableReported) {
-    return;
+  if (autoplayPending) {
+    autoplayPending = false;
+    startAutoplay();
   }
-  playableReported = true;
-  vscode.postMessage({ type: 'playable' });
+
+  // The original opened, which is the host's cue to check the soundtrack: a file
+  // whose picture plays can still be silent, and only ffprobe can say. Metadata
+  // rather than `loadeddata`, because under `preload="metadata"` the element may
+  // fetch no frames until the reader presses play, and the copy should be under
+  // way by then, not starting.
+  if (!proxyNote && !playableReported) {
+    playableReported = true;
+    vscode.postMessage({ type: 'playable' });
+  }
 });
 
 video.addEventListener('error', () => {
@@ -586,6 +680,14 @@ function toggleLoop(): void {
   toast(video.loop ? 'Looping' : 'Looping off');
 }
 
+function toggleAutoplay(): void {
+  autoplay = !autoplay;
+  // Persisted like Loop, and for the next video opened: flipping it mid-clip
+  // neither starts nor stops the one the reader is watching.
+  vscode.postMessage({ type: 'updateSetting', key: 'video.autoplay', value: autoplay });
+  toast(autoplay ? 'Autoplay on' : 'Autoplay off');
+}
+
 function togglePlay(): void {
   if (video.paused) {
     void video.play().catch(() => undefined);
@@ -691,6 +793,7 @@ document.addEventListener('contextmenu', (e) => {
       label: 'Playback',
       entries: [
         { kind: 'checkbox', label: 'Loop', checked: video.loop, run: toggleLoop },
+        { kind: 'checkbox', label: 'Autoplay', checked: autoplay, run: toggleAutoplay },
         { kind: 'divider' },
         { kind: 'label', label: 'Speed' },
         ...SPEEDS.map((rate): MenuEntry => ({

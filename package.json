@@ -491,7 +491,7 @@
         "markcopy.video.autoplay": {
           "type": "boolean",
           "default": false,
-          "description": "Start playing as soon as a video preview opens. Autoplay always starts muted, because that is the only kind a browser engine will start without a click."
+          "description": "Start playing as soon as a video preview opens. Autoplay tries to play with sound; if VS Code requires a click first, it starts muted and the first click or key press in the preview turns the sound on. Also toggled from the preview's right-click Playback menu."
         },
         "markcopy.video.loop": {
           "type": "boolean",
@@ -511,7 +511,7 @@
             "Say what the file is and offer a button, instead of starting on its own.",
             "Never transcode; offer the default player, as MarkCopy did before."
           ],
-          "markdownDescription": "What to do with a video VS Code cannot decode (ProRes, DNxHD, most HEVC). When ffmpeg is installed, MarkCopy can encode a throwaway H.264 copy to a temp folder and play that; the original is never touched, and the copy is deleted when the tab closes. It also covers a video whose picture plays but whose audio VS Code cannot decode (AAC, the usual MP4 soundtrack, plays silently): `auto` builds a copy with Opus sound in the background, copying the video stream so it is fast, and `ask` offers it. Set this to `ask` if you work with long 4K masters, where an automatic transcode is a wait you did not ask for."
+          "markdownDescription": "What to do with a video VS Code cannot decode (ProRes, DNxHD, most HEVC). When ffmpeg is installed, MarkCopy can encode a throwaway H.264 copy to a temp folder and play that; the original is never touched, and the copy is deleted when the tab closes. It also covers a video whose picture plays but whose audio VS Code cannot decode (AAC, the usual MP4 soundtrack, plays silently): `auto` builds a copy with MP3 sound in the background, copying the video stream so it is fast, and `ask` offers it. Set this to `ask` if you work with long 4K masters, where an automatic transcode is a wait you did not ask for."
         },
         "markcopy.video.ffmpegPath": {
           "type": "string",

@@ -198,8 +198,8 @@ describe('the messages behind an unplayable file', () => {
   });
 
   it('says the video keeps playing when a sound copy fails', () => {
-    expect(soundFailed('clip.mp4', 'Unknown encoder libopus')).toBe(
-      'ffmpeg could not build a copy of clip.mp4 with sound: Unknown encoder libopus',
+    expect(soundFailed('clip.mp4', 'Unknown encoder libmp3lame')).toBe(
+      'ffmpeg could not build a copy of clip.mp4 with sound: Unknown encoder libmp3lame',
     );
     expect(soundFailed('clip.mp4', ' ')).toBe(
       'ffmpeg could not build a copy of clip.mp4 with sound.',

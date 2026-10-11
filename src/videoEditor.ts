@@ -27,6 +27,17 @@ import {
 // A video is one to three orders of magnitude larger than either of those, and
 // the base64 round trip would cost several times the file's size in the
 // extension host, where running out of memory takes the whole window with it.
+// The theme values package.json allows for `markcopy.theme`.
+const THEMES = ['auto', 'light', 'dark', 'green'];
+
+/** True for the settings the video viewer's menus write, with a value of the right type. */
+export function isViewerSetting(key: string, value: unknown): boolean {
+  if (key === 'theme') {
+    return typeof value === 'string' && THEMES.includes(value);
+  }
+  return (key === 'video.loop' || key === 'video.autoplay') && typeof value === 'boolean';
+}
+
 export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'markcopy.videoPreview';
 
@@ -101,9 +112,16 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         await proxy.build(msg.kind === 'sound' ? 'sound' : 'picture');
       } else if (msg?.type === 'proxyCancel') {
         proxy.cancel();
-      } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
-        // Persist a setting changed from the viewer's menu (theme, loop) at the
-        // scope where it is defined, matching the other previews.
+      } else if (
+        msg?.type === 'updateSetting' &&
+        typeof msg.key === 'string' &&
+        isViewerSetting(msg.key, msg.value)
+      ) {
+        // Persist a setting changed from the viewer's menu (theme, loop,
+        // autoplay) at the scope where it is defined, matching the other
+        // previews. Only the keys the menu can send are written: the message
+        // comes from a webview, and an unchecked key would let it set
+        // `video.ffmpegPath`, which the host later executes.
         await applyMarkcopySetting(msg.key, msg.value, document.uri);
       }
     });
@@ -530,7 +548,7 @@ class ProxySession {
         // know that before pasting it into a bug report.
         note:
           kind === 'sound'
-            ? 'ffmpeg copy · sound re-encoded to Opus'
+            ? 'ffmpeg copy · sound re-encoded to MP3'
             : probe.hasAlpha
               ? 'ffmpeg preview copy · alpha on checkerboard'
               : 'ffmpeg preview copy',

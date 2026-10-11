@@ -8,7 +8,7 @@
 //
 // Audio is its own problem. That Chromium build has no AAC decoder, so the
 // ordinary H.264/AAC mp4 plays its picture in silence without raising any error.
-// Every copy built here therefore carries Opus, and a file whose picture already
+// Every copy built here therefore carries MP3, and a file whose picture already
 // plays but whose sound does not can get a "sound copy" that leaves the video
 // stream untouched.
 //
@@ -359,14 +359,17 @@ export function codecLabel(probe: SourceProbe): string {
 }
 
 /**
- * Audio codecs VS Code's Chromium can decode.
+ * Audio codecs VS Code's Chromium can decode, besides PCM (see `silentAudio`).
  *
- * Notably not AAC, the soundtrack of nearly every H.264 mp4 and mov: the build
- * ships an H.264 decoder but no AAC one (VS Code's own media preview documents
- * this, and microsoft/vscode#167685 tracks it), so such a file plays its picture
- * and nothing else, with no error event to say why.
+ * Measured, not assumed: a webview played each variant for two seconds and read
+ * Chromium's `webkitAudioDecodedByteCount`. Silent (picture plays, zero audio
+ * bytes, no error event): AAC, Opus in MP4, AC-3 and ALAC. Playing: MP3, FLAC in
+ * MP4, Vorbis in MP4 and PCM in .mov. AAC is the soundtrack of nearly every H.264
+ * mp4 and mov (VS Code's own media preview documents the gap, and
+ * microsoft/vscode#167685 tracks it). `canPlayType` answers "probably" for all of
+ * them, so it cannot be used to decide.
  */
-export const PLAYABLE_AUDIO: ReadonlySet<string> = new Set(['opus', 'vorbis', 'flac', 'mp3']);
+export const PLAYABLE_AUDIO: ReadonlySet<string> = new Set(['mp3', 'flac', 'vorbis']);
 
 /** Video codecs that can be copied into the sound copy untouched, because they play. */
 export const COPYABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'hevc', 'vp9', 'av1']);
@@ -376,10 +379,13 @@ export const COPYABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'hevc', 'vp9
  *
  * An audio stream with no codec name counts: a probe that saw the stream but not
  * what it was is far likelier to be a codec ffmpeg knows and Chromium does not
- * than one of the four it does.
+ * than one of the few it does. Every PCM variant counts as playable (measured in
+ * .mov: s16/s24/s32 in both endiannesses, f32le and u8), hence the prefix test.
  */
 export function silentAudio(probe: SourceProbe): boolean {
-  return probe.hasAudio && !PLAYABLE_AUDIO.has(probe.audioCodec);
+  return (
+    probe.hasAudio && !PLAYABLE_AUDIO.has(probe.audioCodec) && !probe.audioCodec.startsWith('pcm_')
+  );
 }
 
 /** The audio codec as a reader would write it: `aac` -> `AAC`, `eac3` -> `E-AC-3`. */
@@ -389,6 +395,7 @@ export function audioCodecLabel(probe: SourceProbe): string {
     alac: 'ALAC',
     ac3: 'AC-3',
     eac3: 'E-AC-3',
+    opus: 'Opus',
   };
   const codec = probe.audioCodec;
   if (!codec) {
@@ -461,9 +468,9 @@ export function checkerboardFilter(width: number, height: number, frameRate: num
  * and dropping the rest is what makes the output a thing Chromium will play,
  * rather than a faithful copy of a container it already refused once.
  *
- * The audio is Opus, not AAC. Chromium in VS Code has no AAC decoder, so an AAC
- * proxy would be exactly as silent as the file it replaces; Opus in an MP4
- * container plays.
+ * The audio is MP3, not AAC or Opus. Chromium in VS Code decodes neither in an
+ * MP4 (measured: both play silently), so a proxy using them would be exactly as
+ * silent as the file it replaces; MP3 in an MP4 plays.
  *
  * `copyVideo` builds a "sound copy" instead: the picture is already playable, so
  * it is stream-copied (seconds, not minutes, and bit-identical) and only the
@@ -511,11 +518,11 @@ export function transcodeArgs(
     // one ffmpeg declines to decode should still produce a silent proxy rather
     // than failing outright.
     //
-    // `-ac 2` because a preview needs no surround, and libopus rejects some
-    // multichannel layouts (5.1(side) among them) unless given an explicit
-    // channel mapping family. `-ar 48000` because libopus accepts only a handful
-    // of sample rates, and a 44.1 kHz source is not one of them.
-    args.push('-map', '0:a:0?', '-c:a', 'libopus', '-b:a', '160k', '-ac', '2', '-ar', '48000');
+    // libmp3lame because VS Code's Chromium decodes MP3 in MP4 but neither AAC
+    // nor Opus (measured). `-ac 2` because MP3 carries at most two channels and
+    // a preview needs no surround. `-ar 48000` pins a rate MP3 supports whatever
+    // the source is (a 96 kHz master, say).
+    args.push('-map', '0:a:0?', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', '-ar', '48000');
   } else {
     args.push('-an');
   }

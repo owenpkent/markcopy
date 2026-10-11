@@ -4,10 +4,18 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Autoplay gets sound when it can, and has a menu toggle.** `markcopy.video.autoplay` now tries to play with sound. If VS Code requires a click first, the video starts muted, a toast says so, and the first click or key press in the preview turns the sound on (a click on the player's own mute button is left alone). **Playback > Autoplay** in the right-click menu flips the setting for the next video opened.
+
+### Security
+
+- **The video viewer could write any `markcopy` setting.** Its settings message was passed to the configuration unchecked, so the page could set `markcopy.video.ffmpegPath`, which the extension later executes. Only `theme` (one of its four values), `video.loop` and `video.autoplay` (booleans) are accepted now.
+
 ### Fixed
 
 - **Video previews had no sound.** VS Code's Chromium has an H.264 decoder but no AAC decoder, so an ordinary H.264/AAC `.mp4` or `.mov` played its picture in silence, with no error to say why, and every ffmpeg copy MarkCopy built was silent too because it re-encoded audio as AAC.
-  - Copies now carry **Opus** audio (stereo, 48 kHz), so a ProRes or HEVC proxy has sound.
+  - Copies now carry **MP3** audio (192 kbit/s stereo, 48 kHz), so a ProRes or HEVC proxy has sound. VS Code also cannot decode Opus, AC-3 or ALAC (measured), so files with those soundtracks get the sound copy too.
   - A file whose picture plays but whose audio VS Code cannot decode gets a **sound copy** when ffmpeg is installed: the video stream is copied untouched, only the audio is re-encoded, and the copy swaps in at the same position, still playing. Progress shows in a slim notice above the status line without hiding the video. `markcopy.video.transcode` governs it: `auto` builds it, `ask` offers a **Build Copy with Sound** button, `off` does nothing.
   - The "cannot play" messages and the docs no longer claim that AAC audio plays.
 

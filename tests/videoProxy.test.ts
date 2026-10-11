@@ -228,13 +228,18 @@ describe('silentAudio', () => {
   it('is true for the codecs this Chromium cannot decode', () => {
     expect(silentAudio(probe({ hasAudio: true, audioCodec: 'aac' }))).toBe(true);
     expect(silentAudio(probe({ hasAudio: true, audioCodec: 'ac3' }))).toBe(true);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'opus' }))).toBe(true);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'alac' }))).toBe(true);
   });
 
   it('is false for the codecs it can', () => {
     for (const codec of PLAYABLE_AUDIO) {
       expect(silentAudio(probe({ hasAudio: true, audioCodec: codec })), codec).toBe(false);
     }
-    expect([...PLAYABLE_AUDIO].sort()).toEqual(['flac', 'mp3', 'opus', 'vorbis']);
+    expect([...PLAYABLE_AUDIO].sort()).toEqual(['flac', 'mp3', 'vorbis']);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'pcm_s16be' }))).toBe(false);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'vorbis' }))).toBe(false);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'flac' }))).toBe(false);
   });
 
   it('is false when there is no audio at all', () => {
@@ -317,11 +322,13 @@ describe('transcodeArgs', () => {
     // ProRes originals routinely carry PCM, which no browser plays in an MP4.
     const args = transcodeArgs('in.mov', 'out.mp4', probe({ hasAudio: true }));
     expect(args).toContain('0:a:0?');
-    expect(args).toContain('libopus');
+    expect(args).toContain('libmp3lame');
+    expect(args[args.indexOf('-b:a') + 1]).toBe('192k');
     expect(args).not.toContain('aac');
+    expect(args).not.toContain('libopus');
   });
 
-  it('downmixes to stereo at 48 kHz so libopus accepts any source layout', () => {
+  it('downmixes to stereo at 48 kHz so MP3 accepts any source layout', () => {
     const args = transcodeArgs('in.mov', 'out.mp4', probe({ hasAudio: true }));
     expect(args[args.indexOf('-ac') + 1]).toBe('2');
     expect(args[args.indexOf('-ar') + 1]).toBe('48000');
@@ -339,7 +346,7 @@ describe('transcodeArgs', () => {
     expect(args).not.toContain('-vf');
     expect(args).not.toContain('-filter_complex');
     expect(args).not.toContain('-crf');
-    expect(args).toContain('libopus');
+    expect(args).toContain('libmp3lame');
     expect(args).toContain('+faststart');
     expect(args[args.length - 1]).toBe('out.mp4');
   });

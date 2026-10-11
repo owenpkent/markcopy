@@ -15,6 +15,8 @@
 // has to look silent to the real predicate for the sound offer to be made.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const configUpdate = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('vscode', () => {
   const asUri = (fsPath: string) => ({
     fsPath,
@@ -28,10 +30,13 @@ vi.mock('vscode', () => {
       joinPath: (base: { path: string }, ...segments: string[]) =>
         asUri(`${base.path}/${segments.join('/')}`),
     },
+    ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     env: { openExternal: vi.fn() },
     workspace: {
       getConfiguration: vi.fn(() => ({
         get: (key: string, fallback: unknown) => (key === 'video.transcode' ? 'auto' : fallback),
+        inspect: () => undefined,
+        update: configUpdate,
       })),
       fs: { stat: vi.fn(async () => ({ size: 1 })) },
       onDidChangeConfiguration: vi.fn(() => ({ dispose: () => undefined })),
@@ -141,8 +146,32 @@ describe('VideoEditorProvider sound copy', () => {
     const last = loads().at(-1);
     expect(last?.src).toMatch(/^webview:[\\/]proxies[\\/]clip-/);
     expect(last?.src).not.toBe('webview:/videos/clip.mp4');
-    expect(last?.proxyNote).toBe('ffmpeg copy · sound re-encoded to Opus');
+    expect(last?.proxyNote).toBe('ffmpeg copy · sound re-encoded to MP3');
     // The second `playable` is the spent offer, not a second encode.
     expect(tools.transcode).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes only the settings the viewer menus can send', async () => {
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: '/videos/clip.mp4',
+      fsPath: '/videos/clip.mp4',
+    } as vscode.Uri);
+    const { panel, send } = createPanel();
+    await provider.resolveCustomEditor(document, panel);
+
+    // The ffmpeg path is executed by the host later, so a webview must not set it.
+    await send({ type: 'updateSetting', key: 'video.ffmpegPath', value: 'C:/evil.exe' });
+    await send({ type: 'updateSetting', key: 'video.autoplay', value: 'yes' });
+    await send({ type: 'updateSetting', key: 'theme', value: 'neon' });
+    expect(configUpdate).not.toHaveBeenCalled();
+
+    await send({ type: 'updateSetting', key: 'video.autoplay', value: true });
+    await send({ type: 'updateSetting', key: 'video.loop', value: false });
+    await send({ type: 'updateSetting', key: 'theme', value: 'dark' });
+    expect(configUpdate).toHaveBeenCalledTimes(3);
+    expect(configUpdate).toHaveBeenCalledWith('video.autoplay', true, 1);
   });
 });

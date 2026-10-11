@@ -79,7 +79,7 @@ describe('video webview sound-copy swap', () => {
     video.playbackRate = 2;
 
     fromHost(
-      load('https://file.test/proxy.mp4', { proxyNote: 'ffmpeg copy · sound re-encoded to Opus' }),
+      load('https://file.test/proxy.mp4', { proxyNote: 'ffmpeg copy · sound re-encoded to MP3' }),
     );
     // What the browser does when the new source starts loading.
     video.playbackRate = 1;
@@ -89,5 +89,79 @@ describe('video webview sound-copy swap', () => {
     expect(video.playbackRate).toBe(2);
     expect(video.currentTime).toBe(3);
     expect(play).toHaveBeenCalled();
+  });
+});
+
+describe('video webview autoplay', () => {
+  const refused = () =>
+    Promise.reject(Object.assign(new Error('play() needs a gesture'), { name: 'NotAllowedError' }));
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  async function openAutoplay(firstPlay: () => Promise<void>): Promise<HTMLVideoElement> {
+    await import('../src/webview/video');
+    const video = document.getElementById('mc-video') as HTMLVideoElement;
+    play.mockImplementationOnce(firstPlay);
+    fromHost(load('https://file.test/clip.mp4', { autoplay: true }));
+    // The attempt waits for metadata, and does not use the autoplay attribute.
+    expect(video.autoplay).toBe(false);
+    expect(play).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await tick();
+    return video;
+  }
+
+  it('plays with sound when the browser allows it', async () => {
+    const video = await openAutoplay(() => Promise.resolve());
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(video.muted).toBe(false);
+    expect(document.getElementById('mc-toast')?.hidden).toBe(true);
+  });
+
+  it('falls back to muted, then unmutes on the first click', async () => {
+    const video = await openAutoplay(refused);
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(video.muted).toBe(true);
+    expect(document.getElementById('mc-toast')?.textContent).toContain('Playing muted');
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(video.muted).toBe(false);
+  });
+
+  it('still unmutes on the first click after the sound copy swaps in', async () => {
+    const video = await openAutoplay(refused);
+    expect(video.muted).toBe(true);
+
+    // The muted autoplay of an AAC file is exactly what the sound copy replaces,
+    // so the click the toast promised has to survive the swap.
+    Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+    fromHost(
+      load('https://file.test/proxy.mp4', {
+        autoplay: true,
+        proxyNote: 'ffmpeg copy · sound re-encoded to MP3',
+      }),
+    );
+    video.dispatchEvent(new Event('loadedmetadata'));
+    await tick();
+    expect(video.muted).toBe(true);
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(video.muted).toBe(false);
+  });
+
+  it('does not override a mute the reader changed themselves', async () => {
+    const video = await openAutoplay(refused);
+    expect(video.muted).toBe(true);
+
+    // The reader presses the native control, which toggles muted and reports it.
+    video.muted = false;
+    video.dispatchEvent(new Event('volumechange'));
+    video.muted = true;
+    video.dispatchEvent(new Event('volumechange'));
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(video.muted).toBe(true);
   });
 });

@@ -339,7 +339,10 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 
 - [ ] Right-click -> **Playback** -> **Loop** starts looping, shows a checkmark next time the menu opens, and persists to `markcopy.video.loop` in settings.
 - [ ] **Playback** -> a speed other than Normal changes the rate and shows the radio mark on reopening the menu.
-- [ ] Setting `markcopy.video.autoplay` to `true` and reopening starts playback immediately, **muted**. (An unmuted autoplay is refused by the browser engine, and would look like a broken setting.)
+- [ ] Setting `markcopy.video.autoplay` to `true` and reopening starts playback immediately.
+- [ ] If autoplay started muted, a **Playing muted · click anywhere for sound** toast appears, and the first click or key press anywhere in the preview turns the sound on.
+- [ ] With autoplay starting muted, clicking the player's own mute button does not get overridden: the sound stays as the button left it.
+- [ ] Right-click -> **Playback** -> **Autoplay** toggles with a checkmark, shows an **Autoplay on** / **Autoplay off** toast, persists to `markcopy.video.autoplay`, and affects the next opened video without starting or stopping the current one.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
 
 ### Bad input and codecs
@@ -361,11 +364,12 @@ ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -p
 - [ ] With `markcopy.video.ffmpegPath` pointed at a file that is not ffmpeg, the failure names what went wrong rather than hanging or silently falling back.
 - [ ] ★ **Without ffmpeg**: take it off `PATH` for the session and reload the window, leaving `markcopy.video.ffmpegPath` empty so the detection really runs and finds nothing. A ProRes or HEVC `.mov` shows the "cannot play" message naming ProRes and the default player, plus the note about installing ffmpeg. Not a black rectangle, and not an empty tab.
 - [ ] **Open in Default App**, on every one of those messages and in the right-click menu, opens the file in the OS player.
-- [ ] ★ An H.264/AAC file ([sample.mov](../sample.mov)) with ffmpeg installed and `markcopy.video.transcode` at `auto`: it starts playing silently, a slim "Adding sound… n%" notice appears above the status line without hiding the video, and the tone becomes audible at the same position and keeps playing (a paused video stays paused). The status line ends with `ffmpeg copy · sound re-encoded to Opus`.
+- [ ] ★ An H.264/AAC file ([sample.mov](../sample.mov)) with ffmpeg installed and `markcopy.video.transcode` at `auto`: it starts playing silently, a slim "Adding sound… n%" notice appears above the status line without hiding the video, and the tone becomes audible at the same position and keeps playing (a paused video stays paused). The status line ends with `ffmpeg copy · sound re-encoded to MP3`.
 - [ ] With `markcopy.video.transcode` at `ask`, the same file shows a notice ("has AAC audio, which VS Code cannot play, so it is silent here") with **Build Copy with Sound**, **Open in Default App**, and **Dismiss**, and the video stays visible and playing. **Dismiss** hides it and it does not come back until the tab is reopened. **Build Copy with Sound** shows progress, **Cancel** returns to the offer, and a finished build swaps in with sound.
 - [ ] With `off`, or with ffmpeg off `PATH`, an AAC file plays as before with no notice at all.
-- [ ] A ProRes or HEVC `.mov` with audio, played through the picture proxy, now has **sound** (the proxy audio is Opus, not AAC). A 5.1 source works too.
-- [ ] An `.mp4` VS Code _can_ play, with Opus or no audio, opens instantly with no encode and no `ffmpeg` text in the status line.
+- [ ] A ProRes or HEVC `.mov` with audio, played through the picture proxy, now has **sound** (the proxy audio is MP3, not AAC). A 5.1 source works too.
+- [ ] An `.mp4` VS Code _can_ play, with MP3 or no audio, opens instantly with no encode and no `ffmpeg` text in the status line.
+- [ ] After the swap to a copy with sound, the speaker icon in the video controls is enabled (not greyed). A greyed speaker means the element has no decodable audio.
 - [ ] A truncated or garbage `.mov` (`node -e "require('fs').writeFileSync('bad.mov', Buffer.alloc(2048, 0xff))"`) reports that it cannot be played rather than hanging or showing nothing.
 - [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
 - [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.
