@@ -10,6 +10,9 @@ import {
   proxyOffer,
   proxyProgress,
   proxyUnavailable,
+  soundFailed,
+  soundOffer,
+  soundProgress,
   timecodeSlug,
 } from '../src/webview/videoInfo';
 
@@ -113,6 +116,13 @@ describe('describeMediaError', () => {
     expect(message).toMatch(/default player/);
   });
 
+  it('does not claim AAC audio plays', () => {
+    // It does not in VS Code's Chromium, which is why the sound copy exists.
+    expect(describeMediaError(4, 'clip.mov')).not.toMatch(/AAC/);
+    expect(describeMediaError(4, 'clip.mov')).toMatch(/H\.264, VP9 and AV1/);
+    expect(proxyUnavailable('clip.mov')).not.toMatch(/AAC/);
+  });
+
   it('distinguishes a damaged file from an unsupported one', () => {
     expect(describeMediaError(3, 'clip.mov')).toMatch(/damaged/);
     expect(describeMediaError(2, 'clip.mov')).toMatch(/read from disk/);
@@ -168,6 +178,32 @@ describe('the messages behind an unplayable file', () => {
     // A percentage against an unknown total either sticks at 0 or runs past 100.
     expect(proxyProgress(83, 0)).toBe('Building a playable copy… 1:23 in');
     expect(proxyProgress(0, 0)).toBe('Building a playable copy…');
+  });
+
+  it('offers a sound copy by naming the silent codec', () => {
+    const message = soundOffer('clip.mp4', 'AAC');
+    expect(message).toContain('clip.mp4 has AAC audio');
+    expect(message).toContain('silent');
+    expect(message).toContain('without touching the original');
+  });
+
+  it('still offers a sound copy when the codec has no name', () => {
+    expect(soundOffer('clip.mp4', '')).toContain('has audio VS Code cannot play');
+  });
+
+  it('reports sound copy progress the way the picture copy does', () => {
+    expect(soundProgress(2.5, 5)).toBe('Adding sound… 50%');
+    expect(soundProgress(83, 0)).toBe('Adding sound… 1:23 in');
+    expect(soundProgress(0, 0)).toBe('Adding sound…');
+  });
+
+  it('says the video keeps playing when a sound copy fails', () => {
+    expect(soundFailed('clip.mp4', 'Unknown encoder libmp3lame')).toBe(
+      'ffmpeg could not build a copy of clip.mp4 with sound: Unknown encoder libmp3lame',
+    );
+    expect(soundFailed('clip.mp4', ' ')).toBe(
+      'ffmpeg could not build a copy of clip.mp4 with sound.',
+    );
   });
 
   it('never reports past the end', () => {

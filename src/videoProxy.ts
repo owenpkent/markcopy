@@ -1,10 +1,16 @@
 // Making an unplayable video playable, by transcoding a proxy copy with ffmpeg.
 //
-// QuickTime is a container, not a codec. VS Code's Chromium decodes H.264 with
-// AAC and little else, while a `.mov` out of a camera or an editor is usually
+// QuickTime is a container, not a codec. VS Code's Chromium decodes H.264 video
+// and little else, while a `.mov` out of a camera or an editor is usually
 // ProRes, DNxHD, or HEVC. The viewer used to stop there and hand the file to the
 // OS player. When ffmpeg is on the machine there is a better answer: encode a
 // throwaway H.264 copy next to it and play that.
+//
+// Audio is its own problem. That Chromium build has no AAC decoder, so the
+// ordinary H.264/AAC mp4 plays its picture in silence without raising any error.
+// Every copy built here therefore carries MP3, and a file whose picture already
+// plays but whose sound does not can get a "sound copy" that leaves the video
+// stream untouched.
 //
 // The proxy is a preview, not an export. It is written to a temp directory and
 // nothing offers to keep it: the panel closing deletes the one it was playing,
@@ -57,6 +63,8 @@ export interface SourceProbe {
   frameRate: number;
   hasAlpha: boolean;
   hasAudio: boolean;
+  /** ffmpeg's name for the first audio stream's codec, e.g. `aac`. Empty when there is none. */
+  audioCodec: string;
   /** ffmpeg's codec name, e.g. `prores`. Empty when there is no video stream. */
   codec: string;
   /** ffmpeg's profile name, e.g. `4444`. Often absent. */
@@ -290,6 +298,7 @@ export function parseProbe(json: string): SourceProbe {
     frameRate: 0,
     hasAlpha: false,
     hasAudio: false,
+    audioCodec: '',
     codec: '',
     profile: '',
   };
@@ -302,13 +311,15 @@ export function parseProbe(json: string): SourceProbe {
   const root = parsed as { streams?: unknown; format?: { duration?: unknown } };
   const streams = Array.isArray(root.streams) ? (root.streams as Record<string, unknown>[]) : [];
   const video = streams.find((s) => s.codec_type === 'video');
+  const audio = streams.find((s) => s.codec_type === 'audio');
   return {
     durationSec: firstNumber(root.format?.duration),
     width: firstNumber(video?.width),
     height: firstNumber(video?.height),
     frameRate: parseRate(video?.r_frame_rate),
     hasAlpha: hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : ''),
-    hasAudio: streams.some((s) => s.codec_type === 'audio'),
+    hasAudio: audio !== undefined,
+    audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : '',
     codec: typeof video?.codec_name === 'string' ? video.codec_name : '',
     profile: typeof video?.profile === 'string' ? video.profile : '',
   };
@@ -345,6 +356,55 @@ export function codecLabel(probe: SourceProbe): string {
   // is the whole reason a ProRes file behaves the way it does.
   const profile = probe.profile && probe.profile !== 'unknown' ? probe.profile : '';
   return profile ? `${base} ${profile}` : base;
+}
+
+/**
+ * Audio codecs VS Code's Chromium can decode, besides PCM (see `silentAudio`).
+ *
+ * Measured, not assumed: a webview played each variant for two seconds and read
+ * Chromium's `webkitAudioDecodedByteCount`. Silent (picture plays, zero audio
+ * bytes, no error event): AAC, Opus in MP4, AC-3 and ALAC. Playing: MP3, FLAC in
+ * MP4, Vorbis in MP4 and PCM in .mov. AAC is the soundtrack of nearly every H.264
+ * mp4 and mov (VS Code's own media preview documents the gap, and
+ * microsoft/vscode#167685 tracks it). `canPlayType` answers "probably" for all of
+ * them, so it cannot be used to decide.
+ */
+export const PLAYABLE_AUDIO: ReadonlySet<string> = new Set(['mp3', 'flac', 'vorbis']);
+
+/** Video codecs that can be copied into the sound copy untouched, because they play. */
+export const COPYABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'hevc', 'vp9', 'av1']);
+
+/**
+ * Whether the file has a soundtrack that this player will silently drop.
+ *
+ * An audio stream with no codec name counts: a probe that saw the stream but not
+ * what it was is far likelier to be a codec ffmpeg knows and Chromium does not
+ * than one of the few it does. Every PCM variant counts as playable (measured in
+ * .mov: s16/s24/s32 in both endiannesses, f32le and u8), hence the prefix test.
+ */
+export function silentAudio(probe: SourceProbe): boolean {
+  return (
+    probe.hasAudio && !PLAYABLE_AUDIO.has(probe.audioCodec) && !probe.audioCodec.startsWith('pcm_')
+  );
+}
+
+/** The audio codec as a reader would write it: `aac` -> `AAC`, `eac3` -> `E-AC-3`. */
+export function audioCodecLabel(probe: SourceProbe): string {
+  const names: Record<string, string> = {
+    aac: 'AAC',
+    alac: 'ALAC',
+    ac3: 'AC-3',
+    eac3: 'E-AC-3',
+    opus: 'Opus',
+  };
+  const codec = probe.audioCodec;
+  if (!codec) {
+    return '';
+  }
+  if (codec.startsWith('pcm_')) {
+    return 'PCM';
+  }
+  return names[codec] ?? codec.toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -407,8 +467,24 @@ export function checkerboardFilter(width: number, height: number, frameRate: num
  * language, a thumbnail attachment. Taking the first video and the first audio
  * and dropping the rest is what makes the output a thing Chromium will play,
  * rather than a faithful copy of a container it already refused once.
+ *
+ * The audio is MP3, not AAC or Opus. Chromium in VS Code decodes neither in an
+ * MP4 (measured: both play silently), so a proxy using them would be exactly as
+ * silent as the file it replaces; MP3 in an MP4 plays.
+ *
+ * `copyVideo` builds a "sound copy" instead: the picture is already playable, so
+ * it is stream-copied (seconds, not minutes, and bit-identical) and only the
+ * soundtrack is re-encoded. It applies only when the probed video codec is one
+ * Chromium can play; anything else falls through to the full re-encode, since
+ * copying an unplayable picture would produce an equally unplayable file.
  */
-export function transcodeArgs(input: string, output: string, probe: SourceProbe): string[] {
+export function transcodeArgs(
+  input: string,
+  output: string,
+  probe: SourceProbe,
+  opts: { copyVideo?: boolean } = {},
+): string[] {
+  const copy = opts.copyVideo === true && COPYABLE_VIDEO.has(probe.codec);
   const size = evenSize(probe);
   const args = [
     '-nostdin',
@@ -424,7 +500,9 @@ export function transcodeArgs(input: string, output: string, probe: SourceProbe)
     input,
   ];
 
-  if (probe.hasAlpha && size) {
+  if (copy) {
+    args.push('-map', '0:v:0', '-c:v', 'copy');
+  } else if (probe.hasAlpha && size) {
     args.push('-filter_complex', checkerboardFilter(size.width, size.height, probe.frameRate));
     args.push('-map', '[v]');
   } else {
@@ -439,22 +517,20 @@ export function transcodeArgs(input: string, output: string, probe: SourceProbe)
     // `?` makes the map optional: a file whose only audio stream ffprobe saw is
     // one ffmpeg declines to decode should still produce a silent proxy rather
     // than failing outright.
-    args.push('-map', '0:a:0?', '-c:a', 'aac', '-b:a', '160k');
+    //
+    // libmp3lame because VS Code's Chromium decodes MP3 in MP4 but neither AAC
+    // nor Opus (measured). `-ac 2` because MP3 carries at most two channels and
+    // a preview needs no surround. `-ar 48000` pins a rate MP3 supports whatever
+    // the source is (a 96 kHz master, say).
+    args.push('-map', '0:a:0?', '-c:a', 'libmp3lame', '-b:a', '192k', '-ac', '2', '-ar', '48000');
   } else {
     args.push('-an');
   }
 
-  args.push(
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-crf',
-    '22',
-    '-movflags',
-    '+faststart',
-    output,
-  );
+  if (!copy) {
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22');
+  }
+  args.push('-movflags', '+faststart', output);
   return args;
 }
 
@@ -624,12 +700,14 @@ export async function transcode(opts: {
   input: string;
   output: string;
   probe: SourceProbe;
+  /** Build a sound copy: stream-copy the picture, re-encode only the audio. */
+  copyVideo?: boolean;
   signal?: AbortSignal;
   onProgress?: (seconds: number) => void;
 }): Promise<void> {
   const { code, stderr } = await run(
     opts.ffmpeg,
-    transcodeArgs(opts.input, opts.output, opts.probe),
+    transcodeArgs(opts.input, opts.output, opts.probe, { copyVideo: opts.copyVideo }),
     {
       signal: opts.signal,
       stallMs: STALL_TIMEOUT_MS,

@@ -3,8 +3,10 @@ import { mkdtemp, mkdir, readdir, rm, symlink, utimes, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  audioCodecLabel,
   checkerboardFilter,
   codecLabel,
+  COPYABLE_VIDEO,
   ensureProxyDir,
   ffmpegCandidates,
   ffprobeFor,
@@ -12,8 +14,10 @@ import {
   hasAlphaPixelFormat,
   parseProbe,
   parseProgressSeconds,
+  PLAYABLE_AUDIO,
   probeArgs,
   proxyFileName,
+  silentAudio,
   sweepProxyDir,
   transcodeArgs,
   type SourceProbe,
@@ -26,6 +30,7 @@ const PROBE: SourceProbe = {
   frameRate: 24,
   hasAlpha: false,
   hasAudio: false,
+  audioCodec: '',
   codec: 'prores',
   profile: '4444',
 };
@@ -162,6 +167,7 @@ describe('parseProbe', () => {
       frameRate: 24,
       hasAlpha: true,
       hasAudio: true,
+      audioCodec: 'pcm_s24le',
       codec: 'prores',
       profile: '4444',
     });
@@ -192,6 +198,72 @@ describe('parseProbe', () => {
 
   it('reports no audio for a video-only file', () => {
     expect(parseProbe(JSON.stringify({ streams: [{ codec_type: 'video' }] })).hasAudio).toBe(false);
+  });
+});
+
+describe('parseProbe audio codec', () => {
+  it('names the first audio stream, and nothing when there is none', () => {
+    const json = JSON.stringify({
+      streams: [
+        { codec_type: 'video', codec_name: 'h264' },
+        { codec_type: 'audio', codec_name: 'aac' },
+        { codec_type: 'audio', codec_name: 'opus' },
+      ],
+    });
+    expect(parseProbe(json).audioCodec).toBe('aac');
+    expect(
+      parseProbe(JSON.stringify({ streams: [{ codec_type: 'video', codec_name: 'h264' }] }))
+        .audioCodec,
+    ).toBe('');
+  });
+
+  it('keeps hasAudio true for a stream whose codec ffprobe did not name', () => {
+    const result = parseProbe(JSON.stringify({ streams: [{ codec_type: 'audio' }] }));
+    expect(result.hasAudio).toBe(true);
+    expect(result.audioCodec).toBe('');
+  });
+});
+
+describe('silentAudio', () => {
+  it('is true for the codecs this Chromium cannot decode', () => {
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'aac' }))).toBe(true);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'ac3' }))).toBe(true);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'opus' }))).toBe(true);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'alac' }))).toBe(true);
+  });
+
+  it('is false for the codecs it can', () => {
+    for (const codec of PLAYABLE_AUDIO) {
+      expect(silentAudio(probe({ hasAudio: true, audioCodec: codec })), codec).toBe(false);
+    }
+    expect([...PLAYABLE_AUDIO].sort()).toEqual(['flac', 'mp3', 'vorbis']);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'pcm_s16be' }))).toBe(false);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'vorbis' }))).toBe(false);
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: 'flac' }))).toBe(false);
+  });
+
+  it('is false when there is no audio at all', () => {
+    expect(silentAudio(probe({ hasAudio: false, audioCodec: '' }))).toBe(false);
+  });
+
+  it('assumes the worst for an audio stream with no codec name', () => {
+    expect(silentAudio(probe({ hasAudio: true, audioCodec: '' }))).toBe(true);
+  });
+});
+
+describe('audioCodecLabel', () => {
+  it('spells the names a reader would', () => {
+    const label = (audioCodec: string) => audioCodecLabel(probe({ hasAudio: true, audioCodec }));
+    expect(label('aac')).toBe('AAC');
+    expect(label('alac')).toBe('ALAC');
+    expect(label('ac3')).toBe('AC-3');
+    expect(label('eac3')).toBe('E-AC-3');
+    expect(label('pcm_s16le')).toBe('PCM');
+    expect(label('wmav2')).toBe('WMAV2');
+  });
+
+  it('names nothing when there is no audio codec', () => {
+    expect(audioCodecLabel(probe())).toBe('');
   });
 });
 
@@ -250,7 +322,42 @@ describe('transcodeArgs', () => {
     // ProRes originals routinely carry PCM, which no browser plays in an MP4.
     const args = transcodeArgs('in.mov', 'out.mp4', probe({ hasAudio: true }));
     expect(args).toContain('0:a:0?');
-    expect(args).toContain('aac');
+    expect(args).toContain('libmp3lame');
+    expect(args[args.indexOf('-b:a') + 1]).toBe('192k');
+    expect(args).not.toContain('aac');
+    expect(args).not.toContain('libopus');
+  });
+
+  it('downmixes to stereo at 48 kHz so MP3 accepts any source layout', () => {
+    const args = transcodeArgs('in.mov', 'out.mp4', probe({ hasAudio: true }));
+    expect(args[args.indexOf('-ac') + 1]).toBe('2');
+    expect(args[args.indexOf('-ar') + 1]).toBe('48000');
+  });
+
+  it('copies a playable picture and re-encodes only the sound when asked', () => {
+    const args = transcodeArgs(
+      'in.mp4',
+      'out.mp4',
+      probe({ codec: 'h264', hasAudio: true, audioCodec: 'aac' }),
+      { copyVideo: true },
+    );
+    expect(args[args.indexOf('-c:v') + 1]).toBe('copy');
+    expect(args).not.toContain('libx264');
+    expect(args).not.toContain('-vf');
+    expect(args).not.toContain('-filter_complex');
+    expect(args).not.toContain('-crf');
+    expect(args).toContain('libmp3lame');
+    expect(args).toContain('+faststart');
+    expect(args[args.length - 1]).toBe('out.mp4');
+  });
+
+  it('only copies codecs the player can show, and re-encodes the rest', () => {
+    expect([...COPYABLE_VIDEO].sort()).toEqual(['av1', 'h264', 'hevc', 'vp9']);
+    const args = transcodeArgs('in.mov', 'out.mp4', probe({ codec: 'prores' }), {
+      copyVideo: true,
+    });
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
   });
 
   it('asks for silence when there is no audio to take', () => {

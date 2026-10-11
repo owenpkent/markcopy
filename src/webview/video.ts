@@ -17,6 +17,9 @@ import {
   proxyOffer,
   proxyProgress,
   proxyUnavailable,
+  soundFailed,
+  soundOffer,
+  soundProgress,
 } from './videoInfo';
 
 // Minimal VS Code webview API surface we use.
@@ -34,6 +37,7 @@ const statusEl = document.getElementById('mc-status') as HTMLDivElement;
 const errorEl = document.getElementById('mc-error') as HTMLDivElement;
 const menuEl = document.getElementById('mc-menu') as HTMLDivElement;
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
+const noticeEl = document.getElementById('mc-notice') as HTMLDivElement;
 
 const contextMenu = createMenu(menuEl);
 
@@ -67,6 +71,33 @@ let proxyNote = '';
 // second `error` (the proxy's own, or a retry) does not start the conversation
 // over from the top.
 let proxyAsked = false;
+// Whether the host has been told that the original loaded, so the report is made
+// once per source however many times the element re-reads its metadata. Reset on
+// every load.
+let playableReported = false;
+// Where the reader was when a sound copy replaced the original, applied once the
+// new source has metadata to seek in. Undefined for an ordinary load. The rate
+// is part of it because assigning `src` runs the media load algorithm, which
+// puts `playbackRate` back to `defaultPlaybackRate`: a 2x clip would otherwise
+// drop to normal speed the moment its sound arrived.
+let resumeAt: { time: number; playing: boolean; rate: number } | undefined;
+
+// The markcopy.video.autoplay setting as the reader last saw or toggled it,
+// seeded from every load message. The menu flips it for the next video opened;
+// it never starts or stops the one on screen.
+let autoplay = false;
+// Set by an ordinary (non-swap) load that should start playing, and consumed by
+// the `loadedmetadata` handler: the attempt waits for metadata so `play()` has a
+// source to start, and a swap or a later reload must not repeat it.
+let autoplayPending = false;
+// Our own pending `video.muted` write and the value it set, so the
+// `volumechange` listener can tell that echo from the reader pressing the
+// control's mute button.
+let mutedEchoPending = false;
+let mutedWritten = false;
+// Armed when autoplay had to fall back to muted: the first click or key press
+// anywhere in the preview turns the sound on, unless the reader got there first.
+let unmuteArmed = false;
 
 // The active markcopy.theme, seeded from the host and changed via the menu.
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
@@ -142,40 +173,56 @@ function showOverlay(message: string, actions: OverlayAction[], progress?: numbe
   overlayText = text;
 
   if (progress !== undefined) {
-    const track = document.createElement('div');
-    track.className = 'mc-video-progress';
-    const fill = document.createElement('div');
-    fill.className = 'mc-video-progress-fill';
-    track.appendChild(fill);
+    const { track, fill } = progressBar();
     errorEl.appendChild(track);
     overlayFill = fill;
     setProgress(progress);
   }
 
   if (actions.length > 0) {
-    const row = document.createElement('div');
-    row.className = 'mc-video-actions';
-    for (const action of actions) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'mc-video-button';
-      button.textContent = action.label;
-      button.addEventListener('click', action.run);
-      row.appendChild(button);
-    }
-    errorEl.appendChild(row);
+    errorEl.appendChild(actionRow(actions));
   }
 }
 
-function setProgress(fraction: number): void {
-  if (!overlayFill) {
+/** Size a progress bar's fill; a negative fraction paces instead of claiming a position. */
+function setFill(fill: HTMLDivElement | undefined, fraction: number): void {
+  if (!fill) {
     return;
   }
   const indeterminate = fraction < 0;
-  overlayFill.classList.toggle('mc-video-progress-fill--waiting', indeterminate);
-  overlayFill.style.width = indeterminate
+  fill.classList.toggle('mc-video-progress-fill--waiting', indeterminate);
+  fill.style.width = indeterminate
     ? ''
     : `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
+}
+
+function setProgress(fraction: number): void {
+  setFill(overlayFill, fraction);
+}
+
+/** A row of buttons, shared by the overlay and the notice. */
+function actionRow(actions: OverlayAction[]): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'mc-video-actions';
+  for (const action of actions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mc-video-button';
+    button.textContent = action.label;
+    button.addEventListener('click', action.run);
+    row.appendChild(button);
+  }
+  return row;
+}
+
+/** A progress track with its fill, which the caller keeps to update in place. */
+function progressBar(): { track: HTMLDivElement; fill: HTMLDivElement } {
+  const track = document.createElement('div');
+  track.className = 'mc-video-progress';
+  const fill = document.createElement('div');
+  fill.className = 'mc-video-progress-fill';
+  track.appendChild(fill);
+  return { track, fill };
 }
 
 /** Retitle the overlay already on screen, or draw a fresh one if there is none. */
@@ -186,6 +233,62 @@ function updateOverlay(message: string, fraction: number, actions: OverlayAction
     return;
   }
   showOverlay(message, actions, fraction);
+}
+
+// The notice bar: the overlay's quieter sibling, for news about a file that is
+// already playing. It never hides the stage, so the sound copy's offer, progress
+// and failure can all arrive while the reader is watching the picture.
+let noticeText: HTMLParagraphElement | undefined;
+let noticeFill: HTMLDivElement | undefined;
+
+// The notice sits where the <video> element draws its controls, so the stage
+// gives up exactly the notice's height while it is up. Observed rather than
+// measured once, because the text wraps differently as the panel is resized.
+new ResizeObserver(() => {
+  const height = noticeEl.hidden ? 0 : noticeEl.offsetHeight;
+  document.body.style.setProperty('--mc-notice-h', `${height}px`);
+}).observe(noticeEl);
+
+function hideNotice(): void {
+  noticeEl.hidden = true;
+  noticeEl.textContent = '';
+  noticeText = undefined;
+  noticeFill = undefined;
+}
+
+const dismissAction: OverlayAction = { label: 'Dismiss', run: hideNotice };
+
+function showNotice(message: string, actions: OverlayAction[], progress?: number): void {
+  noticeEl.hidden = false;
+  noticeEl.textContent = '';
+  noticeText = undefined;
+  noticeFill = undefined;
+
+  const text = document.createElement('p');
+  text.className = 'mc-video-notice-text';
+  text.textContent = message;
+  noticeEl.appendChild(text);
+  noticeText = text;
+
+  if (progress !== undefined) {
+    const { track, fill } = progressBar();
+    noticeEl.appendChild(track);
+    noticeFill = fill;
+    setFill(fill, progress);
+  }
+  if (actions.length > 0) {
+    noticeEl.appendChild(actionRow(actions));
+  }
+}
+
+/** Same in-place rule as `updateOverlay`: ticks must not rebuild the Cancel button. */
+function updateNotice(message: string, fraction: number, actions: OverlayAction[]): void {
+  if (noticeText && noticeFill) {
+    noticeText.textContent = message;
+    setFill(noticeFill, fraction);
+    return;
+  }
+  showNotice(message, actions, fraction);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,21 +312,113 @@ function load(msg: LoadMessage): void {
   fileBytes = msg.size;
   sourceUri = msg.src;
   proxyNote = msg.proxyNote ?? '';
+  playableReported = false;
+  // A copy replacing the original under the reader's feet (the sound copy) must
+  // not throw them back to 0:00 and a stopped picture. The initial load has
+  // nothing to preserve, and neither has a swap from a source that never loaded.
+  const swap = proxyNote !== '' && video.readyState >= 1 && video.src !== '';
+  resumeAt = swap
+    ? { time: video.currentTime, playing: !video.paused, rate: video.playbackRate }
+    : undefined;
+  hideNotice();
   // A second source means a second chance at both: the CORS probe is per-file,
   // and a proxy that fails to load is a different failure from the original's.
   corsRetried = false;
   frameCopyBlocked = false;
 
   video.loop = msg.loop;
-  // Chromium only honours autoplay without a user gesture while muted, so an
-  // unmuted autoplay request would reject and leave a still frame with no
-  // explanation. Muting is the honest reading of "start playing on open".
-  video.autoplay = msg.autoplay;
-  video.muted = msg.autoplay;
+  autoplay = msg.autoplay;
+  // A new file ends a pending "unmute on first gesture": it belonged to the
+  // previous source's autoplay. A swap does not, because the sound copy of a
+  // muted autoplay is exactly where the promised click has to work, and the swap
+  // keeps the muted state that click is meant to undo.
+  if (!swap) {
+    unmuteArmed = false;
+  }
+  // An unmuted `play()` without a user gesture rejects with NotAllowedError in a
+  // webview while a muted one succeeds, so the `autoplay` attribute (which would
+  // silently stay a still frame) is not used. The attempt is made unmuted in the
+  // `loadedmetadata` handler and only falls back to muted if it is refused. A
+  // swap is not an open: it keeps whatever mute state the reader has chosen, and
+  // resumes by itself below.
+  video.autoplay = false;
+  autoplayPending = !swap && msg.autoplay;
+  if (!swap) {
+    setMuted(false);
+  }
   video.crossOrigin = 'anonymous';
   video.src = sourceUri;
   updateStatus();
 }
+
+/** Write `video.muted` in a way the `volumechange` listener can recognise as ours. */
+function setMuted(value: boolean): void {
+  if (video.muted === value) {
+    return;
+  }
+  // `volumechange` is queued as a task rather than fired inline, so a flag
+  // cleared right after the write would never be seen set. The echo is matched
+  // by value instead: an event that finds the element in a state we did not
+  // write is the reader's.
+  mutedEchoPending = true;
+  mutedWritten = value;
+  video.muted = value;
+}
+
+video.addEventListener('volumechange', () => {
+  if (mutedEchoPending && video.muted === mutedWritten) {
+    mutedEchoPending = false;
+    return;
+  }
+  // The reader used the control (or a key) themselves: whatever they chose is
+  // not ours to undo on their next click.
+  mutedEchoPending = false;
+  unmuteArmed = false;
+});
+
+/**
+ * Autoplay with sound when the browser allows it, muted when it does not.
+ * Fallback on the first refusal rather than guessing: whether a gesture counts
+ * depends on the host, so the attempt is the only reliable test.
+ */
+function startAutoplay(): void {
+  const source = sourceUri;
+  void video.play().catch((err: unknown) => {
+    // Only a policy refusal earns the muted retry. The same promise also rejects,
+    // with AbortError, when the reader pauses before the first frame arrives or a
+    // new source replaces this one, and retrying then would undo their pause or
+    // start a stale attempt on the wrong file.
+    if ((err as { name?: unknown } | null)?.name !== 'NotAllowedError' || source !== sourceUri) {
+      return;
+    }
+    setMuted(true);
+    video.play().catch(() => undefined);
+    toast('Playing muted · click anywhere for sound', 4000);
+    unmuteArmed = true;
+  });
+}
+
+// Unmute on the first gesture, capture phase so nothing in the preview can stop
+// it. The unmute is deferred a tick and re-checked: a click on the native mute
+// button would otherwise be unmuted on pointerdown and then re-muted by the
+// control itself. By the time the timeout runs the control's `volumechange` has
+// disarmed us, so the reader's choice stands.
+function onFirstGesture(event: Event): void {
+  if (!unmuteArmed) {
+    return;
+  }
+  if (event instanceof KeyboardEvent && ['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) {
+    return;
+  }
+  window.setTimeout(() => {
+    if (unmuteArmed && video.muted) {
+      unmuteArmed = false;
+      setMuted(false);
+    }
+  }, 0);
+}
+document.addEventListener('click', onFirstGesture, true);
+document.addEventListener('keydown', onFirstGesture, true);
 
 video.addEventListener('loadedmetadata', () => {
   stage.hidden = false;
@@ -233,6 +428,35 @@ video.addEventListener('loadedmetadata', () => {
   overlayText = undefined;
   overlayFill = undefined;
   updateStatus();
+
+  if (resumeAt) {
+    const { time, playing, rate } = resumeAt;
+    resumeAt = undefined;
+    video.playbackRate = rate;
+    // Clamped, because the copy's duration can differ by a frame or two from the
+    // original's and a seek past the end would land on the last frame, ended.
+    video.currentTime = Number.isFinite(video.duration) ? Math.min(time, video.duration) : time;
+    if (playing) {
+      // A rejection (the browser declining to start without a gesture) leaves the
+      // reader at the right place, paused, which is the right failure.
+      void video.play().catch(() => undefined);
+    }
+  }
+
+  if (autoplayPending) {
+    autoplayPending = false;
+    startAutoplay();
+  }
+
+  // The original opened, which is the host's cue to check the soundtrack: a file
+  // whose picture plays can still be silent, and only ffprobe can say. Metadata
+  // rather than `loadeddata`, because under `preload="metadata"` the element may
+  // fetch no frames until the reader presses play, and the copy should be under
+  // way by then, not starting.
+  if (!proxyNote && !playableReported) {
+    playableReported = true;
+    vscode.postMessage({ type: 'playable' });
+  }
 });
 
 video.addEventListener('error', () => {
@@ -276,7 +500,9 @@ video.addEventListener('error', () => {
  */
 interface ProxyMessage {
   type: 'proxy';
-  state: 'unavailable' | 'ask' | 'running' | 'failed';
+  state: 'unavailable' | 'ask' | 'running' | 'failed' | 'soundAsk';
+  /** `sound` for the background sound copy, which belongs in the notice bar. */
+  scope?: 'sound';
   /** Why there will be no proxy: no ffmpeg to run, or the reader said not to. */
   reason?: 'missing' | 'disabled';
   /** The source codec as ffprobe named it, when a probe got that far. */
@@ -292,12 +518,46 @@ const buildAction: OverlayAction = {
   label: 'Build Playable Copy',
   run: () => vscode.postMessage({ type: 'proxyStart' }),
 };
+const buildSoundAction: OverlayAction = {
+  label: 'Build Copy with Sound',
+  run: () => vscode.postMessage({ type: 'proxyStart', kind: 'sound' }),
+};
 const cancelAction: OverlayAction = {
   label: 'Cancel',
   run: () => vscode.postMessage({ type: 'proxyCancel' }),
 };
 
+/** The sound copy's side of the conversation, which never touches the overlay. */
+function onSoundMessage(msg: ProxyMessage): void {
+  switch (msg.state) {
+    case 'soundAsk':
+      showNotice(soundOffer(fileName, msg.codec ?? ''), [
+        buildSoundAction,
+        openExternalAction(),
+        dismissAction,
+      ]);
+      break;
+    case 'running': {
+      const duration = msg.durationSec ?? 0;
+      const seconds = msg.seconds ?? 0;
+      updateNotice(soundProgress(seconds, duration), duration > 0 ? seconds / duration : -1, [
+        cancelAction,
+      ]);
+      break;
+    }
+    case 'failed':
+      showNotice(soundFailed(fileName, msg.detail ?? ''), [dismissAction]);
+      break;
+    default:
+      break;
+  }
+}
+
 function onProxyMessage(msg: ProxyMessage): void {
+  if (msg.scope === 'sound') {
+    onSoundMessage(msg);
+    return;
+  }
   switch (msg.state) {
     case 'unavailable':
       showOverlay(
@@ -428,6 +688,14 @@ function toggleLoop(): void {
   toast(video.loop ? 'Looping' : 'Looping off');
 }
 
+function toggleAutoplay(): void {
+  autoplay = !autoplay;
+  // Persisted like Loop, and for the next video opened: flipping it mid-clip
+  // neither starts nor stops the one the reader is watching.
+  vscode.postMessage({ type: 'updateSetting', key: 'video.autoplay', value: autoplay });
+  toast(autoplay ? 'Autoplay on' : 'Autoplay off');
+}
+
 function togglePlay(): void {
   if (video.paused) {
     void video.play().catch(() => undefined);
@@ -533,6 +801,7 @@ document.addEventListener('contextmenu', (e) => {
       label: 'Playback',
       entries: [
         { kind: 'checkbox', label: 'Loop', checked: video.loop, run: toggleLoop },
+        { kind: 'checkbox', label: 'Autoplay', checked: autoplay, run: toggleAutoplay },
         { kind: 'divider' },
         { kind: 'label', label: 'Speed' },
         ...SPEEDS.map((rate): MenuEntry => ({
