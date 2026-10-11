@@ -23,7 +23,7 @@ body:
       placeholder: |
         1. Open this .md ...
         2. Right-click the table ...
-        3. Choose "Copy Table as Rich Text"
+        3. Choose "Copy Table"
         4. Paste into ...
     validations:
       required: true
@@ -40,9 +40,14 @@ body:
         - Copy Diagram (PNG / SVG)
         - Copy as Markdown
         - Preview rendering or scroll sync
+        - CSV / TSV grid (viewing or editing)
         - Spreadsheet preview (.xlsx / .xlsm)
+        - PowerPoint preview (.pptx / .pptm)
         - PDF viewer
+        - LaTeX preview
         - STL 3D viewer
+        - Video player
+        - Save as PDF / Word / PowerPoint
         - Other / not sure
     validations:
       required: true
