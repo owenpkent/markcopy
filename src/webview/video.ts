@@ -382,7 +382,15 @@ video.addEventListener('volumechange', () => {
  * depends on the host, so the attempt is the only reliable test.
  */
 function startAutoplay(): void {
-  void video.play().catch(() => {
+  const source = sourceUri;
+  void video.play().catch((err: unknown) => {
+    // Only a policy refusal earns the muted retry. The same promise also rejects,
+    // with AbortError, when the reader pauses before the first frame arrives or a
+    // new source replaces this one, and retrying then would undo their pause or
+    // start a stale attempt on the wrong file.
+    if ((err as { name?: unknown } | null)?.name !== 'NotAllowedError' || source !== sourceUri) {
+      return;
+    }
     setMuted(true);
     video.play().catch(() => undefined);
     toast('Playing muted · click anywhere for sound', 4000);

@@ -150,6 +150,30 @@ describe('video webview autoplay', () => {
     expect(video.muted).toBe(false);
   });
 
+  it('leaves a pause alone when it cancels the pending autoplay', async () => {
+    await import('../src/webview/video');
+    const video = document.getElementById('mc-video') as HTMLVideoElement;
+    let reject: (err: Error) => void = () => undefined;
+    play.mockImplementationOnce(
+      () => new Promise<void>((_resolve, rejectPlay) => (reject = rejectPlay)),
+    );
+    fromHost(load('https://file.test/clip.mp4', { autoplay: true }));
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(play).toHaveBeenCalledTimes(1);
+
+    // The reader pauses (the native control, or Space) while the first play() is
+    // still waiting for frames, and the pause rejects that promise with
+    // AbortError, as the spec requires. Paused on the element itself: modules
+    // booted by earlier tests still listen on the shared document.
+    video.pause();
+    reject(Object.assign(new Error('interrupted by pause()'), { name: 'AbortError' }));
+    await tick();
+
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(video.muted).toBe(false);
+    expect(document.getElementById('mc-toast')?.textContent).not.toContain('Playing muted');
+  });
+
   it('does not override a mute the reader changed themselves', async () => {
     const video = await openAutoplay(refused);
     expect(video.muted).toBe(true);
