@@ -260,7 +260,7 @@ export function probeArgs(input: string): string[] {
     '-print_format',
     'json',
     '-show_entries',
-    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate',
+    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate:stream_tags=alpha_mode',
     '-i',
     input,
   ];
@@ -289,7 +289,10 @@ function firstNumber(raw: unknown): number {
  * attempt on the plain path, because the fields that go missing (frame rate,
  * duration) only drive the checkerboard and the progress readout. The one thing
  * worth being certain about is the alpha channel, and that comes from a pixel
- * format ffprobe either reports or does not.
+ * format ffprobe either reports or does not, plus one WebM wrinkle: a transparent
+ * VP9 or VP8 file reports plain `yuv420p` (the alpha rides in a separate block
+ * the container flags with an `alpha_mode` stream tag), so the pixel format alone
+ * would call it opaque and the remux path would repackage it, alpha dropped.
  */
 export function parseProbe(json: string): SourceProbe {
   const empty: SourceProbe = {
@@ -318,7 +321,9 @@ export function parseProbe(json: string): SourceProbe {
     width: firstNumber(video?.width),
     height: firstNumber(video?.height),
     frameRate: parseRate(video?.r_frame_rate),
-    hasAlpha: hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : ''),
+    hasAlpha:
+      hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : '') ||
+      (video?.tags as { alpha_mode?: unknown } | undefined)?.alpha_mode === '1',
     hasAudio: audio !== undefined,
     audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : '',
     codec: typeof video?.codec_name === 'string' ? video.codec_name : '',
@@ -531,9 +536,19 @@ export function transcodeArgs(
     '-progress',
     'pipe:1',
     '-nostats',
-    '-i',
-    input,
   ];
+  // ffmpeg's native vp8/vp9 decoders ignore WebM alpha and hand back opaque
+  // frames, so the checkerboard would composite over nothing. The libvpx
+  // decoders read the alpha block; the choice is an input option, hence before
+  // `-i`. Other codecs carry alpha in the pixel format and need no override.
+  if (probe.hasAlpha && size && !copy) {
+    if (probe.codec === 'vp9') {
+      args.push('-c:v', 'libvpx-vp9');
+    } else if (probe.codec === 'vp8') {
+      args.push('-c:v', 'libvpx');
+    }
+  }
+  args.push('-i', input);
 
   if (copy) {
     args.push('-map', '0:v:0', '-c:v', 'copy');

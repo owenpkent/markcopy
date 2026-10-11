@@ -352,10 +352,12 @@ Make the fixtures once, with ffmpeg on `PATH`:
 ```
 ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -c:v prores_ks prores.mov
 ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le alpha.mov
+ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 alpha.webm
 ```
 
 - [ ] ★ **With ffmpeg installed**, opening `prores.mov` shows "Building a playable copy… n%" with a progress bar, then plays. The status line ends with `ffmpeg preview copy`.
 - [ ] `alpha.mov` plays over a grey **transparency checkerboard**, not flat black, and the status line says `alpha on checkerboard`. **Copy Frame as PNG** from it: the board is in the pasted image (it is baked into the proxy, which is what the status line is warning you about).
+- [ ] `alpha.webm` (transparent VP9) gets the same checkerboard re-encode, not a `repackaged as MP4` copy: the status line says `alpha on checkerboard` and the red is tinted by the grey squares rather than flat.
 - [ ] Press **Cancel** during a long file's encode: it stops, and the offer to build one comes back rather than an error.
 - [ ] Close the tab after a proxy has played, then check `%TEMP%\markcopy-video` (`/tmp/markcopy-video`): the copy is gone. Nothing accumulates across a session of opening clips.
 - [ ] The original file's timestamp and size are unchanged after all of the above.

@@ -581,3 +581,97 @@ describe('sweepProxyDir', () => {
     await expect(sweepProxyDir(join(dir, 'absent'), now)).resolves.toBeUndefined();
   });
 });
+
+// Verbatim `ffprobe` output (probeArgs) for transparent WebM fixtures, made with
+//   ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" //     -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 alpha.webm   (libvpx for VP8)
+// The pixel format is plain yuv420p; only the alpha_mode tag says it is transparent.
+const VP9_ALPHA_PROBE = `{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "vp9",
+            "profile": "Profile 0",
+            "codec_type": "video",
+            "width": 64,
+            "height": 64,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "5/1",
+            "tags": {
+                "alpha_mode": "1"
+            }
+        }
+    ],
+    "format": {
+        "duration": "1.000000"
+    }
+}`;
+const VP8_ALPHA_PROBE = `{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "vp8",
+            "profile": "0",
+            "codec_type": "video",
+            "width": 64,
+            "height": 64,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "5/1",
+            "tags": {
+                "alpha_mode": "1"
+            }
+        }
+    ],
+    "format": {
+        "duration": "1.000000"
+    }
+}`;
+
+describe('transparent WebM', () => {
+  it('requests the alpha_mode stream tag from ffprobe', () => {
+    expect(probeArgs('a.webm').join(' ')).toContain(':stream_tags=alpha_mode');
+  });
+
+  for (const [name, json, codec, decoder] of [
+    ['VP9', VP9_ALPHA_PROBE, 'vp9', 'libvpx-vp9'],
+    ['VP8', VP8_ALPHA_PROBE, 'vp8', 'libvpx'],
+  ] as const) {
+    it(`${name}: reads alpha from the tag, refuses the remux, decodes with libvpx`, () => {
+      const parsed = parseProbe(json);
+      expect(parsed.hasAlpha).toBe(true);
+      expect(parsed.codec).toBe(codec);
+      expect(canRemux(parsed, 'alpha.webm')).toBe(false);
+      const args = transcodeArgs('alpha.webm', 'out.mp4', parsed);
+      expect(args).toContain('-filter_complex');
+      expect(args).toContain('libx264');
+      expect(args).not.toContain('copy');
+      expect(args[args.indexOf('-i') - 1]).toBe(decoder);
+      expect(args[args.indexOf('-i') - 2]).toBe('-c:v');
+    });
+  }
+
+  it('does not override the decoder for an opaque VP9 WebM or an alpha ProRes', () => {
+    const opaque = parseProbe(VP9_ALPHA_PROBE.replace('"alpha_mode": "1"', '"language": "und"'));
+    expect(opaque.hasAlpha).toBe(false);
+    expect(canRemux(opaque, 'clip.webm')).toBe(true);
+    const prores = transcodeArgs('in.mov', 'out.mp4', probe({ hasAlpha: true }));
+    expect(prores.slice(0, prores.indexOf('-i'))).not.toContain('-c:v');
+  });
+
+  it('still remuxes an opaque H.264 .mkv', () => {
+    const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec: 'h264' }));
+    expect(args).toContain('copy');
+    expect(args).not.toContain('libx264');
+  });
+});
