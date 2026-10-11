@@ -393,9 +393,18 @@ describe('transcodeArgs', () => {
 
   it('only remuxes the codecs measured to decode inside an MP4', () => {
     expect([...REMUXABLE_VIDEO].sort()).toEqual(['av1', 'h264', 'vp9']);
-    expect(canRemux(probe({ codec: 'vp9' }))).toBe(true);
-    expect(canRemux(probe({ codec: 'hevc' }))).toBe(false);
-    expect(canRemux(probe({ codec: 'h264', hasAlpha: true }))).toBe(false);
+    expect(canRemux(probe({ codec: 'vp9' }), 'clip.webm')).toBe(true);
+    expect(canRemux(probe({ codec: 'hevc' }), 'clip.mkv')).toBe(false);
+    expect(canRemux(probe({ codec: 'h264', hasAlpha: true }), 'clip.mkv')).toBe(false);
+  });
+
+  it('re-encodes an H.264 file the player refused inside an MP4 container', () => {
+    // The container was not the problem there, so a copy would fail again.
+    expect(canRemux(probe({ codec: 'h264' }), 'clip.mov')).toBe(false);
+    expect(canRemux(probe({ codec: 'h264' }), 'CLIP.MP4')).toBe(false);
+    const args = transcodeArgs('in.mov', 'out.mp4', probe({ codec: 'h264' }));
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
   });
 
   it('asks for silence when there is no audio to take', () => {

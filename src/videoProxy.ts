@@ -24,6 +24,7 @@ import { constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, posix, win32 } from 'node:path';
+import { outsideMp4Family } from './webview/videoInfo';
 
 // How long a transcode may go without reporting a single new timestamp before it
 // is treated as wedged. ffmpeg reports progress roughly twice a second on any
@@ -390,11 +391,15 @@ export const REMUXABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'vp9', 'av1
 /**
  * Whether the picture can be stream-copied into an MP4 rather than re-encoded.
  *
- * Alpha excludes it: the checkerboard is composited over the picture, which needs
- * decoded frames, and a copied alpha stream would play as black or not at all.
+ * Only when the container is the problem. An H.264 .mov or .mp4 that the player
+ * refused was already in an MP4, so whatever failed (an odd profile, a damaged
+ * stream) travels with a copy and fails again; that file needs the re-encode.
+ * Alpha excludes it too: the checkerboard is composited over the picture, which
+ * needs decoded frames, and a copied alpha stream would play as black or not at
+ * all.
  */
-export function canRemux(probe: SourceProbe): boolean {
-  return REMUXABLE_VIDEO.has(probe.codec) && !probe.hasAlpha;
+export function canRemux(probe: SourceProbe, sourceName: string): boolean {
+  return outsideMp4Family(sourceName) && REMUXABLE_VIDEO.has(probe.codec) && !probe.hasAlpha;
 }
 
 /**
@@ -513,7 +518,8 @@ export function transcodeArgs(
   probe: SourceProbe,
   opts: { copyVideo?: boolean } = {},
 ): string[] {
-  const copy = opts.copyVideo === true ? COPYABLE_VIDEO.has(probe.codec) : canRemux(probe);
+  const copy =
+    opts.copyVideo === true ? COPYABLE_VIDEO.has(probe.codec) : canRemux(probe, basename(input));
   const size = evenSize(probe);
   const args = [
     '-nostdin',

@@ -550,7 +550,7 @@ class ProxySession {
         note:
           kind === 'sound'
             ? 'ffmpeg copy · sound re-encoded to MP3'
-            : canRemux(probe)
+            : canRemux(probe, basename(this.source))
               ? 'ffmpeg copy · repackaged as MP4'
               : probe.hasAlpha
                 ? 'ffmpeg preview copy · alpha on checkerboard'
@@ -599,7 +599,11 @@ class ProxySession {
    * wrong.
    */
   private askMessage(probe: SourceProbe): Record<string, unknown> {
-    return { state: 'ask', codec: codecLabel(probe), remux: canRemux(probe) };
+    return {
+      state: 'ask',
+      codec: codecLabel(probe),
+      remux: canRemux(probe, basename(this.source)),
+    };
   }
 
   /** The copy this panel has finished building, if any. */
