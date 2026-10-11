@@ -24,6 +24,7 @@ import { constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, posix, win32 } from 'node:path';
+import { outsideMp4Family } from './webview/videoInfo';
 
 // How long a transcode may go without reporting a single new timestamp before it
 // is treated as wedged. ffmpeg reports progress roughly twice a second on any
@@ -259,7 +260,7 @@ export function probeArgs(input: string): string[] {
     '-print_format',
     'json',
     '-show_entries',
-    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate',
+    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate:stream_tags=alpha_mode',
     '-i',
     input,
   ];
@@ -288,7 +289,10 @@ function firstNumber(raw: unknown): number {
  * attempt on the plain path, because the fields that go missing (frame rate,
  * duration) only drive the checkerboard and the progress readout. The one thing
  * worth being certain about is the alpha channel, and that comes from a pixel
- * format ffprobe either reports or does not.
+ * format ffprobe either reports or does not, plus one WebM wrinkle: a transparent
+ * VP9 or VP8 file reports plain `yuv420p` (the alpha rides in a separate block
+ * the container flags with an `alpha_mode` stream tag), so the pixel format alone
+ * would call it opaque and the remux path would repackage it, alpha dropped.
  */
 export function parseProbe(json: string): SourceProbe {
   const empty: SourceProbe = {
@@ -317,7 +321,9 @@ export function parseProbe(json: string): SourceProbe {
     width: firstNumber(video?.width),
     height: firstNumber(video?.height),
     frameRate: parseRate(video?.r_frame_rate),
-    hasAlpha: hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : ''),
+    hasAlpha:
+      hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : '') ||
+      (video?.tags as { alpha_mode?: unknown } | undefined)?.alpha_mode === '1',
     hasAudio: audio !== undefined,
     audioCodec: typeof audio?.codec_name === 'string' ? audio.codec_name : '',
     codec: typeof video?.codec_name === 'string' ? video.codec_name : '',
@@ -373,6 +379,33 @@ export const PLAYABLE_AUDIO: ReadonlySet<string> = new Set(['mp3', 'flac', 'vorb
 
 /** Video codecs that can be copied into the sound copy untouched, because they play. */
 export const COPYABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'hevc', 'vp9', 'av1']);
+
+/**
+ * Video codecs that always decode once they are inside an MP4, so a file that
+ * fails only because of its container can be repackaged instead of re-encoded.
+ *
+ * Measured: H.264, VP9 and AV1 played from an MP4 every time, while the same
+ * streams in .mkv/.webm/.avi/.flv were refused at the demuxer. HEVC is left out
+ * on purpose. It decodes only where the OS has a decoder, so when an HEVC file
+ * fails it is usually the codec, and copying it into an MP4 would fail again on
+ * the very machine that just refused it. VP8 is out because it was never measured
+ * inside an MP4, and an unmeasured copy is a guess the reader pays for.
+ */
+export const REMUXABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'vp9', 'av1']);
+
+/**
+ * Whether the picture can be stream-copied into an MP4 rather than re-encoded.
+ *
+ * Only when the container is the problem. An H.264 .mov or .mp4 that the player
+ * refused was already in an MP4, so whatever failed (an odd profile, a damaged
+ * stream) travels with a copy and fails again; that file needs the re-encode.
+ * Alpha excludes it too: the checkerboard is composited over the picture, which
+ * needs decoded frames, and a copied alpha stream would play as black or not at
+ * all.
+ */
+export function canRemux(probe: SourceProbe, sourceName: string): boolean {
+  return outsideMp4Family(sourceName) && REMUXABLE_VIDEO.has(probe.codec) && !probe.hasAlpha;
+}
 
 /**
  * Whether the file has a soundtrack that this player will silently drop.
@@ -477,6 +510,12 @@ export function checkerboardFilter(width: number, height: number, frameRate: num
  * soundtrack is re-encoded. It applies only when the probed video codec is one
  * Chromium can play; anything else falls through to the full re-encode, since
  * copying an unplayable picture would produce an equally unplayable file.
+ *
+ * Without `copyVideo` the picture path still stream-copies when `canRemux`: a
+ * .mkv holding H.264 fails only at the demuxer, and repackaging it takes seconds
+ * where a libx264 pass takes minutes and costs generation loss. The audio stays
+ * on the MP3 args either way (an AAC or Opus track would play silently in the MP4,
+ * and copying even a playable MP3 is not worth a second code path).
  */
 export function transcodeArgs(
   input: string,
@@ -484,7 +523,8 @@ export function transcodeArgs(
   probe: SourceProbe,
   opts: { copyVideo?: boolean } = {},
 ): string[] {
-  const copy = opts.copyVideo === true && COPYABLE_VIDEO.has(probe.codec);
+  const copy =
+    opts.copyVideo === true ? COPYABLE_VIDEO.has(probe.codec) : canRemux(probe, basename(input));
   const size = evenSize(probe);
   const args = [
     '-nostdin',
@@ -496,9 +536,19 @@ export function transcodeArgs(
     '-progress',
     'pipe:1',
     '-nostats',
-    '-i',
-    input,
   ];
+  // ffmpeg's native vp8/vp9 decoders ignore WebM alpha and hand back opaque
+  // frames, so the checkerboard would composite over nothing. The libvpx
+  // decoders read the alpha block; the choice is an input option, hence before
+  // `-i`. Other codecs carry alpha in the pixel format and need no override.
+  if (probe.hasAlpha && size && !copy) {
+    if (probe.codec === 'vp9') {
+      args.push('-c:v', 'libvpx-vp9');
+    } else if (probe.codec === 'vp8') {
+      args.push('-c:v', 'libvpx');
+    }
+  }
+  args.push('-i', input);
 
   if (copy) {
     args.push('-map', '0:v:0', '-c:v', 'copy');

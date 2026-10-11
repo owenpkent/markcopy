@@ -352,10 +352,12 @@ Make the fixtures once, with ffmpeg on `PATH`:
 ```
 ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -c:v prores_ks prores.mov
 ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le alpha.mov
+ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 alpha.webm
 ```
 
 - [ ] ★ **With ffmpeg installed**, opening `prores.mov` shows "Building a playable copy… n%" with a progress bar, then plays. The status line ends with `ffmpeg preview copy`.
 - [ ] `alpha.mov` plays over a grey **transparency checkerboard**, not flat black, and the status line says `alpha on checkerboard`. **Copy Frame as PNG** from it: the board is in the pasted image (it is baked into the proxy, which is what the status line is warning you about).
+- [ ] `alpha.webm` (transparent VP9) gets the same checkerboard re-encode, not a `repackaged as MP4` copy: the status line says `alpha on checkerboard` and the red is tinted by the grey squares rather than flat.
 - [ ] Press **Cancel** during a long file's encode: it stops, and the offer to build one comes back rather than an error.
 - [ ] Close the tab after a proxy has played, then check `%TEMP%\markcopy-video` (`/tmp/markcopy-video`): the copy is gone. Nothing accumulates across a session of opening clips.
 - [ ] The original file's timestamp and size are unchanged after all of the above.
@@ -368,6 +370,10 @@ ffmpeg -f lavfi -i "color=c=red@0.5:s=320x240:d=2,format=rgba" -c:v prores_ks -p
 - [ ] With `markcopy.video.transcode` at `ask`, the same file shows a notice ("has AAC audio, which VS Code cannot play, so it is silent here") with **Build Copy with Sound**, **Open in Default App**, and **Dismiss**, and the video stays visible and playing. **Dismiss** hides it and it does not come back until the tab is reopened. **Build Copy with Sound** shows progress, **Cancel** returns to the offer, and a finished build swaps in with sound.
 - [ ] With `off`, or with ffmpeg off `PATH`, an AAC file plays as before with no notice at all.
 - [ ] A ProRes or HEVC `.mov` with audio, played through the picture proxy, now has **sound** (the proxy audio is MP3, not AAC). A 5.1 source works too.
+- [ ] ★ **Containers**: generate an H.264 `.mkv` and a VP8 `.webm` (`ffmpeg -f lavfi -i testsrc=size=320x240:rate=15:duration=2 -f lavfi -i sine=frequency=440:duration=2 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest sample.mkv`, and the same with `-c:v libvpx -c:a libvorbis` and `sample.webm`; `-c:v wmv2 sample.wmv` and `-c:v mpeg2video sample.mpg` for the others). Both open in the MarkCopy player, not as binary.
+- [ ] The H.264 `.mkv` with ffmpeg installed and `markcopy.video.transcode` at `ask` says "VS Code's player cannot open .mkv files. MarkCopy can repackage sample.mkv as MP4 with ffmpeg in a few seconds, without re-encoding the picture or touching the original."; pressing **Build Playable Copy** finishes in seconds, plays with sound, and the status line ends with `ffmpeg copy · repackaged as MP4`.
+- [ ] The VP8 `.webm`, the `.wmv`, and the `.mpg` get the full re-encode ("Building a playable copy… n%", status `ffmpeg preview copy`), not a repackage.
+- [ ] ★ Without ffmpeg, the `.mkv` and `.webm` say "VS Code's player opens only MP4 and QuickTime files, so sample.mkv needs your default player" plus the install-ffmpeg sentence, and **Open in Default App** works.
 - [ ] An `.mp4` VS Code _can_ play, with MP3 or no audio, opens instantly with no encode and no `ffmpeg` text in the status line.
 - [ ] After the swap to a copy with sound, the speaker icon in the video controls is enabled (not greyed). A greyed speaker means the element has no decodable audio.
 - [ ] A truncated or garbage `.mov` (`node -e "require('fs').writeFileSync('bad.mov', Buffer.alloc(2048, 0xff))"`) reports that it cannot be played rather than hanging or showing nothing.

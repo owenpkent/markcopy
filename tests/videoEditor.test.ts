@@ -175,3 +175,90 @@ describe('VideoEditorProvider sound copy', () => {
     expect(configUpdate).toHaveBeenCalledWith('video.autoplay', true, 1);
   });
 });
+
+describe('VideoEditorProvider container offers', () => {
+  const probeOf = (over: Record<string, unknown>) => ({
+    durationSec: 5,
+    width: 1920,
+    height: 1080,
+    frameRate: 24,
+    hasAlpha: false,
+    hasAudio: true,
+    audioCodec: 'aac',
+    codec: 'h264',
+    profile: '',
+    ...over,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tools.findFfmpeg.mockResolvedValue({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' });
+    tools.transcode.mockResolvedValue(undefined);
+    tools.ensureProxyDir.mockResolvedValue('/proxies');
+    tools.removeQuietly.mockResolvedValue(undefined);
+    tools.proxyDir.mockReturnValue('/proxies');
+  });
+
+  async function open(file: string) {
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: `/videos/${file}`,
+      fsPath: `/videos/${file}`,
+    } as vscode.Uri);
+    const harness = createPanel();
+    await provider.resolveCustomEditor(document, harness.panel);
+    return harness;
+  }
+
+  // The offer reads the transcode mode on its first configuration lookup after
+  // the panel opens, so a one-shot override is enough to put it in `ask`.
+  async function askMode(): Promise<void> {
+    const vs = await import('vscode');
+    vi.mocked(vs.workspace.getConfiguration).mockImplementationOnce(
+      () =>
+        ({
+          get: (key: string, fallback: unknown) => (key === 'video.transcode' ? 'ask' : fallback),
+          inspect: () => undefined,
+          update: configUpdate,
+        }) as never,
+    );
+  }
+
+  it('flags a remuxable codec in the ask message, with the codec named', async () => {
+    tools.probeSource.mockResolvedValue(probeOf({ codec: 'h264' }));
+    const { posted, send } = await open('clip.mkv');
+    await askMode();
+    await send({ type: 'proxyRequest' });
+    expect(posted.find((m) => m.state === 'ask')).toMatchObject({
+      type: 'proxy',
+      codec: 'H.264',
+      remux: true,
+    });
+  });
+
+  it('does not flag a codec that has to be re-encoded', async () => {
+    tools.probeSource.mockResolvedValue(probeOf({ codec: 'vp8' }));
+    const { posted, send } = await open('clip.webm');
+    await askMode();
+    await send({ type: 'proxyRequest' });
+    expect(posted.find((m) => m.state === 'ask')).toMatchObject({ codec: 'VP8', remux: false });
+  });
+
+  it('repackages an H.264 mkv and says so in the status note', async () => {
+    tools.probeSource.mockResolvedValue(probeOf({ codec: 'h264' }));
+    const { posted, send } = await open('clip.mkv');
+    await send({ type: 'proxyRequest' });
+    const last = posted.filter((m) => m.type === 'load').at(-1);
+    expect(last?.proxyNote).toBe('ffmpeg copy · repackaged as MP4');
+    expect(last?.name).toBe('clip.mkv');
+  });
+
+  it('keeps the preview-copy note for a full re-encode', async () => {
+    tools.probeSource.mockResolvedValue(probeOf({ codec: 'wmv2' }));
+    const { posted, send } = await open('clip.wmv');
+    await send({ type: 'proxyRequest' });
+    expect(posted.filter((m) => m.type === 'load').at(-1)?.proxyNote).toBe('ffmpeg preview copy');
+  });
+});

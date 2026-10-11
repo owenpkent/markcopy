@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   audioCodecLabel,
+  canRemux,
   checkerboardFilter,
   codecLabel,
   COPYABLE_VIDEO,
@@ -17,6 +18,7 @@ import {
   PLAYABLE_AUDIO,
   probeArgs,
   proxyFileName,
+  REMUXABLE_VIDEO,
   silentAudio,
   sweepProxyDir,
   transcodeArgs,
@@ -360,6 +362,51 @@ describe('transcodeArgs', () => {
     expect(args).not.toContain('copy');
   });
 
+  it('stream-copies a picture that only failed on its container', () => {
+    const args = transcodeArgs(
+      'in.mkv',
+      'out.mp4',
+      probe({ codec: 'h264', hasAudio: true, audioCodec: 'aac' }),
+    );
+    expect(args[args.indexOf('-c:v') + 1]).toBe('copy');
+    expect(args).not.toContain('libx264');
+    expect(args).not.toContain('-vf');
+    // The soundtrack still goes through MP3, which is what plays in an MP4.
+    expect(args).toContain('libmp3lame');
+    expect(args).toContain('+faststart');
+  });
+
+  it('re-encodes HEVC, VP8 and the rest instead of copying them', () => {
+    for (const codec of ['hevc', 'vp8', 'wmv2', 'mpeg2video', 'prores']) {
+      const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec }));
+      expect(args, codec).toContain('libx264');
+      expect(args, codec).not.toContain('copy');
+    }
+  });
+
+  it('does not copy a picture with alpha, which needs the checkerboard', () => {
+    const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec: 'h264', hasAlpha: true }));
+    expect(args).toContain('-filter_complex');
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
+  });
+
+  it('only remuxes the codecs measured to decode inside an MP4', () => {
+    expect([...REMUXABLE_VIDEO].sort()).toEqual(['av1', 'h264', 'vp9']);
+    expect(canRemux(probe({ codec: 'vp9' }), 'clip.webm')).toBe(true);
+    expect(canRemux(probe({ codec: 'hevc' }), 'clip.mkv')).toBe(false);
+    expect(canRemux(probe({ codec: 'h264', hasAlpha: true }), 'clip.mkv')).toBe(false);
+  });
+
+  it('re-encodes an H.264 file the player refused inside an MP4 container', () => {
+    // The container was not the problem there, so a copy would fail again.
+    expect(canRemux(probe({ codec: 'h264' }), 'clip.mov')).toBe(false);
+    expect(canRemux(probe({ codec: 'h264' }), 'CLIP.MP4')).toBe(false);
+    const args = transcodeArgs('in.mov', 'out.mp4', probe({ codec: 'h264' }));
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
+  });
+
   it('asks for silence when there is no audio to take', () => {
     expect(transcodeArgs('in.mov', 'out.mp4', probe())).toContain('-an');
   });
@@ -532,5 +579,99 @@ describe('sweepProxyDir', () => {
 
   it('says nothing about a directory that was never made', async () => {
     await expect(sweepProxyDir(join(dir, 'absent'), now)).resolves.toBeUndefined();
+  });
+});
+
+// Verbatim `ffprobe` output (probeArgs) for transparent WebM fixtures, made with
+//   ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" //     -c:v libvpx-vp9 -pix_fmt yuva420p -auto-alt-ref 0 alpha.webm   (libvpx for VP8)
+// The pixel format is plain yuv420p; only the alpha_mode tag says it is transparent.
+const VP9_ALPHA_PROBE = `{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "vp9",
+            "profile": "Profile 0",
+            "codec_type": "video",
+            "width": 64,
+            "height": 64,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "5/1",
+            "tags": {
+                "alpha_mode": "1"
+            }
+        }
+    ],
+    "format": {
+        "duration": "1.000000"
+    }
+}`;
+const VP8_ALPHA_PROBE = `{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "vp8",
+            "profile": "0",
+            "codec_type": "video",
+            "width": 64,
+            "height": 64,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "5/1",
+            "tags": {
+                "alpha_mode": "1"
+            }
+        }
+    ],
+    "format": {
+        "duration": "1.000000"
+    }
+}`;
+
+describe('transparent WebM', () => {
+  it('requests the alpha_mode stream tag from ffprobe', () => {
+    expect(probeArgs('a.webm').join(' ')).toContain(':stream_tags=alpha_mode');
+  });
+
+  for (const [name, json, codec, decoder] of [
+    ['VP9', VP9_ALPHA_PROBE, 'vp9', 'libvpx-vp9'],
+    ['VP8', VP8_ALPHA_PROBE, 'vp8', 'libvpx'],
+  ] as const) {
+    it(`${name}: reads alpha from the tag, refuses the remux, decodes with libvpx`, () => {
+      const parsed = parseProbe(json);
+      expect(parsed.hasAlpha).toBe(true);
+      expect(parsed.codec).toBe(codec);
+      expect(canRemux(parsed, 'alpha.webm')).toBe(false);
+      const args = transcodeArgs('alpha.webm', 'out.mp4', parsed);
+      expect(args).toContain('-filter_complex');
+      expect(args).toContain('libx264');
+      expect(args).not.toContain('copy');
+      expect(args[args.indexOf('-i') - 1]).toBe(decoder);
+      expect(args[args.indexOf('-i') - 2]).toBe('-c:v');
+    });
+  }
+
+  it('does not override the decoder for an opaque VP9 WebM or an alpha ProRes', () => {
+    const opaque = parseProbe(VP9_ALPHA_PROBE.replace('"alpha_mode": "1"', '"language": "und"'));
+    expect(opaque.hasAlpha).toBe(false);
+    expect(canRemux(opaque, 'clip.webm')).toBe(true);
+    const prores = transcodeArgs('in.mov', 'out.mp4', probe({ hasAlpha: true }));
+    expect(prores.slice(0, prores.indexOf('-i'))).not.toContain('-c:v');
+  });
+
+  it('still remuxes an opaque H.264 .mkv', () => {
+    const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec: 'h264' }));
+    expect(args).toContain('copy');
+    expect(args).not.toContain('libx264');
   });
 });

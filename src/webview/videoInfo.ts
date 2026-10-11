@@ -61,6 +61,29 @@ export function frameFileName(videoName: string, seconds: number): string {
   return `${base}-${timecodeSlug(seconds)}.png`;
 }
 
+// The containers VS Code's player opens, measured: .mp4, .mov, .m4v and .3gp
+// play, while .mkv, .webm, .avi, .flv, .mpg and .wmv fail at once with
+// MEDIA_ERR_SRC_NOT_SUPPORTED even when they hold codecs that play inside an MP4.
+const MP4_FAMILY = new Set(['mp4', 'mov', 'm4v', '3gp']);
+
+/** The lowercase extension without its dot, or '' when the name has none. */
+export function containerOf(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * Whether the name's container is one VS Code's player cannot open at all.
+ *
+ * An unknown or missing extension counts as inside the family: the container
+ * messages name the extension, and claiming "cannot open .xyz files" about a file
+ * we know nothing about would be a guess dressed up as a measurement.
+ */
+export function outsideMp4Family(name: string): boolean {
+  const ext = containerOf(name);
+  return ext !== '' && !MP4_FAMILY.has(ext);
+}
+
 /**
  * What to tell the reader when the <video> element gives up on the file.
  *
@@ -72,6 +95,9 @@ export function frameFileName(videoName: string, seconds: number): string {
  * that the file needs the OS player, so say so and offer that door.
  */
 export function describeMediaError(code: number | undefined, name: string): string {
+  if ((code === 4 || code === undefined) && outsideMp4Family(name)) {
+    return containerLimit(name);
+  }
   switch (code) {
     case 1: // MEDIA_ERR_ABORTED
       return `Loading ${name} was cancelled.`;
@@ -97,8 +123,22 @@ export function describeCodec(name: string, codec: string): string {
   return codec ? `${name} is ${codec}, which VS Code cannot play.` : `VS Code cannot play ${name}.`;
 }
 
-/** The offer, when ffmpeg is there to make good on it. */
-export function proxyOffer(name: string, codec: string): string {
+/** Why a non-MP4 file never opened: the container, whatever the codec inside is. */
+function containerLimit(name: string): string {
+  return `VS Code's player opens only MP4 and QuickTime files, so ${name} needs your default player.`;
+}
+
+/**
+ * The offer, when ffmpeg is there to make good on it.
+ *
+ * `remux` is the host's word that the picture will be copied, not re-encoded. It
+ * only changes the wording for a container outside the MP4 family: there, an
+ * H.264 file is not something VS Code "cannot play", its wrapper is.
+ */
+export function proxyOffer(name: string, codec: string, remux = false): string {
+  if (remux && outsideMp4Family(name)) {
+    return `VS Code's player cannot open .${containerOf(name)} files. MarkCopy can repackage ${name} as MP4 with ffmpeg in a few seconds, without re-encoding the picture or touching the original.`;
+  }
   return `${describeCodec(name, codec)} MarkCopy can build a playable copy with ffmpeg, without touching the original.`;
 }
 
@@ -110,7 +150,12 @@ export function proxyOffer(name: string, codec: string): string {
  * is not sent to a package manager first.
  */
 export function proxyUnavailable(name: string): string {
-  return `VS Code cannot play ${name}. It plays H.264, VP9 and AV1 video; ProRes, DNxHD, and most HEVC files need your default player. Install ffmpeg, or set markcopy.video.ffmpegPath, and MarkCopy will build a playable copy here instead.`;
+  const install =
+    'Install ffmpeg, or set markcopy.video.ffmpegPath, and MarkCopy will build a playable copy here instead.';
+  if (outsideMp4Family(name)) {
+    return `${containerLimit(name)} ${install}`;
+  }
+  return `VS Code cannot play ${name}. It plays H.264, VP9 and AV1 video; ProRes, DNxHD, and most HEVC files need your default player. ${install}`;
 }
 
 /** What went wrong, with ffmpeg's own words kept: they are terse and specific. */

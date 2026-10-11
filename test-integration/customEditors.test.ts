@@ -291,6 +291,24 @@ suite('MarkCopy custom editors', () => {
     assert.strictEqual(tab?.viewType, VIDEO_VIEW, 'clip.mp4 did not open in the MarkCopy player');
   });
 
+  test('containers VS Code cannot open (.mkv, .webm, .AVI) open in the video preview', async () => {
+    // Measured: VS Code's own player refuses everything outside the MP4 family,
+    // WebM included. The bytes are an MP4 renamed, which is enough here: this
+    // proves the registration, not the player.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    for (const name of ['clip.mkv', 'clip.webm', 'CLIP.AVI']) {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      fs.copyFileSync(path.resolve(__dirname, '..', 'sample.mov'), uri.fsPath);
+
+      await vscode.commands.executeCommand('vscode.open', uri);
+
+      const tab = await waitFor(() =>
+        customTabs().find((candidate) => candidate.uri === uri.toString()),
+      );
+      assert.strictEqual(tab?.viewType, VIDEO_VIEW, `${name} did not open in the MarkCopy player`);
+    }
+  });
+
   test('a Markdown file opens as a MarkCopy tab when asked, and only when asked', async () => {
     const uri = fixture('sample.md');
 

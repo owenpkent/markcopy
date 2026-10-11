@@ -6,6 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Added
 
+- **MKV, WebM, AVI, WMV, FLV, MPEG and 3GP videos open in the player.** VS Code's own player opens only the MP4 family (measured: `.mkv`, `.webm`, `.avi`, `.flv`, `.mpg` and `.wmv` all fail at once, WebM included, even with codecs that play inside an MP4), so these now open in MarkCopy. With ffmpeg, a file holding H.264, VP9 or AV1 is repackaged as MP4 in seconds without re-encoding the picture (status line: `ffmpeg copy · repackaged as MP4`), except a transparent WebM, which gets the checkerboard re-encode so its alpha is not dropped; VP8, WMV, MPEG-2 and the rest get the full re-encode. The messages name the container ("VS Code's player cannot open .mkv files") instead of blaming the codec. `.ts`, `.mts` and `.m2ts` are not registered, since `.ts` is TypeScript.
 - **Autoplay gets sound when it can, and has a menu toggle.** `markcopy.video.autoplay` now tries to play with sound. If VS Code requires a click first, the video starts muted, a toast says so, and the first click or key press in the preview turns the sound on (a click on the player's own mute button is left alone). **Playback > Autoplay** in the right-click menu flips the setting for the next video opened.
 
 ### Security
