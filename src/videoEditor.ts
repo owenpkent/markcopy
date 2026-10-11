@@ -73,7 +73,12 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
 
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
-        await this.sendLoad(webview, document.uri);
+        // A webview that reloads inside the same panel starts over from `ready`.
+        // A copy already built for this panel is what it was playing, and the
+        // sound copy in particular would not come back by itself: the original
+        // would report `playable` again into a session that has already made
+        // its one offer.
+        await this.sendLoad(webview, document.uri, proxy.current);
       } else if (msg?.type === 'saveFrame') {
         await saveFrame(document.uri, msg.name, msg.data, webview);
       } else if (msg?.type === 'openExternal') {
@@ -561,6 +566,11 @@ class ProxySession {
         await removeQuietly(output);
       }
     }
+  }
+
+  /** The copy this panel has finished building, if any. */
+  get current(): BuiltProxy | undefined {
+    return this.built;
   }
 
   cancel(): void {

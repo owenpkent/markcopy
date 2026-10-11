@@ -75,8 +75,11 @@ let proxyAsked = false;
 // re-fires `loadeddata` does not repeat the report. Reset on every load.
 let playableReported = false;
 // Where the reader was when a sound copy replaced the original, applied once the
-// new source has metadata to seek in. Undefined for an ordinary load.
-let resumeAt: { time: number; playing: boolean } | undefined;
+// new source has metadata to seek in. Undefined for an ordinary load. The rate
+// is part of it because assigning `src` runs the media load algorithm, which
+// puts `playbackRate` back to `defaultPlaybackRate`: a 2x clip would otherwise
+// drop to normal speed the moment its sound arrived.
+let resumeAt: { time: number; playing: boolean; rate: number } | undefined;
 
 // The active markcopy.theme, seeded from the host and changed via the menu.
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
@@ -296,7 +299,9 @@ function load(msg: LoadMessage): void {
   // not throw them back to 0:00 and a stopped picture. The initial load has
   // nothing to preserve, and neither has a swap from a source that never loaded.
   const swap = proxyNote !== '' && video.readyState >= 1 && video.src !== '';
-  resumeAt = swap ? { time: video.currentTime, playing: !video.paused } : undefined;
+  resumeAt = swap
+    ? { time: video.currentTime, playing: !video.paused, rate: video.playbackRate }
+    : undefined;
   hideNotice();
   // A second source means a second chance at both: the CORS probe is per-file,
   // and a proxy that fails to load is a different failure from the original's.
@@ -328,8 +333,9 @@ video.addEventListener('loadedmetadata', () => {
   updateStatus();
 
   if (resumeAt) {
-    const { time, playing } = resumeAt;
+    const { time, playing, rate } = resumeAt;
     resumeAt = undefined;
+    video.playbackRate = rate;
     // Clamped, because the copy's duration can differ by a frame or two from the
     // original's and a seek past the end would land on the last frame, ended.
     video.currentTime = Number.isFinite(video.duration) ? Math.min(time, video.duration) : time;
