@@ -299,6 +299,54 @@
           },
           {
             "filenamePattern": "*.M4V"
+          },
+          {
+            "filenamePattern": "*.mkv"
+          },
+          {
+            "filenamePattern": "*.MKV"
+          },
+          {
+            "filenamePattern": "*.webm"
+          },
+          {
+            "filenamePattern": "*.WEBM"
+          },
+          {
+            "filenamePattern": "*.avi"
+          },
+          {
+            "filenamePattern": "*.AVI"
+          },
+          {
+            "filenamePattern": "*.wmv"
+          },
+          {
+            "filenamePattern": "*.WMV"
+          },
+          {
+            "filenamePattern": "*.flv"
+          },
+          {
+            "filenamePattern": "*.FLV"
+          },
+          {
+            "filenamePattern": "*.mpg"
+          },
+          {
+            "filenamePattern": "*.MPG"
+          },
+          {
+            "filenamePattern": "*.mpeg"
+          },
+          {
+            "filenamePattern": "*.MPEG"
+          },
+          {
+            "filenamePattern": "*.3gp"
+          },
+          {
+            "filenamePattern": "*.3GP"
           }
         ],
         "priority": "default"
@@ -511,7 +559,7 @@
             "Say what the file is and offer a button, instead of starting on its own.",
             "Never transcode; offer the default player, as MarkCopy did before."
           ],
-          "markdownDescription": "What to do with a video VS Code cannot decode (ProRes, DNxHD, most HEVC). When ffmpeg is installed, MarkCopy can encode a throwaway H.264 copy to a temp folder and play that; the original is never touched, and the copy is deleted when the tab closes. It also covers a video whose picture plays but whose audio VS Code cannot decode (AAC, the usual MP4 soundtrack, plays silently): `auto` builds a copy with MP3 sound in the background, copying the video stream so it is fast, and `ask` offers it. Set this to `ask` if you work with long 4K masters, where an automatic transcode is a wait you did not ask for."
+          "markdownDescription": "What to do with a video VS Code cannot open: a codec it cannot decode (ProRes, DNxHD, most HEVC), or a container outside the MP4 family (MKV, WebM, AVI, ...), which is repackaged as MP4 without re-encoding when it holds H.264, VP9 or AV1. When ffmpeg is installed, MarkCopy can encode a throwaway H.264 copy to a temp folder and play that; the original is never touched, and the copy is deleted when the tab closes. It also covers a video whose picture plays but whose audio VS Code cannot decode (AAC, the usual MP4 soundtrack, plays silently): `auto` builds a copy with MP3 sound in the background, copying the video stream so it is fast, and `ask` offers it. Set this to `ask` if you work with long 4K masters, where an automatic transcode is a wait you did not ask for."
         },
         "markcopy.video.ffmpegPath": {
           "type": "string",

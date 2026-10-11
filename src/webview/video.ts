@@ -507,6 +507,8 @@ interface ProxyMessage {
   reason?: 'missing' | 'disabled';
   /** The source codec as ffprobe named it, when a probe got that far. */
   codec?: string;
+  /** The build will copy the picture into an MP4 instead of re-encoding it. */
+  remux?: boolean;
   /** Seconds encoded so far, and the total to measure them against. */
   seconds?: number;
   durationSec?: number;
@@ -566,7 +568,10 @@ function onProxyMessage(msg: ProxyMessage): void {
       );
       break;
     case 'ask':
-      showOverlay(proxyOffer(fileName, msg.codec ?? ''), [buildAction, openExternalAction()]);
+      showOverlay(proxyOffer(fileName, msg.codec ?? '', msg.remux === true), [
+        buildAction,
+        openExternalAction(),
+      ]);
       break;
     case 'running': {
       const duration = msg.durationSec ?? 0;

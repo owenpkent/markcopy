@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   audioCodecLabel,
+  canRemux,
   checkerboardFilter,
   codecLabel,
   COPYABLE_VIDEO,
@@ -17,6 +18,7 @@ import {
   PLAYABLE_AUDIO,
   probeArgs,
   proxyFileName,
+  REMUXABLE_VIDEO,
   silentAudio,
   sweepProxyDir,
   transcodeArgs,
@@ -358,6 +360,42 @@ describe('transcodeArgs', () => {
     });
     expect(args).toContain('libx264');
     expect(args).not.toContain('copy');
+  });
+
+  it('stream-copies a picture that only failed on its container', () => {
+    const args = transcodeArgs(
+      'in.mkv',
+      'out.mp4',
+      probe({ codec: 'h264', hasAudio: true, audioCodec: 'aac' }),
+    );
+    expect(args[args.indexOf('-c:v') + 1]).toBe('copy');
+    expect(args).not.toContain('libx264');
+    expect(args).not.toContain('-vf');
+    // The soundtrack still goes through MP3, which is what plays in an MP4.
+    expect(args).toContain('libmp3lame');
+    expect(args).toContain('+faststart');
+  });
+
+  it('re-encodes HEVC, VP8 and the rest instead of copying them', () => {
+    for (const codec of ['hevc', 'vp8', 'wmv2', 'mpeg2video', 'prores']) {
+      const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec }));
+      expect(args, codec).toContain('libx264');
+      expect(args, codec).not.toContain('copy');
+    }
+  });
+
+  it('does not copy a picture with alpha, which needs the checkerboard', () => {
+    const args = transcodeArgs('in.mkv', 'out.mp4', probe({ codec: 'h264', hasAlpha: true }));
+    expect(args).toContain('-filter_complex');
+    expect(args).toContain('libx264');
+    expect(args).not.toContain('copy');
+  });
+
+  it('only remuxes the codecs measured to decode inside an MP4', () => {
+    expect([...REMUXABLE_VIDEO].sort()).toEqual(['av1', 'h264', 'vp9']);
+    expect(canRemux(probe({ codec: 'vp9' }))).toBe(true);
+    expect(canRemux(probe({ codec: 'hevc' }))).toBe(false);
+    expect(canRemux(probe({ codec: 'h264', hasAlpha: true }))).toBe(false);
   });
 
   it('asks for silence when there is no audio to take', () => {

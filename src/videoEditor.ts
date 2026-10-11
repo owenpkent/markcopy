@@ -4,6 +4,7 @@ import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import {
   audioCodecLabel,
+  canRemux,
   codecLabel,
   ensureProxyDir,
   findFfmpeg,
@@ -440,7 +441,7 @@ class ProxySession {
     if (mode === 'ask') {
       // Probe first, so the offer can name the codec rather than describe the
       // whole family of things it might be.
-      this.post({ state: 'ask', codec: codecLabel(await this.probe(tools.ffprobe)) });
+      this.post(this.askMessage(await this.probe(tools.ffprobe)));
       return;
     }
     await this.build();
@@ -549,9 +550,11 @@ class ProxySession {
         note:
           kind === 'sound'
             ? 'ffmpeg copy · sound re-encoded to MP3'
-            : probe.hasAlpha
-              ? 'ffmpeg preview copy · alpha on checkerboard'
-              : 'ffmpeg preview copy',
+            : canRemux(probe)
+              ? 'ffmpeg copy · repackaged as MP4'
+              : probe.hasAlpha
+                ? 'ffmpeg preview copy · alpha on checkerboard'
+                : 'ffmpeg preview copy',
       };
       await this.play(this.built);
     } catch (err) {
@@ -563,7 +566,7 @@ class ProxySession {
         if (kind === 'sound') {
           this.post({ state: 'soundAsk', codec: audioCodecLabel(probe) }, 'sound');
         } else {
-          this.post({ state: 'ask', codec: codecLabel(probe) });
+          this.post(this.askMessage(probe));
         }
       } else {
         this.post(
@@ -584,6 +587,19 @@ class ProxySession {
         await removeQuietly(output);
       }
     }
+  }
+
+  /**
+   * The offer for the picture path.
+   *
+   * `remux` says the build will be a stream copy, which the webview combines with
+   * the file's extension to tell a container problem (an H.264 .mkv) from a codec
+   * one. The host cannot word that itself: the same flag on an .mp4 means the
+   * file is broken in some other way, and promising a repackage there would be
+   * wrong.
+   */
+  private askMessage(probe: SourceProbe): Record<string, unknown> {
+    return { state: 'ask', codec: codecLabel(probe), remux: canRemux(probe) };
   }
 
   /** The copy this panel has finished building, if any. */

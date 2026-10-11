@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  containerOf,
   describeCodec,
   describeMediaError,
   formatBytes,
   formatDuration,
   frameFileName,
+  outsideMp4Family,
   proxyDisabled,
   proxyFailed,
   proxyOffer,
@@ -209,5 +211,48 @@ describe('the messages behind an unplayable file', () => {
   it('never reports past the end', () => {
     // ffmpeg's last position can overshoot a duration the container rounded.
     expect(proxyProgress(5.2, 5)).toBe('Building a playable copy… 100%');
+  });
+});
+
+describe('container messages', () => {
+  it('reads the extension case-insensitively', () => {
+    expect(containerOf('Clip.MKV')).toBe('mkv');
+    expect(containerOf('no-extension')).toBe('');
+    expect(containerOf('.hidden')).toBe('');
+  });
+
+  it('puts the MP4 family inside and everything measured as refused outside', () => {
+    for (const name of ['a.mp4', 'a.MOV', 'a.m4v', 'a.3gp', 'noext']) {
+      expect(outsideMp4Family(name), name).toBe(false);
+    }
+    for (const name of ['a.mkv', 'a.WEBM', 'a.avi', 'a.wmv', 'a.flv', 'a.mpg']) {
+      expect(outsideMp4Family(name), name).toBe(true);
+    }
+  });
+
+  it('offers a repackage, naming the container rather than the codec', () => {
+    const message = proxyOffer('clip.mkv', 'H.264', true);
+    expect(message).toBe(
+      "VS Code's player cannot open .mkv files. MarkCopy can repackage clip.mkv as MP4 with ffmpeg in a few seconds, without re-encoding the picture or touching the original.",
+    );
+    expect(message).not.toMatch(/which VS Code cannot play/);
+  });
+
+  it('keeps the codec wording when the picture is re-encoded or the file is an MP4', () => {
+    expect(proxyOffer('clip.wmv', 'WMV2', false)).toContain('is WMV2, which VS Code cannot play');
+    expect(proxyOffer('clip.mp4', 'H.264', true)).toContain('is H.264, which VS Code cannot play');
+  });
+
+  it('names the container when there is no ffmpeg or the element refused it', () => {
+    const none = proxyUnavailable('clip.mkv');
+    expect(none).toContain(
+      "VS Code's player opens only MP4 and QuickTime files, so clip.mkv needs your default player",
+    );
+    expect(none).toContain('Install ffmpeg');
+    expect(describeMediaError(4, 'clip.webm')).toBe(
+      "VS Code's player opens only MP4 and QuickTime files, so clip.webm needs your default player.",
+    );
+    // A damaged file is still damaged, whatever its extension.
+    expect(describeMediaError(3, 'clip.mkv')).toMatch(/damaged/);
   });
 });

@@ -375,6 +375,29 @@ export const PLAYABLE_AUDIO: ReadonlySet<string> = new Set(['mp3', 'flac', 'vorb
 export const COPYABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'hevc', 'vp9', 'av1']);
 
 /**
+ * Video codecs that always decode once they are inside an MP4, so a file that
+ * fails only because of its container can be repackaged instead of re-encoded.
+ *
+ * Measured: H.264, VP9 and AV1 played from an MP4 every time, while the same
+ * streams in .mkv/.webm/.avi/.flv were refused at the demuxer. HEVC is left out
+ * on purpose. It decodes only where the OS has a decoder, so when an HEVC file
+ * fails it is usually the codec, and copying it into an MP4 would fail again on
+ * the very machine that just refused it. VP8 is out because it was never measured
+ * inside an MP4, and an unmeasured copy is a guess the reader pays for.
+ */
+export const REMUXABLE_VIDEO: ReadonlySet<string> = new Set(['h264', 'vp9', 'av1']);
+
+/**
+ * Whether the picture can be stream-copied into an MP4 rather than re-encoded.
+ *
+ * Alpha excludes it: the checkerboard is composited over the picture, which needs
+ * decoded frames, and a copied alpha stream would play as black or not at all.
+ */
+export function canRemux(probe: SourceProbe): boolean {
+  return REMUXABLE_VIDEO.has(probe.codec) && !probe.hasAlpha;
+}
+
+/**
  * Whether the file has a soundtrack that this player will silently drop.
  *
  * An audio stream with no codec name counts: a probe that saw the stream but not
@@ -477,6 +500,12 @@ export function checkerboardFilter(width: number, height: number, frameRate: num
  * soundtrack is re-encoded. It applies only when the probed video codec is one
  * Chromium can play; anything else falls through to the full re-encode, since
  * copying an unplayable picture would produce an equally unplayable file.
+ *
+ * Without `copyVideo` the picture path still stream-copies when `canRemux`: a
+ * .mkv holding H.264 fails only at the demuxer, and repackaging it takes seconds
+ * where a libx264 pass takes minutes and costs generation loss. The audio stays
+ * on the MP3 args either way (an AAC or Opus track would play silently in the MP4,
+ * and copying even a playable MP3 is not worth a second code path).
  */
 export function transcodeArgs(
   input: string,
@@ -484,7 +513,7 @@ export function transcodeArgs(
   probe: SourceProbe,
   opts: { copyVideo?: boolean } = {},
 ): string[] {
-  const copy = opts.copyVideo === true && COPYABLE_VIDEO.has(probe.codec);
+  const copy = opts.copyVideo === true ? COPYABLE_VIDEO.has(probe.codec) : canRemux(probe);
   const size = evenSize(probe);
   const args = [
     '-nostdin',
