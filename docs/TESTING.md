@@ -101,7 +101,7 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 
 - [ ] Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
-- [ ] **Sync scroll**, **Auto-open preview**, and **Math** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
+- [ ] **Sync scroll**, **Auto-open preview**, **Math**, and **Footnotes** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
 - [ ] ☑ With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
 - [ ] ☑ Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
@@ -168,7 +168,7 @@ Open [sample.csv](../sample.csv).
 - [ ] Row 9 is short one field; it is padded with empty cells rather than shifting the columns.
 - [ ] Row 10 renders `Café Ünïcode` correctly.
 - [ ] Editing the file in the editor updates the grid live.
-- [ ] All three themes (Auto/Light/Dark, and Green on black) style the grid, including the stripes and the gutter.
+- [ ] All four themes (Auto, Light, Dark, and Green on black) style the grid, including the stripes and the gutter.
 - [ ] Set `markcopy.csv.maxRows` to `3`: only 3 rows render and a note says how many of the total are hidden.
 - [ ] Turn `markcopy.csv.headerRow` off: the first row becomes ordinary data and there is no pinned header.
 - [ ] Open a `.tsv` (or set `markcopy.csv.delimiter` explicitly): the delimiter is picked up correctly.

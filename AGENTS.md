@@ -10,8 +10,9 @@ boundary.
 - `src/extension.ts` owns activation, Markdown/CSV preview lifecycle, and export
   orchestration. Other preview providers live beside it in `src/`.
 - `src/webview/` contains browser behavior. `src/previewShell.ts` provides the
-  shared Markdown/CSV/Excel shell; PDF, STL, and video have separate viewers.
-- `src/xlsx/` reads workbooks; `src/docx/` builds Word documents.
+  shared Markdown/CSV/Excel/PowerPoint shell; PDF, STL, and video have separate viewers.
+- `src/xlsx/` reads workbooks, `src/pptx/` reads and builds decks, and `src/docx/` builds
+  Word documents; `src/ooxml/` holds the container code they share.
 - Edit source files and `media/preview.css`, not generated bundles. `esbuild.js`
   builds the host; `esbuild.web.js` builds webviews and copies KaTeX assets.
 - Keep `vscode` external to the host bundle. Preserve CSP, sanitization, and

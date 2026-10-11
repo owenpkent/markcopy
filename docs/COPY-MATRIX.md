@@ -41,6 +41,8 @@ Copy as:
 | -------- | ------------------------------ | ------------------------------------ |
 | Markdown | `text/plain` (Markdown source) | Any editor, chat, another `.md` file |
 
+A selection also adds a **Search Google for "..."** row (the first 30 characters of the selection are shown), which opens the search in your browser and writes nothing to the clipboard.
+
 This takes over from "Copy Table" / "Copy Block" below whenever there's an active selection. If the selection sits inside a table, the **Copy as** submenu splits into headed sections, one for the selection and one for the table it's in (for example `SELECTION > Markdown` and `TABLE > Rich Text, Markdown, CSV, TSV, PNG`), so every format for both contexts stays reachable.
 
 ### Code block
@@ -73,6 +75,8 @@ This applies to the CSV/TSV/`.tab` grid too: a previewed `.csv`, `.tsv`, or `.ta
 A single cell is reachable too. **Copy as** carries a `CELL` section holding **Cell Text**, the clicked cell's own text; and when that text contains an email address or a URL, the menu leads with **Copy Email Address** / **Copy Link** for it instead of **Copy Table**. Nothing linkifies a grid, so an address in a `.csv` or a spreadsheet is plain characters with no link to right-click, and this is the only route to it that isn't a careful drag across part of a cell. An ordinary cell leaves **Copy Table** at the top where it has always been.
 
 A grid you have resized also gets one non-copy row, **Reset Column Widths**, which restores the automatic column sizing.
+
+While a CSV cell is open for editing, the copy rows are replaced by ones that act on the text being typed: **Copy Selection** (when part of the value is selected), **Copy Cell** (the whole value, dropped when the selection already is the whole value), and **Select All**. An empty editor offers none of them.
 
 ### Mermaid diagram
 
@@ -175,7 +179,7 @@ Three differences are worth stating explicitly.
 
 - **The header row is chrome, not data.** A CSV grid's header is the file's own first row, so it copies. A sheet's header is the column letters A, B, C, which label the grid rather than being part of it, so the whole row is marked `data-mc-ignore` and drops out of every copy. What you copy is the cells, starting at the sheet's first row.
 - **Cells copy as displayed, not as stored.** A date copies as `2023-03-15`, not as the serial `45000`, and a percentage as `15.3%`, not `0.153`. That is what the reader is looking at, and what a spreadsheet or document receiving the paste will interpret correctly.
-- **Copy Whole Document, Save as PDF, and Save as Word cover the active sheet only.** All three serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
+- **Copy Whole Document, Save as PDF, Save as Word, and Save as PowerPoint cover the active sheet only.** All four serialize what is on screen, and the preview shows one sheet at a time. Switch tabs and repeat for another sheet.
 
 **Copy as Markdown** deserves a note of its own, because a sheet needs reshaping that a Markdown table does not. A GFM table cannot be headerless, and a sheet is one once its column letters are stripped: Turndown's table rule sees no header, declines the table, and returns the raw HTML. So `prepareTableForMarkdown` (`src/webview/table.ts`) promotes the first body row to the header and pads it out to the widest row, which matters when row 1 is a merged title spanning the sheet.
 
@@ -197,7 +201,7 @@ Three differences are worth stating explicitly, and they run the opposite way fr
 
 The STL viewer has **no copy actions**, and its absence from this matrix is deliberate rather than an omission. Every row above copies something the reader can identify and a receiving app can use: text, a table of cells, an image of a diagram. An STL is an unstructured list of triangles with no text, no structure, and no author-intended visual, so there is no format to offer that is not a screenshot of an arbitrary camera angle. Right-clicking in the viewer does nothing; its toolbar is view controls only.
 
-**Copy Whole Document as Rich Text**, **Save as PDF**, and **Save as Word** do not apply either, for the same reason: all three serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply either, for the same reason: all four serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
 
 ## Video (.mov / .mp4 / .m4v)
 
@@ -217,4 +221,4 @@ Notes:
 - **Nudge with `,` and `.`** (roughly a frame at 30fps) to land on the frame you want before grabbing it.
 - **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
 
-**Copy Whole Document as Rich Text**, **Save as PDF**, and **Save as Word** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
