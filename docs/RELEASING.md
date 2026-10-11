@@ -156,7 +156,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ## Troubleshooting Phase 2
 
-The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, and the last out of 0.14.0. None of them says what it means.
+The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, the sixth out of 0.14.0, and the last out of 0.15.0. None of them says what it means.
 
 ### `Request timeout: /_apis/gallery` can mean the PAT expired
 
@@ -236,7 +236,7 @@ So do not read a stale response as a failed publish, and do not republish on the
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
 ```
 
-0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. In 0.14.1 the first check, about 40 seconds after `DONE Published`, already returned 200, while the listing stayed on 0.14.0 for about seven minutes. That is one measurement, not a guarantee, so a 404 in the first few minutes is still no reason to republish; a 200 is the answer to wait for:
+0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. In 0.14.1 the first check, about 40 seconds after `DONE Published`, already returned 200, while the listing stayed on 0.14.0 for about seven minutes, and 0.15.0 went the same way: 200 on the first check, under a minute after `DONE Published`, with `vsce show` still reporting 0.14.1 three minutes later. That is one measurement, not a guarantee, so a 404 in the first few minutes is still no reason to republish; a 200 is the answer to wait for:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -L \
@@ -251,7 +251,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -L \
 curl -s -o /dev/null -w '%{http_code}\n' https://open-vsx.org/api/OwenPKent/markcopy/<version>
 ```
 
-0.14.0 switched over the same way, all at once, after about three minutes, and 0.14.1 within about two and a half.
+0.14.0 switched over the same way, all at once, after about three minutes, 0.14.1 within about two and a half, and 0.15.0 after about two and a half as well.
 
 ### A VSIX much larger than the last one
 
@@ -264,6 +264,15 @@ unzip -l markcopy-<version>.vsix | tail -1                     # files in the pa
 unzip -l markcopy-<version>.vsix | rg -c 'chunk-katex'         # one per KaTeX version in use
 git clean -ndX -- media dist                                    # dry run: what would be removed
 git clean -fdX -- media dist && npm run vsix
+```
+
+### A VSIX of tens of thousands of files
+
+The first 0.15.0 package came out at 69,611 files and 250.51 MB instead of 185 files and 3.54 MB. `vsce` does not read `.gitignore`, only `.vscodeignore`, and two git worktrees that coding agents had left under `.claude/worktrees/` were full checkouts, `node_modules` included, so `vsce` packaged both. Nothing was published: the size line `vsce` prints while packaging gave it away, the worktrees were removed (their branches were already merged), and the repackaged VSIX was 185 files again. `.vscodeignore` now excludes `.claude/**`. Before packaging, `git worktree list` should show only the main checkout, and the `.vsix` file count is still the check that catches anything else:
+
+```bash
+git worktree list                                  # only the main checkout
+unzip -l markcopy-<version>.vsix | tail -1         # about 185 files
 ```
 
 ## Notes

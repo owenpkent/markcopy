@@ -38,4 +38,8 @@ eslint.config.mjs
 .pre-commit-config.yaml
 .gitleaksignore
 coverage/**
+# Local agent state. Git ignores it, but vsce does not read .gitignore, and a
+# git worktree left under .claude/worktrees/ is a full checkout with its own
+# node_modules: the first 0.15.0 package came out at 69,611 files and 250 MB.
+.claude/**
 # Keep: dist/**, media/**, README.md, LICENSE, package.json
