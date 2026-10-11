@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import {
+  audioCodecLabel,
   codecLabel,
   ensureProxyDir,
   findFfmpeg,
@@ -10,6 +11,7 @@ import {
   proxyDir,
   proxyFileName,
   removeQuietly,
+  silentAudio,
   TranscodeCancelled,
   transcode,
   type FfmpegTools,
@@ -82,8 +84,16 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         // The element gave up on the file. Whether that is the end of the story
         // depends on things only the host can see: the setting, and ffmpeg.
         await proxy.offer();
+      } else if (msg?.type === 'playable') {
+        // The original file just loaded and plays. That is not the end of the
+        // story for its sound: the picture can be fine while the soundtrack is
+        // AAC, which this Chromium drops without an error. Only the host can
+        // probe for that.
+        await proxy.offerSound();
       } else if (msg?.type === 'proxyStart') {
-        await proxy.build();
+        // Anything other than the explicit sound request is the picture path, so
+        // a malformed message cannot select a mode the host did not expect.
+        await proxy.build(msg.kind === 'sound' ? 'sound' : 'picture');
       } else if (msg?.type === 'proxyCancel') {
         proxy.cancel();
       } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
@@ -193,7 +203,10 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   }
   #mc-stage {
     position: fixed;
-    inset: 0 0 30px 0;
+    /* --mc-notice-h is the sound notice's height, set by the webview while it is
+       up, so the notice pushes the video's own controls up rather than covering
+       them. */
+    inset: 0 0 calc(30px + var(--mc-notice-h, 0px)) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -283,6 +296,35 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
      error overlay on screen together. The toast and the menu need no such rule:
      neither one sets a display. */
   #mc-stage[hidden], #mc-error[hidden] { display: none; }
+
+  /* The sound-copy notice. A bar sitting on top of the status line, so it never
+     hides the picture behind a blocking overlay. Colours come from VS Code's own
+     widget tokens, which are defined for light, dark, and high-contrast themes
+     alike; the fallbacks only matter outside VS Code. The top border picks up
+     contrastBorder in high-contrast themes (unset elsewhere) so the bar stays
+     distinct from the video behind it. */
+  #mc-notice {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 30px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 8px 12px;
+    box-sizing: border-box;
+    font-size: 12px;
+    line-height: 1.4;
+    background: var(--vscode-editorWidget-background, #252526);
+    color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, #cccccc));
+    border-top: 1px solid var(--vscode-contrastBorder, var(--vscode-editorWidget-border, transparent));
+  }
+  #mc-notice[hidden] { display: none; }
+  .mc-video-notice-text { margin: 0; flex: 1 1 24em; }
+  .mc-video-notice .mc-video-actions { justify-content: flex-start; gap: 8px; }
+  .mc-video-notice .mc-video-button { padding: 3px 10px; font-size: 12px; }
+  .mc-video-notice .mc-video-progress { flex: 0 0 160px; width: 160px; }
 </style>
 </head>
 <body class="mc-video" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
@@ -290,6 +332,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     <video id="mc-video" controls playsinline preload="metadata"></video>
   </div>
   <div id="mc-error" hidden></div>
+  <div id="mc-notice" class="mc-video-notice" role="status" hidden></div>
   <div id="mc-status"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>
@@ -298,6 +341,16 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
 </html>`;
   }
 }
+
+/**
+ * Which of the two things the ffmpeg session can build.
+ *
+ * `picture` rescues a file the element refused outright, so the webview shows its
+ * blocking overlay. `sound` is for a file that already plays but is silent: the
+ * picture is copied, the webview keeps playing the original meanwhile, and every
+ * message is scoped so it lands in a notice bar instead of the overlay.
+ */
+type ProxyKind = 'picture' | 'sound';
 
 /** A finished proxy: where it is, and how the status line should describe it. */
 interface BuiltProxy {
@@ -331,6 +384,9 @@ class ProxySession {
   // codec, rather than falling back to the generic message.
   private tools: FfmpegTools | undefined;
   private probed: SourceProbe | undefined;
+  // The sound offer is made at most once per panel, so a webview that reports
+  // `playable` again (a reload, a second load) cannot nag after a Dismiss.
+  private soundOffered = false;
 
   constructor(
     private readonly source: vscode.Uri,
@@ -367,8 +423,42 @@ class ProxySession {
     await this.build();
   }
 
+  /**
+   * The original plays, but does it make a sound?
+   *
+   * Chromium here cannot decode AAC, so the ordinary mp4 plays silently with no
+   * error to trigger `offer`. None of that is visible to the webview, so it just
+   * reports the file as playable and the host decides. Silent on every branch
+   * that cannot be sure: without ffprobe the codec is unknown, and a notice that
+   * may be wrong is worse than none.
+   */
+  async offerSound(): Promise<void> {
+    if (this.soundOffered || this.built || this.running || this.disposed) {
+      return;
+    }
+    const cfg = vscode.workspace.getConfiguration('markcopy', this.source);
+    const mode = cfg.get<string>('video.transcode', 'auto');
+    if (mode === 'off') {
+      return;
+    }
+    const tools = await this.find(cfg);
+    if (!tools) {
+      return;
+    }
+    const probe = await this.probe(tools.ffprobe);
+    if (!silentAudio(probe) || this.disposed || this.soundOffered) {
+      return;
+    }
+    this.soundOffered = true;
+    if (mode === 'ask') {
+      this.post({ state: 'soundAsk', codec: audioCodecLabel(probe) }, 'sound');
+      return;
+    }
+    await this.build('sound');
+  }
+
   /** Encode the proxy, reporting progress, and play it when it lands. */
-  async build(): Promise<void> {
+  async build(kind: ProxyKind = 'picture'): Promise<void> {
     if (this.running) {
       return;
     }
@@ -382,7 +472,12 @@ class ProxySession {
     const cfg = vscode.workspace.getConfiguration('markcopy', this.source);
     const tools = await this.find(cfg);
     if (!tools) {
-      this.post({ state: 'unavailable', reason: 'missing' });
+      // A missing ffmpeg is only worth a message when the picture is stuck on it.
+      // The sound path never gets here without having found one, but the
+      // notice's button can outlive an uninstall.
+      if (kind === 'picture') {
+        this.post({ state: 'unavailable', reason: 'missing' });
+      }
       return;
     }
 
@@ -394,7 +489,7 @@ class ProxySession {
     let output: string | undefined;
     try {
       const probe = await this.probe(tools.ffprobe);
-      this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec });
+      this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec }, kind);
 
       const dir = await ensureProxyDir();
       output = join(dir, proxyFileName(basename(this.source)));
@@ -405,6 +500,7 @@ class ProxySession {
         input: this.source.fsPath,
         output,
         probe,
+        copyVideo: kind === 'sound',
         signal: abort.signal,
         onProgress: (seconds) => {
           const now = Date.now();
@@ -412,7 +508,7 @@ class ProxySession {
             return;
           }
           lastPost = now;
-          this.post({ state: 'running', seconds, durationSec: probe.durationSec });
+          this.post({ state: 'running', seconds, durationSec: probe.durationSec }, kind);
         },
       });
 
@@ -427,9 +523,12 @@ class ProxySession {
         // checkerboard half matters more than it looks: a frame grabbed from a
         // composited proxy has the board baked into it, and the reader has to
         // know that before pasting it into a bug report.
-        note: probe.hasAlpha
-          ? 'ffmpeg preview copy · alpha on checkerboard'
-          : 'ffmpeg preview copy',
+        note:
+          kind === 'sound'
+            ? 'ffmpeg copy · sound re-encoded to Opus'
+            : probe.hasAlpha
+              ? 'ffmpeg preview copy · alpha on checkerboard'
+              : 'ffmpeg preview copy',
       };
       await this.play(this.built);
     } catch (err) {
@@ -437,9 +536,17 @@ class ProxySession {
         // Back to the offer rather than to an error: the reader stopped this,
         // and may well want it again once they know how long it takes. The
         // probe is already in hand, so the offer still names the codec.
-        this.post({ state: 'ask', codec: codecLabel(await this.probe(tools.ffprobe)) });
+        const probe = await this.probe(tools.ffprobe);
+        if (kind === 'sound') {
+          this.post({ state: 'soundAsk', codec: audioCodecLabel(probe) }, 'sound');
+        } else {
+          this.post({ state: 'ask', codec: codecLabel(probe) });
+        }
       } else {
-        this.post({ state: 'failed', detail: err instanceof Error ? err.message : String(err) });
+        this.post(
+          { state: 'failed', detail: err instanceof Error ? err.message : String(err) },
+          kind,
+        );
       }
     } finally {
       this.running = false;
@@ -504,6 +611,7 @@ class ProxySession {
         frameRate: 0,
         hasAlpha: false,
         hasAudio: false,
+        audioCodec: '',
         codec: '',
         profile: '',
       };
@@ -511,8 +619,17 @@ class ProxySession {
     return this.probed;
   }
 
-  private post(msg: Record<string, unknown>): void {
-    void this.webview.postMessage({ type: 'proxy', ...msg });
+  /**
+   * `scope: 'sound'` is what keeps a sound build's messages out of the blocking
+   * overlay: the webview routes on it, so the picture it is still playing is
+   * never hidden behind a progress screen for a file that was fine all along.
+   */
+  private post(msg: Record<string, unknown>, kind: ProxyKind = 'picture'): void {
+    void this.webview.postMessage({
+      type: 'proxy',
+      ...msg,
+      ...(kind === 'sound' ? { scope: 'sound' } : {}),
+    });
   }
 }
 

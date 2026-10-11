@@ -65,9 +65,10 @@ export function frameFileName(videoName: string, seconds: number): string {
  * What to tell the reader when the <video> element gives up on the file.
  *
  * The `.mov` case is the one worth spelling out. QuickTime is a container, not a
- * codec: VS Code's Chromium plays H.264/AAC inside it, but a `.mov` straight off
- * a camera or out of an editor is often ProRes, DNxHD, or HEVC, none of which it
- * can decode. "Error 4" would read as a broken extension; the real answer is
+ * codec: VS Code's Chromium plays H.264 video inside it (though not AAC audio,
+ * which is a separate, silent failure handled by the sound copy), but a `.mov`
+ * straight off a camera or out of an editor is often ProRes, DNxHD, or HEVC,
+ * none of which it can decode. "Error 4" would read as a broken extension; the real answer is
  * that the file needs the OS player, so say so and offer that door.
  */
 export function describeMediaError(code: number | undefined, name: string): string {
@@ -80,7 +81,7 @@ export function describeMediaError(code: number | undefined, name: string): stri
       return `${name} is damaged, or uses a codec VS Code cannot decode. Try opening it in your default player.`;
     default:
       // MEDIA_ERR_SRC_NOT_SUPPORTED, and anything the element declines to name.
-      return `VS Code cannot play ${name}. It supports H.264 (and AAC audio); ProRes, DNxHD, and most HEVC files need your default player.`;
+      return `VS Code cannot play ${name}. It plays H.264, VP9 and AV1 video; ProRes, DNxHD, and most HEVC files need your default player.`;
   }
 }
 
@@ -109,7 +110,7 @@ export function proxyOffer(name: string, codec: string): string {
  * is not sent to a package manager first.
  */
 export function proxyUnavailable(name: string): string {
-  return `VS Code cannot play ${name}. It supports H.264 (and AAC audio); ProRes, DNxHD, and most HEVC files need your default player. Install ffmpeg, or set markcopy.video.ffmpegPath, and MarkCopy will build a playable copy here instead.`;
+  return `VS Code cannot play ${name}. It plays H.264, VP9 and AV1 video; ProRes, DNxHD, and most HEVC files need your default player. Install ffmpeg, or set markcopy.video.ffmpegPath, and MarkCopy will build a playable copy here instead.`;
 }
 
 /** What went wrong, with ffmpeg's own words kept: they are terse and specific. */
@@ -128,13 +129,40 @@ export function proxyFailed(name: string, detail: string): string {
  * run past 100. Elapsed output time is the honest readout there.
  */
 export function proxyProgress(seconds: number, durationSec: number): string {
+  return progressLine('Building a playable copy…', seconds, durationSec);
+}
+
+/** The same readout for the sound copy, which runs in the background. */
+export function soundProgress(seconds: number, durationSec: number): string {
+  return progressLine('Adding sound…', seconds, durationSec);
+}
+
+function progressLine(label: string, seconds: number, durationSec: number): string {
   if (durationSec > 0) {
     const pct = Math.min(100, Math.max(0, Math.round((seconds / durationSec) * 100)));
-    return `Building a playable copy… ${pct}%`;
+    return `${label} ${pct}%`;
   }
-  return seconds > 0
-    ? `Building a playable copy… ${formatDuration(seconds)} in`
-    : 'Building a playable copy…';
+  return seconds > 0 ? `${label} ${formatDuration(seconds)} in` : label;
+}
+
+/**
+ * The notice for a file whose picture plays but whose sound does not.
+ *
+ * Says "silent" outright, because from the reader's side that is the whole
+ * symptom: the video plays, nothing is wrong on screen, and there is no error
+ * to explain the quiet.
+ */
+export function soundOffer(name: string, codec: string): string {
+  const what = codec ? `${codec} audio, which VS Code cannot play,` : 'audio VS Code cannot play,';
+  return `${name} has ${what} so it is silent here. MarkCopy can build a copy with sound using ffmpeg, without touching the original.`;
+}
+
+/** A sound copy that failed. The video is still playing, just without sound. */
+export function soundFailed(name: string, detail: string): string {
+  const said = detail.trim();
+  return said
+    ? `ffmpeg could not build a copy of ${name} with sound: ${said}`
+    : `ffmpeg could not build a copy of ${name} with sound.`;
 }
 
 /**

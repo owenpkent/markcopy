@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Video previews had no sound.** VS Code's Chromium has an H.264 decoder but no AAC decoder, so an ordinary H.264/AAC `.mp4` or `.mov` played its picture in silence, with no error to say why, and every ffmpeg copy MarkCopy built was silent too because it re-encoded audio as AAC.
+  - Copies now carry **Opus** audio (stereo, 48 kHz), so a ProRes or HEVC proxy has sound.
+  - A file whose picture plays but whose audio VS Code cannot decode gets a **sound copy** when ffmpeg is installed: the video stream is copied untouched, only the audio is re-encoded, and the copy swaps in at the same position, still playing. Progress shows in a slim notice above the status line without hiding the video. `markcopy.video.transcode` governs it: `auto` builds it, `ask` offers a **Build Copy with Sound** button, `off` does nothing.
+  - The "cannot play" messages and the docs no longer claim that AAC audio plays.
+
 ### Planned
 
 - PlantUML support.
