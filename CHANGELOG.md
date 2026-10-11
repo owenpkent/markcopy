@@ -4,14 +4,17 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.15.0] - 2026-10-11
+
 ### Added
 
 - **MKV, WebM, AVI, WMV, FLV, MPEG and 3GP videos open in the player.** VS Code's own player opens only the MP4 family (measured: `.mkv`, `.webm`, `.avi`, `.flv`, `.mpg` and `.wmv` all fail at once, WebM included, even with codecs that play inside an MP4), so these now open in MarkCopy. With ffmpeg, a file holding H.264, VP9 or AV1 is repackaged as MP4 in seconds without re-encoding the picture (status line: `ffmpeg copy · repackaged as MP4`), except a transparent WebM, which gets the checkerboard re-encode so its alpha is not dropped; VP8, WMV, MPEG-2 and the rest get the full re-encode. The messages name the container ("VS Code's player cannot open .mkv files") instead of blaming the codec. `.ts`, `.mts` and `.m2ts` are not registered, since `.ts` is TypeScript.
 - **Autoplay gets sound when it can, and has a menu toggle.** `markcopy.video.autoplay` now tries to play with sound. If VS Code requires a click first, the video starts muted, a toast says so, and the first click or key press in the preview turns the sound on (a click on the player's own mute button is left alone). **Playback > Autoplay** in the right-click menu flips the setting for the next video opened.
-
-### Security
-
-- **The video viewer could write any `markcopy` setting.** Its settings message was passed to the configuration unchecked, so the page could set `markcopy.video.ffmpegPath`, which the extension later executes. Only `theme` (one of its four values), `video.loop` and `video.autoplay` (booleans) are accepted now.
 
 ### Fixed
 
@@ -20,10 +23,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - A file whose picture plays but whose audio VS Code cannot decode gets a **sound copy** when ffmpeg is installed: the video stream is copied untouched, only the audio is re-encoded, and the copy swaps in at the same position, still playing. Progress shows in a slim notice above the status line without hiding the video. `markcopy.video.transcode` governs it: `auto` builds it, `ask` offers a **Build Copy with Sound** button, `off` does nothing.
   - The "cannot play" messages and the docs no longer claim that AAC audio plays.
 
-### Planned
+### Security
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- **The video viewer could write any `markcopy` setting.** Its settings message was passed to the configuration unchecked, so the page could set `markcopy.video.ffmpegPath`, which the extension later executes. Only `theme` (one of its four values), `video.loop` and `video.autoplay` (booleans) are accepted now.
 
 ## [0.14.1] - 2026-10-03
 
@@ -378,7 +380,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/owenpkent/markcopy/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/owenpkent/markcopy/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/owenpkent/markcopy/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/owenpkent/markcopy/compare/v0.12.0...v0.13.0
