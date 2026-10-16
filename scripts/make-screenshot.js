@@ -8,6 +8,8 @@
 // - rendering-dark.png: the real webview bundle upgrading KaTeX math and a
 //   Mermaid diagram in the dark theme.
 // - terminal-green.png: the green-on-black terminal palette.
+// - edit-mode.png / edit-mode-dark.png: the real webview bundle in edit mode with one
+//   paragraph open in the block editor (dimmed Markdown syntax markers).
 // - pdf-viewer.png: the real pdf.js viewer with the floating page/zoom toolbar.
 //
 // The static shots load file:// HTML directly; the live shots stub
@@ -190,6 +192,68 @@ function buildWebviewHarness(sample, theme) {
   <script type="module" src="/media/webview.js"></script>
   <script type="module">
     window.postMessage(${JSON.stringify(message)}, '*');
+  </script>
+</body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Shot 3b: edit mode. The real webview bundle with the remembered mode set to
+// 'edit' (via the stubbed getState) and a click on one paragraph, which opens
+// the same block editor a user gets, with the Markdown markers dimmed.
+// ---------------------------------------------------------------------------
+const editSample = `# Meeting notes
+
+Decisions from today: ship the **beta on Friday**, keep the \`--legacy\` flag, and
+follow up with [the design team](https://example.com) about the *final* copy.
+
+- Draft the announcement
+- Update the changelog
+- Book the retro
+`;
+
+function buildEditHarness(theme) {
+  const message = {
+    type: 'render',
+    html: md.render(editSample),
+    source: editSample,
+    styleProfile: 'github',
+    theme,
+    mermaidConfig: {},
+    syncScroll: false,
+    autoPreview: false,
+    math: true,
+    docKey: 'screenshot-edit',
+  };
+  return `<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="/media/preview.css" rel="stylesheet">
+<style>${frameCss(theme !== 'light')}</style>
+<script>
+  window.acquireVsCodeApi = () => ({
+    postMessage() {},
+    getState: () => ({ editMode: 'edit' }),
+    setState() {},
+  });
+</script>
+</head>
+<body>
+  <div class="frame">
+    <div id="content" class="markdown-body"></div>
+  </div>
+  <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
+  <div id="mc-toast" class="mc-toast" hidden></div>
+  <script type="module" src="/media/webview.js"></script>
+  <script type="module">
+    window.postMessage(${JSON.stringify(message)}, '*');
+    // Once the document has rendered, click the paragraph to open its editor.
+    const started = performance.now();
+    const timer = setInterval(() => {
+      const para = document.querySelector('#content > p[data-source-line]');
+      if (para || performance.now() - started > 5000) {
+        clearInterval(timer);
+        para?.click();
+      }
+    }, 50);
   </script>
 </body></html>`;
 }
@@ -503,6 +567,16 @@ async function main() {
       'rendering-dark.png',
       { width: 880, height: 640, budgetMs: 20000 },
     );
+    await shoot(harness('_shot-edit.html', buildEditHarness('light')), 'edit-mode.png', {
+      width: 880,
+      height: 430,
+      budgetMs: 8000,
+    });
+    await shoot(harness('_shot-edit-dark.html', buildEditHarness('dark')), 'edit-mode-dark.png', {
+      width: 880,
+      height: 430,
+      budgetMs: 8000,
+    });
     await shoot(
       harness('_shot-green.html', buildWebviewHarness(greenSample, 'green')),
       'terminal-green.png',
@@ -526,6 +600,8 @@ async function main() {
     for (const f of [
       '_shot-rendering.html',
       '_shot-green.html',
+      '_shot-edit.html',
+      '_shot-edit-dark.html',
       '_shot-csv.html',
       '_shot-csv-dark.html',
       '_shot-pdf.html',

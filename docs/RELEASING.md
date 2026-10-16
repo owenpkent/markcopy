@@ -83,7 +83,7 @@ With `.env` loaded, the publish steps below need no `-p` flag. They pass the pac
 
 Everything here happens **before** Phase 1 below; nothing in it is destructive, so it can be redone freely until it all passes.
 
-- [ ] `main` is green in CI and your working tree is clean (`git status`).
+- [ ] `main` is green in CI and your working tree is clean (`git status`). After pulling, run `npm ci` so `node_modules` matches the lockfile (see [A stale `node_modules`](#a-stale-node_modules-fails-npm-run-vsix)).
 - [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`. (`npm test` is the unit suite and the webview E2E suite together.)
 - [ ] Integration tests pass: `npm run test:integration` (on Linux: `xvfb-run -a npm run test:integration`).
 - [ ] The manual pass in [docs/TESTING.md](TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**. Rows marked ☑ are covered by the two commands above and want a glance rather than a careful pass, provided both actually ran green.
@@ -102,7 +102,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ### Phase 1: cut the release in git
 
-1. Start from a clean `main` with green CI and the [pre-release checklist](#pre-release-checklist) done.
+1. Start from a clean, freshly pulled `main` with green CI, run `npm ci`, and have the [pre-release checklist](#pre-release-checklist) done.
 2. Bump the version: `npm version patch --no-git-tag-version` (or `minor` / `major`). This updates `package.json` and `package-lock.json` without committing or tagging. Create the tag in step 6 after the changelog and any regenerated assets are committed, so the tag contains the complete release.
 3. Update [CHANGELOG.md](../CHANGELOG.md): move the `[Unreleased]` entries under a new `[x.y.z] - YYYY-MM-DD` heading and refresh the compare links.
 4. Sanity checks: `npm run lint && npm test && npm run format:check && npm run compile`. (CI runs these too, including `prettier --check .` over Markdown, but they are fast locally.)
@@ -156,7 +156,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 ## Troubleshooting Phase 2
 
-The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, the sixth out of 0.14.0, and the last out of 0.15.0. None of them says what it means.
+The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, the sixth out of 0.14.0, the seventh out of 0.15.0, and the last out of 0.16.0. None of them says what it means.
 
 ### `Request timeout: /_apis/gallery` can mean the PAT expired
 
@@ -214,7 +214,7 @@ npx vsce verify-pat OwenPKent
 - **It reports Access Denied / an expired token** -> mint a new PAT.
 - **It hangs too** -> try it a few more times, a minute apart, before falling back to the token list in the browser. In 0.13.0 it hung on two attempts and then succeeded, with anonymous requests to the Marketplace answering in under 0.2s throughout, so a hang on its own is the stall more often than a dead token.
 
-A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further. 0.13.0 went the same way: a loop that checked the live version, ran `verify-pat`, and published the moment it succeeded got through on its third pass, about two minutes in. In 0.14.0 the authenticated path was healthy throughout: `verify-pat` answered at once and the publish went through on the first attempt.
+A successful `verify-pat` is also the best moment to retry: in 0.12.0 a publish that had failed repeatedly over ~15 minutes went through on the first attempt made straight after one, which reads as the authenticated path being briefly healthy rather than as a coincidence. So publish immediately on a green `verify-pat` rather than probing further. 0.13.0 went the same way: a loop that checked the live version, ran `verify-pat`, and published the moment it succeeded got through on its third pass, about two minutes in. In 0.14.0 the authenticated path was healthy throughout: `verify-pat` answered at once and the publish went through on the first attempt. 0.16.0 went the same way: both `vsce verify-pat` and `ovsx verify-pat` answered at once and the Marketplace publish succeeded first time.
 
 Step 9 already publishes this way, so retrying is just running that same command again rather than rebuilding:
 
@@ -236,7 +236,7 @@ So do not read a stale response as a failed publish, and do not republish on the
 for i in 1 2 3 4 5 6; do npx vsce show OwenPKent.markcopy 2>/dev/null | rg -i 'version:' | head -1; done
 ```
 
-0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. In 0.14.1 the first check, about 40 seconds after `DONE Published`, already returned 200, while the listing stayed on 0.14.0 for about seven minutes, and 0.15.0 went the same way: 200 on the first check, under a minute after `DONE Published`, with `vsce show` still reporting 0.14.1 three minutes later. That is one measurement, not a guarantee, so a 404 in the first few minutes is still no reason to republish; a 200 is the answer to wait for:
+0.14.0 stayed stale for longer: every listing read, from both `vsce show` and the gallery `extensionquery` endpoint, returned 0.13.0 for about eight minutes after `DONE Published`. The download URL for the exact version can end the doubt sooner. During 0.14.0's stale stretch it already returned 200 for 0.14.0, and 404 for a made-up 0.99.0. A 200 proves the version is published. In 0.14.1 the first check, about 40 seconds after `DONE Published`, already returned 200, while the listing stayed on 0.14.0 for about seven minutes, and 0.15.0 went the same way: 200 on the first check, under a minute after `DONE Published`, with `vsce show` still reporting 0.14.1 three minutes later. So did 0.16.0: 200 on the first check, about a minute after `DONE Published`, with `vsce show` still on 0.15.0 a few minutes later. That is one measurement, not a guarantee, so a 404 in the first few minutes is still no reason to republish; a 200 is the answer to wait for:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -L \
@@ -251,7 +251,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -L \
 curl -s -o /dev/null -w '%{http_code}\n' https://open-vsx.org/api/OwenPKent/markcopy/<version>
 ```
 
-0.14.0 switched over the same way, all at once, after about three minutes, 0.14.1 within about two and a half, and 0.15.0 after about two and a half as well.
+0.14.0 switched over the same way, all at once, after about three minutes, 0.14.1 within about two and a half, and 0.15.0 after about two and a half as well. 0.16.0 took about two minutes: 404 on the first four checks at 30 second intervals, 200 on the fifth.
 
 ### A VSIX much larger than the last one
 
@@ -274,6 +274,10 @@ The first 0.15.0 package came out at 69,611 files and 250.51 MB instead of 185 f
 git worktree list                                  # only the main checkout
 unzip -l markcopy-<version>.vsix | tail -1         # about 185 files
 ```
+
+### A stale `node_modules` fails `npm run vsix`
+
+The first `npm run vsix` for 0.16.0 failed because the release agent's local `node_modules` predated the Dependabot bumps (dompurify, katex, pdfjs-dist) that had landed on `main`. `npm ci` fixed it and the repackaged VSIX was normal: 185 files and 3.54 MB, as in 0.14.0. Run `npm ci` after every pull of `main` before the gate and packaging, not only when a build breaks.
 
 ## Notes
 
