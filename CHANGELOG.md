@@ -4,14 +4,20 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Added
-
-- **Edit mode in the Markdown preview.** A small pill in the top-right corner switches between a lock (read mode, the default) and a pencil (edit mode); the choice is remembered. In edit mode, click a block (paragraph, heading, list, table, quote, math block) to edit its raw Markdown in place, in a box with light syntax dimming. Ctrl/Cmd+Enter or clicking away commits, Escape cancels. It is keyboard accessible: Tab to a block, then Enter or F2 to edit it. The change is written to the document as an undoable edit and is not saved. Links do not navigate in edit mode. If the document changed underneath the editor, the edit is refused with a notice rather than overwriting it. Fenced code blocks that go through the syntax highlighter are not editable yet.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [0.16.0] - 2026-10-16
+
+### Added
+
+- **Edit mode in the Markdown preview.** A small pill in the top-right corner switches between a lock (read mode, the default) and a pencil (edit mode); the choice is remembered. In edit mode, click a block (paragraph, heading, list, table, quote, math block) to edit its raw Markdown in place, in a box with light syntax dimming. Ctrl/Cmd+Enter or clicking away commits, Escape cancels. It is keyboard accessible: Tab to a block, then Enter or F2 to edit it. The change is written to the document as an undoable edit and is not saved. Links do not navigate in edit mode. If the document changed underneath the editor, the edit is refused with a notice rather than overwriting it. Fenced code blocks that go through the syntax highlighter are not editable yet.
+
+### Changed
+
+- **Bundled libraries updated.** KaTeX 0.19 (math rendering), pdf.js 6.4 (PDF viewer) and DOMPurify 3.4.17 (sanitizer) are the new versions the preview ships with.
 
 ## [0.15.0] - 2026-10-11
 
@@ -384,7 +390,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/owenpkent/markcopy/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/owenpkent/markcopy/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/owenpkent/markcopy/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/owenpkent/markcopy/compare/v0.13.0...v0.14.0
