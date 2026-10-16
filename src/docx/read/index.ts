@@ -89,6 +89,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
     rels: partRels(parts, mainPath),
     bookmarks: new Set(),
     counters: new Map(),
+    seenLevels: new Set(),
     footnotes: {
       defs: soft(() => readNotes(parts, footnotePath, 'footnote'), new Map()),
       order: [],

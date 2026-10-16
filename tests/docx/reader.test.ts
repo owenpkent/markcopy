@@ -10,6 +10,7 @@ import {
   imageRel,
   list,
   lvl,
+  num,
   numPr,
   para,
   PNG_1x1,
@@ -343,14 +344,65 @@ describe('lists', () => {
     expect(out).toBe('<ul><li>Fruit<ul><li>Apple</li><li>Pear</li></ul></li><li>Veg</li></ul>');
   });
 
-  it('joins consecutive bullet lists with different ids but keeps ordered ones apart', () => {
+  it('counts per abstract numbering, so two instances of one definition are one list', () => {
+    // How LibreOffice writes a list: the first item on an instance that
+    // restarts the level, the rest on a plain instance of the same definition.
+    const shared = numbering + num(10, 2) + num(11, 2, { ilvl: 0, start: 1 });
+    expect(body({ numbering: shared, body: item('a', 11) + item('b', 10) + item('c', 10) })).toBe(
+      '<ol><li>a</li><li>b</li><li>c</li></ol>',
+    );
+  });
+
+  it('applies a startOverride the first time an instance is used, then continues', () => {
+    const shared = numbering + num(10, 2) + num(11, 2, { ilvl: 0, start: 4 });
+    expect(
+      body({
+        numbering: shared,
+        body: item('a', 10) + item('b', 10) + item('c', 11) + item('d', 11),
+      }),
+    ).toBe('<ol><li>a</li><li>b</li></ol><ol start="4"><li>c</li><li>d</li></ol>');
+  });
+
+  it('resumes an interrupted list with a start attribute, across instances and headings', () => {
+    const shared = numbering + num(10, 2);
+    const out = body({
+      styles: style('Heading1', { name: 'heading 1' }),
+      numbering: shared,
+      body:
+        item('a', 2) +
+        item('b', 2) +
+        para('Heading', '<w:pStyle w:val="Heading1"/>') +
+        item('c', 10) +
+        para('text') +
+        item('d', 2),
+    });
+    expect(out).toBe(
+      '<ol><li>a</li><li>b</li></ol><h1>Heading</h1><ol start="3"><li>c</li></ol><p>text</p><ol start="4"><li>d</li></ol>',
+    );
+  });
+
+  it('restarts deeper levels when a shallower item arrives', () => {
+    const out = body({
+      numbering,
+      body: item('1', 2) + item('a', 2, 1) + item('b', 2, 1) + item('2', 2) + item('again', 2, 1),
+    });
+    expect(out).toBe(
+      '<ol><li>1<ol type="a"><li>a</li><li>b</li></ol></li><li>2<ol type="a"><li>again</li></ol></li></ol>',
+    );
+  });
+
+  it('keeps different abstract definitions apart, bullets included', () => {
     const more = list(7, lvl(0, 'bullet')) + list(8, lvl(0, 'decimal'));
     expect(body({ numbering: numbering + more, body: item('a', 1) + item('b', 7) })).toBe(
-      '<ul><li>a</li><li>b</li></ul>',
+      '<ul><li>a</li></ul><ul><li>b</li></ul>',
     );
     expect(body({ numbering: numbering + more, body: item('a', 2) + item('b', 8) })).toBe(
       '<ol><li>a</li></ol><ol><li>b</li></ol>',
     );
+  });
+
+  it('shows the start number when the level does not begin at 1', () => {
+    expect(body({ numbering, body: item('x', 3) })).toBe('<ol start="5"><li>x</li></ol>');
   });
 
   it('honors a start value from the level and from a restart override', () => {

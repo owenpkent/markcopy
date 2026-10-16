@@ -16,7 +16,8 @@ const MAX_SPAN = 1000;
 
 interface ListOpen {
   kind: 'list';
-  numId: string;
+  /** The abstract numbering definition the list started under. */
+  key: string;
   stack: { ilvl: number; tag: 'ul' | 'ol' }[];
   html: string;
 }
@@ -122,7 +123,12 @@ export function renderBlocks(
       case 'item':
         if (open?.kind !== 'list' || !continuesList(open, para.numId, para.ilvl, ctx)) {
           close();
-          open = { kind: 'list', numId: para.numId, stack: [], html: '' };
+          open = {
+            kind: 'list',
+            key: ctx.numbering.abstractKey(para.numId),
+            stack: [],
+            html: '',
+          };
         }
         addItem(open, para.numId, para.ilvl, para.html, ctx);
         break;
@@ -212,18 +218,15 @@ function readParagraph(p: XNode, ctx: ReadCtx, allowPre: boolean): Para {
 /**
  * Whether an item belongs to the list already open.
  *
- * Same `numId` always does. Beyond that, Word writers (this extension's own
- * export included) give each nested list and each separate bullet list its own
- * `numId`, so insisting on equality would split one visual list into a stack of
- * fragments: a deeper item continues the open list as its sublist, and a bullet
- * continues an open bullet list (bullets carry no count, so there is nothing
- * to restart). Two ordered lists with different ids stay apart, since that is
- * how a restart is written.
+ * Word counts per abstract numbering definition, not per `numId`: several
+ * `w:num` instances of one `abstractNum` are one running list unless an
+ * instance restarts a level (`startOverride`, honored the first time that
+ * instance is used). So a list continues while the abstract definition stays
+ * the same and no restart is pending. A deeper item always nests under the
+ * open list, since writers (this extension's own export included) give a
+ * sublist its own definition or instance.
  */
 function continuesList(list: ListOpen, numId: string, ilvl: number, ctx: ReadCtx): boolean {
-  if (list.numId === numId) {
-    return true;
-  }
   const base = list.stack[0];
   if (base === undefined) {
     return false;
@@ -231,8 +234,17 @@ function continuesList(list: ListOpen, numId: string, ilvl: number, ctx: ReadCtx
   if (ilvl > base.ilvl) {
     return true;
   }
-  const fmt = ctx.numbering.level(numId, ilvl).fmt;
-  return base.tag === 'ul' && ilvl === base.ilvl && (fmt === 'bullet' || fmt === 'none');
+  if (isRestart(numId, ilvl, ctx)) {
+    return false;
+  }
+  return list.key === ctx.numbering.abstractKey(numId);
+}
+
+/** A restart pending: this instance overrides the level and has not been used at it yet. */
+function isRestart(numId: string, ilvl: number, ctx: ReadCtx): boolean {
+  return (
+    ctx.numbering.level(numId, ilvl).restart === true && !ctx.seenLevels.has(`${numId}:${ilvl}`)
+  );
 }
 
 function clampLevel(n: number): number {
@@ -253,26 +265,38 @@ const OL_TYPE: Record<string, string> = {
 function addItem(list: ListOpen, numId: string, ilvl: number, html: string, ctx: ReadCtx): void {
   const lvl = ctx.numbering.level(numId, ilvl);
   const tag: 'ul' | 'ol' = lvl.fmt === 'bullet' || lvl.fmt === 'none' ? 'ul' : 'ol';
-  let counts = ctx.counters.get(numId);
-  if (counts === undefined) {
-    counts = [];
-    ctx.counters.set(numId, counts);
+  const key = ctx.numbering.abstractKey(numId);
+  // `next[level]` is the number the next item at that level will show,
+  // tracked per abstract definition across the whole document so a list that
+  // resumes after other content, or moves to another instance of the same
+  // definition, keeps counting.
+  let next = ctx.counters.get(key);
+  if (next === undefined) {
+    next = [];
+    ctx.counters.set(key, next);
   }
+  const restart = isRestart(numId, ilvl, ctx);
+  ctx.seenLevels.add(`${numId}:${ilvl}`);
+  if (restart) {
+    next[ilvl] = lvl.start;
+  }
+  const number = Math.min(1_000_000, Math.max(0, next[ilvl] ?? lvl.start));
 
   const stack = list.stack;
-  while (stack.length > 0 && stack[stack.length - 1].ilvl > ilvl) {
+  // A restart ends any list already open at this level or deeper.
+  while (
+    stack.length > 0 &&
+    (restart ? stack[stack.length - 1].ilvl >= ilvl : stack[stack.length - 1].ilvl > ilvl)
+  ) {
     list.html += `</li></${stack.pop()!.tag}>`;
   }
   if (stack.length > 0 && stack[stack.length - 1].ilvl === ilvl) {
     list.html += '</li>';
   } else {
-    // A new list at this level. A list that was interrupted and resumes
-    // (same numId, later in the document) carries on counting where it left off.
     let attrs = '';
     if (tag === 'ol') {
-      const start = Math.min(1_000_000, Math.max(0, lvl.start + (counts[ilvl] ?? 0)));
-      if (start !== 1) {
-        attrs += ` start="${start}"`;
+      if (number !== 1) {
+        attrs += ` start="${number}"`;
       }
       const type = OL_TYPE[lvl.fmt];
       if (type !== undefined) {
@@ -284,9 +308,10 @@ function addItem(list: ListOpen, numId: string, ilvl: number, html: string, ctx:
   }
   list.html += `<li>${html}`;
 
-  counts[ilvl] = (counts[ilvl] ?? 0) + 1;
-  for (let k = ilvl + 1; k < counts.length; k++) {
-    counts[k] = 0;
+  next[ilvl] = number + 1;
+  // A shallower item restarts every deeper level, as Word does.
+  for (let k = ilvl + 1; k < next.length; k++) {
+    next[k] = undefined;
   }
 }
 

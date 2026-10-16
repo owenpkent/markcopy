@@ -160,6 +160,18 @@ export function list(id: number, levels: string, numOverride = ''): string {
   );
 }
 
+/** A further `w:num` instance of an existing abstractNum, optionally restarting a level. */
+export function num(
+  numId: number,
+  abstractId: number,
+  restartAt?: { ilvl: number; start: number },
+): string {
+  const over = restartAt
+    ? `<w:lvlOverride w:ilvl="${restartAt.ilvl}"><w:startOverride w:val="${restartAt.start}"/></w:lvlOverride>`
+    : '';
+  return `<w:num w:numId="${numId}"><w:abstractNumId w:val="${abstractId}"/>${over}</w:num>`;
+}
+
 export function externalRel(id: string, target: string): string {
   return `<Relationship Id="${id}" Type="${REL}/hyperlink" Target="${target}" TargetMode="External"/>`;
 }

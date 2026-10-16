@@ -34,8 +34,10 @@ export interface ReadCtx {
   rels: PartRels;
   /** Bookmark ids already emitted; the first claim on an id wins. */
   bookmarks: Set<string>;
-  /** Items emitted so far per list and level, so a list that resumes keeps counting. */
-  counters: Map<string, number[]>;
+  /** The next number per level, per abstract numbering definition, across the whole document. */
+  counters: Map<string, (number | undefined)[]>;
+  /** `numId:level` pairs already used, so a restart override applies only the first time. */
+  seenLevels: Set<string>;
   footnotes: NoteBook;
   endnotes: NoteBook;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */

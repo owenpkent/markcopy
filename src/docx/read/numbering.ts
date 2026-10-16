@@ -12,6 +12,8 @@ export interface LevelDef {
   /** `bullet`, `decimal`, `lowerLetter`, `upperRoman`, `none`, and so on. */
   fmt: string;
   start: number;
+  /** This instance restarts the level at `start` the first time it is used. */
+  restart?: boolean;
 }
 
 interface NumDef {
@@ -61,7 +63,11 @@ export class Numbering {
         const base = full === undefined ? undefined : readLevel(full);
         const start = startOverride && intAttr(startOverride.attrs, 'val');
         if (base !== undefined || start !== undefined) {
-          over.set(ilvl, { fmt: base?.fmt ?? '', start: start ?? base?.start ?? 1 });
+          over.set(ilvl, {
+            fmt: base?.fmt ?? '',
+            start: start ?? base?.start ?? 1,
+            restart: true,
+          });
         }
       }
       this.nums.set(id, {
@@ -85,7 +91,13 @@ export class Numbering {
     return {
       fmt: over?.fmt || def?.fmt || 'bullet',
       start: over?.start ?? def?.start ?? 1,
+      restart: over?.restart === true,
     };
+  }
+
+  /** Counting is per abstract definition; an instance of an unknown one counts alone. */
+  abstractKey(numId: string): string {
+    return this.nums.get(numId)?.abstractId ?? `num:${numId}`;
   }
 }
 
