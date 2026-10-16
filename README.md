@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview
+# MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL & Video Preview
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs and Excel workbooks as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, a PowerPoint deck as one scrollable column of slides, STL models in a 3D viewer, and `.mov` / `.mp4` / `.mkv` / `.webm` video in a player you can grab a frame from, so one extension previews them all.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs and Excel workbooks as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, a Word document as readable, structured text, a PowerPoint deck as one scrollable column of slides, STL models in a 3D viewer, and `.mov` / `.mp4` / `.mkv` / `.webm` video in a player you can grab a frame from, so one extension previews them all.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -46,6 +46,7 @@ Open a `.csv`, `.tsv`, or `.tab` and you get a proper grid: a header and row num
 | STL 3D model preview                     |    No    |            No             | **Yes**  |
 | QuickTime (.mov) video preview           |    No    |            No             | **Yes**  |
 | Copy a video frame as PNG                |    No    |            No             | **Yes**  |
+| Word (.docx) preview                     |    No    |            No             | **Yes**  |
 | Export to Word (.docx)                   |    No    |        Via Pandoc         | **Yes**  |
 | PowerPoint (.pptx) preview               |    No    |            No             | **Yes**  |
 | Export to PowerPoint (.pptx)             |    No    |        Via Pandoc         | **Yes**  |
@@ -75,6 +76,10 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 
   The preview is **read-only by design**: MarkCopy never writes to your workbook, so it cannot corrupt one. See [Settings](#settings) for `markcopy.xlsx.*`.
 
+- **Word preview.** Open a `.docx` or `.docm` and it renders as a readable document in reading order, so what you copy out is structured text rather than a picture of a page: headings (the Title style and Heading 1 to 6, or any paragraph with an outline level), bold, italic, underline, strikethrough, super- and subscript, monospace runs as code, bulleted and numbered lists with their nesting and start numbers, tables with merged cells and a marked header row, links (web and mail links only), images with their alt text, and footnotes and endnotes. Tracked changes show the final text, and a field shows the result Word last computed. Page layout, headers and footers, comments, text boxes, equations, and charts are not drawn. Everything copies the way it does in the other previews (**Copy as Rich Text**, **Copy as Markdown**, per-table CSV, **Save as PDF**, **Save as Word**), and the right-click **Search Google** row works on a selection.
+
+  The preview is **read-only by design**: MarkCopy never writes to your document. See [Word preview](#word-preview).
+
 - **PowerPoint preview.** Open a `.pptx` or `.pptm` and the whole deck renders as one scrollable column of slides, rather than one slide at a time behind a tab strip: a deck is read end to end, and rendering it that way is what lets **Copy as Rich Text**, **Save as PDF**, and **Save as Word** take the whole thing in one go instead of whichever slide happened to be on screen. Slides keep their real layout, but the markup underneath is semantic and in reading order, so a title placeholder becomes a heading, body text becomes paragraphs and lists, a slide table becomes a real table, and a picture keeps its alt text. Charts, SmartArt, OLE objects, and embedded media are drawn as labelled placeholders naming what they are, never as blanks; transitions and animations are not rendered. Speaker notes appear under each slide (`markcopy.pptx.showNotes`), and every slide is its own right-click block, so **Copy Rich Text / Markdown / PNG** work per slide, and a table on a slide gets the full table menu.
 
   The preview is **read-only by design**: MarkCopy never writes to your presentation. See [Settings](#settings) for `markcopy.pptx.*`.
@@ -94,7 +99,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`; diagrams keep the classic layout and look unless you set `"layout": "elk"` or `"look": "neo"`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video.
 - **LaTeX preview.** Open or focus a `.tex`, `.ltx`, or `.latex` file and the preview opens automatically beside it, the same as Markdown, CSV, and TSV (`markcopy.autoPreview`); it is also reachable by hand from **Reopen Editor With...**. The file itself still opens in the text editor, since it is contributed at `option` priority, not default: it is a file you spend most of the day editing, and the preview simply arrives as a second tab beside it. MarkCopy compiles it with an external LaTeX engine and shows the result through the very same PDF viewer above, inheriting all of it: text selection, **Copy Page as PNG**, comments, zoom, and the **Theme** submenu. It rebuilds on save, and a floating **Recompile** button, a toolbar icon, and a right-click **Recompile LaTeX** entry rebuild it without one. Requires a LaTeX engine on your machine already; see [LaTeX preview](#latex-preview) for what to install.
 - **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
 - **Video preview with frame grabs.** Open a `.mov`, `.mp4`, `.m4v`, `.mkv`, `.webm`, `.avi`, `.wmv`, `.flv`, `.mpg`, `.mpeg`, or `.3gp` and it plays inline with full transport controls, rather than opening as binary or not at all: VS Code ships no preview for QuickTime files. Right-click for **Copy Frame as PNG** and **Save Frame as PNG…**, so a still from a screen recording goes straight into a bug report. A **Playback** submenu sets looping, speed, and autoplay, and `,` and `.` step a frame at a time to line the shot up. A file VS Code cannot decode (ProRes, DNxHD, most HEVC) plays anyway when you have ffmpeg: MarkCopy builds a throwaway H.264 copy in a temp folder, laying a clip with an alpha channel over a transparency checkerboard rather than flattening it onto black. Without ffmpeg it says what is wrong and offers your default player. See [Video preview](#video-preview).
@@ -342,6 +347,23 @@ Every slide is its own right-click block, so **Copy Rich Text**, **Copy as Markd
 
 The preview is **read-only by design**, and, like the Excel preview, needs nothing installed to show a deck: no PowerPoint, no Pandoc, no browser. `markcopy.pptx.maxSlides` caps how many slides render before the preview stops and says how many it hid. See [Settings](#settings) for `markcopy.pptx.*`.
 
+## Word preview
+
+![A Word document in the MarkCopy preview: a title, headings, tracked changes shown as final text, nested lists, a table with merged cells, an image, and a footnote](docs/media/docx-preview.png)
+
+MarkCopy registers as the editor for `.docx` and `.docm` files, so opening one renders it inline instead of leaving it as a binary download. Like the PowerPoint preview, it is a column of semantic HTML in the shared preview, which is what lets every copy and export action work on it unchanged. It reads the content, not the layout:
+
+- **Headings.** The Title style becomes a top-level heading and Heading 1 to 6 become `h1` to `h6`, resolved through style inheritance, so a custom style based on Heading 2 is a heading too. A paragraph with an outline level 1 to 6 is a heading even without a heading style. A document that has both a Title and Heading 1 therefore has two top-level headings; the mapping is deliberately a plain function of each paragraph, and it matches what **Save as Word** writes, so a round trip comes back unchanged.
+- **Text.** Bold, italic, underline, strikethrough, superscript, subscript, and highlight. A run or paragraph style set in a monospace font (Consolas, Courier New, and so on) is code, and consecutive monospace paragraphs become one code block. Line breaks and tabs are kept; page breaks are not.
+- **Lists.** Bullet or ordered by the list's number format, nested by indent level, with start numbers honored and a list that resumes after other content carrying on counting.
+- **Tables.** Merged cells (`gridSpan` and `vMerge`) become `colspan` and `rowspan`, a row Word marks as a header row becomes the header, and tables nest.
+- **Links.** Only `http`, `https`, and `mailto` links are followed; any other scheme (`file:`, `javascript:`, a UNC path) is shown as plain text. A link to a bookmark scrolls within the preview, including a table of contents.
+- **Images.** Inline and floating pictures show with their alt text and declared size. A format a browser cannot show (EMF, WMF), a picture linked from a URL (never fetched), and one past the 16 MB image budget are drawn as a labelled placeholder.
+- **Tracked changes and fields.** Inserted text is kept and deleted text is dropped, so you see the final text; a field shows its last computed result.
+- **Footnotes and endnotes** appear as superscript links with the notes listed at the end.
+
+Not drawn: headers and footers, comments, text boxes and shapes, equations, charts, SmartArt, and embedded objects. A document too large for the preview stops at 50,000 paragraphs and says so. The preview is **read-only by design** and needs nothing installed: no Word, no Pandoc, no browser. A file that is not a real `.docx` (including the older `.doc`) shows a message in the panel rather than failing to open.
+
 ## Documentation
 
 - [Copy Matrix](docs/COPY-MATRIX.md): every context-menu action and its clipboard output.
@@ -360,7 +382,7 @@ npm run watch       # rebuild on change
 npm test            # vitest: unit tests plus the webview E2E suite
 npm run test:integration   # runs the extension inside a real VS Code
 # press F5 in VS Code to launch the Extension Development Host; it opens this
-# repo, so sample.md, sample.csv, sample.xlsx, sample.pptx, sample.tex,
+# repo, so sample.md, sample.csv, sample.xlsx, sample.docx, sample.pptx, sample.tex,
 # sample.stl, and sample.mov are ready to preview (sample.pdf is generated
 # with: node scripts/make-sample-pdf.js)
 ```

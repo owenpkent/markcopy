@@ -8,7 +8,7 @@
 import { attr, boolAttr, intAttr, walkXml } from '../../ooxml/xml';
 import { partForRels, partText, resolveTarget, type Parts } from '../../ooxml/zip';
 import { relsPathFor, type Rels } from '../../ooxml/rels';
-import { child, children, deep, findDeep, parseXml, type XNode } from './xnode';
+import { child, children, deep, findDeep, parseXml, type XNode } from '../../ooxml/xnode';
 import { readClrMap, readTheme, type ClrMap, type Theme } from './theme';
 
 export interface Geometry {

@@ -9,7 +9,7 @@ import {
   resolveTarget,
   type Parts,
 } from '../../ooxml/zip';
-import { type XNode } from './xnode';
+import { type XNode } from '../../ooxml/xnode';
 
 export interface SlideSize {
   cx: number;

@@ -9,13 +9,17 @@
 //   Mermaid diagram in the dark theme.
 // - terminal-green.png: the green-on-black terminal palette.
 // - pdf-viewer.png: the real pdf.js viewer with the floating page/zoom toolbar.
+// - docx-preview.png: sample.docx read by the real docx reader and shown by the
+//   real webview bundle.
+//
+// `node scripts/make-screenshot.js docx` regenerates only docx-preview.png.
 //
 // The static shots load file:// HTML directly; the live shots stub
 // acquireVsCodeApi and post the same messages the extension host sends, with
 // the repo served over a local HTTP server so ES-module chunks and the pdf.js
 // worker resolve.
 //
-// Usage: node scripts/make-screenshot.js
+// Usage: node scripts/make-screenshot.js [docx]
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
@@ -35,7 +39,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // what the webview receives in production.
 // ---------------------------------------------------------------------------
 function bundleHost(entry) {
-  const outfile = path.join(outDir, `_${entry}.cjs`);
+  const outfile = path.join(outDir, `_${entry.replace(/\//g, '-')}.cjs`);
   esbuild.buildSync({
     entryPoints: [path.join(root, 'src', `${entry}.ts`)],
     bundle: true,
@@ -51,6 +55,7 @@ function bundleHost(entry) {
 
 const { createMarkdownIt } = bundleHost('render');
 const { renderCsvHtml } = bundleHost('csv');
+const { renderDocxHtml } = bundleHost('docx/read/index');
 const md = createMarkdownIt();
 
 const css = fs.readFileSync(path.join(root, 'media', 'preview.css'), 'utf8');
@@ -255,6 +260,45 @@ function buildCsvHarness(theme) {
 </head>
 <body>
   <div id="content" class="markdown-body"></div>
+  <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
+  <div id="mc-toast" class="mc-toast" hidden></div>
+  <script type="module" src="/media/webview.js"></script>
+  <script type="module">
+    window.postMessage(${JSON.stringify(message)}, '*');
+  </script>
+</body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Word preview: sample.docx through the real reader (src/docx/read) and the
+// real webview bundle, in a card like the Markdown shots.
+// ---------------------------------------------------------------------------
+function buildDocxHarness(theme) {
+  const message = {
+    type: 'render',
+    html: renderDocxHtml(fs.readFileSync(path.join(root, 'sample.docx'))).html,
+    source: '',
+    kind: 'docx',
+    styleProfile: 'github',
+    theme,
+    mermaidConfig: {},
+    syncScroll: false,
+    autoPreview: false,
+    math: false,
+    docKey: 'screenshot-docx',
+  };
+  return `<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="/media/preview.css" rel="stylesheet">
+<style>${frameCss(theme !== 'light')}</style>
+<script>
+  window.acquireVsCodeApi = () => ({ postMessage() {}, getState() {}, setState() {} });
+</script>
+</head>
+<body>
+  <div class="frame">
+    <div id="content" class="markdown-body"></div>
+  </div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>
   <script type="module" src="/media/webview.js"></script>
@@ -485,6 +529,14 @@ async function main() {
     return `${base}/${name}`;
   };
   try {
+    if (process.argv[2] === 'docx') {
+      await shoot(harness('_shot-docx.html', buildDocxHarness('light')), 'docx-preview.png', {
+        width: 880,
+        height: 1560,
+        budgetMs: 8000,
+      });
+      return;
+    }
     // Static shots (no scripts) load straight from disk.
     for (const [name, dark] of [
       ['context-menu.png', false],
@@ -522,6 +574,11 @@ async function main() {
       width: 880,
       height: 580,
     });
+    await shoot(harness('_shot-docx.html', buildDocxHarness('light')), 'docx-preview.png', {
+      width: 880,
+      height: 1560,
+      budgetMs: 8000,
+    });
   } finally {
     for (const f of [
       '_shot-rendering.html',
@@ -529,6 +586,7 @@ async function main() {
       '_shot-csv.html',
       '_shot-csv-dark.html',
       '_shot-pdf.html',
+      '_shot-docx.html',
     ]) {
       fs.rmSync(path.join(root, f), { force: true });
     }

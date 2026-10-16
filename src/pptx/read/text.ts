@@ -18,7 +18,7 @@
 // family), this module owns finding that XML at each level of the chain.
 import { attr, intAttr } from '../../ooxml/xml';
 import { escapeAttr, escapeHtml } from '../../escape';
-import { child, children, type XNode } from './xnode';
+import { child, children, type XNode } from '../../ooxml/xnode';
 import {
   applyColorMods,
   normalizeHex,
