@@ -66,6 +66,9 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] With a box open, change the file from the text editor: the preview does not replace the box; after you commit or cancel, it updates. Committing a block whose lines changed shows "The document changed; edit not applied."
 - [ ] Reload the window: the chosen mode is remembered. Switching back to the lock commits an open box.
 - [ ] A fenced code block that is syntax-highlighted is not editable (known limitation).
+- [ ] Keyboard only: with the pencil active, Tab reaches each block in turn (a focus ring shows); Enter or F2 opens the focused block, Escape returns focus to it unchanged, and Ctrl/Cmd+Enter commits and leaves focus on the block once the preview re-renders. Switching to the lock removes the tab stops.
+- [ ] Edit a block so it gets shorter or longer, then immediately click the next block: its box opens on the right text (never a later block) once the preview updates, and committing it changes the right lines.
+- [ ] With the preview open beside a second Markdown file, commit an edit and at once retarget the side preview to the other file: the other file is not modified.
 
 ### Where the preview opens
 

@@ -88,6 +88,8 @@ export interface RenderOptions {
   theme?: string;
   docKey?: string;
   docVersion?: number;
+  /** The id of the block edit this render answers, as the host puts on it. */
+  ackEdit?: number;
   math?: boolean;
   footnotes?: boolean;
 }

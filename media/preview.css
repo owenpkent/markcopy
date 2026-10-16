@@ -1377,7 +1377,8 @@ body.mc-editing-enabled #content > [data-source-line][data-source-end] {
   cursor: text;
   border-radius: 4px;
 }
-body.mc-editing-enabled #content > [data-source-line][data-source-end]:hover {
+body.mc-editing-enabled #content > [data-source-line][data-source-end]:hover,
+body.mc-editing-enabled #content > [data-source-line][data-source-end]:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, var(--mc-accent));
   outline-offset: 3px;
 }

@@ -131,6 +131,7 @@ function loadEditMode(): EditModeName {
 const editMode = createEditMode({
   content,
   getSourceLines: () => sourceLines,
+  getDocKey: () => currentDocKey,
   post: (msg) => vscode.postMessage(msg),
   loadMode: loadEditMode,
   saveMode: (mode) => {
@@ -151,6 +152,9 @@ const editMode = createEditMode({
 let pendingRender: Record<string, unknown> | undefined;
 
 function applyRenderMessage(msg: Record<string, any>): void {
+  const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
+  // render() replaces #content before its first await, so the new blocks are in
+  // place by the time afterRender looks for them.
   void render(
     msg.html as string,
     msg.source as string,
@@ -166,6 +170,10 @@ function applyRenderMessage(msg: Record<string, any>): void {
     (msg.kind as string) ?? 'markdown',
     Number(msg.docVersion ?? -1),
     msg.revealFragment as string | undefined,
+  );
+  editMode.afterRender(
+    Number.isSafeInteger(msg.ackEdit) ? (msg.ackEdit as number) : undefined,
+    docChanged,
   );
 }
 

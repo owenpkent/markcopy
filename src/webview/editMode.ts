@@ -13,6 +13,8 @@ export interface EditModeOptions {
   content: HTMLElement;
   /** The source lines of the render currently on screen. */
   getSourceLines: () => string[];
+  /** The document key of the render currently on screen. */
+  getDocKey: () => string;
   /** Send a message to the host. */
   post: (msg: unknown) => void;
   /** Read the remembered mode. */
@@ -30,7 +32,18 @@ export interface EditMode {
   isEditing(): boolean;
   /** Commit (or drop) an open editor, if any. */
   close(commit: boolean): void;
+  /**
+   * Called once a render has replaced the content. `ackEdit` is the id of the
+   * block edit the host answered with this render, if any.
+   */
+  afterRender(ackEdit: number | undefined, docChanged: boolean): void;
 }
+
+const EDITABLE = '[data-source-line][data-source-end]';
+
+// How long to wait for the host's answer to a commit before giving up on it.
+// The host always answers, so this only matters if its document has gone away.
+const ACK_TIMEOUT_MS = 3000;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -101,6 +114,30 @@ export function createEditMode(opts: EditModeOptions): EditMode {
     editBtn.setAttribute('aria-pressed', String(active === 'edit'));
     document.body.classList.toggle('mc-editing-enabled', active === 'edit');
     pill.hidden = !kindOk;
+    decorate();
+  }
+
+  // In edit mode every editable block is a tab stop, opened with Enter or F2.
+  // Only tab stops added here are removed again; a block that brought its own
+  // tabindex keeps it.
+  function decorate(): void {
+    const on = effectiveMode() === 'edit';
+    for (const el of Array.from(content.children) as HTMLElement[]) {
+      if (!el.matches(EDITABLE)) continue;
+      if (on && !el.hasAttribute('tabindex')) {
+        el.tabIndex = 0;
+        el.dataset.mcEditTab = '1';
+      } else if (!on && el.dataset.mcEditTab) {
+        el.removeAttribute('tabindex');
+        delete el.dataset.mcEditTab;
+      }
+    }
+  }
+
+  function blockAt(line: number): HTMLElement | undefined {
+    return (Array.from(content.children) as HTMLElement[]).find(
+      (el) => el.matches(EDITABLE) && Number(el.dataset.sourceLine) === line,
+    );
   }
 
   function setMode(next: EditModeName): void {
@@ -122,6 +159,7 @@ export function createEditMode(opts: EditModeOptions): EditMode {
     area: HTMLTextAreaElement;
     startLine: number;
     endLine: number;
+    docKey: string;
     original: string;
     initial: string;
     trailing: number;
@@ -129,7 +167,34 @@ export function createEditMode(opts: EditModeOptions): EditMode {
   }
   let session: Session | undefined;
 
-  function closeEditor(commit: boolean): void {
+  // A commit the host has not answered yet. Until its render arrives, the line
+  // numbers on screen predate the edit, so no other editor may open: a block
+  // asked for meanwhile is remembered by the line it will start on once the
+  // edit lands (`queuedLine`) and opened then.
+  interface Pending {
+    id: number;
+    endLine: number;
+    delta: number;
+    timer: number;
+  }
+  let pending: Pending | undefined;
+  let nextEditId = 1;
+  let queuedLine: number | undefined;
+  // The block to focus once the answering render arrives (keyboard commits).
+  let focusLine: number | undefined;
+
+  function settle(): void {
+    if (pending) window.clearTimeout(pending.timer);
+    pending = undefined;
+  }
+
+  function forgetPending(): void {
+    settle();
+    queuedLine = undefined;
+    focusLine = undefined;
+  }
+
+  function closeEditor(commit: boolean, refocus = false): void {
     const s = session;
     if (!s || s.done) return;
     s.done = true;
@@ -140,35 +205,47 @@ export function createEditMode(opts: EditModeOptions): EditMode {
     if (s.box.isConnected) {
       s.box.replaceWith(s.block);
     }
-    if (commit && text !== s.initial) {
+    const committed = commit && text !== s.initial;
+    if (committed) {
       const replacement = text + '\n'.repeat(s.trailing);
+      const id = nextEditId++;
       opts.post({
         type: 'editBlock',
+        editId: id,
+        docKey: s.docKey,
         startLine: s.startLine,
         endLine: s.endLine,
         original: s.original,
         text: replacement,
       });
-      shiftAfterEdit(s.startLine, s.endLine, replacement.split('\n'));
+      settle();
+      const timer = window.setTimeout(() => {
+        if (pending?.id === id) forgetPending();
+      }, ACK_TIMEOUT_MS);
+      pending = {
+        id,
+        endLine: s.endLine,
+        delta: replacement.split('\n').length - (s.endLine - s.startLine),
+        timer,
+      };
+      queuedLine = undefined;
+      focusLine = refocus ? s.startLine : undefined;
     }
+    // May apply a buffered render, which replaces the block just restored.
     opts.onClosed();
+    if (refocus && !committed) {
+      (s.block.isConnected ? s.block : blockAt(s.startLine))?.focus();
+    }
   }
 
-  // Mirror the edit locally until the host's re-render arrives, so a block
-  // opened in the meantime (clicking the next paragraph commits this one first)
-  // names the lines it will have once the edit lands. If the host refuses the
-  // edit it re-renders, which resets both.
-  function shiftAfterEdit(startLine: number, endLine: number, newLines: string[]): void {
-    const delta = newLines.length - (endLine - startLine);
-    opts.getSourceLines().splice(startLine, endLine - startLine, ...newLines);
-    if (delta === 0) return;
-    for (const el of content.querySelectorAll<HTMLElement>('[data-source-line][data-source-end]')) {
-      const line = Number(el.dataset.sourceLine);
-      if (line >= endLine) {
-        el.dataset.sourceLine = String(line + delta);
-        el.dataset.sourceEnd = String(Number(el.dataset.sourceEnd) + delta);
-      }
+  function requestOpen(block: HTMLElement): void {
+    if (pending) {
+      const line = Number(block.dataset.sourceLine);
+      queuedLine = line >= pending.endLine ? line + pending.delta : line;
+      focusLine = undefined;
+      return;
     }
+    openEditor(block);
   }
 
   function openEditor(block: HTMLElement): void {
@@ -211,6 +288,7 @@ export function createEditMode(opts: EditModeOptions): EditMode {
       area,
       startLine,
       endLine,
+      docKey: opts.getDocKey(),
       original: slice.join('\n'),
       initial: body,
       trailing,
@@ -222,11 +300,11 @@ export function createEditMode(opts: EditModeOptions): EditMode {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        closeEditor(false);
+        closeEditor(false, true);
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         e.stopPropagation();
-        closeEditor(true);
+        closeEditor(true, true);
       }
     });
     area.addEventListener('blur', () => {
@@ -258,13 +336,24 @@ export function createEditMode(opts: EditModeOptions): EditMode {
       // A click elsewhere has already blurred (and so committed) an open editor.
       if (session) closeEditor(true);
       if (!target.isConnected) return;
-      const block = target.closest<HTMLElement>('[data-source-line][data-source-end]');
+      const block = target.closest<HTMLElement>(EDITABLE);
       if (!block || block.parentElement !== content) return;
       e.stopPropagation();
-      openEditor(block);
+      requestOpen(block);
     },
     true,
   );
+
+  // Enter or F2 on a focused block opens it, the keyboard route into editing.
+  content.addEventListener('keydown', (e) => {
+    if (effectiveMode() !== 'edit' || session) return;
+    if (e.key !== 'Enter' && e.key !== 'F2') return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const target = e.target as HTMLElement | null;
+    if (!target || target.parentElement !== content || !target.matches(EDITABLE)) return;
+    e.preventDefault();
+    requestOpen(target);
+  });
 
   refresh();
   return {
@@ -275,6 +364,25 @@ export function createEditMode(opts: EditModeOptions): EditMode {
       refresh();
     },
     isEditing: () => session !== undefined,
-    close: closeEditor,
+    close: (commit: boolean) => closeEditor(commit),
+    afterRender(ackEdit: number | undefined, docChanged: boolean): void {
+      decorate();
+      if (docChanged) {
+        forgetPending();
+        return;
+      }
+      if (!pending || ackEdit === undefined || ackEdit < pending.id) return;
+      settle();
+      const open = queuedLine;
+      const focus = focusLine;
+      queuedLine = undefined;
+      focusLine = undefined;
+      if (open !== undefined) {
+        const block = blockAt(open);
+        if (block && effectiveMode() === 'edit') openEditor(block);
+      } else if (focus !== undefined) {
+        blockAt(focus)?.focus();
+      }
+    },
   };
 }

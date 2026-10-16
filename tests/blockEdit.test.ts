@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { planBlockEdit, EOL_CRLF, EOL_LF, MAX_BLOCK_EDIT_CHARS } from '../src/blockEdit';
+import {
+  planBlockEdit,
+  editTargetsDocument,
+  EOL_CRLF,
+  EOL_LF,
+  MAX_BLOCK_EDIT_CHARS,
+} from '../src/blockEdit';
 
 function apply(doc: string, plan: ReturnType<typeof planBlockEdit>): string {
   if (!plan.ok) throw new Error('plan refused');
@@ -81,5 +87,14 @@ describe('planBlockEdit', () => {
     expect(
       planBlockEdit(doc, EOL_LF, { startLine: 4, endLine: 5, original: 'd', text: 'D' }).ok,
     ).toBe(true);
+  });
+});
+
+describe('editTargetsDocument', () => {
+  it('accepts only the document the preview now shows', () => {
+    expect(editTargetsDocument('file:///a.md', 'file:///a.md')).toBe(true);
+    expect(editTargetsDocument('file:///a.md', 'file:///b.md')).toBe(false);
+    expect(editTargetsDocument(undefined, 'file:///b.md')).toBe(false);
+    expect(editTargetsDocument(7, 'file:///b.md')).toBe(false);
   });
 });

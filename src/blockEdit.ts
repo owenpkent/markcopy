@@ -89,3 +89,12 @@ export function planBlockEdit(
   }
   return { ok: true, start, end, text: toLf(text).replace(/\n/g, eol) };
 }
+
+/**
+ * Whether a block edit was made against the document the preview now shows.
+ * A side preview can be retargeted while a commit is in flight, and the edit
+ * must never land in the new file because it happens to hold the same text.
+ */
+export function editTargetsDocument(msgDocKey: unknown, previewDocKey: string): boolean {
+  return typeof msgDocKey === 'string' && msgDocKey === previewDocKey;
+}
