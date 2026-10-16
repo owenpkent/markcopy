@@ -277,7 +277,7 @@ unzip -l markcopy-<version>.vsix | tail -1         # about 185 files
 
 ### A stale `node_modules` fails `npm run vsix`
 
-The first `npm run vsix` for 0.16.0 failed because the release agent's local `node_modules` predated the Dependabot bumps (dompurify, katex, pdfjs-dist) that had landed on `main`. `npm ci` fixed it and the repackaged VSIX was normal: 185 files and 3.54 MB, as in 0.14.0. Run `npm ci` after every pull of `main` before the gate and packaging, not only when a build breaks.
+The first `npm run vsix` for 0.16.0 failed because the local `node_modules` predated the Dependabot bumps (dompurify, katex, pdfjs-dist) that had landed on `main`. `npm ci` fixed it and the repackaged VSIX was normal: 185 files and 3.54 MB, as in 0.14.0. Run `npm ci` after every pull of `main` before the gate and packaging, not only when a build breaks.
 
 ## Notes
 
