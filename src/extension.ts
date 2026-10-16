@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
+import { EOL_CRLF, EOL_LF, editTargetsDocument, planBlockEdit } from './blockEdit';
 import { PdfEditorProvider } from './pdfEditor';
 import {
   buildPdfPage,
@@ -820,6 +821,8 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         void applyCellEdit(state, msg);
       } else if (msg?.type === 'gridOp') {
         void applyGridOp(state, msg);
+      } else if (msg?.type === 'editBlock') {
+        void applyBlockEdit(state, msg);
       }
     }),
   ];
@@ -874,7 +877,9 @@ function scheduleUpdate(state: PreviewState): void {
   }, UPDATE_DEBOUNCE_MS);
 }
 
-function update(state: PreviewState): void {
+// `ackEdit` is the id of a webview block edit this render answers (see
+// applyBlockEdit); the webview opens no other block editor until it arrives.
+function update(state: PreviewState, ackEdit?: number): void {
   // A direct update supersedes anything the debounce still has pending, so the
   // two can never race and render the same document twice.
   if (state.timer !== undefined) {
@@ -927,6 +932,7 @@ function update(state: PreviewState): void {
     kind,
     docVersion: doc.version,
     docKey: state.docUri.toString(),
+    ackEdit,
     revealFragment,
     styleProfile: cfg.get<string>('styleProfile', 'github'),
     theme: cfg.get<string>('theme', 'auto'),
@@ -1000,6 +1006,65 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   // Re-render at once rather than waiting out the debounce, so the grid's notion
   // of the document version catches up before the next cell edit is committed.
   update(state);
+}
+
+// Write one block edited in the Markdown preview back into the document.
+//
+// Like a CSV cell edit, the webview posts what it wants and waits for the
+// document to change; the file stays authoritative and the change lands in the
+// editor's undo stack. The webview names the lines it edited and the text it
+// started from, and the edit is applied only if the document still holds exactly
+// that text (planBlockEdit), so an edit made elsewhere in the meantime can never
+// be overwritten by a stale block. The document is not saved.
+//
+// The webview also names the document it rendered (`docKey`). A side preview
+// can be retargeted while a commit is in flight, and the edit must never land
+// in the newly shown file just because it holds the same text at those lines.
+// Whatever happens, the render that follows carries the edit's `editId`, which
+// tells the webview its line coordinates are current again.
+async function applyBlockEdit(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
+  const editId = Number.isSafeInteger(msg.editId) ? (msg.editId as number) : undefined;
+  const ack = (): void => update(state, editId);
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (
+    !doc ||
+    !editTargetsDocument(msg.docKey, state.docUri.toString()) ||
+    (previewKind(doc.languageId, state.docUri.path) ?? 'markdown') !== 'markdown'
+  ) {
+    ack();
+    return;
+  }
+  const eol = doc.eol === vscode.EndOfLine.CRLF ? EOL_CRLF : EOL_LF;
+  const plan = planBlockEdit(doc.getText(), eol, {
+    startLine: msg.startLine,
+    endLine: msg.endLine,
+    original: msg.original,
+    text: msg.text,
+  });
+  if (!plan.ok) {
+    if (plan.reason === 'stale') {
+      void state.panel.webview.postMessage({
+        type: 'notice',
+        text: 'The document changed; edit not applied.',
+      });
+    }
+    ack();
+    return;
+  }
+  const range = new vscode.Range(doc.positionAt(plan.start), doc.positionAt(plan.end));
+  if (doc.getText(range) === plan.text) {
+    ack();
+    return;
+  }
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.replace(doc.uri, range, plan.text);
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) {
+    void vscode.window.showWarningMessage('MarkCopy: could not edit this file.');
+  }
+  ack();
 }
 
 // How many ranges a single WorkspaceEdit is worth carrying. A grid operation

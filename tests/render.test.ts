@@ -11,6 +11,22 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('data-source-line="2"');
   });
 
+  it('tags top-level blocks with an exclusive data-source-end', () => {
+    const html = md.render(
+      ['# Title', '', 'Line one', 'line two', '', '```ts', 'x', '```', '', '- a', '- b', ''].join(
+        '\n',
+      ),
+    );
+    expect(html).toContain('<h1 id="title" data-source-line="0" data-source-end="1">');
+    expect(html).toContain('<p data-source-line="2" data-source-end="4">');
+    expect(html).toContain('<ul data-source-line="9" data-source-end="11">');
+  });
+
+  it('does not tag nested blocks with a source range', () => {
+    const html = md.render(['- item', '', '  nested paragraph', ''].join('\n'));
+    expect(html.match(/data-source-end/g)).toHaveLength(1);
+  });
+
   it('turns a mermaid fence into a placeholder, not a code block', () => {
     const html = md.render('```mermaid\nflowchart LR\n  A --> B\n```\n');
     expect(html).toContain('class="mermaid-src"');
@@ -78,7 +94,9 @@ describe('createMarkdownIt', () => {
     // Still a top-level paragraph, so it carries data-source-line like any
     // other (addSourceLineMapping), rather than the level-1 wrapper the
     // footnote plugin would otherwise have left it nested inside.
-    expect(html).toContain('<p data-source-line="0">[^orphan]: This text has no reference.</p>');
+    expect(html).toContain(
+      '<p data-source-line="0" data-source-end="1">[^orphan]: This text has no reference.</p>',
+    );
     expect(html).not.toContain('footnote');
   });
 
@@ -92,7 +110,9 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('Referenced note.');
     // [^b] is not, so its line stays a plain paragraph in place, exactly where
     // it sits in the source, rather than disappearing.
-    expect(html).toContain('<p data-source-line="4">[^b]: Never referenced.</p>');
+    expect(html).toContain(
+      '<p data-source-line="4" data-source-end="5">[^b]: Never referenced.</p>',
+    );
     expect(html).not.toContain('[^a]:');
   });
 

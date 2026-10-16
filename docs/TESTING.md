@@ -53,6 +53,23 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] `[^note]` footnote references and definitions render as a numbered footnotes section, with back-links to the prose; an unreferenced `[^orphan]:` definition stays visible as plain text instead of disappearing, and `^[...]` inline footnote shorthand stays literal. Turning `markcopy.footnotes` off shows literal `[^note]` text again.
 - [ ] Relative and absolute local images render; remote images still load.
 
+### Edit mode
+
+- [ ] ★ A lock/pencil pill sits in the top-right of a Markdown preview, with the lock active. Hovering each button shows its label. It is absent in a CSV, Excel, or PowerPoint preview.
+- [ ] Click the pencil: it turns the button blue, blocks get an outline and a text cursor on hover, and clicking a link does nothing (no navigation, no prompt).
+- [ ] Click a paragraph: it becomes a rounded box with the raw Markdown, markers (`**`, `#`, `>`, bullets, link brackets and URL) dimmed, bold text slightly heavier, and no shift between the text you see and the caret. The caret is at the end.
+- [ ] Type a change and press Ctrl/Cmd+Enter, then click away: the document in the text editor changes (unsaved), the preview re-renders, and Ctrl+Z in the editor reverts it.
+- [ ] Press Escape mid-edit: the block returns unchanged and the document is untouched.
+- [ ] Ctrl+Z / Ctrl+Y inside the open box undo and redo typing. Selecting text, double-click word select, and an IME composition (for example Japanese) behave normally and line up with the highlighted text.
+- [ ] Edit a multi-line list, a table, a blockquote, and the last line of a file with no trailing newline; also a CRLF file (the line endings stay CRLF).
+- [ ] Check the box in a light, a dark, and a high-contrast theme: text, dimmed markers, caret, selection, and the box border are all legible.
+- [ ] With a box open, change the file from the text editor: the preview does not replace the box; after you commit or cancel, it updates. Committing a block whose lines changed shows "The document changed; edit not applied."
+- [ ] Reload the window: the chosen mode is remembered. Switching back to the lock commits an open box.
+- [ ] A fenced code block that is syntax-highlighted is not editable (known limitation).
+- [ ] Keyboard only: with the pencil active, Tab reaches each block in turn (a focus ring shows); Enter or F2 opens the focused block, Escape returns focus to it unchanged, and Ctrl/Cmd+Enter commits and leaves focus on the block once the preview re-renders. Switching to the lock removes the tab stops.
+- [ ] Edit a block so it gets shorter or longer, then immediately click the next block: its box opens on the right text (never a later block) once the preview updates, and committing it changes the right lines.
+- [ ] With the preview open beside a second Markdown file, commit an edit and at once retarget the side preview to the other file: the other file is not modified.
+
 ### Where the preview opens
 
 - [ ] ★ In `sample.md`'s editor title bar, the **Show Preview** button (`$(open-preview)`, leftmost) swaps that same tab to the preview, full width, titled `sample.md` (not `Preview sample.md`). No new editor group, and no second tab left open on the file. **Reopen Editor With...** > **MarkCopy Markdown Preview** gets to the same place.
