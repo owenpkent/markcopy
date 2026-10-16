@@ -1325,3 +1325,126 @@ ol.mc-pptx-body {
 .mc-force-light .mc-pptx-canvas {
   background-color: #fff !important;
 }
+
+/* Markdown edit mode: the read/edit pill and the in-place block editor. */
+.mc-modepill {
+  position: fixed;
+  top: 10px;
+  right: 18px;
+  z-index: 1050;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--vscode-editorWidget-background, var(--mc-pre-bg));
+  color: var(--vscode-editorWidget-foreground, var(--mc-fg));
+  border: 1px solid var(--vscode-editorWidget-border, var(--mc-border));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.mc-modepill[hidden] {
+  display: none;
+}
+.mc-modepill button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.mc-modepill button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+.mc-modepill button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, var(--mc-accent));
+  outline-offset: 1px;
+}
+.mc-modepill button[aria-pressed='true'] {
+  background: var(--vscode-button-background, var(--mc-accent));
+  color: var(--vscode-button-foreground, #fff);
+}
+.mc-modepill button[data-mc-mode='read'][aria-pressed='true'] {
+  background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.3));
+  color: inherit;
+}
+
+body.mc-editing-enabled #content > [data-source-line][data-source-end] {
+  cursor: text;
+  border-radius: 4px;
+}
+body.mc-editing-enabled #content > [data-source-line][data-source-end]:hover {
+  outline: 1px solid var(--vscode-focusBorder, var(--mc-accent));
+  outline-offset: 3px;
+}
+body.mc-editing-enabled #content a {
+  cursor: text;
+}
+
+.mc-block-editor {
+  position: relative;
+  margin: 0 0 16px;
+  border: 1px solid var(--mc-border);
+  border-radius: 8px;
+  background: var(--vscode-input-background, var(--mc-pre-bg));
+  color: var(--mc-fg);
+}
+.mc-block-editor:focus-within {
+  border-color: var(--vscode-focusBorder, var(--mc-accent));
+}
+/* Both layers must share every metric that affects text layout, or the caret and
+   the highlighted text drift apart. */
+.mc-be-layer {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.92em;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1.5;
+  letter-spacing: normal;
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-align: left;
+}
+.mc-be-backdrop {
+  min-height: 1.5em;
+  color: var(--mc-fg);
+  pointer-events: none;
+}
+.mc-be-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--mc-fg);
+  outline: none;
+}
+.mc-be-input::selection {
+  background: var(--vscode-editor-selectionBackground, rgba(9, 105, 218, 0.3));
+  -webkit-text-fill-color: transparent;
+}
+/* Dimming and faux bold change no advance widths; never use font-weight here. */
+.mc-hl-dim {
+  color: var(--vscode-descriptionForeground, var(--mc-muted-fg));
+  opacity: 0.8;
+}
+.mc-hl-url {
+  color: var(--vscode-descriptionForeground, var(--mc-muted-fg));
+}
+.mc-hl-bold {
+  -webkit-text-stroke: 0.6px currentColor;
+}

@@ -16,6 +16,7 @@ import {
 } from './links';
 import { splitMermaidConfig } from './mermaidDefaults';
 import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
+import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
@@ -121,26 +122,72 @@ async function initMermaid(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Messaging
 // ---------------------------------------------------------------------------
+// Edit mode state is remembered per webview (survives re-renders and reloads).
+function loadEditMode(): EditModeName {
+  const state = vscode.getState() as { editMode?: unknown } | undefined;
+  return state?.editMode === 'edit' ? 'edit' : 'read';
+}
+
+const editMode = createEditMode({
+  content,
+  getSourceLines: () => sourceLines,
+  post: (msg) => vscode.postMessage(msg),
+  loadMode: loadEditMode,
+  saveMode: (mode) => {
+    const state = (vscode.getState() as Record<string, unknown> | undefined) ?? {};
+    vscode.setState({ ...state, editMode: mode });
+  },
+  // A render that arrived while a block editor was open waits for it to close.
+  onClosed: () => {
+    const queued = pendingRender;
+    pendingRender = undefined;
+    if (queued) {
+      applyRenderMessage(queued);
+    }
+  },
+});
+
+// Only the latest render received while a block editor is open is kept.
+let pendingRender: Record<string, unknown> | undefined;
+
+function applyRenderMessage(msg: Record<string, any>): void {
+  void render(
+    msg.html as string,
+    msg.source as string,
+    msg.styleProfile as string,
+    msg.theme as string,
+    (msg.mermaidConfig as Record<string, unknown>) ?? {},
+    Boolean(msg.syncScroll),
+    msg.supportsSync === undefined ? true : Boolean(msg.supportsSync),
+    Boolean(msg.autoPreview),
+    msg.math === undefined ? true : Boolean(msg.math),
+    msg.footnotes === undefined ? true : Boolean(msg.footnotes),
+    (msg.docKey as string) ?? '',
+    (msg.kind as string) ?? 'markdown',
+    Number(msg.docVersion ?? -1),
+    msg.revealFragment as string | undefined,
+  );
+}
+
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   switch (msg?.type) {
     case 'render':
-      render(
-        msg.html as string,
-        msg.source as string,
-        msg.styleProfile as string,
-        msg.theme as string,
-        (msg.mermaidConfig as Record<string, unknown>) ?? {},
-        Boolean(msg.syncScroll),
-        msg.supportsSync === undefined ? true : Boolean(msg.supportsSync),
-        Boolean(msg.autoPreview),
-        msg.math === undefined ? true : Boolean(msg.math),
-        msg.footnotes === undefined ? true : Boolean(msg.footnotes),
-        (msg.docKey as string) ?? '',
-        (msg.kind as string) ?? 'markdown',
-        Number(msg.docVersion ?? -1),
-        msg.revealFragment as string | undefined,
-      );
+      if (editMode.isEditing()) {
+        if (((msg.docKey as string) ?? '') === currentDocKey) {
+          pendingRender = msg;
+          break;
+        }
+        // A different document: the open editor belongs to the old one.
+        editMode.close(false);
+        pendingRender = undefined;
+      }
+      applyRenderMessage(msg);
+      break;
+    case 'notice':
+      if (typeof msg.text === 'string') {
+        toast(msg.text);
+      }
       break;
     case 'scrollToLine':
       scrollToLine(msg.line as number);
@@ -198,6 +245,7 @@ async function render(
   currentDocKey = docKey;
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.mcKind = kind || 'markdown';
+  editMode.setKind(kind || 'markdown');
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
@@ -632,6 +680,8 @@ window.addEventListener('resize', invalidateAnchors, { passive: true });
 // Context menu
 // ---------------------------------------------------------------------------
 document.addEventListener('contextmenu', (e) => {
+  // The block editor keeps the native cut/copy/paste menu.
+  if ((e.target as Element | null)?.closest?.('.mc-block-editor')) return;
   e.preventDefault();
   contextMenu.show(e.pageX, e.pageY, buildMenu(e.target as HTMLElement));
 });

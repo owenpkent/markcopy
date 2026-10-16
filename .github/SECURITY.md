@@ -140,6 +140,10 @@ Cell editing is the one place MarkCopy writes to a file rather than only reading
 - The render carries a document version that the grid echoes back; a mismatch drops the edit instead of applying it against stale line numbers.
 - Only the edited field's own source span is replaced, so an edit cannot rewrite or reformat any other part of the file.
 
+## Markdown block editing
+
+Edit mode in the Markdown preview is the second place MarkCopy writes to a file, under the same rules as cell editing: the webview names lines and text, never a file; the host applies a `WorkspaceEdit` to the previewed Markdown document only, so edits are undoable and respect read-only files, and nothing is saved automatically. The host validates the `editBlock` message itself (integer lines with `0 <= startLine < endLine <= lineCount`, string fields, text capped at 1,000,000 characters) and refuses the edit unless the document's current text for those lines equals the `original` the webview started from, so a stale editor cannot overwrite a newer change. The editor backdrop is built from HTML-escaped pieces only, and the rendered preview still goes through DOMPurify unchanged.
+
 ## Spreadsheet preview
 
 An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before a single tag is parsed. `src/xlsx/` reads it in the extension host, never in the webview, and the resulting HTML goes through the same DOMPurify sanitize and the same CSP as everything else.

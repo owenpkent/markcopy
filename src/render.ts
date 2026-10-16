@@ -263,7 +263,9 @@ function addMath(md: MarkdownItInstance): void {
   // render as plain display math for now.
   md.renderer.rules['math_block'] = (tokens, idx) => {
     const token = tokens[idx];
-    const line = token.map ? ` data-source-line="${token.map[0]}"` : '';
+    const line = token.map
+      ? ` data-source-line="${token.map[0]}" data-source-end="${token.map[1]}"`
+      : '';
     return `<div class="mc-math" data-display="1"${line}>${escapeHtml(token.content)}</div>\n`;
   };
   md.renderer.rules['math_block_eqno'] = md.renderer.rules['math_block'];
@@ -311,6 +313,8 @@ function addSourceLineMapping(md: MarkdownItInstance): void {
       const token = tokens[idx];
       if (token.map && token.level === 0) {
         token.attrSet('data-source-line', String(token.map[0]));
+        // Exclusive end line, so the webview can edit exactly lines [start, end).
+        token.attrSet('data-source-end', String(token.map[1]));
       }
       return original
         ? original(tokens, idx, options, env, self)

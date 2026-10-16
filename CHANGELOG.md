@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Edit mode in the Markdown preview.** A small pill in the top-right corner switches between a lock (read mode, the default) and a pencil (edit mode); the choice is remembered. In edit mode, click a block (paragraph, heading, list, table, quote, math block) to edit its raw Markdown in place, in a box with light syntax dimming. Ctrl/Cmd+Enter or clicking away commits, Escape cancels. The change is written to the document as an undoable edit and is not saved. Links do not navigate in edit mode. If the document changed underneath the editor, the edit is refused with a notice rather than overwriting it. Fenced code blocks that go through the syntax highlighter are not editable yet.
+
 ### Planned
 
 - PlantUML support.

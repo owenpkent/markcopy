@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
+import { EOL_CRLF, EOL_LF, planBlockEdit } from './blockEdit';
 import { PdfEditorProvider } from './pdfEditor';
 import {
   buildPdfPage,
@@ -820,6 +821,8 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         void applyCellEdit(state, msg);
       } else if (msg?.type === 'gridOp') {
         void applyGridOp(state, msg);
+      } else if (msg?.type === 'editBlock') {
+        void applyBlockEdit(state, msg);
       }
     }),
   ];
@@ -999,6 +1002,51 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   }
   // Re-render at once rather than waiting out the debounce, so the grid's notion
   // of the document version catches up before the next cell edit is committed.
+  update(state);
+}
+
+// Write one block edited in the Markdown preview back into the document.
+//
+// Like a CSV cell edit, the webview posts what it wants and waits for the
+// document to change; the file stays authoritative and the change lands in the
+// editor's undo stack. The webview names the lines it edited and the text it
+// started from, and the edit is applied only if the document still holds exactly
+// that text (planBlockEdit), so an edit made elsewhere in the meantime can never
+// be overwritten by a stale block. The document is not saved.
+async function applyBlockEdit(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc || (previewKind(doc.languageId, state.docUri.path) ?? 'markdown') !== 'markdown') {
+    return;
+  }
+  const eol = doc.eol === vscode.EndOfLine.CRLF ? EOL_CRLF : EOL_LF;
+  const plan = planBlockEdit(doc.getText(), eol, {
+    startLine: msg.startLine,
+    endLine: msg.endLine,
+    original: msg.original,
+    text: msg.text,
+  });
+  if (!plan.ok) {
+    if (plan.reason === 'stale') {
+      void state.panel.webview.postMessage({
+        type: 'notice',
+        text: 'The document changed; edit not applied.',
+      });
+      update(state);
+    }
+    return;
+  }
+  const range = new vscode.Range(doc.positionAt(plan.start), doc.positionAt(plan.end));
+  if (doc.getText(range) === plan.text) {
+    return;
+  }
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  workspaceEdit.replace(doc.uri, range, plan.text);
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) {
+    void vscode.window.showWarningMessage('MarkCopy: could not edit this file.');
+  }
   update(state);
 }
 
