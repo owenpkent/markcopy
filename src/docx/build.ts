@@ -24,6 +24,7 @@ import {
 } from '../ooxml/xhtml';
 import { decodeImage, displayExtent, type DecodedImage } from './media';
 import { bookmarkName, CONTENT_WIDTH_TWIPS, escapeAttr, escapeXml } from './ooxml';
+import { MAX_CELL_COLSPAN, MAX_CELL_ROWSPAN, spanAttr, tableTooLarge } from '../ooxml/tableLimits';
 
 /** Elements that break a paragraph. Anything else is inline. */
 const BLOCK_TAGS = new Set([
@@ -103,6 +104,8 @@ export interface DocxReport {
   imagesSkipped: number;
   headings: number;
   tables: number;
+  /** Tables whose grid was too large to write; a note stands in for each. */
+  tablesSkipped: number;
 }
 
 export interface BuildResult {
@@ -233,6 +236,7 @@ class Builder {
     imagesSkipped: 0,
     headings: 0,
     tables: 0,
+    tablesSkipped: 0,
   };
 
   constructor(root: DocxElement) {
@@ -522,6 +526,16 @@ class Builder {
     this.report.tables++;
 
     const cols = columnCount(rows);
+    // The spans are clamped per cell, but a row of many wide cells still adds
+    // up, and a grid is expanded one output cell per position below. Decide
+    // here, before the first <w:gridCol>, whether that expansion is one the
+    // extension host should be asked to do at all.
+    const tooLarge = tableTooLarge(cols, rows.length);
+    if (tooLarge !== undefined) {
+      this.report.tablesSkipped++;
+      this.paragraph([{ kind: 'text', text: tooLarge }], ctx);
+      return;
+    }
     const colWidth = Math.floor(CONTENT_WIDTH_TWIPS / cols);
 
     const parts: string[] = [
@@ -1076,8 +1090,9 @@ export function columnCount(rows: TableRow[]): number {
 function toCell(el: DocxElement): TableCell {
   return {
     el,
-    colspan: positiveInt(el.attrs.colspan),
-    rowspan: positiveInt(el.attrs.rowspan),
+    // Serialized by the webview and so untrusted: see ../ooxml/tableLimits.ts.
+    colspan: spanAttr(el.attrs.colspan, MAX_CELL_COLSPAN),
+    rowspan: spanAttr(el.attrs.rowspan, MAX_CELL_ROWSPAN),
     header: el.name === 'th',
     align: cellAlign(el),
   };
@@ -1120,11 +1135,6 @@ function pixelAttr(value: string | undefined): number | undefined {
   }
   const n = Math.round(Number.parseFloat(value));
   return n > 0 ? n : undefined;
-}
-
-function positiveInt(value: string | undefined): number {
-  const n = Number.parseInt(value ?? '1', 10);
-  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 function cellAlign(el: DocxElement): TableCell['align'] {

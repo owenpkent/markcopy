@@ -492,14 +492,38 @@ export interface CsvHtmlOptions {
   headerRow?: boolean;
   /** Body rows to render before truncating. Default 5000. */
   maxRows?: number;
+  /** Columns to render before truncating. Default CSV_MAX_COLUMNS. */
+  maxColumns?: number;
+  /** Total cells (rows times columns) to render. Default CSV_MAX_CELLS. */
+  maxCells?: number;
 }
 
 export interface CsvHtmlResult {
   html: string;
   delimiter: string;
+  /** Body rows rendered. */
   rows: number;
+  /** Columns rendered. */
   columns: number;
+  /** Columns the widest record had past `columns`, which the grid did not draw. */
+  columnsDropped: number;
 }
+
+/** Default for `markcopy.csv.maxColumns`, matching the spreadsheet preview. */
+export const CSV_MAX_COLUMNS = 200;
+
+/**
+ * The most cells the grid will ever draw, whatever the row and column caps say.
+ *
+ * The two caps bound each axis, but the grid is their product: every row is
+ * padded out to the widest record, so a 200-column header over 5,000 one-field
+ * rows is a million cells, and the string holding them is built synchronously
+ * in the extension host on every keystroke. This is the bound on the product,
+ * and it is spent on rows, because the columns are what make the file the shape
+ * it is; a reader who wants the rest raises `markcopy.csv.maxColumns` and sees
+ * fewer rows at a time.
+ */
+export const CSV_MAX_CELLS = 500_000;
 
 // A value that should sit flush right, the way a spreadsheet aligns numbers.
 // Tolerates thousands separators, a leading currency symbol, a trailing percent,
@@ -525,6 +549,8 @@ export function isNumeric(value: string): boolean {
 export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlResult {
   const headerRow = opts.headerRow !== false;
   const maxRows = Math.max(1, opts.maxRows ?? 5000);
+  const maxColumns = Math.max(1, opts.maxColumns ?? CSV_MAX_COLUMNS);
+  const maxCells = Math.max(1, opts.maxCells ?? CSV_MAX_CELLS);
   const delimiter =
     !opts.delimiter || opts.delimiter === 'auto' ? sniffDelimiter(text, opts.hint) : opts.delimiter;
 
@@ -537,12 +563,25 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
       delimiter,
       rows: 0,
       columns: 0,
+      columnsDropped: 0,
     };
   }
 
-  const columns = records.reduce((max, r) => Math.max(max, r.cells.length), 0);
+  // Every budget is settled here, before a byte of markup exists, and the
+  // rendering loops below run only over what survived. Trailing columns are the
+  // ones cut, never leading or middle ones, so a <td>'s position in its row is
+  // still the field's position in the record and the cell editor's coordinates
+  // keep meaning what they did (see src/webview/csvEdit.ts).
+  const widest = records.reduce((max, r) => Math.max(max, r.cells.length), 0);
+  const columns = Math.min(widest, maxColumns);
+  const columnsDropped = widest - columns;
   const header = headerRow ? records[0] : undefined;
-  const body = headerRow ? records.slice(1) : records;
+  const allBody = headerRow ? records.slice(1) : records;
+  const rowBudget = Math.max(1, Math.floor(maxCells / Math.max(1, columns)));
+  const body = allBody.length > rowBudget ? allBody.slice(0, rowBudget) : allBody;
+  // Rows the cell budget cut, as opposed to the ones the row cap did.
+  const droppedByCells = allBody.length - body.length;
+  const droppedRows = dropped + droppedByCells;
 
   const parts: string[] = [];
   parts.push('<div class="mc-csv-wrap">');
@@ -592,17 +631,30 @@ export function renderCsvHtml(text: string, opts: CsvHtmlOptions = {}): CsvHtmlR
   parts.push('</tbody></table>');
 
   // Outside the table, so copying the table never picks the notice up.
-  if (dropped > 0) {
+  const notes: string[] = [];
+  if (droppedRows > 0) {
     const shown = num(body.length);
-    const total = num(body.length + dropped);
-    parts.push(
-      `<p class="mc-csv-note">Showing the first ${shown} of ${total} rows. ` +
-        `Raise <code>markcopy.csv.maxRows</code> to show more.</p>`,
+    const total = num(body.length + droppedRows);
+    notes.push(
+      droppedByCells > 0
+        ? `Showing the first ${shown} of ${total} rows: the grid draws at most ` +
+            `${num(maxCells)} cells, and this file is ${num(columns)} columns wide.`
+        : `Showing the first ${shown} of ${total} rows. ` +
+            `Raise <code>markcopy.csv.maxRows</code> to show more.`,
     );
+  }
+  if (columnsDropped > 0) {
+    notes.push(
+      `Showing the first ${num(columns)} of ${num(widest)} columns. ` +
+        `Raise <code>markcopy.csv.maxColumns</code> to show more.`,
+    );
+  }
+  if (notes.length > 0) {
+    parts.push(`<p class="mc-csv-note">${notes.join(' ')}</p>`);
   }
   parts.push('</div>');
 
-  return { html: parts.join(''), delimiter, rows: body.length, columns };
+  return { html: parts.join(''), delimiter, rows: body.length, columns, columnsDropped };
 }
 
 function num(n: number): string {

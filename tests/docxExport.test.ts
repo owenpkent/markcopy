@@ -5,6 +5,7 @@ import { htmlToDocx, reportSummary } from '../src/docxExport';
 import { imageSize } from '../src/docx/media';
 import { bookmarkName } from '../src/docx/ooxml';
 import { columnCount, cssColor } from '../src/docx/build';
+import { MAX_CELL_COLSPAN, MAX_TABLE_CELLS } from '../src/ooxml/tableLimits';
 
 /** A 1x1 PNG, as the webview would inline it. */
 const PNG_1x1 =
@@ -632,5 +633,69 @@ describe('helpers', () => {
     expect(cssColor('font-weight:bold;color: rgb(1, 2, 3)')).toBe('010203');
     expect(cssColor('background-color: #fff')).toBeUndefined();
     expect(cssColor(undefined)).toBeUndefined();
+  });
+});
+
+describe('table limits', () => {
+  // The span attributes come from the webview's serializer, which copies them
+  // out of the sanitized DOM verbatim. The browser clamps the colSpan property,
+  // not the attribute, so the host has to treat the string as untrusted.
+  it('clamps an oversized colspan to the browser limit instead of expanding it', () => {
+    const { document, report } = docx('<table><tr><td colspan="10000">wide</td></tr></table>');
+    expect(document.match(/<w:gridCol /g)).toHaveLength(MAX_CELL_COLSPAN);
+    expect(document).toContain(`<w:gridSpan w:val="${MAX_CELL_COLSPAN}"/>`);
+    expect(report.tablesSkipped).toBe(0);
+    assertWellFormed(document);
+  });
+
+  it('reads a malformed span as 1, the way a browser does', () => {
+    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x', '99999999999999999999']) {
+      const { document } = docx(`<table><tr><td colspan="${bad}">a</td><td>b</td></tr></table>`);
+      expect(document.match(/<w:gridCol /g)).toHaveLength(2);
+      expect(document).not.toContain('<w:gridSpan');
+    }
+  });
+
+  it('keeps an ordinary colspan and rowspan table laid out as before', () => {
+    const { document } = docx(
+      '<table><tr><td colspan="2">wide</td><td rowspan="2">tall</td></tr>' +
+        '<tr><td>a</td><td>b</td></tr></table>',
+    );
+    expect(document.match(/<w:gridCol /g)).toHaveLength(3);
+    expect(document).toContain('<w:gridSpan w:val="2"/>');
+    expect(document).toContain('<w:vMerge w:val="restart"/>');
+    expect(document).toContain('<w:vMerge/>');
+  });
+
+  it('replaces a grid wider than the column limit with a note', () => {
+    // Each span is within its own clamp; the row adds up past the grid limit.
+    const { document, report } = docx(
+      '<table><tr><td colspan="1000">a</td><td colspan="1000">b</td></tr></table>',
+    );
+    expect(document).not.toContain('<w:tbl>');
+    expect(document).toContain('Table omitted: 2,000 columns');
+    expect(report.tables).toBe(1);
+    expect(report.tablesSkipped).toBe(1);
+    expect(reportSummary(report)).toContain('1 table too large to export');
+    assertWellFormed(document);
+  });
+
+  it('replaces a grid over the cell budget with a note', () => {
+    const rows = Math.ceil(MAX_TABLE_CELLS / MAX_CELL_COLSPAN) + 1;
+    const html =
+      '<table>' + `<tr><td colspan="${MAX_CELL_COLSPAN}">x</td></tr>`.repeat(rows) + '</table>';
+    const { document, report } = docx(html);
+    expect(document).not.toContain('<w:tbl>');
+    expect(document).toContain('Table omitted');
+    expect(document).toContain('cells this export can write');
+    expect(report.tablesSkipped).toBe(1);
+  });
+
+  it('writes the rest of the document around an omitted table', () => {
+    const { document } = docx(
+      '<p>before</p><table><tr><td colspan="1000">a</td><td colspan="1000">b</td></tr></table><p>after</p>',
+    );
+    expect(document.indexOf('before')).toBeLessThan(document.indexOf('Table omitted'));
+    expect(document.indexOf('Table omitted')).toBeLessThan(document.indexOf('after'));
   });
 });

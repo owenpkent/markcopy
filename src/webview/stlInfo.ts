@@ -134,30 +134,52 @@ export function sniffStl(bytes: Uint8Array): StlSniffResult {
   return { format: 'binary', triangles: binaryTriangleCount(bytes) };
 }
 
-// How far in to look for the "facet" that confirms an ASCII file. The first
-// facet follows the solid name, which is one line in every exporter anyone has
-// seen, but 1 KiB was tight enough that a long name pushed a perfectly good
-// ASCII file onto the binary path, where its text got read as a uint32 count and
-// it was rejected as "possibly corrupt or malicious". 64 KiB costs one decode of
-// at most that much and removes the class of false accusation.
-const ASCII_SNIFF_BYTES = 64 * 1024;
+// The bytes of "solid", and the offsets the loader looks for them at. Up to five
+// bytes of encoding prefix (a BOM) may precede the text, so offsets 0 through 4
+// are tried; the match is byte-exact and case-sensitive.
+const SOLID = [0x73, 0x6f, 0x6c, 0x69, 0x64];
+const SOLID_MAX_OFFSET = 5;
 
-// ASCII STL files start with "solid" and, within the same header region,
-// contain a "facet" keyword introducing the first triangle. Binary STL files
-// can technically start with the bytes "solid" too (the 80-byte header is
-// free-form text), so requiring "facet" nearby as well avoids misclassifying
-// those as ASCII.
+// Whether STLLoader will take the ASCII path for `bytes`.
+//
+// This is a byte-for-byte restatement of the `isBinary` test in the pinned
+// three.js STLLoader (examples/jsm/loaders/STLLoader.js), and it has to stay
+// one. checkStl() applies the binary length and count guards only to files it
+// classifies as binary, and the loader allocates its vertex arrays from the
+// header count only on the path *it* picks, so any header the two classify
+// differently is a file that skips the guards and reaches those allocations
+// anyway. The previous sniff was friendlier (case-insensitive, leading
+// whitespace, "facet" required) and that friendliness was the gap: "SOLID
+// facet" passed here as ASCII and went to the loader as binary.
+//
+//  1. A length exactly matching the header's own triangle count is binary,
+//     whatever the header spells. The 80-byte header is free-form text and
+//     exporters do write "solid" there.
+//  2. Otherwise lowercase "solid" starting at any of offsets 0..4 is ASCII.
+//  3. Anything else is binary.
 function looksAscii(bytes: Uint8Array): boolean {
-  // A file whose length is exactly what its own header's triangle count implies
-  // is binary, whatever that header spells. Checked first because the header is
-  // free-form text, "solid" is a common thing for an exporter to write there,
-  // and this is the one signal that cannot be a coincidence in a real file.
   const declared = binaryTriangleCount(bytes);
   if (declared !== null && 84 + declared * 50 === bytes.byteLength) {
     return false;
   }
-  const head = decodeLatin1(bytes.subarray(0, Math.min(bytes.length, ASCII_SNIFF_BYTES)));
-  return /^\s*solid\b/i.test(head) && /facet/i.test(head);
+  for (let off = 0; off < SOLID_MAX_OFFSET; off++) {
+    if (matchesAt(bytes, SOLID, off)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function matchesAt(bytes: Uint8Array, query: readonly number[], offset: number): boolean {
+  if (offset + query.length > bytes.length) {
+    return false;
+  }
+  for (let i = 0; i < query.length; i++) {
+    if (bytes[offset + i] !== query[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // A binary STL is: 80-byte header, uint32 LE triangle count, then 50 bytes per
@@ -175,14 +197,6 @@ function binaryTriangleCount(bytes: Uint8Array): number | null {
 
 function formatMib(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MiB`;
-}
-
-function decodeLatin1(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) {
-    s += String.fromCharCode(bytes[i]);
-  }
-  return s;
 }
 
 export interface StlCheck {

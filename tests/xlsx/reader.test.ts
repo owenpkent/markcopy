@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
 import { renderWorkbookHtml, WorkbookError } from '../../src/xlsx';
 import { columnName } from '../../src/xlsx/render';
-import { columnOf } from '../../src/xlsx/sheet';
+import { columnOf, columnRange } from '../../src/xlsx/sheet';
 import { buildXlsx, row, sheetData } from './fixture';
 
 /** Render a one-sheet workbook and return its HTML. */
@@ -240,6 +240,67 @@ describe('structure', () => {
         sheetData([row(1, '<c r="A1"><v>1</v></c><c r="B1"><v>2</v></c>')]),
     );
     expect(cells(hiddenCol)[0]).toEqual(['2']);
+  });
+
+  describe('<col> ranges', () => {
+    // The two cells every case below renders, so a range that is skipped leaves
+    // both visible and a range that applies hides A.
+    const twoCells = sheetData([row(1, '<c r="A1"><v>1</v></c><c r="B1"><v>2</v></c>')]);
+
+    it('applies an ordinary range that crosses the column cap, up to the cap', () => {
+      // Columns 2..100000 at width 20: only B is rendered, at the width given,
+      // and the loop stops at the cap rather than at the range's end.
+      const html = render(`<cols><col min="2" max="100000" width="20"/></cols>` + twoCells);
+      const cols = html.match(/<col[ >][^>]*>/g) ?? [];
+      // Gutter, A (no width), B (styled).
+      expect(cols).toHaveLength(3);
+      expect(cols[1]).toBe('<col />');
+      expect(cols[2]).toContain('width:145px');
+      expect(html).not.toContain('markcopy.xlsx.maxColumns');
+    });
+
+    it('skips a range whose min is negative instead of expanding columns left of A', () => {
+      // min="-10000" previously produced 10,201 hidden-column entries for a
+      // 200-column cap. Rejected outright, it hides nothing.
+      const html = render(`<cols><col min="-10000" max="200" hidden="1"/></cols>` + twoCells);
+      expect(cells(html)[0]).toEqual(['1', '2']);
+    });
+
+    it('skips a reversed range', () => {
+      const html = render(`<cols><col min="2" max="1" hidden="1"/></cols>` + twoCells);
+      expect(cells(html)[0]).toEqual(['1', '2']);
+    });
+
+    it('skips a range that starts past the column cap', () => {
+      const html = render(`<cols><col min="201" max="300" hidden="1"/></cols>` + twoCells);
+      expect(cells(html)[0]).toEqual(['1', '2']);
+    });
+
+    it('skips a zero or non-numeric bound', () => {
+      expect(columnRange({ min: '0', max: '5' }, 200)).toBeUndefined();
+      expect(columnRange({ min: 'A', max: '5' }, 200)).toBeUndefined();
+      expect(columnRange({ min: '1', max: 'Infinity' }, 200)).toBeUndefined();
+    });
+
+    it('rejects bounds outside the safe-integer range before any loop runs', () => {
+      // A negative number this large satisfies `c + 1 === c`, so a loop that
+      // started from it would never advance and never end. Checked on the pure
+      // helper so a regression fails the test instead of hanging the suite.
+      expect(columnRange({ min: '-99999999999999999999', max: '200' }, 200)).toBeUndefined();
+      // An unsafe `max` would be harmless after the cap, but a bound no
+      // spreadsheet can have is a malformed element, not a wide one.
+      expect(columnRange({ min: '1', max: '99999999999999999999' }, 200)).toBeUndefined();
+      expect(columnRange({ min: '99999999999999999999', max: '99999999999999999999' }, 200)).toBe(
+        undefined,
+      );
+    });
+
+    it('intersects a valid range with the cap and keeps a plain one as is', () => {
+      expect(columnRange({ min: '1', max: '200' }, 200)).toEqual([1, 200]);
+      expect(columnRange({ min: '150', max: '250' }, 200)).toEqual([150, 200]);
+      expect(columnRange({ min: '3' }, 200)).toEqual([3, 3]);
+      expect(columnRange({ max: '4' }, 200)).toEqual([1, 4]);
+    });
   });
 
   it('opens the first visible sheet when the workbook starts with a hidden one', () => {
