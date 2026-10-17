@@ -495,6 +495,12 @@
           "minimum": 1,
           "description": "Maximum number of CSV/TSV rows to render. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large files."
         },
+        "markcopy.csv.maxColumns": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Maximum number of CSV/TSV columns to render. The preview says how many columns it is hiding. The grid also draws at most 500,000 cells in total, so a very wide file shows fewer rows."
+        },
         "markcopy.xlsx.maxRows": {
           "type": "number",
           "default": 5000,

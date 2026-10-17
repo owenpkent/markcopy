@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { checkStl, MAX_STL_BYTES, MAX_TRIANGLES, sniffStl, toBytes } from '../src/webview/stlInfo';
 
 // Build a minimal binary STL buffer: 80-byte header + uint32 LE triangle count
@@ -75,6 +76,107 @@ describe('sniffStl', () => {
     const bytes = new Uint8Array(84).fill(0xff);
     // bytes 80-83 are all 0xff -> 4294967295 as an unsigned LE uint32
     expect(sniffStl(bytes)).toEqual({ format: 'binary', triangles: 4294967295 });
+  });
+});
+
+/**
+ * An 84-byte buffer whose header starts with `prefix` and whose count field
+ * declares `count` triangles. 84 bytes is a complete header with no body, so
+ * any count above zero is one the file cannot hold.
+ */
+function headerOnly(prefix: number[] | string, count: number): Uint8Array {
+  const bytes = new Uint8Array(84);
+  const head = typeof prefix === 'string' ? Array.from(new TextEncoder().encode(prefix)) : prefix;
+  bytes.set(head.slice(0, 80), 0);
+  new DataView(bytes.buffer).setUint32(80, count, true);
+  return bytes;
+}
+
+/** Which parser the pinned STLLoader picks, observed without allocating anything big. */
+function loaderPath(bytes: Uint8Array): 'binary' | 'ascii' {
+  // On these 84-byte fixtures the two paths are told apart by what they do:
+  // the binary parser reads `count` triangles past the end of the buffer and
+  // throws a DataView bounds error, while the ASCII parser scans the text for
+  // "solid ... endsolid", finds none, and returns an empty geometry.
+  try {
+    new STLLoader().parse(bytes.buffer.slice(0) as ArrayBuffer);
+    return 'ascii';
+  } catch {
+    return 'binary';
+  }
+}
+
+describe('format classification agrees with STLLoader', () => {
+  // Every case here is checked twice: once against sniffStl, and once against
+  // the loader the webview actually hands the bytes to. The guards in checkStl
+  // apply to what sniffStl calls binary, and the loader allocates from the
+  // header count on what *it* calls binary, so the two disagreeing is a file
+  // that skips the guards. The declared count is small and the buffer is a bare
+  // header, so a wrong answer costs a thrown error, not an allocation.
+  const cases: { name: string; bytes: Uint8Array; format: 'binary' | 'ascii' }[] = [
+    { name: 'lowercase "solid" at offset 0', bytes: headerOnly('solid facet', 1), format: 'ascii' },
+    {
+      name: '"solid" with no "facet" anywhere',
+      bytes: headerOnly('solid cube', 1),
+      format: 'ascii',
+    },
+    {
+      name: 'a UTF-8 BOM before "solid"',
+      bytes: headerOnly([0xef, 0xbb, 0xbf, 0x73, 0x6f, 0x6c, 0x69, 0x64], 1),
+      format: 'ascii',
+    },
+    { name: '"solid" at offset 4', bytes: headerOnly('    solid', 1), format: 'ascii' },
+    { name: 'uppercase "SOLID facet"', bytes: headerOnly('SOLID facet', 1), format: 'binary' },
+    {
+      name: 'five spaces then "solid facet"',
+      bytes: headerOnly('     solid facet', 1),
+      format: 'binary',
+    },
+    // One byte of anything before "solid" is within the five the loader skips.
+    { name: 'a tab then "solid"', bytes: headerOnly('\tsolid facet', 1), format: 'ascii' },
+    { name: '"solid" at offset 5', bytes: headerOnly('xxxxxsolid', 1), format: 'binary' },
+    {
+      name: 'a header that merely mentions facets',
+      bytes: headerOnly('facet normal', 1),
+      format: 'binary',
+    },
+  ];
+
+  for (const c of cases) {
+    it(`classifies ${c.name} as ${c.format}, as the loader does`, () => {
+      expect(sniffStl(c.bytes).format).toBe(c.format);
+      expect(loaderPath(c.bytes)).toBe(c.format);
+    });
+  }
+
+  it('applies the binary guards to every header the loader parses as binary', () => {
+    // These passed the old sniff as ASCII with a count above the triangle cap,
+    // and so reached the loader, which parsed them as binary and sized its
+    // arrays from that count.
+    for (const prefix of ['SOLID facet', '     solid facet']) {
+      const over = headerOnly(prefix, MAX_TRIANGLES + 1);
+      const r = checkStl(over);
+      expect(r.ok).toBe(false);
+      expect(r.format).toBe('binary');
+      expect(r.reason).toMatch(/more than the file can hold/i);
+    }
+  });
+
+  it('still reads a binary file whose length matches its count as binary, whatever it spells', () => {
+    const bytes = makeBinaryStl(1);
+    bytes.set(new TextEncoder().encode('solid facet'), 0);
+    expect(sniffStl(bytes).format).toBe('binary');
+    // A complete one-triangle body, so the binary parser succeeds and yields
+    // three vertices; the ASCII parser would find no "endsolid" and yield none.
+    const geometry = new STLLoader().parse(bytes.buffer.slice(0) as ArrayBuffer);
+    expect(geometry.getAttribute('position').count).toBe(3);
+  });
+
+  it('parses a lowercase ASCII solid through the loader as ASCII', () => {
+    const bytes = new TextEncoder().encode(makeAsciiStl());
+    expect(sniffStl(bytes).format).toBe('ascii');
+    const geometry = new STLLoader().parse(bytes.buffer.slice(0) as ArrayBuffer);
+    expect(geometry.getAttribute('position').count).toBe(3);
   });
 });
 
