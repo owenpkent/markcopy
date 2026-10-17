@@ -133,7 +133,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
   }
   if (ctx.output.truncated) {
     html +=
-      '<p class="mc-docx-note">Some repeated images are not shown, to keep the preview a reasonable size.</p>';
+      '<p class="mc-docx-note">Some repeated images or charts are not shown, to keep the preview a reasonable size.</p>';
   }
   return {
     html: `<div class="mc-docx">${html}</div>`,

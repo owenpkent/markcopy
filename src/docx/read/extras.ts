@@ -14,7 +14,7 @@ import { attr, relAttr } from '../../ooxml/xml';
 import { child, children, findAll, findDeep, type XNode } from '../../ooxml/xnode';
 import { partText } from '../../ooxml/zip';
 import { renderBlocks } from './blocks';
-import { type ReadCtx } from './context';
+import { spendOutput, type ReadCtx } from './context';
 import { parseXml } from '../../ooxml/xnode';
 
 /** Text boxes inside text boxes are real but rare; past this they are dropped. */
@@ -151,7 +151,7 @@ function renderChart(rid: string | undefined, alt: string, ctx: ReadCtx): string
     return placeholder(alt ? `Chart (data not available): ${alt}` : 'Chart (data not available)');
   }
   try {
-    const html = chartFigure(xml, alt);
+    const html = chartFigure(xml, alt, ctx);
     if (html !== undefined) {
       return html;
     }
@@ -161,7 +161,7 @@ function renderChart(rid: string | undefined, alt: string, ctx: ReadCtx): string
   return placeholder(alt ? `Chart (no data to show): ${alt}` : 'Chart (no data to show)');
 }
 
-function chartFigure(xml: string, alt: string): string | undefined {
+function chartFigure(xml: string, alt: string, ctx: ReadCtx): string | undefined {
   const space = parseXml(xml).children[0];
   const chart = space && child(space, 'chart');
   const plot = chart && child(chart, 'plotArea');
@@ -237,6 +237,22 @@ function chartFigure(xml: string, alt: string): string | undefined {
     }
   }
   const rows = Math.min(MAX_CHART_ROWS, Math.max(...cols.map((c) => c.cache?.pts.length ?? 0)));
+
+  // Every reference to a chart expands its table again, so each one is charged
+  // against the document-wide output budget before any markup is built.
+  let cost = 256 + head.reduce((n, h) => n + 24 + h.length, 0) + rows * 9;
+  for (const c of cols) {
+    for (let r = 0; r < rows; r++) {
+      cost += 9 + (c.cache?.pts[r]?.length ?? 0);
+    }
+  }
+  if (!spendOutput(ctx, cost)) {
+    return placeholder(
+      alt
+        ? `Chart (not shown, size limit reached): ${alt}`
+        : 'Chart (not shown, size limit reached)',
+    );
+  }
 
   let html = `<tr>${head.map((h) => `<th scope="col">${escapeHtml(h)}</th>`).join('')}</tr>`;
   const body: string[] = [];

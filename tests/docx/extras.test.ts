@@ -592,4 +592,28 @@ describe('charts', () => {
     expect(d.querySelector('figure b, figure i, figure u')).toBeNull();
     expect(text(d.querySelector('figcaption'))).toBe('<b>T</b> (Bar chart)');
   });
+
+  it('charges every reference to a chart against the output budget', () => {
+    const pts = Array.from({ length: 2000 }, (_, i) => `row${i}`);
+    const chart = space(
+      `<c:plotArea><c:barChart>${ser('S', str(...pts), nums('General', ...pts.map(() => '1')))}</c:barChart></c:plotArea>`,
+    );
+    const many = Array.from({ length: 100 }, () => chartDrawing('Sales')).join('');
+    const spec = withChart(chart, many);
+    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 1_000_000 });
+    // One expansion is about 70 KB, so only a few fit; the rest are placeholders.
+    const figures = out.html.match(/<figure/g)?.length ?? 0;
+    expect(figures).toBeGreaterThan(0);
+    expect(figures).toBeLessThan(20);
+    expect(out.html.match(/Chart \(not shown, size limit reached\): Sales/g)).toHaveLength(
+      100 - figures,
+    );
+    expect(out.html.length).toBeLessThan(1_100_000);
+    expect(out.truncated).toBe(true);
+    expect(out.html).toContain('Some repeated images or charts are not shown');
+    // Within the budget nothing is cut.
+    const fits = renderDocxHtml(buildDocx(withChart(chart, many.slice(0, many.length / 100))));
+    expect(fits.html.match(/<figure/g)).toHaveLength(1);
+    expect(fits.truncated).toBe(false);
+  });
 });

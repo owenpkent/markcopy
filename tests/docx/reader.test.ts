@@ -847,7 +847,7 @@ describe('images', () => {
     expect(out.html.match(/mc-docx-placeholder/g)).toHaveLength(96);
     expect(out.html.length).toBeLessThan(20_000);
     expect(out.truncated).toBe(true);
-    expect(out.html).toContain('Some repeated images are not shown');
+    expect(out.html).toContain('Some repeated images or charts are not shown');
     // Within the budget nothing is cut.
     const fits = renderDocxHtml(buildDocx(spec));
     expect(fits.html.match(/<img/g)).toHaveLength(100);
