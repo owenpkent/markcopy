@@ -205,6 +205,8 @@ Differences worth stating:
 
 - **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole document.** There is no tab strip and nothing is paged. A document past the 50,000-paragraph cap has content the preview never rendered, and the copies see only what rendered.
 - **What you copy is the final text.** Deleted tracked changes are not in the preview, so they are not on the clipboard. Footnote back arrows are chrome and are left out of every copy.
+- **A chart copies as a table.** A chart is drawn as a table of its saved values, so **Copy Table** offers Rich Text, Markdown, CSV, TSV, and PNG, as for any other table.
+- **Headers, footers, and comments are left out.** The page header and footer, comment markers, the Comments section, and the comment highlight are chrome: every copy and export drops them and keeps the commented text. A selection copied as Markdown drops them too. Text boxes are content and are copied.
 - **Equations are math blocks.** A Word equation is converted to LaTeX and rendered like Markdown math, so the [Equation](#equation-katex) actions (**Copy Equation** as a PNG, **Copy as** > **LaTeX**) apply to it, and **Copy as** > **Markdown** writes `$...$` or `$$...$$`. Turning `markcopy.math` off shows the LaTeX as code instead. Save as Word from the preview writes the equation as an image.
 - **Unsupported content copies as its placeholder.** An EMF or WMF picture, a linked picture, and one past the image budget are labelled boxes, not images.
 - **Save as Word from a Word preview** offers a file name based on the source, so check the destination before saving over the original.

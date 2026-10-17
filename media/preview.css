@@ -1507,3 +1507,79 @@ body.mc-editing-enabled #content a {
 .mc-hl-bold {
   -webkit-text-stroke: 0.6px currentColor;
 }
+
+/* Word headers and footers: page chrome shown once at the top and bottom of the
+   continuous column. Muted so they read as furniture, not content. */
+.mc-docx-pagehead,
+.mc-docx-pagefoot {
+  font-size: 0.85em;
+  color: var(--mc-muted-fg);
+}
+
+.mc-docx-pagehead {
+  margin-bottom: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.mc-docx-pagefoot {
+  margin-top: 28px;
+  padding-top: 8px;
+  border-top: 1px solid var(--mc-border);
+}
+
+/* A text box: the content of a drawn box, set after the paragraph that anchors it. */
+.mc-docx-textbox {
+  margin: 10px 0;
+  padding: 6px 12px;
+  border: 1px solid var(--mc-border);
+  border-radius: 4px;
+}
+
+/* A commented range, its marker, and the Comments section. */
+.mc-docx mark.mc-docx-comment {
+  background: color-mix(in srgb, #f5c542 32%, transparent);
+  color: inherit;
+}
+
+.mc-docx-commentref {
+  font-size: 0.75em;
+}
+
+.mc-docx-comments {
+  margin-top: 28px;
+  font-size: 0.9em;
+}
+
+.mc-docx-comments-title {
+  font-size: 1em;
+  border: 0;
+  margin: 8px 0;
+}
+
+.mc-docx-cmeta {
+  color: var(--mc-muted-fg);
+  font-size: 0.9em;
+}
+
+.mc-docx-cauthor {
+  font-weight: 600;
+  color: var(--mc-fg);
+}
+
+.mc-docx-resolved {
+  padding: 0 6px;
+  border: 1px solid var(--mc-border);
+  border-radius: 999px;
+  font-size: 0.85em;
+}
+
+/* A chart drawn as the table of its cached data. */
+.mc-docx-chart {
+  margin: 12px 0;
+}
+
+.mc-docx-chart figcaption {
+  font-weight: 600;
+  margin-bottom: 4px;
+}

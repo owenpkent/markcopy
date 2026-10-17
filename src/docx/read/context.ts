@@ -8,6 +8,7 @@ import { type Rels } from '../../ooxml/rels';
 import { type MediaBudget } from '../../ooxml/media';
 import { type Parts } from '../../ooxml/zip';
 import { type XNode } from '../../ooxml/xnode';
+import { type ChartParts } from './extras';
 import { type Numbering } from './numbering';
 import { type Styles } from './styles';
 
@@ -25,12 +26,32 @@ export interface NoteBook {
   order: string[];
 }
 
+/** One comment from word/comments.xml. */
+export interface CommentDef {
+  node: XNode;
+  author: string;
+  /** `YYYY-MM-DD`, or '' when the file gave no usable date. */
+  date: string;
+  /** The `w14:paraId` of the comment's last paragraph, which `commentsExtended` keys on. */
+  paraId?: string;
+}
+
+/** Comments: the definitions, the ids the body referenced in order, and the thread data. */
+export interface CommentBook {
+  defs: Map<string, CommentDef>;
+  order: string[];
+  /** paraId -> `{ parent paraId, done }` from word/commentsExtended.xml. */
+  extended: Map<string, { parent?: string; done: boolean }>;
+}
+
 export interface ReadCtx {
   parts: Parts;
   styles: Styles;
   numbering: Numbering;
   media: MediaBudget;
   imageCache: Map<string, string>;
+  /** Chart parts already read, by part path; null for one with nothing to show. */
+  chartCache: Map<string, ChartParts | null>;
   rels: PartRels;
   /** Bookmark ids already emitted; the first claim on an id wins. */
   bookmarks: Set<string>;
@@ -40,6 +61,17 @@ export interface ReadCtx {
   seenLevels: Set<string>;
   footnotes: NoteBook;
   endnotes: NoteBook;
+  comments: CommentBook;
+  /** Comment ranges opened and not yet closed, so a range can cross paragraphs. */
+  openComments: Set<string>;
+  /**
+   * Block markup (text boxes, charts) found while reading a paragraph's runs.
+   * Block content cannot live inside a `<p>`, so the block reader drains this
+   * and places it after the paragraph.
+   */
+  afterPara: string[];
+  /** How deep text boxes nest inside text boxes; bounded so a crafted file stays cheap. */
+  boxDepth: number;
   /** Draw equations as KaTeX placeholders (`markcopy.math`); off shows their LaTeX as code. */
   math: boolean;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */
@@ -123,4 +155,25 @@ export function noteRefHtml(ctx: ReadCtx, kind: NoteKind, id: string): string {
     `<sup class="mc-docx-noteref"><a href="#${noteDomId(kind, id, 'note')}" ` +
     `id="${noteDomId(kind, id, 'ref')}">${n}</a></sup>`
   );
+}
+
+/** The superscript marker for a comment, or '' when the file defines no such comment. */
+export function commentRefHtml(ctx: ReadCtx, id: string): string {
+  if (!ctx.comments.defs.has(id)) {
+    return '';
+  }
+  let n = ctx.comments.order.indexOf(id) + 1;
+  if (n === 0) {
+    ctx.comments.order.push(id);
+    n = ctx.comments.order.length;
+  }
+  const dom = commentDomId(id);
+  return (
+    `<sup class="mc-docx-commentref" data-mc-ignore="1"><a href="#mc-cm-${dom}" ` +
+    `id="mc-cmref-${dom}" aria-label="Comment ${n}">C${n}</a></sup>`
+  );
+}
+
+export function commentDomId(id: string): string {
+  return id.slice(0, MAX_ID).replace(/[^A-Za-z0-9_-]/g, '-');
 }

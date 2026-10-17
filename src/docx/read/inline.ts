@@ -10,12 +10,22 @@
 //
 // Track changes read as the final text: `w:ins` and `w:moveTo` content is
 // kept, `w:del` and `w:moveFrom` content is dropped. Fields show their cached
-// result. Comments, text boxes, and anything else not named here are skipped.
+// result, except page-number fields. Comment ranges become `<mark>` spans, and
+// text boxes and charts are handed to the block reader (see extras.ts) because
+// block markup cannot live inside a paragraph. Anything else not named is skipped.
 import { escapeAttr, escapeHtml } from '../../escape';
 import { imageDataUri } from '../../ooxml/media';
 import { attr, relAttr } from '../../ooxml/xml';
 import { child, findAll, findDeep, type XNode } from '../../ooxml/xnode';
-import { bookmarkId, noteRefHtml, safeHref, spendOutput, type ReadCtx } from './context';
+import {
+  bookmarkId,
+  commentRefHtml,
+  noteRefHtml,
+  safeHref,
+  spendOutput,
+  type ReadCtx,
+} from './context';
+import { drawingExtras, inTextBox, textBoxes } from './extras';
 import { mathParaMembers, ommlToLatex } from './omml';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
 
@@ -78,7 +88,9 @@ export function readInline(
   paraProps: RunProps = {},
 ): InlineResult {
   const walker = new InlineWalker(ctx, paraMono, paraProps);
+  walker.beginComments();
   walker.nodes(p.children, undefined);
+  walker.endComments();
   return finish(walker.atoms);
 }
 
@@ -112,11 +124,17 @@ interface Field {
   phase: 'instr' | 'result';
   instr: string;
   link?: Link;
+  /** A page-number field: its cached result means nothing in a continuous preview. */
+  drop?: boolean;
 }
+
+const PAGE_FIELD = /^\s*(PAGE|NUMPAGES|SECTIONPAGES)(?![A-Za-z])/i;
 
 class InlineWalker {
   readonly atoms: Atom[] = [];
   private readonly fields: Field[] = [];
+  /** Comment ranges open in this paragraph, outermost first. */
+  private readonly openMarks: string[] = [];
 
   constructor(
     private readonly ctx: ReadCtx,
@@ -139,7 +157,15 @@ class InlineWalker {
         this.nodes(n.children, this.hyperlinkOf(n) ?? link);
         break;
       case 'fldSimple':
-        this.nodes(n.children, fieldLink(attr(n.attrs, 'instr')) ?? link);
+        if (!PAGE_FIELD.test(attr(n.attrs, 'instr') ?? '')) {
+          this.nodes(n.children, fieldLink(attr(n.attrs, 'instr')) ?? link);
+        }
+        break;
+      case 'commentRangeStart':
+        this.commentStart(attr(n.attrs, 'id'));
+        break;
+      case 'commentRangeEnd':
+        this.commentEnd(attr(n.attrs, 'id'));
         break;
       // Inserted and moved-to text is the final text. Deleted and moved-from
       // text is not, and is not listed here, so it is skipped.
@@ -172,6 +198,54 @@ class InlineWalker {
       default:
         break;
     }
+  }
+
+  beginComments(): void {
+    for (const id of this.ctx.openComments) {
+      this.markOpen(id);
+    }
+  }
+
+  endComments(): void {
+    while (this.openMarks.length > 0) {
+      this.openMarks.pop();
+      this.raw('</mark>');
+    }
+  }
+
+  private commentStart(id: string | undefined): void {
+    if (id !== undefined && this.ctx.comments.defs.has(id) && !this.ctx.openComments.has(id)) {
+      this.ctx.openComments.add(id);
+      this.markOpen(id);
+    }
+  }
+
+  private commentEnd(id: string | undefined): void {
+    if (id === undefined) {
+      return;
+    }
+    this.ctx.openComments.delete(id);
+    const at = this.openMarks.lastIndexOf(id);
+    if (at === -1) {
+      return;
+    }
+    // Close the ranges nested inside this one, then the range, then reopen
+    // the inner ones so each keeps its own text.
+    const inner = this.openMarks.splice(at + 1);
+    this.openMarks.pop();
+    this.raw('</mark>'.repeat(inner.length + 1));
+    for (const other of inner) {
+      this.markOpen(other);
+    }
+  }
+
+  private markOpen(id: string): void {
+    this.openMarks.push(id);
+    this.raw(`<mark class="mc-docx-comment" data-mc-comment="${escapeAttr(id)}">`);
+  }
+
+  private raw(html: string): void {
+    this.atoms.push({ kind: 'html', html, content: false });
   }
 
   private math(n: XNode, display: boolean): void {
@@ -232,7 +306,7 @@ class InlineWalker {
 
   /** Inside a field's instruction, where nothing is shown. */
   private hidden(): boolean {
-    return this.fields.some((f) => f.phase === 'instr');
+    return this.fields.some((f) => f.phase === 'instr' || f.drop);
   }
 
   private run(r: XNode, link: Link | undefined): void {
@@ -294,7 +368,7 @@ class InlineWalker {
         // Word wraps a drawing in Choice (modern) and Fallback (VML, a second
         // copy of the same picture). Reading both would show every image twice.
         case 'AlternateContent': {
-          const choice = child(c, 'Choice');
+          const choice = child(c, 'Choice') ?? child(c, 'Fallback');
           if (choice !== undefined) {
             this.runChildren(choice.children, props, link);
           }
@@ -307,6 +381,14 @@ class InlineWalker {
             const html = noteRefHtml(this.ctx, kind, attr(c.attrs, 'id') ?? '');
             if (html !== '') {
               this.atoms.push({ kind: 'html', html, content: true });
+            }
+          }
+          break;
+        case 'commentReference':
+          if (this.shown(props)) {
+            const html = commentRefHtml(this.ctx, attr(c.attrs, 'id') ?? '');
+            if (html !== '') {
+              this.atoms.push({ kind: 'html', html, content: false });
             }
           }
           break;
@@ -334,6 +416,7 @@ class InlineWalker {
       if (f !== undefined) {
         f.phase = 'result';
         f.link = fieldLink(f.instr);
+        f.drop = PAGE_FIELD.test(f.instr);
       }
     } else if (type === 'end') {
       this.fields.pop();
@@ -369,12 +452,17 @@ class InlineWalker {
   }
 
   private drawing(d: XNode, link: Link | undefined): void {
+    const extras = drawingExtras(d, this.ctx);
+    for (const html of extras.inline) {
+      this.atoms.push({ kind: 'html', html, content: true, link: this.link(link) });
+    }
     const host = child(d, 'inline') ?? child(d, 'anchor');
     const docPr = host && child(host, 'docPr');
     const docAlt = docPr
       ? attr(docPr.attrs, 'descr')?.trim() || attr(docPr.attrs, 'title')?.trim() || ''
       : '';
-    const pics = findAll(d, 'pic');
+    // A text box's pictures belong to the box, which the extras reader has rendered.
+    const pics = findAll(d, 'pic', inTextBox);
     const extent = host && child(host, 'extent');
     for (const pic of pics) {
       const cNvPr = findDeep(pic, 'cNvPr');
@@ -392,8 +480,13 @@ class InlineWalker {
   }
 
   private pict(p: XNode, link: Link | undefined): void {
+    this.ctx.afterPara.push(...textBoxes(p, this.ctx));
     for (const c of p.children) {
-      const data = c.name === 'imagedata' ? c : findDeep(c, 'imagedata');
+      // A text box's own pictures are rendered with the box, not a second time here.
+      if (inTextBox(c)) {
+        continue;
+      }
+      const data = c.name === 'imagedata' ? c : findDeep(c, 'imagedata', inTextBox);
       if (data === undefined) {
         continue;
       }

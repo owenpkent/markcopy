@@ -8,8 +8,13 @@
 // under test.
 import { strToU8, unzipSync, zipSync } from 'fflate';
 
-const NS =
+export const NS =
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+  'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" ' +
+  'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" ' +
+  'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" ' +
+  'xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" ' +
+  'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" ' +
   'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
   'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
   'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
@@ -17,8 +22,8 @@ const NS =
   'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ' +
   'xmlns:v="urn:schemas-microsoft-com:vml"';
 
-const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+export const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+export const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 
 export interface DocxSpec {
   /** Inner XML of `<w:body>`. */

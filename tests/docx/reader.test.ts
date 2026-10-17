@@ -847,7 +847,7 @@ describe('images', () => {
     expect(out.html.match(/mc-docx-placeholder/g)).toHaveLength(96);
     expect(out.html.length).toBeLessThan(20_000);
     expect(out.truncated).toBe(true);
-    expect(out.html).toContain('Some repeated images are not shown');
+    expect(out.html).toContain('Some repeated images or charts are not shown');
     // Within the budget nothing is cut.
     const fits = renderDocxHtml(buildDocx(spec));
     expect(fits.html.match(/<img/g)).toHaveLength(100);
@@ -899,7 +899,7 @@ describe('track changes and fields', () => {
 
   it('shows the result of a simple field', () => {
     const out = body({
-      body: para('<w:fldSimple w:instr=" PAGE ">' + run('7') + '</w:fldSimple>'),
+      body: para('<w:fldSimple w:instr=" TIME ">' + run('7') + '</w:fldSimple>'),
     });
     expect(out).toBe('<p>7</p>');
   });
@@ -924,14 +924,12 @@ describe('track changes and fields', () => {
     expect(out).toBe('<p>shown</p>');
   });
 
-  it('skips comments, headers and text boxes', () => {
+  it('ignores comment markers with no comments part, and unreferenced headers', () => {
     const out = body({
       body:
         `<w:p>${run('text')}<w:commentRangeStart w:id="0"/><w:commentRangeEnd w:id="0"/>` +
         '<w:r><w:commentReference w:id="0"/></w:r></w:p>',
       extra: {
-        'word/comments.xml':
-          '<w:comments xmlns:w="x"><w:comment w:id="0"><w:p><w:r><w:t>COMMENT</w:t></w:r></w:p></w:comment></w:comments>',
         'word/header1.xml': '<w:hdr xmlns:w="x"><w:p><w:r><w:t>HEADER</w:t></w:r></w:p></w:hdr>',
       },
     });

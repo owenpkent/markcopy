@@ -1180,6 +1180,7 @@ async function selectionMarkdown(): Promise<string> {
   }
   // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
+  stripViewerChrome(wrapper);
   const md = (await htmlToMarkdown(wrapper.innerHTML)).trim();
   return md || sel.toString();
 }
@@ -1216,8 +1217,93 @@ function copyText(text: string): void {
 
 function copyRichText(el: HTMLElement): void {
   const html = inlineStyledHtml(el);
-  writeClipboard(html, el.innerText);
+  writeClipboard(html, visibleText(el));
   toast('Copied as rich text');
+}
+
+/**
+ * The element's text as the user sees it, minus viewer chrome. `innerText`
+ * honors `display: none`, so the chrome is hidden for the read and restored.
+ */
+function visibleText(el: HTMLElement): string {
+  const chrome = Array.from(el.querySelectorAll<HTMLElement>('[data-mc-ignore]'));
+  const shown = chrome.map((n) => n.style.display);
+  chrome.forEach((n) => (n.style.display = 'none'));
+  try {
+    return el.innerText;
+  } finally {
+    chrome.forEach((n, i) => (n.style.display = shown[i]));
+  }
+}
+
+const BLOCK_TAGS = new Set([
+  'ADDRESS',
+  'ARTICLE',
+  'ASIDE',
+  'BLOCKQUOTE',
+  'DIV',
+  'FIGCAPTION',
+  'FIGURE',
+  'FOOTER',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'HEADER',
+  'HR',
+  'LI',
+  'OL',
+  'P',
+  'PRE',
+  'SECTION',
+  'TABLE',
+  'TR',
+  'UL',
+]);
+
+/**
+ * Plain text of a detached fragment, keeping the breaks between blocks and rows
+ * and a tab between cells. `innerText` would do this in a browser but needs
+ * layout, which a detached fragment does not have.
+ */
+function blockText(root: Node): string {
+  let out = '';
+  const brk = () => {
+    if (out !== '' && !out.endsWith('\n')) {
+      out += '\n';
+    }
+  };
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent ?? '';
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+    const el = node as Element;
+    const block = BLOCK_TAGS.has(el.tagName);
+    if (el.tagName === 'BR') {
+      out += '\n';
+      return;
+    }
+    if (block) {
+      brk();
+    }
+    if (el.tagName === 'TD' || el.tagName === 'TH') {
+      if (out !== '' && !out.endsWith('\n') && !out.endsWith('\t')) {
+        out += '\t';
+      }
+    }
+    node.childNodes.forEach(walk);
+    if (block) {
+      brk();
+    }
+  };
+  walk(root);
+  return out.trimEnd();
 }
 
 function copyRichFromSelection(): void {
@@ -1229,8 +1315,16 @@ function copyRichFromSelection(): void {
   wrapper.appendChild(sel.getRangeAt(0).cloneContents());
   content.appendChild(wrapper); // attach so computed styles resolve
   const html = inlineStyledHtml(wrapper);
+  // The plain flavor must leave out the same chrome the HTML does. A selection
+  // with none keeps the browser's own text, so other previews are unchanged.
+  const hasChrome = wrapper.querySelector('[data-mc-ignore], mark[data-mc-comment]') !== null;
+  let plain = sel.toString();
+  if (hasChrome) {
+    stripViewerChrome(wrapper);
+    plain = blockText(wrapper);
+  }
   wrapper.remove();
-  writeClipboard(html, sel.toString());
+  writeClipboard(html, plain);
   toast('Copied selection as rich text');
 }
 
@@ -1656,6 +1750,9 @@ function inlineStyledHtml(source: HTMLElement): string {
  */
 function stripViewerChrome(root: HTMLElement): void {
   root.querySelectorAll('[data-mc-ignore]').forEach((el) => el.remove());
+  // A commented range keeps its text and loses the highlight element, so a
+  // copy of a Word document carries the words and none of the review markup.
+  root.querySelectorAll('mark[data-mc-comment]').forEach((el) => el.replaceWith(...el.childNodes));
   root.querySelectorAll('col.mc-csv-gutter-col').forEach((el) => el.remove());
 }
 

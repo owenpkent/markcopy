@@ -4,9 +4,10 @@
 // fidelity surface unit-tests directly. The reader is read-only and lossy by
 // design: it recovers what a person reading the document would call its
 // content (headings, paragraphs with inline formatting, lists, tables, links,
-// images with alt text, footnotes) and leaves layout alone. Page geometry,
-// headers and footers, comments, text boxes and charts are not drawn. Equations
-// become LaTeX (omml.ts) in the placeholder markup the Markdown preview uses.
+// images with alt text, footnotes, comments, text boxes, and charts as data
+// tables) and leaves layout alone. Page geometry is not drawn; the first
+// header and last footer are shown once, as page chrome. Equations become
+// LaTeX (omml.ts) in the placeholder markup the Markdown preview uses.
 //
 // Heading mapping: the `Title` style becomes `<h1 class="mc-docx-title">`, and
 // `Heading 1` through `Heading 6` become `<h1>` through `<h6>`, so a document
@@ -21,8 +22,10 @@ import { attr, walkXml } from '../../ooxml/xml';
 import { child, children, parseXml, type XNode } from '../../ooxml/xnode';
 import { openZip, OpcError, partText, type Parts, type ZipLimits } from '../../ooxml/zip';
 import { renderBlocks } from './blocks';
+import { emptyComments, readComments, renderComments } from './comments';
 import { noteDomId, type NoteBook, type PartRels, type ReadCtx } from './context';
 import { Numbering } from './numbering';
+import { renderPagePart, sectionProps } from './pageParts';
 import { Styles } from './styles';
 
 export { OpcError as DocxError } from '../../ooxml/zip';
@@ -92,6 +95,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
     ),
     media,
     imageCache: new Map(),
+    chartCache: new Map(),
     rels: partRels(parts, mainPath),
     bookmarks: new Set(),
     counters: new Map(),
@@ -101,6 +105,13 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
       order: [],
     },
     endnotes: { defs: soft(() => readNotes(parts, endnotePath, 'endnote'), new Map()), order: [] },
+    comments: soft(
+      () => readComments(parts, `${dir}comments.xml`, `${dir}commentsExtended.xml`),
+      emptyComments(),
+    ),
+    openComments: new Set(),
+    afterPara: [],
+    boxDepth: 0,
     math: opts.math !== false,
     budget: {
       used: 0,
@@ -111,10 +122,14 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
     output: { used: 0, max: media.max, truncated: false },
   };
 
-  const blocks = renderBlocks(body.children, ctx, 0, true);
-  let html = blocks.join('');
+  const sects = sectionProps(body);
+  const relsFor = (path: string): PartRels => partRels(parts, path);
+  let html = renderPagePart('header', sects, ctx, relsFor);
+  html += renderBlocks(body.children, ctx, 0, true).join('');
   html += renderNotes(ctx, 'footnote', ctx.footnotes, partRels(parts, footnotePath));
   html += renderNotes(ctx, 'endnote', ctx.endnotes, partRels(parts, endnotePath));
+  html += renderPagePart('footer', sects, ctx, relsFor);
+  html += renderComments(ctx, partRels(parts, `${dir}comments.xml`));
   if (html === '') {
     html = '<p class="mc-docx-note">This document has no content to show.</p>';
   }
@@ -123,7 +138,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
   }
   if (ctx.output.truncated) {
     html +=
-      '<p class="mc-docx-note">Some repeated images are not shown, to keep the preview a reasonable size.</p>';
+      '<p class="mc-docx-note">Some repeated images or charts are not shown, to keep the preview a reasonable size.</p>';
   }
   return {
     html: `<div class="mc-docx">${html}</div>`,

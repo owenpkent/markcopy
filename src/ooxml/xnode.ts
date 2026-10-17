@@ -66,13 +66,23 @@ export function deep(node: XNode | undefined, ...names: string[]): XNode | undef
   return cur;
 }
 
-/** The first descendant at any depth with this local name, depth-first. */
-export function findDeep(node: XNode, name: string): XNode | undefined {
+/**
+ * The first descendant at any depth with this local name, depth-first. A node
+ * for which `stop` is true is neither matched nor searched.
+ */
+export function findDeep(
+  node: XNode,
+  name: string,
+  stop?: (n: XNode) => boolean,
+): XNode | undefined {
   for (const c of node.children) {
+    if (stop?.(c)) {
+      continue;
+    }
     if (c.name === name) {
       return c;
     }
-    const nested = findDeep(c, name);
+    const nested = findDeep(c, name, stop);
     if (nested !== undefined) {
       return nested;
     }
@@ -80,11 +90,17 @@ export function findDeep(node: XNode, name: string): XNode | undefined {
   return undefined;
 }
 
-/** Every descendant at any depth with this local name, in document order. */
-export function findAll(node: XNode, name: string): XNode[] {
+/**
+ * Every descendant at any depth with this local name, in document order. A node
+ * for which `stop` is true is neither matched nor searched.
+ */
+export function findAll(node: XNode, name: string, stop?: (n: XNode) => boolean): XNode[] {
   const out: XNode[] = [];
   const visit = (n: XNode): void => {
     for (const c of n.children) {
+      if (stop?.(c)) {
+        continue;
+      }
       if (c.name === name) {
         out.push(c);
       }
