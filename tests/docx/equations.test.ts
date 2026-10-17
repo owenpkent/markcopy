@@ -51,9 +51,13 @@ const PANDOC: Record<number, string> = {
   17: '\\sin x+\\cos^{2}\\theta=\\ln y',
   18: '\\lim_{x\\rightarrow0}\\frac{\\sin x}{x}=1',
   19: '\\hat{x}+\\vec{v}+\\bar{y}+\\tilde{z}+\\dot{w}',
+  // Pandoc writes \quad as U+2001 and \qquad as two of them; plain spaces would
+  // vanish in math mode, so they must come back as LaTeX spacing.
+  12: '\\iint_{D} f\\,dA\\quad \\quad \\prod\\limits_{k=1}^{m} a_{k}',
   21: '\\binom{n}{k}=\\frac{n!}{k!(n-k)!}',
-  23: '\\underbrace{a+b}_{\\text{sum}} \\overbrace{c+d}^{n}',
-  24: 'A\\cup B\\subseteq C, x\\in\\mathbb{R}, \\forall x\\exists y',
+  23: '\\underbrace{a+b}_{\\text{sum}}\\quad \\overbrace{c+d}^{n}',
+  24: 'A\\cup B\\subseteq C,\\quad x\\in\\mathbb{R},\\quad \\forall x\\exists y',
+  27: 'x\\text{ and }y\\quad \\mathrm{d}x\\quad \\partial f/\\partial x',
 };
 
 describe.each(['equations.docx', 'equations-lo.docx'])('real document: %s', (name) => {
