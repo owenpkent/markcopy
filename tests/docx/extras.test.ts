@@ -1,5 +1,19 @@
 // Headers and footers, text boxes, comments, and charts in the .docx reader.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const chartParses = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../../src/ooxml/xnode', async (orig) => {
+  const mod = await orig<Record<string, unknown> & { parseXml: (xml: string) => unknown }>();
+  return {
+    ...mod,
+    parseXml: (xml: string) => {
+      if (xml.includes('chartSpace')) {
+        chartParses.count++;
+      }
+      return mod.parseXml(xml);
+    },
+  };
+});
 import { renderDocxHtml } from '../../src/docx/read';
 import {
   buildDocx,
@@ -655,5 +669,19 @@ describe('charts', () => {
     const fits = renderDocxHtml(buildDocx(withChart(chart, many.slice(0, many.length / 100))));
     expect(fits.html.match(/<figure/g)).toHaveLength(1);
     expect(fits.truncated).toBe(false);
+  });
+
+  it('reads each chart part once however many drawings reference it', () => {
+    const chart = space(
+      `<c:plotArea><c:barChart>${ser('S', str('a', 'b'), nums('General', '1', '2'))}</c:barChart></c:plotArea>`,
+    );
+    chartParses.count = 0;
+    const out = renderDocxHtml(
+      buildDocx(
+        withChart(chart, Array.from({ length: 200 }, () => chartDrawing('Sales')).join('')),
+      ),
+    );
+    expect(out.html.match(/<figure/g)).toHaveLength(200);
+    expect(chartParses.count).toBe(1);
   });
 });

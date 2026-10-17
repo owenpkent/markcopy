@@ -147,24 +147,56 @@ const TYPE_LABELS: Record<string, string> = {
   surface: 'Surface',
 };
 
-function renderChart(rid: string | undefined, alt: string, ctx: ReadCtx): string {
-  const target = rid === undefined ? undefined : ctx.rels.embed.get(rid);
-  const xml = target === undefined ? undefined : partText(ctx.parts, target);
-  if (xml === undefined) {
-    return placeholder(alt ? `Chart (data not available): ${alt}` : 'Chart (data not available)');
-  }
-  try {
-    const html = chartFigure(xml, alt, ctx);
-    if (html !== undefined) {
-      return html;
-    }
-  } catch {
-    // A malformed chart part costs the chart, never the document.
-  }
-  return placeholder(alt ? `Chart (no data to show): ${alt}` : 'Chart (no data to show)');
+/** A chart part read once: the parts of its figure that do not depend on the referencing drawing. */
+export interface ChartParts {
+  title: string;
+  typeLabel: string;
+  table: string;
 }
 
-function chartFigure(xml: string, alt: string, ctx: ReadCtx): string | undefined {
+function renderChart(rid: string | undefined, alt: string, ctx: ReadCtx): string {
+  const target = rid === undefined ? undefined : ctx.rels.embed.get(rid);
+  if (target === undefined) {
+    return placeholder(alt ? `Chart (data not available): ${alt}` : 'Chart (data not available)');
+  }
+  // A part is parsed once however many drawings point at it; only the cheap
+  // wrapper and the budget charge repeat. Parts with no usable data cache as null.
+  let parts = ctx.chartCache.get(target);
+  if (parts === undefined) {
+    const xml = partText(ctx.parts, target);
+    if (xml === undefined) {
+      return placeholder(alt ? `Chart (data not available): ${alt}` : 'Chart (data not available)');
+    }
+    try {
+      parts = chartParts(xml) ?? null;
+    } catch {
+      // A malformed chart part costs the chart, never the document.
+      parts = null;
+    }
+    ctx.chartCache.set(target, parts);
+  }
+  if (parts === null) {
+    return placeholder(alt ? `Chart (no data to show): ${alt}` : 'Chart (no data to show)');
+  }
+  const title = parts.title || alt;
+  const caption = title ? `${title} (${parts.typeLabel})` : parts.typeLabel;
+  const aria = alt ? ` aria-label="${escapeAttr(alt)}"` : '';
+  const html =
+    `<figure class="mc-docx-chart"${aria}>` +
+    `<figcaption>${escapeHtml(caption)}</figcaption>${parts.table}</figure>`;
+  // Every reference writes the table out again, so each is charged to the
+  // document-wide output budget.
+  if (!spendOutput(ctx, html.length)) {
+    return placeholder(
+      alt
+        ? `Chart (not shown, size limit reached): ${alt}`
+        : 'Chart (not shown, size limit reached)',
+    );
+  }
+  return html;
+}
+
+function chartParts(xml: string): ChartParts | undefined {
   const space = parseXml(xml).children[0];
   const chart = space && child(space, 'chart');
   const plot = chart && child(chart, 'plotArea');
@@ -210,8 +242,6 @@ function chartFigure(xml: string, alt: string, ctx: ReadCtx): string | undefined
     kinds.length === 0
       ? 'Chart'
       : `${[kinds[0], ...kinds.slice(1).map((k) => k.toLowerCase())].join(' and ')} chart`;
-  const title = chartTitle(chart) || alt;
-  const caption = title ? `${title} (${typeLabel})` : typeLabel;
 
   const labelOf = (s: Series): Cache | undefined => (xy ? s.x : s.cat);
   const first = withData.find((s) => labelOf(s) !== undefined && labelOf(s)!.pts.length > 0);
@@ -241,22 +271,6 @@ function chartFigure(xml: string, alt: string, ctx: ReadCtx): string | undefined
   }
   const rows = Math.min(MAX_CHART_ROWS, Math.max(...cols.map((c) => c.cache?.pts.length ?? 0)));
 
-  // Every reference to a chart expands its table again, so each one is charged
-  // against the document-wide output budget before any markup is built.
-  let cost = 256 + head.reduce((n, h) => n + 24 + h.length, 0) + rows * 9;
-  for (const c of cols) {
-    for (let r = 0; r < rows; r++) {
-      cost += 9 + (c.cache?.pts[r]?.length ?? 0);
-    }
-  }
-  if (!spendOutput(ctx, cost)) {
-    return placeholder(
-      alt
-        ? `Chart (not shown, size limit reached): ${alt}`
-        : 'Chart (not shown, size limit reached)',
-    );
-  }
-
   let html = `<tr>${head.map((h) => `<th scope="col">${escapeHtml(h)}</th>`).join('')}</tr>`;
   const body: string[] = [];
   for (let r = 0; r < rows; r++) {
@@ -269,11 +283,7 @@ function chartFigure(xml: string, alt: string, ctx: ReadCtx): string | undefined
     body.push(`<tr>${cells.join('')}</tr>`);
   }
   html = `<table><thead>${html}</thead><tbody>${body.join('')}</tbody></table>`;
-  const aria = alt ? ` aria-label="${escapeAttr(alt)}"` : '';
-  return (
-    `<figure class="mc-docx-chart"${aria}>` +
-    `<figcaption>${escapeHtml(caption)}</figcaption>${html}</figure>`
-  );
+  return { title: chartTitle(chart), typeLabel, table: html };
 }
 
 function textOf(node: XNode | undefined): string {

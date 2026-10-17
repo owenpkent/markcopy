@@ -8,6 +8,7 @@ import { type Rels } from '../../ooxml/rels';
 import { type MediaBudget } from '../../ooxml/media';
 import { type Parts } from '../../ooxml/zip';
 import { type XNode } from '../../ooxml/xnode';
+import { type ChartParts } from './extras';
 import { type Numbering } from './numbering';
 import { type Styles } from './styles';
 
@@ -49,6 +50,8 @@ export interface ReadCtx {
   numbering: Numbering;
   media: MediaBudget;
   imageCache: Map<string, string>;
+  /** Chart parts already read, by part path; null for one with nothing to show. */
+  chartCache: Map<string, ChartParts | null>;
   rels: PartRels;
   /** Bookmark ids already emitted; the first claim on an id wins. */
   bookmarks: Set<string>;

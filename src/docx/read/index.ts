@@ -92,6 +92,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
     ),
     media,
     imageCache: new Map(),
+    chartCache: new Map(),
     rels: partRels(parts, mainPath),
     bookmarks: new Set(),
     counters: new Map(),
