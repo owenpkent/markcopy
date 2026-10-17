@@ -349,9 +349,14 @@ function renderTable(tbl: XNode, ctx: ReadCtx, depth: number): string {
   }
   mergeRows(rows);
 
-  const render = (row: Row): string => {
+  const gaps = leadingGaps(rows);
+  const render = (row: Row, index: number): string => {
     const tag = row.header ? 'th' : 'td';
     let html = '<tr>';
+    for (const span of gaps[index]) {
+      const attrs = (row.header ? ' scope="col"' : '') + (span > 1 ? ` colspan="${span}"` : '');
+      html += `<${tag}${attrs}></${tag}>`;
+    }
     for (const cell of row.cells) {
       if (cell.covered) {
         continue;
@@ -377,10 +382,13 @@ function renderTable(tbl: XNode, ctx: ReadCtx, depth: number): string {
   while (headCount < rows.length && rows[headCount].header) {
     headCount++;
   }
-  const head = rows.slice(0, headCount).map(render).join('');
+  const head = rows
+    .slice(0, headCount)
+    .map((r, i) => render(r, i))
+    .join('');
   const body = rows
     .slice(headCount)
-    .map((r) => render({ ...r, header: false }))
+    .map((r, i) => render({ ...r, header: false }, headCount + i))
     .join('');
   return (
     '<table>' +
@@ -401,7 +409,10 @@ function readRows(tbl: XNode): Row[] {
     const tblHeader = trPr && child(trPr, 'tblHeader');
     const header = tblHeader !== undefined && !['0', 'false', 'off'].includes(val(tblHeader) ?? '');
     const gridBefore = trPr && child(trPr, 'gridBefore');
-    let col = (gridBefore && intAttr(gridBefore.attrs, 'val')) ?? 0;
+    let col = Math.min(
+      MAX_SPAN,
+      Math.max(0, (gridBefore && intAttr(gridBefore.attrs, 'val')) ?? 0),
+    );
     const cells: Cell[] = [];
     for (const tc of children(tr, 'tc')) {
       const tcPr = child(tc, 'tcPr');
@@ -456,6 +467,47 @@ function mergeRows(rows: Row[]): void {
       }
     }
   }
+}
+
+/**
+ * For each row, the widths of the empty cells to draw before its first cell.
+ *
+ * `w:gridBefore` skips grid columns at the start of a row, and the cells after
+ * it sit at their grid position. HTML places cells left to right, so the skip
+ * has to be drawn or everything shifts left (and so does a per-table TSV copy).
+ * Columns a rowspan from an earlier row already holds are not empty and are
+ * left out; each run of free columns between them is one cell.
+ */
+function leadingGaps(rows: Row[]): number[][] {
+  const held: [number, number][][] = rows.map(() => []);
+  rows.forEach((row, r) => {
+    for (const cell of row.cells) {
+      for (let n = r + 1; n < Math.min(rows.length, r + cell.rowSpan); n++) {
+        held[n].push([cell.col, cell.col + cell.span]);
+      }
+    }
+  });
+  return rows.map((row, r) => {
+    const first = row.cells.find((c) => !c.covered);
+    const gaps: number[] = [];
+    if (first === undefined) {
+      return gaps;
+    }
+    let cursor = 0;
+    for (const [start, end] of held[r].sort((a, b) => a[0] - b[0])) {
+      if (start >= first.col) {
+        break;
+      }
+      if (start > cursor) {
+        gaps.push(start - cursor);
+      }
+      cursor = Math.max(cursor, end);
+    }
+    if (first.col > cursor) {
+      gaps.push(first.col - cursor);
+    }
+    return gaps;
+  });
 }
 
 function cellHtml(tc: XNode, ctx: ReadCtx, depth: number): string {

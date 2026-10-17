@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import DOMPurify from 'dompurify';
 import { strToU8, zipSync } from 'fflate';
 import { renderDocxHtml, DocxError } from '../../src/docx/read';
+import { tableToDelimited } from '../../src/webview/table';
 import {
   buildDocx,
   cell,
@@ -552,6 +553,48 @@ describe('tables', () => {
     );
     expect(out).toContain('<tr><td rowspan="2">m</td><td>n</td><td>o</td></tr>');
     expect(out).toContain('<tr><td>q</td><td>r</td></tr>');
+  });
+
+  describe('gridBefore', () => {
+    const grid = '<w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>';
+    const skip = (n: number, cells: string): string =>
+      `<w:tr><w:trPr><w:gridBefore w:val="${n}"/></w:trPr>${cells}</w:tr>`;
+    const tableOf = (rows: string): string => `<w:tbl><w:tblPr/>${grid}${rows}</w:tbl>`;
+    const dom = (spec: string): HTMLTableElement => {
+      const host = document.createElement('div');
+      host.innerHTML = body({ body: spec });
+      return host.querySelector('table')!;
+    };
+
+    it('draws the skipped leading column so cells keep their grid position', () => {
+      const spec = tableOf(
+        row(cell(p('A')) + cell(p('B')) + cell(p('C')), true) +
+          skip(1, cell(p('belongs to B')) + cell(p('belongs to C'))),
+      );
+      expect(body({ body: spec })).toContain(
+        '<tr><td></td><td>belongs to B</td><td>belongs to C</td></tr>',
+      );
+      expect(tableToDelimited(dom(spec), '\t')).toBe('A\tB\tC\r\n\tbelongs to B\tbelongs to C');
+      expect(tableToDelimited(dom(spec), ',')).toBe('A,B,C\r\n,belongs to B,belongs to C');
+    });
+
+    it('merges a wider skip into one colspan cell', () => {
+      const out = body({
+        body: tableOf(row(cell(p('A')) + cell(p('B')) + cell(p('C'))) + skip(2, cell(p('only C')))),
+      });
+      expect(out).toContain('<tr><td colspan="2"></td><td>only C</td></tr>');
+    });
+
+    it('does not draw a column a rowspan from above already holds', () => {
+      const spec = tableOf(
+        row(cell(p('A')) + cell(p('B'), '<w:vMerge w:val="restart"/>') + cell(p('C'))) +
+          skip(1, cell('<w:p/>', '<w:vMerge/>') + cell(p('c2'))),
+      );
+      const out = body({ body: spec });
+      expect(out).toContain('<tr><td>A</td><td rowspan="2">B</td><td>C</td></tr>');
+      // Column 0 is the skip; column 1 belongs to B's rowspan, so only one empty cell.
+      expect(out).toContain('<tr><td></td><td>c2</td></tr>');
+    });
   });
 
   it('keeps a lone continue cell with no start above it as an ordinary cell', () => {
