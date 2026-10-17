@@ -929,6 +929,7 @@ function update(state: PreviewState, ackEdit?: number): void {
           delimiter: csvDelimiter(doc, source),
           headerRow: cfg.get<boolean>('csv.headerRow', true),
           maxRows: cfg.get<number>('csv.maxRows', 5000),
+          maxColumns: cfg.get<number>('csv.maxColumns', 200),
         }).html
       : md.render(source, {
           resolveImage: (src: string) => resolveImageSrc(src, state.docUri, webview),

@@ -204,6 +204,7 @@ Open [sample.csv](../sample.csv).
 - [ ] Editing the file in the editor updates the grid live.
 - [ ] All four themes (Auto, Light, Dark, and Green on black) style the grid, including the stripes and the gutter.
 - [ ] Set `markcopy.csv.maxRows` to `3`: only 3 rows render and a note says how many of the total are hidden.
+- [ ] Set `markcopy.csv.maxColumns` to `2`: only the first 2 columns render, a note says how many columns are hidden, and editing a cell in column 2 still writes to the second field of the right row.
 - [ ] Turn `markcopy.csv.headerRow` off: the first row becomes ordinary data and there is no pinned header.
 - [ ] Open a `.tsv` (or set `markcopy.csv.delimiter` explicitly): the delimiter is picked up correctly.
 - [ ] Save a `.tsv` whose fields contain commas (e.g. `name,full<TAB>city,town`): it renders as two columns, not three. The file extension wins over what scoring alone would pick.

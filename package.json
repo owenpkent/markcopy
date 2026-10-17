@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
   "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
   "version": "0.16.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -24,6 +24,7 @@
   ],
   "keywords": [
     "markdown",
+    "markdown editor",
     "excel",
     "xlsx",
     "spreadsheet",
@@ -515,6 +516,12 @@
           "default": 5000,
           "minimum": 1,
           "description": "Maximum number of CSV/TSV rows to render. The preview says how many rows it is hiding; raise this to show more, at the cost of a slower preview on very large files."
+        },
+        "markcopy.csv.maxColumns": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Maximum number of CSV/TSV columns to render. The preview says how many columns it is hiding. The grid also draws at most 500,000 cells in total, so a very wide file shows fewer rows."
         },
         "markcopy.xlsx.maxRows": {
           "type": "number",

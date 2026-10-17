@@ -9,6 +9,14 @@
 // of the slide -- see the design doc's "never repaginate overflow".
 import { hasClass, isElement, textOf, type XhtmlElement, type XhtmlNode } from '../../ooxml/xhtml';
 import { escapeAttr, escapeXml } from '../../ooxml/write';
+import {
+  MAX_CELL_COLSPAN,
+  MAX_CELL_ROWSPAN,
+  countTableColumns,
+  spanAttr,
+  tableTooLarge,
+  type ColumnCountStats,
+} from '../../ooxml/tableLimits';
 import { cssColor } from '../../docx/build';
 import { decodeImage, EMU_PER_PX, type DecodedImage } from '../../docx/media';
 
@@ -78,6 +86,8 @@ export interface PptxReport {
   /** Images whose bytes could not be embedded (unreachable remote src, odd format). */
   imagesSkipped: number;
   tables: number;
+  /** Tables whose grid was too large to write; a note stands in for each. */
+  tablesSkipped: number;
   /** Slides whose stacked content is estimated to run past the bottom edge. */
   overflowed: number;
 }
@@ -331,6 +341,7 @@ class Builder {
     imagesMissingAlt: 0,
     imagesSkipped: 0,
     tables: 0,
+    tablesSkipped: 0,
     overflowed: 0,
   };
 
@@ -747,6 +758,21 @@ class Builder {
       return;
     }
     this.report.tables++;
+    // Decided here, before the table is queued, so a grid the slide writer
+    // should never expand is never handed to it: tableShapeXml lays out one
+    // <a:tc> per grid position, and that loop runs synchronously in the host.
+    const tooLarge = tableTooLarge(tableColumnCount(rows), rows.length);
+    if (tooLarge !== undefined) {
+      this.report.tablesSkipped++;
+      this.textBuf.push({
+        xml: paragraph(textRun(tooLarge, { sz: SZ_BODY, italic: true }), {
+          lvl: 0,
+          bullet: 'none',
+        }),
+        sz: SZ_BODY,
+      });
+      return;
+    }
     this.flushText();
     this.shapeQueue.push({ kind: 'table', rows });
   }
@@ -1295,16 +1321,12 @@ function collectRows(table: XhtmlElement): TableRow[] {
 function toCell(el: XhtmlElement): TableCell {
   return {
     el,
-    colspan: positiveInt(el.attrs.colspan),
-    rowspan: positiveInt(el.attrs.rowspan),
+    // Serialized by the webview and so untrusted: see ../../ooxml/tableLimits.ts.
+    colspan: spanAttr(el.attrs.colspan, MAX_CELL_COLSPAN),
+    rowspan: spanAttr(el.attrs.rowspan, MAX_CELL_ROWSPAN),
     header: el.name === 'th',
     align: cellAlign(el),
   };
-}
-
-function positiveInt(value: string | undefined): number {
-  const n = Number.parseInt(value ?? '1', 10);
-  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 function cellAlign(el: XhtmlElement): TableCell['align'] {
@@ -1316,29 +1338,7 @@ function cellAlign(el: XhtmlElement): TableCell['align'] {
   return match ? (match[1].toLowerCase() as TableCell['align']) : undefined;
 }
 
-/**
- * The grid width of a table, in columns; see docx/build.ts's columnCount for
- * why a rowspan from an earlier row has to be counted here too. Duplicated
- * rather than imported: it is a private helper there, and the two tables are
- * shaped too differently (attributes vs child elements for a span) to share
- * the cell-emission code around it.
- */
-function tableColumnCount(rows: TableRow[]): number {
-  let cols = 1;
-  let carried: number[] = [];
-  for (const row of rows) {
-    let col = 0;
-    for (const cell of row.cells) {
-      while ((carried[col] ?? 0) > 0) {
-        col++;
-      }
-      for (let i = 0; i < cell.colspan; i++) {
-        carried[col + i] = Math.max(carried[col + i] ?? 0, cell.rowspan);
-      }
-      col += cell.colspan;
-    }
-    cols = Math.max(cols, col);
-    carried = carried.map((left) => Math.max(0, left - 1));
-  }
-  return cols;
+/** The grid width of a table, in columns; see `countTableColumns`. */
+export function tableColumnCount(rows: TableRow[], stats?: ColumnCountStats): number {
+  return countTableColumns(rows, stats);
 }

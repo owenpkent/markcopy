@@ -67,6 +67,41 @@ export function columnOf(ref: string): number | undefined {
   return seen === 0 ? undefined : out - 1;
 }
 
+/**
+ * The 1-based inclusive column range a <col> element covers, cut to the first
+ * `maxColumns` columns, or undefined when the element describes no column the
+ * grid will show.
+ *
+ * The attributes come straight out of the file and are checked before anything
+ * loops over them. `min` was previously taken as written and only `max` was
+ * capped, so a negative `min` expanded thousands of columns to the left of A,
+ * and a `min` beyond the safe-integer range stalled the extension host for
+ * good: `c++` on such a number yields the same number, and `c <= max` never
+ * stops being true. Both bounds must be safe positive integers, in order, and
+ * the range must reach a column the display cap admits. An absent `min` means
+ * column A and an absent `max` means a single column, as before; a bound that
+ * is present but not a number is a malformed element and is skipped whole.
+ */
+export function columnRange(
+  attrs: Record<string, string>,
+  maxColumns: number,
+): [number, number] | undefined {
+  const min = attr(attrs, 'min') === undefined ? 1 : intAttr(attrs, 'min');
+  const max = attr(attrs, 'max') === undefined ? min : intAttr(attrs, 'max');
+  if (
+    min === undefined ||
+    max === undefined ||
+    !Number.isSafeInteger(min) ||
+    !Number.isSafeInteger(max) ||
+    min < 1 ||
+    max < min
+  ) {
+    return undefined;
+  }
+  const last = Math.min(max, maxColumns);
+  return min > last ? undefined : [min, last];
+}
+
 export function readSheet(xml: string, ctx: SheetContext): Sheet {
   const rows: SheetRow[] = [];
   const widths: (number | undefined)[] = [];
@@ -125,8 +160,11 @@ export function readSheet(xml: string, ctx: SheetContext): Sheet {
         case 'col': {
           // `min`/`max` are an inclusive 1-based range, not a single column, and
           // a single <col> routinely spans hundreds of them.
-          const min = intAttr(attrs, 'min') ?? 1;
-          const max = Math.min(intAttr(attrs, 'max') ?? min, ctx.limits.maxColumns);
+          const range = columnRange(attrs, ctx.limits.maxColumns);
+          if (range === undefined) {
+            break;
+          }
+          const [min, max] = range;
           const width = Number(attr(attrs, 'width'));
           const hidden = boolAttr(attrs, 'hidden');
           for (let c = min; c <= max; c++) {
