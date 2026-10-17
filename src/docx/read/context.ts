@@ -42,6 +42,8 @@ export interface ReadCtx {
   endnotes: NoteBook;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */
   budget: { used: number; max: number; truncated: boolean };
+  /** Inside a header cell, whose <th> is already bold. */
+  inHeaderCell: boolean;
   /** Rendered-output budget: everything emitted from embedded bytes, charged per emission. */
   output: OutputBudget;
 }

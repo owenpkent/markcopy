@@ -103,6 +103,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
       max: Math.max(1, opts.maxParagraphs ?? DEFAULT_MAX_PARAGRAPHS),
       truncated: false,
     },
+    inHeaderCell: false,
     output: { used: 0, max: media.max, truncated: false },
   };
 

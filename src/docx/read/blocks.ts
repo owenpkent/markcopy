@@ -174,7 +174,13 @@ function readParagraph(p: XNode, ctx: ReadCtx, allowPre: boolean): Para {
   const styles = ctx.styles;
   const outline = pPr && child(pPr, 'outlineLvl');
   const heading = styles.heading(styleId, outline && intAttr(outline.attrs, 'val'));
-  const inline = readInline(p, ctx, styles.isMono(styleId));
+  // A heading or a header cell is bold already; that is its own look, not
+  // emphasis to repeat as <strong> inside the <h1> or <th>.
+  const paraProps = styles.runStyle(styleId);
+  if (heading !== undefined || ctx.inHeaderCell) {
+    delete paraProps.b;
+  }
+  const inline = readInline(p, ctx, styles.isMono(styleId), paraProps);
   if (!inline.hasContent) {
     return { t: 'empty' };
   }
@@ -357,7 +363,10 @@ function renderTable(tbl: XNode, ctx: ReadCtx, depth: number): string {
       if (cell.rowSpan > 1) {
         attrs += ` rowspan="${cell.rowSpan}"`;
       }
+      const outer = ctx.inHeaderCell;
+      ctx.inHeaderCell = row.header;
       html += `<${tag}${attrs}>${cellHtml(cell.node, ctx, depth)}</${tag}>`;
+      ctx.inHeaderCell = outer;
     }
     return `${html}</tr>`;
   };

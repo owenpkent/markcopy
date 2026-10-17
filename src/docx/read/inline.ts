@@ -63,8 +63,17 @@ const SYMBOL_GLYPHS: Record<number, string> = {
   0xf076: '❖',
 };
 
-export function readInline(p: XNode, ctx: ReadCtx, paraMono: boolean): InlineResult {
-  const walker = new InlineWalker(ctx, paraMono);
+/**
+ * `paraProps` are the run properties the paragraph's style gives every run in
+ * it; a character style and then a run's own properties are layered on top.
+ */
+export function readInline(
+  p: XNode,
+  ctx: ReadCtx,
+  paraMono: boolean,
+  paraProps: RunProps = {},
+): InlineResult {
+  const walker = new InlineWalker(ctx, paraMono, paraProps);
   walker.nodes(p.children, undefined);
   return finish(walker.atoms);
 }
@@ -108,6 +117,7 @@ class InlineWalker {
   constructor(
     private readonly ctx: ReadCtx,
     private readonly paraMono: boolean,
+    private readonly paraProps: RunProps,
   ) {}
 
   nodes(list: XNode[], link: Link | undefined): void {
@@ -204,7 +214,10 @@ class InlineWalker {
   private run(r: XNode, link: Link | undefined): void {
     const rPr = child(r, 'rPr');
     const styleId = rPr && attr(child(rPr, 'rStyle')?.attrs ?? {}, 'val');
-    const props = mergeRunProps(this.ctx.styles.runStyle(styleId), readRunProps(rPr));
+    const props = mergeRunProps(
+      mergeRunProps(this.paraProps, this.ctx.styles.runStyle(styleId)),
+      readRunProps(rPr),
+    );
     this.runChildren(r.children, props, link);
   }
 

@@ -159,6 +159,55 @@ describe('paragraphs and runs', () => {
     expect(out).toBe('<p>x</p>');
   });
 
+  it('applies the paragraph style run properties, inherited through basedOn', () => {
+    const out = body({
+      styles:
+        style('Base', { rPr: '<w:b/>' }) +
+        style('Fancy', { basedOn: 'Base', rPr: '<w:i/>' }) +
+        style('Plain', { type: 'character', rPr: '<w:i w:val="0"/>' }),
+      body: para(
+        run('all') + run('char', '<w:rStyle w:val="Plain"/>'),
+        '<w:pStyle w:val="Fancy"/>',
+      ),
+    });
+    expect(out).toBe('<p><strong><em>all</em></strong><strong>char</strong></p>');
+  });
+
+  it('lets a direct false override beat the paragraph style', () => {
+    const out = body({
+      styles: style('Loud', { rPr: '<w:b/><w:i/>' }),
+      body: para(run('styled') + run('override', '<w:b w:val="0"/>'), '<w:pStyle w:val="Loud"/>'),
+    });
+    expect(out).toBe('<p><strong><em>styled</em></strong><em>override</em></p>');
+  });
+
+  it('hides text a paragraph style marks vanish, unless a run turns it back on', () => {
+    const out = body({
+      styles: style('Hidden', { rPr: '<w:vanish/>' }),
+      body: para(
+        run('secret') + run('shown', '<w:vanish w:val="0"/>'),
+        '<w:pStyle w:val="Hidden"/>',
+      ),
+    });
+    expect(out).toBe('<p>shown</p>');
+  });
+
+  it('does not wrap a heading in strong for its style bold', () => {
+    const out = body({
+      styles: style('Heading1', { name: 'heading 1', rPr: '<w:b/><w:i/>' }),
+      body: para('Title', '<w:pStyle w:val="Heading1"/>'),
+    });
+    expect(out).toBe('<h1><em>Title</em></h1>');
+  });
+
+  it('does not repeat a header-row style bold inside the th', () => {
+    const out = body({
+      styles: style('TableHeader', { rPr: '<w:b/>' }),
+      body: table(row(cell(para('Name', '<w:pStyle w:val="TableHeader"/>')), true)),
+    });
+    expect(out).toContain('<th scope="col">Name</th>');
+  });
+
   it('takes bold from a character style', () => {
     const out = body({
       styles: style('Strong', { type: 'character', rPr: '<w:b/>' }),
