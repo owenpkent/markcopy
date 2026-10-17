@@ -397,3 +397,25 @@ describe('robustness', () => {
     expect(convert(xml)).toBe('');
   });
 });
+
+describe('equation size limits', () => {
+  it('rejects one oversized text node without converting it', () => {
+    expect(convert(r('x'.repeat(100_001)))).toBe('');
+    expect(convert(r('x'.repeat(100_000)))).not.toBe('');
+  });
+
+  it('counts text across runs toward the same limit', () => {
+    expect(convert(r('x'.repeat(60_000)) + r('y'.repeat(60_000)))).toBe('');
+  });
+
+  it('converts a large allowed run in linear time', () => {
+    const start = performance.now();
+    const tex = convert(r('x'.repeat(100_000)));
+    expect(tex).toHaveLength(100_000);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it('still separates a command from a following letter after long output', () => {
+    check(r('x'.repeat(500)) + r('α') + r('y'), `${'x'.repeat(500)}\\alpha y`);
+  });
+});

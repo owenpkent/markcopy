@@ -21,6 +21,8 @@ const MAX_DEPTH = 48;
 const MAX_NODES = 20_000;
 /** Longest LaTeX string returned; a longer result is dropped rather than cut mid-command. */
 const MAX_LENGTH = 100_000;
+/** The longest control word `cat` looks back over when deciding on a separating space. */
+const MAX_COMMAND = 32;
 
 const GREEK: Record<string, string> = {
   α: '\\alpha',
@@ -425,7 +427,9 @@ function cat(parts: string[]): string {
     if (p === '') {
       continue;
     }
-    if (/(?<!\\)\\[A-Za-z]+$/.test(out) && /^[A-Za-z]/.test(p)) {
+    // Only the tail matters: no command we emit is longer, and rescanning all
+    // of `out` for every part would be quadratic.
+    if (/^[A-Za-z]/.test(p) && /(?<!\\)\\[A-Za-z]+$/.test(out.slice(-MAX_COMMAND))) {
       out += ' ';
     }
     out += p;
@@ -463,6 +467,8 @@ function fractionType(f: XNode): string | undefined {
 
 class Converter {
   private nodes = 0;
+  /** Run text converted so far; spent before converting so a huge run costs nothing. */
+  private chars = 0;
   /** Inside an equation array, a literal `&` in a run is an alignment point. */
   private eqDepth = 0;
 
@@ -534,6 +540,10 @@ class Converter {
     let text = '';
     for (const c of r.children) {
       if (c.name === 't') {
+        this.chars += c.text.length;
+        if (this.chars > MAX_LENGTH) {
+          throw new Error('equation too long');
+        }
         text += c.text;
       }
     }
