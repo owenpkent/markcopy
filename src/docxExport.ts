@@ -72,6 +72,9 @@ export function reportSummary(report: DocxReport): string | undefined {
   if (report.imagesSkipped > 0) {
     notes.push(`${count(report.imagesSkipped, 'image')} could not be embedded`);
   }
+  if (report.tablesSkipped > 0) {
+    notes.push(`${count(report.tablesSkipped, 'table')} too large to export, replaced by a note`);
+  }
   return notes.length === 0 ? undefined : notes.join('; ');
 }
 

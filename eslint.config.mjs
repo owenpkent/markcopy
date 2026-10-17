@@ -8,6 +8,7 @@ export default tseslint.config(
       'dist',
       'out',
       '.vscode-test',
+      '.claude',
       'node_modules',
       'media/webview.js',
       'media/chunk-*.js',

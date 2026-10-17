@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CSV_MAX_CELLS,
+  CSV_MAX_COLUMNS,
   delimiterHint,
   isNumeric,
   parseDelimited,
@@ -339,5 +341,80 @@ describe('renderCsvHtml', () => {
     const doc = render('');
     expect(doc.querySelector('table')).toBeNull();
     expect(doc.querySelector('.mc-csv-note')?.textContent).toBe('This file is empty.');
+  });
+
+  describe('column and cell budgets', () => {
+    const tdCounts = (doc: Document): number[] =>
+      Array.from(doc.querySelectorAll('tbody tr'), (r) => r.querySelectorAll('td').length);
+
+    it('bounds a very wide header over many short records under the defaults', () => {
+      // Every row is padded to the widest record, so 2,000 header fields over
+      // short rows multiplied out to 2,000 cells per row. The default column cap
+      // holds the row width, and the output size follows from it.
+      const header = Array.from({ length: 2000 }, (_, i) => `h${i}`).join(',');
+      const text = header + '\n' + Array.from({ length: 40 }, () => 'x').join('\n');
+      const result = renderCsvHtml(text);
+      expect(result.columns).toBe(CSV_MAX_COLUMNS);
+      expect(result.columnsDropped).toBe(2000 - CSV_MAX_COLUMNS);
+      expect(result.rows).toBe(40);
+      document.body.innerHTML = result.html;
+      expect(document.querySelectorAll('thead th[scope="col"]')).toHaveLength(CSV_MAX_COLUMNS);
+      expect(new Set(tdCounts(document))).toEqual(new Set([CSV_MAX_COLUMNS]));
+      expect(document.querySelectorAll('colgroup > col')).toHaveLength(CSV_MAX_COLUMNS + 1);
+      expect(document.querySelector('.mc-csv-note')?.textContent).toContain(
+        'first 200 of 2,000 columns',
+      );
+      expect(document.querySelector('.mc-csv-note')?.textContent).toContain(
+        'markcopy.csv.maxColumns',
+      );
+    });
+
+    it('spends the cell budget on rows and says so', () => {
+      const header = Array.from({ length: 10 }, (_, i) => `h${i}`).join(',');
+      const text = header + '\n' + Array.from({ length: 100 }, (_, i) => `${i}`).join('\n');
+      const doc = render(text, { maxCells: 250 });
+      // 250 cells at 10 columns is 25 rows.
+      expect(doc.querySelectorAll('tbody tr')).toHaveLength(25);
+      const note = doc.querySelector('.mc-csv-note')?.textContent ?? '';
+      expect(note).toContain('first 25 of 100 rows');
+      expect(note).toContain('at most 250 cells');
+      expect(note).not.toContain('markcopy.csv.maxRows');
+    });
+
+    it('keeps the row-cap notice when the row cap, not the budget, did the cutting', () => {
+      const doc = render('h\na\nb\nc', { maxRows: 1, maxCells: 1000 });
+      expect(doc.querySelector('.mc-csv-note')?.textContent).toContain('markcopy.csv.maxRows');
+    });
+
+    it('cuts trailing columns only, so a cell keeps its source column and row', () => {
+      const doc = render('a,b,c,d\n1,2,3,4\n5\n6,7,8,9,10', { maxColumns: 2 });
+      expect(tdCounts(doc)).toEqual([2, 2, 2]);
+      const rows = Array.from(doc.querySelectorAll('tbody tr'));
+      expect(Array.from(rows[0].querySelectorAll('td'), (c) => c.textContent)).toEqual(['1', '2']);
+      expect(Array.from(rows[2].querySelectorAll('td'), (c) => c.textContent)).toEqual(['6', '7']);
+      // Row numbering and the line mapping the editor uses are untouched.
+      expect(
+        Array.from(doc.querySelectorAll('tbody .mc-csv-gutter'), (g) => g.textContent),
+      ).toEqual(['1', '2', '3']);
+      expect(rows.map((r) => r.getAttribute('data-record-line'))).toEqual(['1', '2', '3']);
+    });
+
+    it('leaves an ordinary CSV and TSV alone, with no notice', () => {
+      for (const text of ['name,qty\nWidget,3\nGadget,12', 'name\tqty\nWidget\t3\nGadget\t12']) {
+        const result = renderCsvHtml(text);
+        expect(result.columns).toBe(2);
+        expect(result.columnsDropped).toBe(0);
+        expect(result.rows).toBe(2);
+        document.body.innerHTML = result.html;
+        expect(document.querySelector('.mc-csv-note')).toBeNull();
+        expect(tdCounts(document)).toEqual([2, 2]);
+      }
+    });
+
+    it('keeps the default budget large enough for the default caps at modest widths', () => {
+      // 5000 rows at the default row cap with 100 columns fits; the budget is
+      // there for the pathological product, not the everyday one.
+      expect(CSV_MAX_CELLS).toBeGreaterThanOrEqual(5000 * 100);
+    });
   });
 });

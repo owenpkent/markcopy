@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { unzipSync, strFromU8 } from 'fflate';
 import { SaxesParser } from 'saxes';
 import { htmlToPptx, reportSummary } from '../src/pptxExport';
+import { tableColumnCount } from '../src/pptx/write/build';
 import { walkXml } from '../src/ooxml/xml';
+import {
+  MAX_CELL_COLSPAN,
+  MAX_CELL_ROWSPAN,
+  MAX_TABLE_CELLS,
+  MAX_TABLE_COLUMNS,
+  tableTooLarge,
+} from '../src/ooxml/tableLimits';
 
 /** A 1x1 PNG, as the webview would inline it. */
 const PNG_1x1 =
@@ -687,5 +695,84 @@ describe('reportSummary', () => {
   it('says nothing when there is nothing to report', () => {
     const { report } = pptx(`<p><img src="${PNG_1x1}" alt="described"/></p>`);
     expect(reportSummary(report)).toBeUndefined();
+  });
+});
+
+describe('table limits', () => {
+  it('rejects a deep rowspan table during counting, not after scanning every row', () => {
+    type Rows = Parameters<typeof tableColumnCount>[0];
+    const rows = Array.from({ length: 400 }, () => ({
+      cells: [
+        {
+          el: { kind: 'element', name: 'td', attrs: {}, children: [] },
+          colspan: MAX_CELL_COLSPAN,
+          rowspan: MAX_CELL_ROWSPAN,
+        },
+      ],
+    })) as unknown as Rows;
+    const stats = { rowsScanned: 0, maxCarried: 0 };
+    const cols = tableColumnCount(rows, stats);
+    expect(tableTooLarge(cols, rows.length)).toBeDefined();
+    expect(stats.rowsScanned).toBeLessThan(rows.length);
+    expect(stats.maxCarried).toBeLessThanOrEqual(MAX_TABLE_COLUMNS);
+  });
+
+  it('clamps an oversized colspan to the browser limit instead of expanding it', () => {
+    const { slide, report } = pptx('<table><tr><td colspan="10000">wide</td></tr></table>');
+    expect(slide(1).match(/<a:gridCol /g)).toHaveLength(MAX_CELL_COLSPAN);
+    expect(slide(1)).toContain(`gridSpan="${MAX_CELL_COLSPAN}"`);
+    expect(report.tablesSkipped).toBe(0);
+    assertWellFormed(slide(1));
+  });
+
+  it('reads a malformed span as 1, the way a browser does', () => {
+    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x']) {
+      const { slide } = pptx(`<table><tr><td colspan="${bad}">a</td><td>b</td></tr></table>`);
+      expect(slide(1).match(/<a:gridCol /g)).toHaveLength(2);
+      expect(slide(1)).not.toContain('gridSpan=');
+    }
+  });
+
+  it('keeps an ordinary colspan and rowspan table laid out as before', () => {
+    const { slide } = pptx(
+      '<table><tr><td colspan="2">wide</td><td rowspan="2">tall</td></tr>' +
+        '<tr><td>a</td><td>b</td></tr></table>',
+    );
+    expect(slide(1).match(/<a:gridCol /g)).toHaveLength(3);
+    expect(slide(1)).toContain('gridSpan="2"');
+    expect(slide(1)).toContain('rowSpan="2"');
+    expect(slide(1)).toContain('vMerge="1"');
+  });
+
+  it('reads a span with leading zeros by its value', () => {
+    const { slide } = pptx(
+      '<table><tr><td rowspan="0000000002">A</td><td>B</td></tr>' +
+        '<tr><td>C</td><td>D</td></tr></table>',
+    );
+    expect(slide(1).match(/<a:gridCol /g)).toHaveLength(3);
+    expect(slide(1)).toContain('rowSpan="2"');
+    expect(slide(1)).toContain('vMerge="1"');
+  });
+
+  it('replaces a grid wider than the column limit with a note', () => {
+    const { slide, report } = pptx(
+      '<table><tr><td colspan="1000">a</td><td colspan="1000">b</td></tr></table>',
+    );
+    expect(slide(1)).not.toContain('<a:tbl>');
+    expect(slide(1)).toContain('Table omitted: 2,000 columns');
+    expect(report.tables).toBe(1);
+    expect(report.tablesSkipped).toBe(1);
+    expect(reportSummary(report)).toContain('1 table too large to export');
+    assertWellFormed(slide(1));
+  });
+
+  it('replaces a grid over the cell budget with a note', () => {
+    const rows = Math.ceil(MAX_TABLE_CELLS / MAX_CELL_COLSPAN) + 1;
+    const html =
+      '<table>' + `<tr><td colspan="${MAX_CELL_COLSPAN}">x</td></tr>`.repeat(rows) + '</table>';
+    const { slide, report } = pptx(html);
+    expect(slide(1)).not.toContain('<a:tbl>');
+    expect(slide(1)).toContain('cells this export can write');
+    expect(report.tablesSkipped).toBe(1);
   });
 });

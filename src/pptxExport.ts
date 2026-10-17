@@ -72,6 +72,9 @@ export function reportSummary(report: PptxReport): string | undefined {
   if (report.imagesSkipped > 0) {
     notes.push(`${count(report.imagesSkipped, 'image')} could not be embedded`);
   }
+  if (report.tablesSkipped > 0) {
+    notes.push(`${count(report.tablesSkipped, 'table')} too large to export, replaced by a note`);
+  }
   if (report.overflowed > 0) {
     notes.push(`${count(report.overflowed, 'slide')} likely run past the bottom edge`);
   }
