@@ -183,6 +183,9 @@ Open [sample.docx](../sample.docx) (repo root), then a real document of your own
 - [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, and a table's **Copy Table** / CSV work; **Search Google** works on a selection; **Save as PDF** and **Save as Word** export the whole document.
 - [ ] Copy the whole document as rich text and paste into Word and Google Docs: headings, lists, tables and the image come across.
 - [ ] Light, dark, and green themes are all legible; the image and table borders are visible in each.
+- [ ] A header shows once at the top and a footer once at the bottom, muted, with no page number. **Copy Whole Document**: neither is in the paste.
+- [ ] Text boxes and shapes with text show as bordered boxes under their paragraph, once each. A document with a comment shows the highlighted range with a small marker and a Comments list at the end (replies nested, resolved labelled); the marker link scrolls to the comment and the arrow goes back. Paste a whole-document copy into Word: the commented words are plain, with no highlight, marker, or comments.
+- [ ] A chart shows as a table under a caption with its title and type. Right-click it: **Copy as** > CSV and TSV paste into a spreadsheet with a header row and one column per series.
 - [ ] Replace the file on disk (re-save from Word): the preview redraws. Open a text file renamed to `.docx`: the panel says it is not a document rather than failing to open.
 
 ## CSV / TSV grid

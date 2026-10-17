@@ -1180,6 +1180,7 @@ async function selectionMarkdown(): Promise<string> {
   }
   // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
+  stripViewerChrome(wrapper);
   const md = (await htmlToMarkdown(wrapper.innerHTML)).trim();
   return md || sel.toString();
 }
@@ -1216,8 +1217,23 @@ function copyText(text: string): void {
 
 function copyRichText(el: HTMLElement): void {
   const html = inlineStyledHtml(el);
-  writeClipboard(html, el.innerText);
+  writeClipboard(html, visibleText(el));
   toast('Copied as rich text');
+}
+
+/**
+ * The element's text as the user sees it, minus viewer chrome. `innerText`
+ * honors `display: none`, so the chrome is hidden for the read and restored.
+ */
+function visibleText(el: HTMLElement): string {
+  const chrome = Array.from(el.querySelectorAll<HTMLElement>('[data-mc-ignore]'));
+  const shown = chrome.map((n) => n.style.display);
+  chrome.forEach((n) => (n.style.display = 'none'));
+  try {
+    return el.innerText;
+  } finally {
+    chrome.forEach((n, i) => (n.style.display = shown[i]));
+  }
 }
 
 function copyRichFromSelection(): void {
@@ -1656,6 +1672,9 @@ function inlineStyledHtml(source: HTMLElement): string {
  */
 function stripViewerChrome(root: HTMLElement): void {
   root.querySelectorAll('[data-mc-ignore]').forEach((el) => el.remove());
+  // A commented range keeps its text and loses the highlight element, so a
+  // copy of a Word document carries the words and none of the review markup.
+  root.querySelectorAll('mark[data-mc-comment]').forEach((el) => el.replaceWith(...el.childNodes));
   root.querySelectorAll('col.mc-csv-gutter-col').forEach((el) => el.remove());
 }
 

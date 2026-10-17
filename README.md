@@ -361,8 +361,12 @@ MarkCopy registers as the editor for `.docx` and `.docm` files, so opening one r
 - **Images.** Inline and floating pictures show with their alt text and declared size. A format a browser cannot show (EMF, WMF), a picture linked from a URL (never fetched), and one past the 16 MB image budget are drawn as a labelled placeholder.
 - **Tracked changes and fields.** Inserted text is kept and deleted text is dropped, so you see the final text; a field shows its last computed result.
 - **Footnotes and endnotes** appear as superscript links with the notes listed at the end.
+- **Headers and footers.** The first section's header is shown once at the top and the last section's footer once at the bottom, in muted type. Page-number fields are dropped, since a continuous preview has no pages. They are page furniture, so they are left out of every copy and export.
+- **Text boxes.** The text inside a text box or shape (including grouped shapes and the older VML kind) is shown as a bordered box right after the paragraph it is anchored to, once, even though Word stores it twice.
+- **Comments.** A commented range is highlighted with a small marker, and the comments are listed at the end with author, date, replies nested under their parent, and a Resolved label. Comments are review notes, so the highlight, markers, and list are left out of every copy and export, while the commented text is kept.
+- **Charts.** A chart is shown as a table of the values saved inside it (a title and type caption, one row per category, one column per series), so it copies as CSV or TSV like any table. A chart with no saved values, or a newer chart type, is a labelled placeholder.
 
-Not drawn: headers and footers, comments, text boxes and shapes, equations, charts, SmartArt, and embedded objects. A document too large for the preview stops at 50,000 paragraphs and says so. The preview is **read-only by design** and needs nothing installed: no Word, no Pandoc, no browser. A file that is not a real `.docx` (including the older `.doc`) shows a message in the panel rather than failing to open.
+Not drawn: equations, SmartArt, and embedded objects. A document too large for the preview stops at 50,000 paragraphs and says so. The preview is **read-only by design** and needs nothing installed: no Word, no Pandoc, no browser. A file that is not a real `.docx` (including the older `.doc`) shows a message in the panel rather than failing to open.
 
 ## Documentation
 

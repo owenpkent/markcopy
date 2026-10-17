@@ -154,6 +154,11 @@ export function renderBlocks(
         close();
         out.push(para.html);
     }
+    // Text boxes and charts anchored in this paragraph follow it.
+    if (ctx.afterPara.length > 0) {
+      close();
+      out.push(...ctx.afterPara.splice(0));
+    }
   }
   close();
   return out;
