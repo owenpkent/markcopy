@@ -5,7 +5,13 @@ import { htmlToDocx, reportSummary } from '../src/docxExport';
 import { imageSize } from '../src/docx/media';
 import { bookmarkName } from '../src/docx/ooxml';
 import { columnCount, cssColor } from '../src/docx/build';
-import { MAX_CELL_COLSPAN, MAX_TABLE_CELLS } from '../src/ooxml/tableLimits';
+import {
+  MAX_CELL_COLSPAN,
+  MAX_CELL_ROWSPAN,
+  MAX_TABLE_CELLS,
+  MAX_TABLE_COLUMNS,
+  tableTooLarge,
+} from '../src/ooxml/tableLimits';
 
 /** A 1x1 PNG, as the webview would inline it. */
 const PNG_1x1 =
@@ -346,6 +352,24 @@ describe('tables', () => {
       ],
     })) as unknown as Rows;
     expect(columnCount(rows)).toBe(1);
+  });
+
+  it('rejects a deep rowspan table during counting, not after scanning every row', () => {
+    type Rows = Parameters<typeof columnCount>[0];
+    const rows = Array.from({ length: 400 }, () => ({
+      cells: [
+        {
+          el: { kind: 'element', name: 'td', attrs: {}, children: [] },
+          colspan: MAX_CELL_COLSPAN,
+          rowspan: MAX_CELL_ROWSPAN,
+        },
+      ],
+    })) as unknown as Rows;
+    const stats = { rowsScanned: 0, maxCarried: 0 };
+    const cols = columnCount(rows, stats);
+    expect(tableTooLarge(cols, rows.length)).toBeDefined();
+    expect(stats.rowsScanned).toBeLessThan(rows.length);
+    expect(stats.maxCarried).toBeLessThanOrEqual(MAX_TABLE_COLUMNS);
   });
 
   it('follows a table with a paragraph, which Word requires', () => {

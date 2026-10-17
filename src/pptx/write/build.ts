@@ -12,8 +12,10 @@ import { escapeAttr, escapeXml } from '../../ooxml/write';
 import {
   MAX_CELL_COLSPAN,
   MAX_CELL_ROWSPAN,
+  countTableColumns,
   spanAttr,
   tableTooLarge,
+  type ColumnCountStats,
 } from '../../ooxml/tableLimits';
 import { cssColor } from '../../docx/build';
 import { decodeImage, EMU_PER_PX, type DecodedImage } from '../../docx/media';
@@ -1336,29 +1338,7 @@ function cellAlign(el: XhtmlElement): TableCell['align'] {
   return match ? (match[1].toLowerCase() as TableCell['align']) : undefined;
 }
 
-/**
- * The grid width of a table, in columns; see docx/build.ts's columnCount for
- * why a rowspan from an earlier row has to be counted here too. Duplicated
- * rather than imported: it is a private helper there, and the two tables are
- * shaped too differently (attributes vs child elements for a span) to share
- * the cell-emission code around it.
- */
-function tableColumnCount(rows: TableRow[]): number {
-  let cols = 1;
-  let carried: number[] = [];
-  for (const row of rows) {
-    let col = 0;
-    for (const cell of row.cells) {
-      while ((carried[col] ?? 0) > 0) {
-        col++;
-      }
-      for (let i = 0; i < cell.colspan; i++) {
-        carried[col + i] = Math.max(carried[col + i] ?? 0, cell.rowspan);
-      }
-      col += cell.colspan;
-    }
-    cols = Math.max(cols, col);
-    carried = carried.map((left) => Math.max(0, left - 1));
-  }
-  return cols;
+/** The grid width of a table, in columns; see `countTableColumns`. */
+export function tableColumnCount(rows: TableRow[], stats?: ColumnCountStats): number {
+  return countTableColumns(rows, stats);
 }

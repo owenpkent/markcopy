@@ -4,8 +4,10 @@ import {
   MAX_CELL_ROWSPAN,
   MAX_TABLE_CELLS,
   MAX_TABLE_COLUMNS,
+  countTableColumns,
   spanAttr,
   tableTooLarge,
+  type ColumnCountStats,
 } from '../src/ooxml/tableLimits';
 
 describe('spanAttr', () => {
@@ -47,5 +49,40 @@ describe('tableTooLarge', () => {
 
   it('names the cell budget when the grid is too big overall', () => {
     expect(tableTooLarge(100, MAX_TABLE_CELLS / 100 + 1)).toMatch(/cells this export can write/);
+  });
+});
+
+describe('countTableColumns', () => {
+  const cell = (colspan: number, rowspan: number) => ({ colspan, rowspan });
+  const fresh = (): ColumnCountStats => ({ rowsScanned: 0, maxCarried: 0 });
+
+  it('counts a rowspan from an earlier row as a column', () => {
+    const rows = [{ cells: [cell(1, 2)] }, { cells: [cell(1, 1), cell(1, 1)] }];
+    expect(countTableColumns(rows)).toBe(3);
+  });
+
+  it('stops at the first row that breaks the cell budget, not after scanning them all', () => {
+    // One cell as wide as the column limit, held open by a rowspan, row after
+    // row: every row adds another thousand carried columns to scan.
+    const rows = Array.from({ length: 5000 }, () => ({
+      cells: [cell(MAX_CELL_COLSPAN, MAX_CELL_ROWSPAN)],
+    }));
+    const stats = fresh();
+    const cols = countTableColumns(rows, stats);
+    expect(tableTooLarge(cols, rows.length)).toMatch(/cells this export can write/);
+    expect(stats.rowsScanned).toBeLessThanOrEqual(MAX_TABLE_CELLS / MAX_TABLE_COLUMNS + 1);
+    expect(stats.maxCarried).toBeLessThanOrEqual(MAX_TABLE_COLUMNS);
+  });
+
+  it('stops before allocating the columns of a span past the column limit', () => {
+    const rows = [
+      { cells: [cell(MAX_CELL_COLSPAN, 9), cell(MAX_CELL_COLSPAN, 9)] },
+      ...Array(50).fill({ cells: [cell(1, 1)] }),
+    ];
+    const stats = fresh();
+    const cols = countTableColumns(rows, stats);
+    expect(cols).toBe(2 * MAX_CELL_COLSPAN);
+    expect(stats.rowsScanned).toBe(1);
+    expect(stats.maxCarried).toBe(0);
   });
 });

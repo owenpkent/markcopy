@@ -54,6 +54,73 @@ export function spanAttr(value: string | undefined, max: number): number {
   return n < 1 ? 1 : Math.min(n, max);
 }
 
+/** Work counted by `countTableColumns`, exposed so a test can bound it. */
+export interface ColumnCountStats {
+  /** Rows scanned before the count finished or gave up. */
+  rowsScanned: number;
+  /** The longest the rowspan carry array grew. */
+  maxCarried: number;
+}
+
+/**
+ * The grid width of a table, in columns, or a lower bound on it once the table
+ * is known to be too large to write.
+ *
+ * The sum of a row's own colspans is not the answer: a rowspan from an earlier
+ * row occupies a column in this row too, so a `<td rowspan="2">` above a row of
+ * two cells makes a three-column table. Undercounting is not a layout nit: the
+ * placement loop stops at the width, so every cell past it is dropped from the
+ * document entirely.
+ *
+ * The count enforces `tableTooLarge`'s budgets as it goes. It returns as soon
+ * as the width passes `MAX_TABLE_COLUMNS`, before allocating the columns that
+ * span implies, and as soon as the width times the row count passes
+ * `MAX_TABLE_CELLS`; the result then still fails `tableTooLarge`. That keeps the
+ * work linear in the budget: without it, a cell spanning a thousand columns and
+ * rows deep added a thousand carried columns per row and the validation alone
+ * went quadratic.
+ *
+ * A loop rather than `Math.max(...rows.map(...))`, because the spread passes one
+ * argument per row and overflows the call stack somewhere north of a hundred
+ * thousand of them, a size `markcopy.csv.maxRows` can be set to.
+ */
+export function countTableColumns(
+  rows: readonly { cells: readonly { colspan: number; rowspan: number }[] }[],
+  stats?: ColumnCountStats,
+): number {
+  let cols = 1;
+  // Rows still to come that each column owes to a rowspan above it.
+  let carried: number[] = [];
+
+  for (const row of rows) {
+    if (stats) {
+      stats.rowsScanned++;
+    }
+    let col = 0;
+    for (const cell of row.cells) {
+      while ((carried[col] ?? 0) > 0) {
+        col++;
+      }
+      if (col + cell.colspan > MAX_TABLE_COLUMNS) {
+        return col + cell.colspan;
+      }
+      for (let i = 0; i < cell.colspan; i++) {
+        carried[col + i] = Math.max(carried[col + i] ?? 0, cell.rowspan);
+      }
+      col += cell.colspan;
+    }
+    if (stats) {
+      stats.maxCarried = Math.max(stats.maxCarried, carried.length);
+    }
+    cols = Math.max(cols, col);
+    if (cols * rows.length > MAX_TABLE_CELLS) {
+      return cols;
+    }
+    carried = carried.map((left) => Math.max(0, left - 1));
+  }
+  return cols;
+}
+
 /**
  * Why a grid of `columns` by `rows` is too large to write, or undefined when
  * it is within budget. The message is what the writer puts in the document in

@@ -24,7 +24,14 @@ import {
 } from '../ooxml/xhtml';
 import { decodeImage, displayExtent, type DecodedImage } from './media';
 import { bookmarkName, CONTENT_WIDTH_TWIPS, escapeAttr, escapeXml } from './ooxml';
-import { MAX_CELL_COLSPAN, MAX_CELL_ROWSPAN, spanAttr, tableTooLarge } from '../ooxml/tableLimits';
+import {
+  MAX_CELL_COLSPAN,
+  MAX_CELL_ROWSPAN,
+  countTableColumns,
+  spanAttr,
+  tableTooLarge,
+  type ColumnCountStats,
+} from '../ooxml/tableLimits';
 
 /** Elements that break a paragraph. Anything else is inline. */
 const BLOCK_TAGS = new Set([
@@ -1053,38 +1060,11 @@ function collectRows(table: DocxElement): TableRow[] {
 }
 
 /**
- * The grid width of a table, in columns.
- *
- * The sum of a row's own colspans is not the answer: a rowspan from an earlier
- * row occupies a column in this row too, so a `<td rowspan="2">` above a row of
- * two cells makes a three-column table. Undercounting is not a layout nit -- the
- * placement loop stops at the width, so every cell past it is dropped from the
- * document entirely.
- *
- * A loop rather than `Math.max(...rows.map(...))`, because the spread passes one
- * argument per row and overflows the call stack somewhere north of a hundred
- * thousand of them, a size `markcopy.csv.maxRows` can be set to.
+ * The grid width of a table, in columns; see `countTableColumns` for how a
+ * rowspan counts and why the count stops early on a table that is too large.
  */
-export function columnCount(rows: TableRow[]): number {
-  let cols = 1;
-  // Rows still to come that each column owes to a rowspan above it.
-  let carried: number[] = [];
-
-  for (const row of rows) {
-    let col = 0;
-    for (const cell of row.cells) {
-      while ((carried[col] ?? 0) > 0) {
-        col++;
-      }
-      for (let i = 0; i < cell.colspan; i++) {
-        carried[col + i] = Math.max(carried[col + i] ?? 0, cell.rowspan);
-      }
-      col += cell.colspan;
-    }
-    cols = Math.max(cols, col);
-    carried = carried.map((left) => Math.max(0, left - 1));
-  }
-  return cols;
+export function columnCount(rows: TableRow[], stats?: ColumnCountStats): number {
+  return countTableColumns(rows, stats);
 }
 
 function toCell(el: DocxElement): TableCell {
