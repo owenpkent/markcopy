@@ -128,12 +128,24 @@ Links are preserved as external Word relationships. Opening an exported file
 in Word or another office application may therefore follow those links or
 prompt for network access; exporting does not make linked content trusted.
 
+Table spans are untrusted input. DOMPurify keeps `colspan` and `rowspan`
+attributes verbatim, the browser's clamp applies to the DOM property rather
+than to the attribute the serializer copies out, and both the Word and the
+PowerPoint writer expand a table into one output cell per grid position. A raw
+`<td colspan="10000">` in Markdown therefore used to reach the host as ten
+thousand grid columns of synchronous XML building. `src/ooxml/tableLimits.ts`
+is the shared guard: spans are read as plain positive integers (anything else
+means 1, as in a browser) and clamped to the browser's own limits (1,000
+columns, 65,534 rows), and a table whose grid would exceed 1,000 columns or
+250,000 cells is replaced by a note in the document and counted in the export
+summary before either writer starts expanding it.
+
 ## Word preview
 
 A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx/read/` reads it in the extension host under the same guards: the guarded unpacker in `src/ooxml/zip.ts` (25 MB file, 1,000 entries, 64 MB per inflated part, 256 MB total), the saxes parser that never expands a DTD entity, and the same DOMPurify pass and CSP in the webview. Beyond that:
 
 - **Links are filtered by scheme.** Only `http`, `https`, and `mailto` become a link; `file:`, `javascript:`, `ftp:`, a UNC path, and a relationship that is not marked external are shown as plain text. The hostile part of a hyperlink is its target, and `readExternalRels` is the only place an external relationship is read; the target is never fetched, only shown as a link the reader clicks.
-- **Images are never fetched.** An embedded picture is read from the package and inlined as a `data:` URI (16 MiB total budget); a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
+- **Images are never fetched.** An embedded picture is read from the package and inlined as a `data:` URI (16 MiB total budget, charged for every reference, so a picture repeated many times cannot multiply the preview's size); a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
 - **Output is escaped.** Every piece of text is HTML-escaped and every attribute value is attribute-escaped before it reaches the preview. Bookmark names become element ids with a fixed prefix and a restricted character set.
 - **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget, so a crafted document costs a bounded amount of time and memory.
 - **Parts read.** Beyond the body, styles, numbering, and notes, the reader opens the header and footer parts a section names, `comments.xml` and `commentsExtended.xml`, and the chart parts the body references, always through the guarded unpacker. Header, footer, and comment content goes through the same escaping as the body, and a chart is drawn only from its cached values (no embedded workbook is opened). Each is bounded by the paragraph budget, a text box nesting limit, and chart row and series caps, and a malformed part is skipped rather than failing the preview.
@@ -142,6 +154,8 @@ A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx
 ## CSV grid and cell editing
 
 A CSV or TSV file is parsed in the extension host and emitted as an HTML table. Every cell value is HTML-escaped on the way out, and the result still passes through the same DOMPurify sanitize step and CSP as Markdown, so a cell containing `<img src=x onerror=...>` renders as that literal text.
+
+The grid's size is bounded on every axis and on their product. Every row is padded out to the widest record, so a header of a few thousand fields over many one-field rows would multiply a small file into a cell for every row/column pair. `markcopy.csv.maxRows` caps rows, `markcopy.csv.maxColumns` caps columns, and `CSV_MAX_CELLS` in `src/csv.ts` caps the total the grid draws, all applied before any markup is built. Only trailing columns are cut, so a cell's position in its row is still its field's position in the record and the editing coordinates below stay honest.
 
 Cell editing is the one place MarkCopy writes to a file rather than only reading one, so it is deliberately narrow:
 
@@ -164,12 +178,13 @@ An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before 
 - **Entity expansion cannot happen.** The parser (saxes) resolves the five predefined XML entities and never expands entities declared in a DTD, so the classic billion-laughs expansion and XXE are inert here structurally rather than by a check that could be forgotten. A test pins this, so replacing the parser with one that does expand them fails the suite rather than the extension host.
 - **The preview is read-only.** MarkCopy never writes to a workbook, so it cannot corrupt one. There is no equivalent of the CSV grid's cell writeback.
 - **Formulas are never evaluated.** A cell showing a formula's result is showing the value the file already had cached; MarkCopy does not compute anything.
+- **Column ranges are validated before they are expanded.** A `<col>` element's `min`/`max` is an inclusive range the reader walks to record widths and hidden columns. Both bounds have to be safe positive integers in order, and the range is intersected with `markcopy.xlsx.maxColumns` before the loop runs; a malformed element is skipped whole. Without this a negative `min` expanded thousands of columns left of A, and a `min` beyond the safe-integer range (where `c + 1 === c`) made the loop never advance and stalled the extension host for good.
 
 ## STL preview
 
 A binary STL is an 80-byte header, a uint32 triangle count, then 50 bytes per triangle. The count is the file telling the parser how much memory to allocate, and Three.js's `STLLoader` believes it: it sizes its `Float32Array`s from that number without checking the file is large enough to hold that many triangles. An 84-byte file declaring `0xFFFFFFFF` triangles therefore asks for tens of gigabytes, which is a denial of service against the whole window from a file small enough to arrive in an email.
 
-`checkStl()` in `src/webview/stlInfo.ts` runs before any allocation and refuses three shapes:
+`checkStl()` in `src/webview/stlInfo.ts` runs before any allocation. Its binary-versus-ASCII classification is a byte-for-byte restatement of the pinned `STLLoader`'s own test (a length matching the header's count is binary; otherwise lowercase `solid` at offsets 0 through 4 is ASCII; anything else is binary), and it has to stay one: the binary guards below apply to what `checkStl()` calls binary, the loader allocates from the header count on what _it_ calls binary, and any header the two classified differently was a file that skipped the guards. An earlier, friendlier sniff (case-insensitive, leading whitespace allowed, `facet` required) let `SOLID facet` pass as ASCII and reach the loader as binary. A test runs the same fixtures through the real loader to keep the two in agreement. It refuses three shapes:
 
 - **A count the file cannot back.** If `84 + triangles * 50` exceeds the actual byte length, the file is corrupt or crafted and is rejected with a message in the panel. This is the amplification case above.
 - **A count above `MAX_TRIANGLES` (~5.4 million).** A self-consistent 256 MB model is not an attack, but it is not something to hand a WebGL context either.
