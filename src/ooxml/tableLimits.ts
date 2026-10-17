@@ -47,11 +47,21 @@ export function spanAttr(value: string | undefined, max: number): number {
     return 1;
   }
   const trimmed = value.trim();
-  if (!/^\d{1,9}$/.test(trimmed)) {
+  if (!/^\d+$/.test(trimmed)) {
     return 1;
   }
-  const n = Number.parseInt(trimmed, 10);
-  return n < 1 ? 1 : Math.min(n, max);
+  // Leading zeros carry no magnitude (`0000000002` is 2, as in a browser), so
+  // drop them before judging size. What is left is compared by length and never
+  // parsed when long, so a value that would round in floating point is clamped
+  // instead of becoming a loop bound.
+  const digits = trimmed.replace(/^0+/, '');
+  if (digits === '') {
+    return 1;
+  }
+  if (digits.length > 9) {
+    return max;
+  }
+  return Math.min(Number.parseInt(digits, 10), max);
 }
 
 /** Work counted by `countTableColumns`, exposed so a test can bound it. */

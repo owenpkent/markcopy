@@ -726,7 +726,7 @@ describe('table limits', () => {
   });
 
   it('reads a malformed span as 1, the way a browser does', () => {
-    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x', '99999999999999999999']) {
+    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x']) {
       const { slide } = pptx(`<table><tr><td colspan="${bad}">a</td><td>b</td></tr></table>`);
       expect(slide(1).match(/<a:gridCol /g)).toHaveLength(2);
       expect(slide(1)).not.toContain('gridSpan=');
@@ -740,6 +740,16 @@ describe('table limits', () => {
     );
     expect(slide(1).match(/<a:gridCol /g)).toHaveLength(3);
     expect(slide(1)).toContain('gridSpan="2"');
+    expect(slide(1)).toContain('rowSpan="2"');
+    expect(slide(1)).toContain('vMerge="1"');
+  });
+
+  it('reads a span with leading zeros by its value', () => {
+    const { slide } = pptx(
+      '<table><tr><td rowspan="0000000002">A</td><td>B</td></tr>' +
+        '<tr><td>C</td><td>D</td></tr></table>',
+    );
+    expect(slide(1).match(/<a:gridCol /g)).toHaveLength(3);
     expect(slide(1)).toContain('rowSpan="2"');
     expect(slide(1)).toContain('vMerge="1"');
   });

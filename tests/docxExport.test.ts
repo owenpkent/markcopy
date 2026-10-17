@@ -673,7 +673,7 @@ describe('table limits', () => {
   });
 
   it('reads a malformed span as 1, the way a browser does', () => {
-    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x', '99999999999999999999']) {
+    for (const bad of ['abc', '-3', '0', '1e9', '', '2.5x']) {
       const { document } = docx(`<table><tr><td colspan="${bad}">a</td><td>b</td></tr></table>`);
       expect(document.match(/<w:gridCol /g)).toHaveLength(2);
       expect(document).not.toContain('<w:gridSpan');
@@ -687,6 +687,16 @@ describe('table limits', () => {
     );
     expect(document.match(/<w:gridCol /g)).toHaveLength(3);
     expect(document).toContain('<w:gridSpan w:val="2"/>');
+    expect(document).toContain('<w:vMerge w:val="restart"/>');
+    expect(document).toContain('<w:vMerge/>');
+  });
+
+  it('reads a span with leading zeros by its value', () => {
+    const { document } = docx(
+      '<table><tr><td rowspan="0000000002">A</td><td>B</td></tr>' +
+        '<tr><td>C</td><td>D</td></tr></table>',
+    );
+    expect(document.match(/<w:gridCol /g)).toHaveLength(3);
     expect(document).toContain('<w:vMerge w:val="restart"/>');
     expect(document).toContain('<w:vMerge/>');
   });

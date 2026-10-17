@@ -28,11 +28,24 @@ describe('spanAttr', () => {
     expect(spanAttr('999999999', MAX_CELL_ROWSPAN)).toBe(MAX_CELL_ROWSPAN);
   });
 
+  it('reads leading zeros as a browser does', () => {
+    expect(spanAttr('0000000002', 1000)).toBe(2);
+    expect(spanAttr('002', 1000)).toBe(2);
+    expect(spanAttr('0000000000', 1000)).toBe(1);
+    expect(spanAttr('000000000000000000000003', 1000)).toBe(3);
+  });
+
   it('never produces an unsafe number from a long digit string', () => {
-    // Ten or more digits are rejected before parseInt, so a value that would
-    // round in floating point never becomes a loop bound.
-    expect(spanAttr('99999999999999999999', MAX_CELL_COLSPAN)).toBe(1);
-    expect(spanAttr('1'.repeat(400), MAX_CELL_COLSPAN)).toBe(1);
+    // More than nine significant digits are clamped before parseInt, so a value
+    // that would round in floating point never becomes a loop bound.
+    expect(spanAttr('99999999999999999999', MAX_CELL_COLSPAN)).toBe(MAX_CELL_COLSPAN);
+    expect(spanAttr('1'.repeat(400), MAX_CELL_ROWSPAN)).toBe(MAX_CELL_ROWSPAN);
+  });
+
+  it('still rejects malformed values that merely contain digits', () => {
+    for (const bad of ['2x', 'x2', '2 2', '0x2', '١٢']) {
+      expect(spanAttr(bad, 1000)).toBe(1);
+    }
   });
 });
 
