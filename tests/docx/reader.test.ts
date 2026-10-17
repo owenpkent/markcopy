@@ -744,6 +744,24 @@ describe('images', () => {
     expect(body({ rels, media, body: twice }, { maxMediaBytes: 4 })).not.toContain('<img');
   });
 
+  it('charges every reference to a shared image against the output budget', () => {
+    const part = new Uint8Array(1024);
+    part.set(PNG_1x1);
+    const many = para(Array.from({ length: 100 }, () => drawing({ descr: 'dup' })).join(''));
+    const spec = { rels, media: { 'word/media/image1.png': part }, body: many };
+    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 4096 });
+    // Four references fit the 4096-byte budget; the rest become placeholders.
+    expect(out.html.match(/<img/g)).toHaveLength(4);
+    expect(out.html.match(/mc-docx-placeholder/g)).toHaveLength(96);
+    expect(out.html.length).toBeLessThan(20_000);
+    expect(out.truncated).toBe(true);
+    expect(out.html).toContain('Some repeated images are not shown');
+    // Within the budget nothing is cut.
+    const fits = renderDocxHtml(buildDocx(spec));
+    expect(fits.html.match(/<img/g)).toHaveLength(100);
+    expect(fits.truncated).toBe(false);
+  });
+
   it('shows one picture, not two, for a drawing with a VML fallback', () => {
     const alt =
       '<w:r><mc:AlternateContent><mc:Choice Requires="wps">' +

@@ -15,7 +15,7 @@ import { escapeAttr, escapeHtml } from '../../escape';
 import { imageDataUri } from '../../ooxml/media';
 import { attr, relAttr } from '../../ooxml/xml';
 import { child, findAll, findDeep, type XNode } from '../../ooxml/xnode';
-import { bookmarkId, noteRefHtml, safeHref, type ReadCtx } from './context';
+import { bookmarkId, noteRefHtml, safeHref, spendOutput, type ReadCtx } from './context';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
 
 interface Fmt {
@@ -373,14 +373,24 @@ class InlineWalker {
     link: Link | undefined,
   ): void {
     const target = embed === undefined ? undefined : this.ctx.rels.embed.get(embed);
-    const uri =
+    let uri =
       target === undefined
         ? undefined
         : imageDataUri(this.ctx.parts, target, this.ctx.media, this.ctx.imageCache);
+    // The cache makes the encoding free, but every reference writes the whole
+    // URI into the output again, so each one is charged (at the part's size,
+    // the unit the media budget uses).
+    if (
+      uri !== undefined &&
+      target !== undefined &&
+      !spendOutput(this.ctx, this.ctx.parts.get(target)?.length ?? 0)
+    ) {
+      uri = undefined;
+    }
     let html: string;
     if (uri === undefined) {
       // A linked image is never fetched; EMF/WMF and anything over the media
-      // budget cannot be shown. Name the gap instead of leaving a hole.
+      // or output budget cannot be shown. Name the gap instead of leaving a hole.
       const label = linkedOnly ? 'Linked image (not loaded)' : alt ? `Image: ${alt}` : 'Image';
       html = `<span class="mc-docx-placeholder">${escapeHtml(label)}</span>`;
     } else {
