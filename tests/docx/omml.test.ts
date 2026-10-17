@@ -70,6 +70,22 @@ describe('runs', () => {
     check(r('2', val('sty', 'p')), '2');
   });
 
+  it('bolds Greek and digit runs, not only ASCII letters', () => {
+    const cls = (tex: string): string[] =>
+      katex
+        .renderToString(tex, { throwOnError: true, output: 'html' })
+        .match(/mathbf|boldsymbol|mathnormal/g) ?? [];
+    check(r('α', val('sty', 'bi')), '\\boldsymbol{\\alpha}');
+    expect(cls(convert(r('α', val('sty', 'bi'))))).toEqual(['boldsymbol']);
+    check(r('α', val('sty', 'b')), '\\boldsymbol{\\alpha}');
+    check(r('Γ', val('sty', 'b')), '\\boldsymbol{\\Gamma}');
+    check(r('2', val('sty', 'b')), '\\mathbf{2}');
+    expect(cls(convert(r('2', val('sty', 'b'))))).toEqual(['mathbf']);
+    check(r('2', val('sty', 'bi')), '\\boldsymbol{2}');
+    check(r('2', val('sty', 'p')), '2');
+    check(r('α', val('sty', 'p')), '\\alpha');
+  });
+
   it('maps mathematical alphanumerics', () => {
     check(r('\u{1d405}'), '\\mathbf{F}');
     check(r('\u{1d465}'), 'x');

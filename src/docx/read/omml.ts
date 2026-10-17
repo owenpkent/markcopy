@@ -572,15 +572,19 @@ class Converter {
     }
     // Word shows a letter italic unless its style asks otherwise.
     const hasLetter = /[A-Za-z]/.test(text);
+    // Bold also applies to digits and Greek. KaTeX's `\mathbf` leaves lowercase
+    // Greek italic, so any Greek in the run takes `\boldsymbol`, which bolds it.
+    const hasBoldable = /[A-Za-z0-9\p{Script=Greek}]/u.test(text);
+    const hasGreek = /\p{Script=Greek}/u.test(text);
     let wrapped = body;
     const family = scr === undefined ? undefined : SCRIPT_STYLES[scr];
     if (family !== undefined && hasLetter) {
       wrapped = `${family}{${body}}`;
     } else if (sty === 'p' && hasLetter) {
       wrapped = `\\mathrm{${body}}`;
-    } else if (sty === 'b' && hasLetter) {
-      wrapped = `\\mathbf{${body}}`;
-    } else if (sty === 'bi' && hasLetter) {
+    } else if (sty === 'b' && hasBoldable) {
+      wrapped = `${hasGreek ? '\\boldsymbol' : '\\mathbf'}{${body}}`;
+    } else if (sty === 'bi' && hasBoldable) {
       wrapped = `\\boldsymbol{${body}}`;
     }
     return align + wrapped;
