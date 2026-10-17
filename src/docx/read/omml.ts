@@ -423,16 +423,18 @@ function grp(s: string): string {
 /** Concatenate, adding the space that stops `\alpha` fusing with a following letter. */
 function cat(parts: string[]): string {
   let out = '';
+  // Parts are whole tokens, so whether `out` ends in a control word is known
+  // from the last part alone; `out` itself is never read back.
+  let openCommand = false;
   for (const p of parts) {
     if (p === '') {
       continue;
     }
-    // Only the tail matters: no command we emit is longer, and rescanning all
-    // of `out` for every part would be quadratic.
-    if (/^[A-Za-z]/.test(p) && /(?<!\\)\\[A-Za-z]+$/.test(out.slice(-MAX_COMMAND))) {
+    if (openCommand && /^[A-Za-z]/.test(p)) {
       out += ' ';
     }
     out += p;
+    openCommand = /(?<!\\)\\[A-Za-z]+$/.test(p.slice(-MAX_COMMAND));
   }
   return out;
 }

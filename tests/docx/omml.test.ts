@@ -425,10 +425,19 @@ describe('equation size limits', () => {
   });
 
   it('converts a large allowed run in linear time', () => {
-    const start = performance.now();
-    const tex = convert(r('x'.repeat(100_000)));
-    expect(tex).toHaveLength(100_000);
-    expect(performance.now() - start).toBeLessThan(1000);
+    const time = (n: number): number => {
+      let best = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const start = performance.now();
+        const tex = convert(r('x'.repeat(n)));
+        best = Math.min(best, performance.now() - start);
+        expect(tex).toHaveLength(n);
+      }
+      return best;
+    };
+    // Four times the text should cost about four times as much; a quadratic
+    // conversion costs sixteen. The floor keeps timer noise from deciding it.
+    expect(time(100_000)).toBeLessThan(10 * Math.max(time(25_000), 10));
   });
 
   it('still separates a command from a following letter after long output', () => {
