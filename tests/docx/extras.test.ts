@@ -1,7 +1,18 @@
 // Headers and footers, text boxes, comments, and charts in the .docx reader.
 import { describe, expect, it } from 'vitest';
 import { renderDocxHtml } from '../../src/docx/read';
-import { buildDocx, imageRel, NS, para, PNG_1x1, REL, run, XML, type DocxSpec } from './fixture';
+import {
+  buildDocx,
+  drawing,
+  imageRel,
+  NS,
+  para,
+  PNG_1x1,
+  REL,
+  run,
+  XML,
+  type DocxSpec,
+} from './fixture';
 
 function dom(spec: DocxSpec, opts?: Parameters<typeof renderDocxHtml>[1]): Document {
   const html = renderDocxHtml(buildDocx(spec), opts).html;
@@ -217,6 +228,35 @@ describe('text boxes', () => {
     }
     const d = dom({ body: inner });
     expect(d.querySelectorAll('aside').length).toBeLessThan(10);
+  });
+
+  describe('pictures inside a box', () => {
+    const media = { 'word/media/p.png': PNG_1x1 };
+    const rels = imageRel('rIdImg', 'media/p.png');
+
+    it('renders a DrawingML box picture once, inside the box', () => {
+      const d = dom({
+        media,
+        rels,
+        body: `<w:p><w:r>${drawingOf(wsp(para(drawing({}))))}</w:r></w:p>`,
+      });
+      expect(d.querySelectorAll('img')).toHaveLength(1);
+      expect(d.querySelectorAll('aside img')).toHaveLength(1);
+    });
+
+    it('renders a VML box picture once, inside the box', () => {
+      const pict = '<w:r><w:pict><v:shape><v:imagedata r:id="rIdImg"/></v:shape></w:pict></w:r>';
+      const d = dom({ media, rels, body: `<w:p><w:r>${vml(para(pict))}</w:r></w:p>` });
+      expect(d.querySelectorAll('img')).toHaveLength(1);
+      expect(d.querySelectorAll('aside img')).toHaveLength(1);
+    });
+
+    it('still renders a picture that sits beside the box', () => {
+      const group = `<wpg:wgp>${wsp(para(drawing({})))}<pic:pic><pic:blipFill><a:blip r:embed="rIdImg"/></pic:blipFill></pic:pic></wpg:wgp>`;
+      const d = dom({ media, rels, body: `<w:p><w:r>${drawingOf(group)}</w:r></w:p>` });
+      expect(d.querySelectorAll('img')).toHaveLength(2);
+      expect(d.querySelectorAll('aside img')).toHaveLength(1);
+    });
   });
 });
 

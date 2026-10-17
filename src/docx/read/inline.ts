@@ -25,7 +25,7 @@ import {
   spendOutput,
   type ReadCtx,
 } from './context';
-import { drawingExtras, textBoxes } from './extras';
+import { drawingExtras, inTextBox, textBoxes } from './extras';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
 
 interface Fmt {
@@ -437,7 +437,8 @@ class InlineWalker {
     const docAlt = docPr
       ? attr(docPr.attrs, 'descr')?.trim() || attr(docPr.attrs, 'title')?.trim() || ''
       : '';
-    const pics = findAll(d, 'pic');
+    // A text box's pictures belong to the box, which the extras reader has rendered.
+    const pics = findAll(d, 'pic', inTextBox);
     const extent = host && child(host, 'extent');
     for (const pic of pics) {
       const cNvPr = findDeep(pic, 'cNvPr');
@@ -457,7 +458,11 @@ class InlineWalker {
   private pict(p: XNode, link: Link | undefined): void {
     this.ctx.afterPara.push(...textBoxes(p, this.ctx));
     for (const c of p.children) {
-      const data = c.name === 'imagedata' ? c : findDeep(c, 'imagedata');
+      // A text box's own pictures are rendered with the box, not a second time here.
+      if (inTextBox(c)) {
+        continue;
+      }
+      const data = c.name === 'imagedata' ? c : findDeep(c, 'imagedata', inTextBox);
       if (data === undefined) {
         continue;
       }

@@ -98,9 +98,12 @@ export function textBoxes(root: XNode, ctx: ReadCtx): string[] {
   return out;
 }
 
+/** Prunes a picture walk at a text box body, whose content `textBoxes` renders. */
+export const inTextBox = (n: XNode): boolean => n.name === 'txbxContent';
+
 function collectBoxes(node: XNode, out: XNode[]): void {
   for (const c of node.children) {
-    if (c.name === 'txbxContent') {
+    if (inTextBox(c)) {
       out.push(c);
     } else if (c.name === 'AlternateContent') {
       const branch = child(c, 'Choice') ?? child(c, 'Fallback');
