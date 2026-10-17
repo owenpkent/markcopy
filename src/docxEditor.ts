@@ -6,7 +6,7 @@ import { OoxmlEditorProvider, describeReadError, type OoxmlSession } from './oox
 // The settings a document is drawn from. Anything outside this list cannot
 // change what the page looks like, so it must not cost a re-read and a
 // re-parse.
-const REDRAW_SETTINGS = ['markcopy.theme', 'markcopy.styleProfile'];
+const REDRAW_SETTINGS = ['markcopy.theme', 'markcopy.styleProfile', 'markcopy.math'];
 
 // A read-only custom editor for .docx / .docm Word documents, built on the same
 // OoxmlEditorProvider scaffold as the workbook and deck editors. The whole
@@ -26,7 +26,8 @@ export class DocxEditorProvider extends OoxmlEditorProvider {
 
   private async renderDocument(uri: vscode.Uri): Promise<string> {
     const bytes = await vscode.workspace.fs.readFile(uri);
-    return renderDocxHtml(bytes).html;
+    const math = vscode.workspace.getConfiguration('markcopy', uri).get<boolean>('math', true);
+    return renderDocxHtml(bytes, { math }).html;
   }
 
   protected errorHtml(err: unknown): string {
