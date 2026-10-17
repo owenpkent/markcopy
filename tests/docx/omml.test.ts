@@ -81,6 +81,10 @@ describe('runs', () => {
     check(r('Γ', val('sty', 'b')), '\\boldsymbol{\\Gamma}');
     check(r('2', val('sty', 'b')), '\\mathbf{2}');
     expect(cls(convert(r('2', val('sty', 'b'))))).toEqual(['mathbf']);
+    // Latin stays mathbf and Greek is boldsymbol inside it, each with its own class.
+    const mixed = r('x' + String.fromCharCode(0x3b1) + '2', val('sty', 'b'));
+    check(mixed, '\\mathbf{x\\boldsymbol{\\alpha}2}');
+    expect(cls(convert(mixed))).toEqual(['mathbf', 'boldsymbol', 'mathbf']);
     check(r('2', val('sty', 'bi')), '\\boldsymbol{2}');
     check(r('2', val('sty', 'p')), '2');
     check(r('α', val('sty', 'p')), '\\alpha');

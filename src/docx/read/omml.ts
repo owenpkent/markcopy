@@ -566,26 +566,32 @@ class Converter {
     if ((sty === undefined || sty === 'p') && scr === undefined && FUNCTIONS.has(text.trim())) {
       return `${align}\\${text.trim()}`;
     }
+    // Word shows a letter italic unless its style asks otherwise.
+    const hasLetter = /[A-Za-z]/.test(text);
+    const family = scr === undefined ? undefined : SCRIPT_STYLES[scr];
+    // Bold also applies to digits and Greek. KaTeX's `\mathbf` leaves lowercase
+    // Greek italic, so under `b` each Greek command gets its own `\boldsymbol`.
+    const boldGreek = sty === 'b' && !(family !== undefined && hasLetter);
     const body = cat(
-      Array.from(text, (ch) => (ch === '&' && this.eqDepth > 0 ? '&' : mathChar(ch))),
+      Array.from(text, (ch) => {
+        if (ch === '&' && this.eqDepth > 0) {
+          return '&';
+        }
+        const tex = mathChar(ch);
+        return boldGreek && GREEK[ch] !== undefined ? `\\boldsymbol{${tex}}` : tex;
+      }),
     );
     if (body === '') {
       return align;
     }
-    // Word shows a letter italic unless its style asks otherwise.
-    const hasLetter = /[A-Za-z]/.test(text);
-    // Bold also applies to digits and Greek. KaTeX's `\mathbf` leaves lowercase
-    // Greek italic, so any Greek in the run takes `\boldsymbol`, which bolds it.
     const hasBoldable = /[A-Za-z0-9\p{Script=Greek}]/u.test(text);
-    const hasGreek = /\p{Script=Greek}/u.test(text);
     let wrapped = body;
-    const family = scr === undefined ? undefined : SCRIPT_STYLES[scr];
     if (family !== undefined && hasLetter) {
       wrapped = `${family}{${body}}`;
     } else if (sty === 'p' && hasLetter) {
       wrapped = `\\mathrm{${body}}`;
-    } else if (sty === 'b' && hasBoldable) {
-      wrapped = `${hasGreek ? '\\boldsymbol' : '\\mathbf'}{${body}}`;
+    } else if (sty === 'b' && /[A-Za-z0-9]/.test(text)) {
+      wrapped = `\\mathbf{${body}}`;
     } else if (sty === 'bi' && hasBoldable) {
       wrapped = `\\boldsymbol{${body}}`;
     }
