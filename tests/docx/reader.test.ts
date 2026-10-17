@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import DOMPurify from 'dompurify';
 import { strToU8, zipSync } from 'fflate';
 import { renderDocxHtml, DocxError } from '../../src/docx/read';
+import { tableToDelimited } from '../../src/webview/table';
 import {
   buildDocx,
   cell,
@@ -157,6 +158,55 @@ describe('paragraphs and runs', () => {
       body: para(run('x', '<w:b w:val="0"/><w:u w:val="none"/><w:i w:val="false"/>')),
     });
     expect(out).toBe('<p>x</p>');
+  });
+
+  it('applies the paragraph style run properties, inherited through basedOn', () => {
+    const out = body({
+      styles:
+        style('Base', { rPr: '<w:b/>' }) +
+        style('Fancy', { basedOn: 'Base', rPr: '<w:i/>' }) +
+        style('Plain', { type: 'character', rPr: '<w:i w:val="0"/>' }),
+      body: para(
+        run('all') + run('char', '<w:rStyle w:val="Plain"/>'),
+        '<w:pStyle w:val="Fancy"/>',
+      ),
+    });
+    expect(out).toBe('<p><strong><em>all</em></strong><strong>char</strong></p>');
+  });
+
+  it('lets a direct false override beat the paragraph style', () => {
+    const out = body({
+      styles: style('Loud', { rPr: '<w:b/><w:i/>' }),
+      body: para(run('styled') + run('override', '<w:b w:val="0"/>'), '<w:pStyle w:val="Loud"/>'),
+    });
+    expect(out).toBe('<p><strong><em>styled</em></strong><em>override</em></p>');
+  });
+
+  it('hides text a paragraph style marks vanish, unless a run turns it back on', () => {
+    const out = body({
+      styles: style('Hidden', { rPr: '<w:vanish/>' }),
+      body: para(
+        run('secret') + run('shown', '<w:vanish w:val="0"/>'),
+        '<w:pStyle w:val="Hidden"/>',
+      ),
+    });
+    expect(out).toBe('<p>shown</p>');
+  });
+
+  it('does not wrap a heading in strong for its style bold', () => {
+    const out = body({
+      styles: style('Heading1', { name: 'heading 1', rPr: '<w:b/><w:i/>' }),
+      body: para('Title', '<w:pStyle w:val="Heading1"/>'),
+    });
+    expect(out).toBe('<h1><em>Title</em></h1>');
+  });
+
+  it('does not repeat a header-row style bold inside the th', () => {
+    const out = body({
+      styles: style('TableHeader', { rPr: '<w:b/>' }),
+      body: table(row(cell(para('Name', '<w:pStyle w:val="TableHeader"/>')), true)),
+    });
+    expect(out).toContain('<th scope="col">Name</th>');
   });
 
   it('takes bold from a character style', () => {
@@ -505,6 +555,48 @@ describe('tables', () => {
     expect(out).toContain('<tr><td>q</td><td>r</td></tr>');
   });
 
+  describe('gridBefore', () => {
+    const grid = '<w:tblGrid><w:gridCol/><w:gridCol/><w:gridCol/></w:tblGrid>';
+    const skip = (n: number, cells: string): string =>
+      `<w:tr><w:trPr><w:gridBefore w:val="${n}"/></w:trPr>${cells}</w:tr>`;
+    const tableOf = (rows: string): string => `<w:tbl><w:tblPr/>${grid}${rows}</w:tbl>`;
+    const dom = (spec: string): HTMLTableElement => {
+      const host = document.createElement('div');
+      host.innerHTML = body({ body: spec });
+      return host.querySelector('table')!;
+    };
+
+    it('draws the skipped leading column so cells keep their grid position', () => {
+      const spec = tableOf(
+        row(cell(p('A')) + cell(p('B')) + cell(p('C')), true) +
+          skip(1, cell(p('belongs to B')) + cell(p('belongs to C'))),
+      );
+      expect(body({ body: spec })).toContain(
+        '<tr><td></td><td>belongs to B</td><td>belongs to C</td></tr>',
+      );
+      expect(tableToDelimited(dom(spec), '\t')).toBe('A\tB\tC\r\n\tbelongs to B\tbelongs to C');
+      expect(tableToDelimited(dom(spec), ',')).toBe('A,B,C\r\n,belongs to B,belongs to C');
+    });
+
+    it('merges a wider skip into one colspan cell', () => {
+      const out = body({
+        body: tableOf(row(cell(p('A')) + cell(p('B')) + cell(p('C'))) + skip(2, cell(p('only C')))),
+      });
+      expect(out).toContain('<tr><td colspan="2"></td><td>only C</td></tr>');
+    });
+
+    it('does not draw a column a rowspan from above already holds', () => {
+      const spec = tableOf(
+        row(cell(p('A')) + cell(p('B'), '<w:vMerge w:val="restart"/>') + cell(p('C'))) +
+          skip(1, cell('<w:p/>', '<w:vMerge/>') + cell(p('c2'))),
+      );
+      const out = body({ body: spec });
+      expect(out).toContain('<tr><td>A</td><td rowspan="2">B</td><td>C</td></tr>');
+      // Column 0 is the skip; column 1 belongs to B's rowspan, so only one empty cell.
+      expect(out).toContain('<tr><td></td><td>c2</td></tr>');
+    });
+  });
+
   it('keeps a lone continue cell with no start above it as an ordinary cell', () => {
     const out = body({ body: table(row(cell(p('x'), '<w:vMerge/>') + cell(p('y')))) });
     expect(out).toContain('<td>x</td><td>y</td>');
@@ -742,6 +834,24 @@ describe('images', () => {
     const twice = para(drawing({ descr: 'one' }) + drawing({ descr: 'two' }));
     expect(body({ rels, media, body: twice }).match(/<img/g)).toHaveLength(2);
     expect(body({ rels, media, body: twice }, { maxMediaBytes: 4 })).not.toContain('<img');
+  });
+
+  it('charges every reference to a shared image against the output budget', () => {
+    const part = new Uint8Array(1024);
+    part.set(PNG_1x1);
+    const many = para(Array.from({ length: 100 }, () => drawing({ descr: 'dup' })).join(''));
+    const spec = { rels, media: { 'word/media/image1.png': part }, body: many };
+    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 4096 });
+    // Four references fit the 4096-byte budget; the rest become placeholders.
+    expect(out.html.match(/<img/g)).toHaveLength(4);
+    expect(out.html.match(/mc-docx-placeholder/g)).toHaveLength(96);
+    expect(out.html.length).toBeLessThan(20_000);
+    expect(out.truncated).toBe(true);
+    expect(out.html).toContain('Some repeated images are not shown');
+    // Within the budget nothing is cut.
+    const fits = renderDocxHtml(buildDocx(spec));
+    expect(fits.html.match(/<img/g)).toHaveLength(100);
+    expect(fits.truncated).toBe(false);
   });
 
   it('shows one picture, not two, for a drawing with a VML fallback', () => {

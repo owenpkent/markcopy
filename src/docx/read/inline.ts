@@ -17,7 +17,14 @@ import { escapeAttr, escapeHtml } from '../../escape';
 import { imageDataUri } from '../../ooxml/media';
 import { attr, relAttr } from '../../ooxml/xml';
 import { child, findAll, findDeep, type XNode } from '../../ooxml/xnode';
-import { bookmarkId, commentRefHtml, noteRefHtml, safeHref, type ReadCtx } from './context';
+import {
+  bookmarkId,
+  commentRefHtml,
+  noteRefHtml,
+  safeHref,
+  spendOutput,
+  type ReadCtx,
+} from './context';
 import { drawingExtras, textBoxes } from './extras';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
 
@@ -66,8 +73,17 @@ const SYMBOL_GLYPHS: Record<number, string> = {
   0xf076: '❖',
 };
 
-export function readInline(p: XNode, ctx: ReadCtx, paraMono: boolean): InlineResult {
-  const walker = new InlineWalker(ctx, paraMono);
+/**
+ * `paraProps` are the run properties the paragraph's style gives every run in
+ * it; a character style and then a run's own properties are layered on top.
+ */
+export function readInline(
+  p: XNode,
+  ctx: ReadCtx,
+  paraMono: boolean,
+  paraProps: RunProps = {},
+): InlineResult {
+  const walker = new InlineWalker(ctx, paraMono, paraProps);
   walker.beginComments();
   walker.nodes(p.children, undefined);
   walker.endComments();
@@ -119,6 +135,7 @@ class InlineWalker {
   constructor(
     private readonly ctx: ReadCtx,
     private readonly paraMono: boolean,
+    private readonly paraProps: RunProps,
   ) {}
 
   nodes(list: XNode[], link: Link | undefined): void {
@@ -271,7 +288,10 @@ class InlineWalker {
   private run(r: XNode, link: Link | undefined): void {
     const rPr = child(r, 'rPr');
     const styleId = rPr && attr(child(rPr, 'rStyle')?.attrs ?? {}, 'val');
-    const props = mergeRunProps(this.ctx.styles.runStyle(styleId), readRunProps(rPr));
+    const props = mergeRunProps(
+      mergeRunProps(this.paraProps, this.ctx.styles.runStyle(styleId)),
+      readRunProps(rPr),
+    );
     this.runChildren(r.children, props, link);
   }
 
@@ -454,14 +474,24 @@ class InlineWalker {
     link: Link | undefined,
   ): void {
     const target = embed === undefined ? undefined : this.ctx.rels.embed.get(embed);
-    const uri =
+    let uri =
       target === undefined
         ? undefined
         : imageDataUri(this.ctx.parts, target, this.ctx.media, this.ctx.imageCache);
+    // The cache makes the encoding free, but every reference writes the whole
+    // URI into the output again, so each one is charged (at the part's size,
+    // the unit the media budget uses).
+    if (
+      uri !== undefined &&
+      target !== undefined &&
+      !spendOutput(this.ctx, this.ctx.parts.get(target)?.length ?? 0)
+    ) {
+      uri = undefined;
+    }
     let html: string;
     if (uri === undefined) {
       // A linked image is never fetched; EMF/WMF and anything over the media
-      // budget cannot be shown. Name the gap instead of leaving a hole.
+      // or output budget cannot be shown. Name the gap instead of leaving a hole.
       const label = linkedOnly ? 'Linked image (not loaded)' : alt ? `Image: ${alt}` : 'Image';
       html = `<span class="mc-docx-placeholder">${escapeHtml(label)}</span>`;
     } else {
