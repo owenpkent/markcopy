@@ -1,6 +1,6 @@
 # MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/OwenPKent.markcopy?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
+[![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/OwenPKent.markcopy.svg?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
 [![CI](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/owenpkent/markcopy/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@
 
 **Install:** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy), from [Open VSX](https://open-vsx.org/extension/OwenPKent/markcopy) (Cursor, VSCodium, Windsurf), or run `code --install-extension OwenPKent.markcopy`.
 
-> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. It opens CSVs and Excel workbooks as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, a PowerPoint deck as one scrollable column of slides, STL models in a 3D viewer, and `.mov` / `.mp4` / `.mkv` / `.webm` video in a player you can grab a frame from, so one extension previews them all.
+> The preview built for getting content _out_. Right-click anywhere in the rendered preview and copy it in the format you actually need: rich text that pastes **with formatting** into Word, Outlook, Gmail and Google Docs, a per-element copy of a code block or table, the raw Markdown source, or a PNG image of a diagram. Markdown blocks can be edited in place in the preview, and CSV cells too. It opens CSVs and Excel workbooks as a real spreadsheet-style grid, PDFs with a selectable text layer, LaTeX documents compiled and shown the same way, a PowerPoint deck as one scrollable column of slides, STL models in a 3D viewer, and `.mov` / `.mp4` / `.mkv` / `.webm` video in a player you can grab a frame from, so one extension previews them all.
 
 VS Code's built-in preview and the popular alternatives (Markdown Preview Enhanced, Markdown All-in-One, GitHub Styling) have no first-class "copy the rendered output as rich text." MarkCopy is designed around exactly that.
 
@@ -22,6 +22,12 @@ MarkCopy follows your VS Code theme, with a polished GitHub-light or GitHub-dark
 ![The MarkCopy preview and copy menu in a dark VS Code theme](docs/media/context-menu-dark.png)
 
 Open a `.csv`, `.tsv`, or `.tab` and you get a proper grid: a header and row numbers that stay put as you scroll, alternating row colors, numbers aligned right, and columns you can drag to resize (double-click a divider to fit it to its contents). Cells are editable in place, whole rows and columns can be inserted or deleted, and every change goes straight into the file as an ordinary edit, so Ctrl+Z in the file's text editor undoes it normally.
+
+Flip the lock/pencil pill in the top-right corner to edit Markdown right in the preview: click a block and its raw Markdown opens in a box with the syntax markers dimmed, and Ctrl/Cmd+Enter or clicking away writes it back to the file.
+
+![Edit mode in the MarkCopy preview: one paragraph open in the block editor, with the ** markers around bold text dimmed](docs/media/edit-mode.png)
+
+![The same edit mode in a dark VS Code theme](docs/media/edit-mode-dark.png)
 
 ![A CSV file rendered as a spreadsheet-style grid in the MarkCopy preview](docs/media/csv-preview.png)
 
@@ -38,6 +44,7 @@ Open a `.csv`, `.tsv`, or `.tab` and you get a proper grid: a header and row num
 | Copy block as Markdown source            |    No    |            No             | **Yes**  |
 | Live preview + scroll sync               |   Yes    |            Yes            | **Yes**  |
 | CSV / TSV grid preview                   |    No    |            No             | **Yes**  |
+| Edit Markdown blocks in the preview      |    No    |            No             | **Yes**  |
 | Edit CSV cells in the preview            |    No    |            No             | **Yes**  |
 | Excel (.xlsx) preview                    |    No    |            No             | **Yes**  |
 | Copy a spreadsheet range as Markdown     |    No    |            No             | **Yes**  |
