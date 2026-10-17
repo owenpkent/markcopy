@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
   "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video preview with right-click copy: rich text, per-element (code / table / diagram), Markdown, CSV/TSV, and PNG.",
+  "description": "One-stop Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
   "version": "0.16.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -24,6 +24,7 @@
   ],
   "keywords": [
     "markdown",
+    "markdown editor",
     "excel",
     "xlsx",
     "spreadsheet",
