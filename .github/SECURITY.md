@@ -135,10 +135,13 @@ PowerPoint writer expand a table into one output cell per grid position. A raw
 `<td colspan="10000">` in Markdown therefore used to reach the host as ten
 thousand grid columns of synchronous XML building. `src/ooxml/tableLimits.ts`
 is the shared guard: spans are read as plain positive integers (anything else
-means 1, as in a browser) and clamped to the browser's own limits (1,000
-columns, 65,534 rows), and a table whose grid would exceed 1,000 columns or
-250,000 cells is replaced by a note in the document and counted in the export
-summary before either writer starts expanding it.
+means 1, as in a browser; leading zeros carry no value, so `0000000002` is 2)
+and clamped to the browser's own limits (1,000 columns, 65,534 rows), with a
+value of more than nine significant digits clamped to the limit rather than
+parsed. A table whose grid would exceed 1,000 columns or 250,000 cells is
+replaced by a note in the document and counted in the export summary before
+either writer starts expanding it, and the column count itself stops as soon as
+the table passes either limit instead of expanding further.
 
 ## Word preview
 
@@ -147,7 +150,7 @@ A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx
 - **Links are filtered by scheme.** Only `http`, `https`, and `mailto` become a link; `file:`, `javascript:`, `ftp:`, a UNC path, and a relationship that is not marked external are shown as plain text. The hostile part of a hyperlink is its target, and `readExternalRels` is the only place an external relationship is read; the target is never fetched, only shown as a link the reader clicks.
 - **Images are never fetched.** An embedded picture is read from the package and inlined as a `data:` URI (16 MiB total budget, charged for every reference, so a picture repeated many times cannot multiply the preview's size); a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
 - **Output is escaped.** Every piece of text is HTML-escaped and every attribute value is attribute-escaped before it reaches the preview. Bookmark names become element ids with a fixed prefix and a restricted character set.
-- **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget, so a crafted document costs a bounded amount of time and memory.
+- **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget. Generated output has its own document-wide budget (16 MiB): every image reference and every chart table is charged against it, not just each unique part once, so a document that repeats one picture or chart cannot multiply the preview's size; once it is spent, the extras become placeholders and the preview says so. Equation text is capped at 100,000 characters before conversion, and an oversized equation is dropped. A crafted document therefore costs a bounded amount of time and memory.
 - **Parts read.** Beyond the body, styles, numbering, and notes, the reader opens the header and footer parts a section names, `comments.xml` and `commentsExtended.xml`, and the chart parts the body references, always through the guarded unpacker. Header, footer, and comment content goes through the same escaping as the body, and a chart is drawn only from its cached values (no embedded workbook is opened). Each is bounded by the paragraph budget, a text box nesting limit, and chart row and series caps, and a malformed part is skipped rather than failing the preview.
 - **Read-only.** The preview never writes to the document, and macros in a `.docm` are not read, let alone run.
 
