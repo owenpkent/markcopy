@@ -1236,6 +1236,76 @@ function visibleText(el: HTMLElement): string {
   }
 }
 
+const BLOCK_TAGS = new Set([
+  'ADDRESS',
+  'ARTICLE',
+  'ASIDE',
+  'BLOCKQUOTE',
+  'DIV',
+  'FIGCAPTION',
+  'FIGURE',
+  'FOOTER',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'HEADER',
+  'HR',
+  'LI',
+  'OL',
+  'P',
+  'PRE',
+  'SECTION',
+  'TABLE',
+  'TR',
+  'UL',
+]);
+
+/**
+ * Plain text of a detached fragment, keeping the breaks between blocks and rows
+ * and a tab between cells. `innerText` would do this in a browser but needs
+ * layout, which a detached fragment does not have.
+ */
+function blockText(root: Node): string {
+  let out = '';
+  const brk = () => {
+    if (out !== '' && !out.endsWith('\n')) {
+      out += '\n';
+    }
+  };
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent ?? '';
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+    const el = node as Element;
+    const block = BLOCK_TAGS.has(el.tagName);
+    if (el.tagName === 'BR') {
+      out += '\n';
+      return;
+    }
+    if (block) {
+      brk();
+    }
+    if (el.tagName === 'TD' || el.tagName === 'TH') {
+      if (out !== '' && !out.endsWith('\n') && !out.endsWith('\t')) {
+        out += '\t';
+      }
+    }
+    node.childNodes.forEach(walk);
+    if (block) {
+      brk();
+    }
+  };
+  walk(root);
+  return out.trimEnd();
+}
+
 function copyRichFromSelection(): void {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) {
@@ -1245,8 +1315,16 @@ function copyRichFromSelection(): void {
   wrapper.appendChild(sel.getRangeAt(0).cloneContents());
   content.appendChild(wrapper); // attach so computed styles resolve
   const html = inlineStyledHtml(wrapper);
+  // The plain flavor must leave out the same chrome the HTML does. A selection
+  // with none keeps the browser's own text, so other previews are unchanged.
+  const hasChrome = wrapper.querySelector('[data-mc-ignore], mark[data-mc-comment]') !== null;
+  let plain = sel.toString();
+  if (hasChrome) {
+    stripViewerChrome(wrapper);
+    plain = blockText(wrapper);
+  }
   wrapper.remove();
-  writeClipboard(html, sel.toString());
+  writeClipboard(html, plain);
   toast('Copied selection as rich text');
 }
 

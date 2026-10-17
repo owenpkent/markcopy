@@ -112,6 +112,30 @@ describe('a Word document with chrome', () => {
     window.getSelection()?.removeAllRanges();
   });
 
+  it('copies a selection as rich text with neither flavor carrying comment markup', async () => {
+    const root = h.find('.mc-docx');
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    const select = () => {
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    };
+    select();
+    const m = h.rightClick(h.find('.mc-docx > p'));
+    select();
+    await m.click('Copy Selection');
+    const clip = h.lastClip();
+    for (const flavor of [clip?.html ?? '', clip?.plain ?? '']) {
+      expect(flavor).toContain('reviewed words');
+      expect(flavor).not.toContain('C1');
+      expect(flavor).not.toContain('COMMENTBODY');
+      expect(flavor).not.toContain('Comments');
+    }
+    // Paragraphs stay on their own lines.
+    expect(clip?.plain).toMatch(/Alpha reviewed words omega\.\n/);
+    window.getSelection()?.removeAllRanges();
+  });
+
   it('copies the chart table as CSV and TSV', async () => {
     const chart = h.find('figure.mc-docx-chart table');
     await h.rightClick(chart.querySelector('td')!).click('Copy as', 'CSV');
