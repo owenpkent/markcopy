@@ -180,6 +180,7 @@ Open [sample.docx](../sample.docx) (repo root), then a real document of your own
 - [ ] The picture has its alt text (hover it, or check **Copy as** > **Markdown**). A pasted-in EMF or WMF shows a labelled placeholder rather than a broken image.
 - [ ] A web link and a mail link are clickable and open the browser or mail client. A bookmark link (a table of contents entry, or "numbers" in the sample) scrolls to its target. A `file:` link is plain text.
 - [ ] Monospace text (Consolas, Courier New) shows as code, and consecutive code lines form one block.
+- [ ] A document with equations (Insert > Equation in Word: a fraction, a root, a sum with limits, a matrix, an aligned equation) draws them as typeset math, display equations on their own line and inline ones in the sentence, legible in light, dark, and green themes. Right-click one: **Copy as** > **LaTeX** puts the LaTeX on the clipboard (paste it into a LaTeX editor or [katex.org](https://katex.org) and it renders the same equation) and **Copy Equation** pastes an image. With `markcopy.math` off, each equation shows its LaTeX as code instead.
 - [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, and a table's **Copy Table** / CSV work; **Search Google** works on a selection; **Save as PDF** and **Save as Word** export the whole document.
 - [ ] Copy the whole document as rich text and paste into Word and Google Docs: headings, lists, tables and the image come across.
 - [ ] Light, dark, and green themes are all legible; the image and table borders are visible in each.

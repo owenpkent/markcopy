@@ -187,6 +187,11 @@ function readParagraph(p: XNode, ctx: ReadCtx, allowPre: boolean): Para {
     return all === '' ? '' : ` class="${all}"`;
   };
 
+  // A paragraph of only equations is block markup already; a `<p>` around its
+  // `<div>`s would be closed early by the HTML parser.
+  const paragraphHtml = (): string =>
+    inline.blockMath ? inline.html : `<p${cls()}>${inline.html}</p>`;
+
   // A heading stays a heading even when its style also carries a multilevel
   // list number: Word numbers its headings that way, and they are not items.
   if (heading !== undefined) {
@@ -210,9 +215,9 @@ function readParagraph(p: XNode, ctx: ReadCtx, allowPre: boolean): Para {
     return { t: 'code', html: escapePlain(inline.plain) };
   }
   if (styles.isQuote(styleId)) {
-    return { t: 'quote', html: `<p${cls()}>${inline.html}</p>` };
+    return { t: 'quote', html: paragraphHtml() };
   }
-  return { t: 'block', html: `<p${cls()}>${inline.html}</p>` };
+  return { t: 'block', html: paragraphHtml() };
 }
 
 /**

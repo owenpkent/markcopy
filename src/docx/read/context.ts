@@ -40,6 +40,8 @@ export interface ReadCtx {
   seenLevels: Set<string>;
   footnotes: NoteBook;
   endnotes: NoteBook;
+  /** Draw equations as KaTeX placeholders (`markcopy.math`); off shows their LaTeX as code. */
+  math: boolean;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */
   budget: { used: number; max: number; truncated: boolean };
 }

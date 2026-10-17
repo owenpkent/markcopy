@@ -16,6 +16,7 @@ import { imageDataUri } from '../../ooxml/media';
 import { attr, relAttr } from '../../ooxml/xml';
 import { child, findAll, findDeep, type XNode } from '../../ooxml/xnode';
 import { bookmarkId, noteRefHtml, safeHref, type ReadCtx } from './context';
+import { mathParaMembers, ommlToLatex } from './omml';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
 
 interface Fmt {
@@ -37,10 +38,13 @@ interface Link {
 type Atom =
   | { kind: 'text'; text: string; fmt: Fmt; link?: Link }
   | { kind: 'br'; link?: Link }
-  | { kind: 'html'; html: string; content: boolean; link?: Link };
+  | { kind: 'html'; html: string; content: boolean; link?: Link }
+  | { kind: 'math'; tex: string; display: boolean };
 
 export interface InlineResult {
   html: string;
+  /** The paragraph is nothing but equations, so `html` is block markup and takes no `<p>`. */
+  blockMath: boolean;
   /** The text with line breaks as newlines and no formatting, for a code block. */
   plain: string;
   /** Anything a reader would see: non-blank text, an image, a note reference. */
@@ -147,8 +151,28 @@ class InlineWalker {
       case 'bookmarkStart':
         this.bookmark(n, link);
         break;
+      case 'oMathPara':
+        for (const m of mathParaMembers(n)) {
+          this.math(m, true);
+        }
+        break;
+      case 'oMath':
+        this.math(n, false);
+        break;
       default:
         break;
+    }
+  }
+
+  private math(n: XNode, display: boolean): void {
+    const tex = ommlToLatex(n);
+    if (tex === '') {
+      return;
+    }
+    if (this.ctx.math) {
+      this.atoms.push({ kind: 'math', tex, display });
+    } else {
+      this.atoms.push({ kind: 'html', html: `<code>${escapeHtml(tex)}</code>`, content: true });
     }
   }
 
@@ -478,6 +502,15 @@ function finish(source: Atom[]): InlineResult {
   let hasContent = false;
   let allMono = true;
   let visibleText = false;
+  // An equation alone in its paragraph is display math, as Word shows it.
+  const blockMath =
+    atoms.some((a) => a.kind === 'math') &&
+    atoms.every(
+      (a) =>
+        a.kind === 'math' ||
+        (a.kind === 'html' && !a.content) ||
+        (a.kind === 'text' && a.text.trim() === ''),
+    );
 
   for (let i = 0; i < atoms.length;) {
     const a = atoms[i];
@@ -504,6 +537,18 @@ function finish(source: Atom[]): InlineResult {
       i = j;
     } else if (a.kind === 'br') {
       pieces.push({ html: '<br>', link: a.link });
+      i++;
+    } else if (a.kind === 'math') {
+      // The same placeholder the Markdown preview emits; the webview's KaTeX
+      // pass renders it. Display math stays a span unless it is a block of its
+      // own, because a `<div>` inside a `<p>` would split the paragraph.
+      const display = a.display || blockMath;
+      const tag = blockMath ? 'div' : 'span';
+      pieces.push({
+        html: `<${tag} class="mc-math" data-display="${display ? 1 : 0}">${escapeHtml(a.tex)}</${tag}>`,
+      });
+      hasContent = true;
+      allMono = false;
       i++;
     } else {
       pieces.push({ html: a.html, link: a.link });
@@ -532,5 +577,5 @@ function finish(source: Atom[]): InlineResult {
     html += `${p.link.open}${inner}</a>`;
     k = m;
   }
-  return { html, plain, hasContent, allMono: allMono && visibleText };
+  return { html, plain, hasContent, allMono: allMono && visibleText, blockMath };
 }
