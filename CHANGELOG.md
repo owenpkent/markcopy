@@ -7,6 +7,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ### Added
 
 - **`markcopy.csv.maxColumns`** (default 200) caps how many columns the CSV/TSV grid renders, alongside `markcopy.csv.maxRows`. The grid also draws at most 500,000 cells in total, so a very wide file shows fewer rows at a time. Both notices say exactly what is hidden. Only trailing columns are cut, so a cell's position in the grid is still its position in the file and editing keeps working.
+- **Word (.docx) preview.** `.docx` and `.docm` files now open in a read-only custom editor (`markcopy.docxPreview`) instead of as binary. The reader turns the document into semantic HTML in reading order: headings (Title, Heading 1 to 6 through style inheritance, or an outline level), inline formatting, monospace runs as code, nested bullet and ordered lists with start numbers, tables with merged cells and a header row, web and mail links and bookmark links, images with alt text, footnotes and endnotes. Tracked changes show the final text and fields show their cached result. It goes through the same shell as the other previews, so Copy as Rich Text and Markdown, per-table copy, Save as PDF, Save as Word, and Search Google all work on it. Hostile input is bounded by the shared zip limits, linked images are never fetched, and a broken file shows a message in the panel. See the README's Word preview section for what is not drawn.
 
 ### Fixed
 

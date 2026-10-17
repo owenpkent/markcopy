@@ -12,7 +12,7 @@
 // -- and hand-rolling a stack machine that tracks every one of those shapes in
 // a single SAX pass is far more code, and far easier to get wrong, than
 // building the small tree once and walking it with ordinary recursion.
-import { walkXml } from '../../ooxml/xml';
+import { walkXml } from './xml';
 
 export interface XNode {
   /** Local name; the namespace prefix is already stripped by walkXml. */
@@ -78,4 +78,19 @@ export function findDeep(node: XNode, name: string): XNode | undefined {
     }
   }
   return undefined;
+}
+
+/** Every descendant at any depth with this local name, in document order. */
+export function findAll(node: XNode, name: string): XNode[] {
+  const out: XNode[] = [];
+  const visit = (n: XNode): void => {
+    for (const c of n.children) {
+      if (c.name === name) {
+        out.push(c);
+      }
+      visit(c);
+    }
+  };
+  visit(node);
+  return out;
 }

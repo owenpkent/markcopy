@@ -197,6 +197,18 @@ Three differences are worth stating explicitly, and they run the opposite way fr
 
 `markcopy.pptx.maxSlides` caps what there is to copy, the same way `markcopy.csv.maxRows` caps a grid: a deck past the cap has slides the preview never rendered, and Copy Whole Document and the three exports see only what rendered. There is no cell editing and no writeback, as with the spreadsheet preview: the document behind a deck is a binary presentation, and MarkCopy never writes to it (the export commands write a new file, never the one you opened).
 
+## Word documents (.docx / .docm)
+
+The document is one scrollable column of ordinary semantic HTML, so every row of the Markdown preview applies unchanged: a paragraph, heading, list, quote, or code block offers the plain [block](#any-other-block-paragraph-heading-list-blockquote-with-no-text-selected) menu (**Copy Block**, **Copy as** > **Markdown** and **PNG**, where Markdown is produced from the HTML), a selection offers **Copy Selection** and **Copy as** > **Markdown**, a table offers the full [table](#table) menu (CSV, TSV, PNG), and a link offers **Copy Link**. **Search Google** appears on a selection, as everywhere.
+
+Differences worth stating:
+
+- **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole document.** There is no tab strip and nothing is paged. A document past the 50,000-paragraph cap has content the preview never rendered, and the copies see only what rendered.
+- **What you copy is the final text.** Deleted tracked changes are not in the preview, so they are not on the clipboard. Footnote back arrows are chrome and are left out of every copy.
+- **Unsupported content copies as its placeholder.** An EMF or WMF picture, a linked picture, and one past the image budget are labelled boxes, not images.
+- **Save as Word from a Word preview** offers a file name based on the source, so check the destination before saving over the original.
+- There is no editing and no writeback: MarkCopy never writes to the document.
+
 ## STL models (.stl)
 
 The STL viewer has **no copy actions**, and its absence from this matrix is deliberate rather than an omission. Every row above copies something the reader can identify and a receiving app can use: text, a table of cells, an image of a diagram. An STL is an unstructured list of triangles with no text, no structure, and no author-intended visual, so there is no format to offer that is not a screenshot of an arbitrary camera angle. Right-clicking in the viewer does nothing; its toolbar is view controls only.

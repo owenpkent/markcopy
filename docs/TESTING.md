@@ -169,6 +169,22 @@ Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden)
 - [ ] Editing the workbook in a spreadsheet application and saving re-renders the open preview.
 - [ ] ☑ Renaming a `.txt` to `.xlsx` and opening it gives a readable message, not a blank panel.
 
+## Word preview (.docx)
+
+Open [sample.docx](../sample.docx) (repo root), then a real document of your own from Word that has headings, nested lists, tables with merged cells, images, tracked changes, and links.
+
+- [ ] The document opens in the preview, not as binary or in a "cannot open" error. A `.docm` and an uppercase `.DOCX` do too.
+- [ ] The sample shows a title and headings at distinct sizes, a nested bullet list, a numbered list with a lettered sub-item, and a footnote with a back arrow at the end.
+- [ ] Tracked changes read as the final text: in the sample, "is approved" shows and "was drafted" does not. Turn tracking on in a real document, delete and insert some text, and check the same.
+- [ ] A table with a vertically merged cell and a spanning cell draws the merge, and the header row is marked. In a real document, a nested table renders inside its cell.
+- [ ] The picture has its alt text (hover it, or check **Copy as** > **Markdown**). A pasted-in EMF or WMF shows a labelled placeholder rather than a broken image.
+- [ ] A web link and a mail link are clickable and open the browser or mail client. A bookmark link (a table of contents entry, or "numbers" in the sample) scrolls to its target. A `file:` link is plain text.
+- [ ] Monospace text (Consolas, Courier New) shows as code, and consecutive code lines form one block.
+- [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, and a table's **Copy Table** / CSV work; **Search Google** works on a selection; **Save as PDF** and **Save as Word** export the whole document.
+- [ ] Copy the whole document as rich text and paste into Word and Google Docs: headings, lists, tables and the image come across.
+- [ ] Light, dark, and green themes are all legible; the image and table borders are visible in each.
+- [ ] Replace the file on disk (re-save from Word): the preview redraws. Open a text file renamed to `.docx`: the panel says it is not a document rather than failing to open.
+
 ## CSV / TSV grid
 
 Open [sample.csv](../sample.csv).

@@ -30,7 +30,7 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
 engine against the opened source and its included files. Video preview hands
@@ -139,6 +139,16 @@ means 1, as in a browser) and clamped to the browser's own limits (1,000
 columns, 65,534 rows), and a table whose grid would exceed 1,000 columns or
 250,000 cells is replaced by a note in the document and counted in the export
 summary before either writer starts expanding it.
+
+## Word preview
+
+A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx/read/` reads it in the extension host under the same guards: the guarded unpacker in `src/ooxml/zip.ts` (25 MB file, 1,000 entries, 64 MB per inflated part, 256 MB total), the saxes parser that never expands a DTD entity, and the same DOMPurify pass and CSP in the webview. Beyond that:
+
+- **Links are filtered by scheme.** Only `http`, `https`, and `mailto` become a link; `file:`, `javascript:`, `ftp:`, a UNC path, and a relationship that is not marked external are shown as plain text. The hostile part of a hyperlink is its target, and `readExternalRels` is the only place an external relationship is read; the target is never fetched, only shown as a link the reader clicks.
+- **Images are never fetched.** An embedded picture is read from the package and inlined as a `data:` URI (16 MiB total budget, charged for every reference, so a picture repeated many times cannot multiply the preview's size); a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
+- **Output is escaped.** Every piece of text is HTML-escaped and every attribute value is attribute-escaped before it reaches the preview. Bookmark names become element ids with a fixed prefix and a restricted character set.
+- **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget, so a crafted document costs a bounded amount of time and memory.
+- **Read-only.** The preview never writes to the document, and macros in a `.docm` are not read, let alone run.
 
 ## CSV grid and cell editing
 

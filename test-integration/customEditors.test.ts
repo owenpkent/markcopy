@@ -14,6 +14,7 @@ import * as vscode from 'vscode';
 
 const XLSX_VIEW = 'markcopy.xlsxPreview';
 const PPTX_VIEW = 'markcopy.pptxPreview';
+const DOCX_VIEW = 'markcopy.docxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
@@ -216,6 +217,61 @@ suite('MarkCopy custom editors', () => {
     assert.ok(
       customTabs().some((tab) => tab.viewType === PPTX_VIEW && tab.uri === upper.toString()),
       `expected a ${PPTX_VIEW} tab for Slides.PPTM, saw: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('a Word document opens in the document preview, not in the text editor', async () => {
+    const uri = fixture('sample.docx');
+    // No viewType given: the association a double-click in the Explorer follows,
+    // which is what the manifest's `"priority": "default"` buys.
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    const tab = await waitFor(() =>
+      customTabs().find((candidate) => candidate.uri === uri.toString()),
+    );
+    assert.ok(
+      tab,
+      `expected a custom-editor tab for sample.docx, saw: ${JSON.stringify(customTabs())}`,
+    );
+    assert.strictEqual(tab.viewType, DOCX_VIEW, 'sample.docx opened in some other custom editor');
+  });
+
+  test('.docm and the uppercase forms both open in the document preview', async () => {
+    // The same package under a second extension, and the case-sensitive
+    // filesystem case package.json's selector list has to spell out. The two
+    // files need different names: on a case-insensitive filesystem report.docm
+    // and Report.DOCM are one file.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const lower = vscode.Uri.file(path.join(dir, 'macros.docm'));
+    const upper = vscode.Uri.file(path.join(dir, 'Report.DOCX'));
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.docx'), lower.fsPath);
+    fs.copyFileSync(path.resolve(__dirname, '..', 'sample.docx'), upper.fsPath);
+
+    await vscode.commands.executeCommand('vscode.open', lower);
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === DOCX_VIEW && tab.uri === lower.toString()),
+      `expected a ${DOCX_VIEW} tab for macros.docm, saw: ${JSON.stringify(customTabs())}`,
+    );
+
+    await vscode.commands.executeCommand('vscode.open', upper);
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === DOCX_VIEW && tab.uri === upper.toString()),
+      `expected a ${DOCX_VIEW} tab for Report.DOCX, saw: ${JSON.stringify(customTabs())}`,
+    );
+  });
+
+  test('a file that is not a document still opens rather than failing to load', async () => {
+    // The reader reports a broken file as a notice in the panel. Throwing while
+    // resolving would leave VS Code's own "cannot open" error in its place.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const uri = vscode.Uri.file(path.join(dir, 'notreally.docx'));
+    fs.writeFileSync(uri.fsPath, 'this is plain text\n');
+
+    await vscode.commands.executeCommand('vscode.open', uri);
+
+    assert.ok(
+      customTabs().some((tab) => tab.viewType === DOCX_VIEW && tab.uri === uri.toString()),
+      'expected the document preview to claim the tab and report the problem itself',
     );
   });
 

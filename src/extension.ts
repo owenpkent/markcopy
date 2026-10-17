@@ -35,6 +35,7 @@ import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
 import { htmlToPptx, reportSummary as pptxReportSummary, type PptxReport } from './pptxExport';
 import { XlsxEditorProvider } from './xlsxEditor';
 import { PptxEditorProvider } from './pptxEditor';
+import { DocxEditorProvider } from './docxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { sweepProxyDir } from './videoProxy';
@@ -137,6 +138,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       PptxEditorProvider.viewType,
       new PptxEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Word documents open in the MarkCopy document preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      DocxEditorProvider.viewType,
+      new DocxEditorProvider(
         context,
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),

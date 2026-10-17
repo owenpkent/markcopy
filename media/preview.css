@@ -1326,6 +1326,64 @@ ol.mc-pptx-body {
   background-color: #fff !important;
 }
 
+/* ---------------------------------------------------------------------------
+   Word preview
+   ---------------------------------------------------------------------------
+   A document renders as ordinary semantic HTML (headings, paragraphs, lists,
+   tables, images) inside the .markdown-body flow, so the GitHub styling
+   above already covers it. Only what Word adds on top is styled here:
+   alignment classes, the placeholder for an image a browser cannot show, the
+   footnote list, and a guard so an image's width and height attributes (from
+   the drawing's declared size) never distort it when max-width shrinks it. */
+
+.mc-docx .mc-docx-center {
+  text-align: center;
+}
+
+.mc-docx .mc-docx-right {
+  text-align: right;
+}
+
+.mc-docx img {
+  height: auto;
+}
+
+.mc-docx table th,
+.mc-docx table td {
+  vertical-align: top;
+}
+
+/* An image the preview cannot draw (EMF/WMF, a linked picture, over the media
+   budget): named rather than blank, the same idea as .mc-pptx-placeholder. */
+.mc-docx-placeholder {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--mc-border);
+  border-radius: 4px;
+  font-size: 0.85em;
+  color: var(--mc-muted-fg);
+}
+
+.mc-docx-noteref {
+  font-size: 0.8em;
+}
+
+.mc-docx-notes {
+  margin-top: 28px;
+  font-size: 0.9em;
+}
+
+.mc-docx-backref {
+  text-decoration: none;
+  user-select: none;
+}
+
+.mc-docx-note {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--mc-quote-fg);
+}
+
 /* Markdown edit mode: the read/edit pill and the in-place block editor. */
 .mc-modepill {
   position: fixed;

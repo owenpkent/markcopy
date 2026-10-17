@@ -9,8 +9,9 @@
 // does that, so a change to the markup never has to touch how a shape is found.
 import { attr, boolAttr, intAttr, relAttr } from '../../ooxml/xml';
 import { type Rels } from '../../ooxml/rels';
+import { imageDataUri, type MediaBudget } from '../../ooxml/media';
 import { partText, type Parts } from '../../ooxml/zip';
-import { child, children, findDeep, parseXml, type XNode } from './xnode';
+import { child, children, findDeep, parseXml, type XNode } from '../../ooxml/xnode';
 import {
   buildLevelProviders,
   readPlaceholderRef,
@@ -64,10 +65,7 @@ export interface RenderShape {
   content: ShapeContent;
 }
 
-export interface MediaBudget {
-  used: number;
-  max: number;
-}
+export type { MediaBudget };
 
 export interface ShapeReadContext {
   parts: Parts;
@@ -288,18 +286,6 @@ function buildSpShape(
   };
 }
 
-const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  tif: 'image/tiff',
-  tiff: 'image/tiff',
-};
-
 function buildPicShape(pic: XNode, frame: GroupFrame, ctx: ShapeReadContext): RenderShape {
   const ref = readPlaceholderRef(pic);
   let raw = readXfrm(child(pic, 'spPr'));
@@ -358,38 +344,9 @@ function buildPicShape(pic: XNode, frame: GroupFrame, ctx: ShapeReadContext): Re
 /** `r:embed` -> a `data:` URI, or undefined when it is unreadable, unsupported, or past the media budget. */
 function resolveImageDataUri(embedId: string, ctx: ShapeReadContext): string | undefined {
   const target = ctx.slideRels.get(embedId);
-  if (target === undefined) {
-    return undefined;
-  }
-  // Encode and charge each distinct media part once, no matter how many
-  // pictures across the deck embed it. A failed lookup (unsupported
-  // extension, missing part, over budget) is deliberately not cached: it
-  // costs nothing to re-check on the next reference, and caching it would
-  // mean a part that only narrowly missed the budget on first sight can never
-  // be retried.
-  const cached = ctx.imageCache.get(target);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const ext = target.slice(target.lastIndexOf('.') + 1).toLowerCase();
-  const mime = IMAGE_MIME[ext];
-  // EMF/WMF vector metafiles and anything else without a web-safe MIME type
-  // are common in pasted-from-Office content but nothing a browser can show
-  // as an <img>. A placeholder box is honest; a broken <img> is not.
-  if (mime === undefined) {
-    return undefined;
-  }
-  const bytes = ctx.parts.get(target);
-  if (bytes === undefined) {
-    return undefined;
-  }
-  if (ctx.media.used + bytes.length > ctx.media.max) {
-    return undefined;
-  }
-  ctx.media.used += bytes.length;
-  const dataUri = `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
-  ctx.imageCache.set(target, dataUri);
-  return dataUri;
+  return target === undefined
+    ? undefined
+    : imageDataUri(ctx.parts, target, ctx.media, ctx.imageCache);
 }
 
 function buildGraphicFrameShape(

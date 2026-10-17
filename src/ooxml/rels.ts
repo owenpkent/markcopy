@@ -48,3 +48,34 @@ export function readRels(parts: Parts, relsPath: string): Rels {
 export function relsPathFor(partPath: string): string {
   return partPath.replace(/([^/]+)$/, '_rels/$1.rels');
 }
+
+/**
+ * The external relationships of one `.rels` part, id -> target exactly as
+ * written (a URL, not a zip path).
+ *
+ * `readRels` drops these on purpose, so nothing that resolves a part can be
+ * steered outside the package. A hyperlink is the one thing that legitimately
+ * names an external target, and it is only ever shown as a link the reader
+ * clicks, never fetched; this exists for that and for nothing else, and the
+ * caller must filter the scheme before it becomes an href.
+ */
+export function readExternalRels(parts: Parts, relsPath: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const xml = partText(parts, relsPath);
+  if (xml === undefined) {
+    return out;
+  }
+  walkXml(xml, {
+    open(name, attrs) {
+      if (name !== 'Relationship' || attr(attrs, 'TargetMode') !== 'External') {
+        return;
+      }
+      const id = attr(attrs, 'Id');
+      const target = attr(attrs, 'Target');
+      if (id && target) {
+        out.set(id, target);
+      }
+    },
+  });
+  return out;
+}

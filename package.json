@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, PowerPoint, PDF, LaTeX, STL, and video preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL & Video Preview",
+  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
   "version": "0.16.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -29,6 +29,9 @@
     "xlsx",
     "spreadsheet",
     "excel viewer",
+    "docx",
+    "word",
+    "docx viewer",
     "pptx",
     "powerpoint",
     "pptx viewer",
@@ -243,6 +246,25 @@
           },
           {
             "filenamePattern": "*.PPTM"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "markcopy.docxPreview",
+        "displayName": "MarkCopy Word Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.docx"
+          },
+          {
+            "filenamePattern": "*.DOCX"
+          },
+          {
+            "filenamePattern": "*.docm"
+          },
+          {
+            "filenamePattern": "*.DOCM"
           }
         ],
         "priority": "default"
