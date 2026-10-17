@@ -72,6 +72,8 @@ export interface ReadCtx {
   afterPara: string[];
   /** How deep text boxes nest inside text boxes; bounded so a crafted file stays cheap. */
   boxDepth: number;
+  /** Draw equations as KaTeX placeholders (`markcopy.math`); off shows their LaTeX as code. */
+  math: boolean;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */
   budget: { used: number; max: number; truncated: boolean };
   /** Inside a header cell, whose <th> is already bold. */

@@ -5,8 +5,9 @@
 // design: it recovers what a person reading the document would call its
 // content (headings, paragraphs with inline formatting, lists, tables, links,
 // images with alt text, footnotes, comments, text boxes, and charts as data
-// tables) and leaves layout alone. Page geometry and equations are not drawn;
-// the first header and last footer are shown once, as page chrome.
+// tables) and leaves layout alone. Page geometry is not drawn; the first
+// header and last footer are shown once, as page chrome. Equations become
+// LaTeX (omml.ts) in the placeholder markup the Markdown preview uses.
 //
 // Heading mapping: the `Title` style becomes `<h1 class="mc-docx-title">`, and
 // `Heading 1` through `Heading 6` become `<h1>` through `<h6>`, so a document
@@ -38,6 +39,8 @@ export interface ReadOptions {
    */
   maxMediaBytes?: number;
   zipLimits?: ZipLimits;
+  /** Render equations as KaTeX math (default true). Off shows each one's LaTeX as code. */
+  math?: boolean;
 }
 
 export interface DocxHtml {
@@ -109,6 +112,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
     openComments: new Set(),
     afterPara: [],
     boxDepth: 0,
+    math: opts.math !== false,
     budget: {
       used: 0,
       max: Math.max(1, opts.maxParagraphs ?? DEFAULT_MAX_PARAGRAPHS),
