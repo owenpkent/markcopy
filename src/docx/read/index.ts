@@ -30,7 +30,10 @@ export { OpcError as DocxError } from '../../ooxml/zip';
 export interface ReadOptions {
   /** Paragraphs to render before stopping, counting those inside tables. Default 50,000. */
   maxParagraphs?: number;
-  /** Total budget, in bytes, for images inlined as data URIs. Default 16 MiB. */
+  /**
+   * Total budget, in bytes, for images inlined as data URIs. Default 16 MiB.
+   * It bounds distinct parts and, separately, every emitted image reference.
+   */
   maxMediaBytes?: number;
   zipLimits?: ZipLimits;
   /** Render equations as KaTeX math (default true). Off shows each one's LaTeX as code. */
@@ -39,7 +42,7 @@ export interface ReadOptions {
 
 export interface DocxHtml {
   html: string;
-  /** True when `maxParagraphs` cut the document short. */
+  /** True when `maxParagraphs` cut the document short, or repeated content hit the output budget. */
   truncated: boolean;
 }
 
@@ -104,6 +107,8 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
       max: Math.max(1, opts.maxParagraphs ?? DEFAULT_MAX_PARAGRAPHS),
       truncated: false,
     },
+    inHeaderCell: false,
+    output: { used: 0, max: media.max, truncated: false },
   };
 
   const blocks = renderBlocks(body.children, ctx, 0, true);
@@ -116,7 +121,14 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
   if (ctx.budget.truncated) {
     html += `<p class="mc-docx-note">Showing the first ${ctx.budget.max} paragraphs. The rest of the document is not shown.</p>`;
   }
-  return { html: `<div class="mc-docx">${html}</div>`, truncated: ctx.budget.truncated };
+  if (ctx.output.truncated) {
+    html +=
+      '<p class="mc-docx-note">Some repeated images are not shown, to keep the preview a reasonable size.</p>';
+  }
+  return {
+    html: `<div class="mc-docx">${html}</div>`,
+    truncated: ctx.budget.truncated || ctx.output.truncated,
+  };
 }
 
 function soft<T>(read: () => T, fallback: T): T {

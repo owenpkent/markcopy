@@ -44,6 +44,37 @@ export interface ReadCtx {
   math: boolean;
   /** Paragraph budget: a crafted file can hold millions, and the preview is a string in memory. */
   budget: { used: number; max: number; truncated: boolean };
+  /** Inside a header cell, whose <th> is already bold. */
+  inHeaderCell: boolean;
+  /** Rendered-output budget: everything emitted from embedded bytes, charged per emission. */
+  output: OutputBudget;
+}
+
+/**
+ * A document-wide ceiling on content the reader generates from package bytes.
+ * The media budget caps unique parts; this caps what is written into the HTML,
+ * where one small part referenced many times costs its full size every time.
+ */
+export interface OutputBudget {
+  used: number;
+  max: number;
+  /** Set once a charge was refused, so the result can say content was left out. */
+  truncated: boolean;
+}
+
+/**
+ * Charge `cost` bytes of generated output. False means the budget is spent and
+ * the caller must emit a placeholder instead; the refusal marks the result
+ * truncated. A refused charge costs nothing, so a smaller item may still fit.
+ */
+export function spendOutput(ctx: ReadCtx, cost: number): boolean {
+  const out = ctx.output;
+  if (out.used + cost > out.max) {
+    out.truncated = true;
+    return false;
+  }
+  out.used += cost;
+  return true;
 }
 
 const MAX_ID = 120;
