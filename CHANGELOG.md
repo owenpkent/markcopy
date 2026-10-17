@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.17.0] - 2026-10-16
+
 ### Added
 
 - **`markcopy.csv.maxColumns`** (default 200) caps how many columns the CSV/TSV grid renders, alongside `markcopy.csv.maxRows`. The grid also draws at most 500,000 cells in total, so a very wide file shows fewer rows at a time. Both notices say exactly what is hidden. Only trailing columns are cut, so a cell's position in the grid is still its position in the file and editing keeps working.
@@ -15,11 +22,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **A small ragged CSV could exhaust the extension host.** Every row is padded to the widest record, so a 200-field header over short rows multiplied into a cell for every row/column pair with no bound on columns or on the product. See the new column and cell budgets above (#119).
 - **The STL pre-allocation guard and Three.js disagreed on what was ASCII.** The guard accepted `SOLID` in any case after leading whitespace when `facet` appeared nearby; the loader looks for lowercase `solid` at offsets 0 through 4 only. A header the guard called ASCII but the loader parsed as binary skipped the triangle-count check and reached allocations sized from the header. The guard now classifies exactly as the loader does, so the binary length and count checks apply to every file the loader will parse as binary (#120).
 - **A raw `colspan="10000"` in Markdown expanded into ten thousand grid columns in Word and PowerPoint exports.** The serialized attribute is now validated on the host: spans are read as plain positive integers (leading zeros ignored) and clamped to the browser's own limits (1,000 columns, 65,534 rows), and a table whose grid would exceed 1,000 columns or 250,000 cells is replaced by a note saying so (the width is checked as the grid is counted, so an oversized table is refused before it is expanded), counted in the export summary. Ordinary merged cells export as before (#121).
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.16.0] - 2026-10-16
 
@@ -402,7 +404,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/owenpkent/markcopy/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/owenpkent/markcopy/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/owenpkent/markcopy/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/owenpkent/markcopy/compare/v0.14.0...v0.14.1
