@@ -144,9 +144,11 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section). Then check both before publishing; each answers in seconds and neither publishes anything: `npx vsce verify-pat OwenPKent` and `npx ovsx verify-pat OwenPKent`.
 9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
 10. Publish the same artifact to Open VSX: `npm run publish:ovsx -- markcopy-<version>.vsix` (reads `OVSX_PAT`).
-11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`:
+11. Cut the GitHub release from the pushed tag, attaching the packaged `.vsix`, with the version's [CHANGELOG.md](../CHANGELOG.md) section as its notes. Not `--notes-from-tag`: the tag message from step 6 is just `v<version>`, so that is all the release would say, which is what 0.18.0 first went out with.
     ```bash
-    gh release create v<version> markcopy-<version>.vsix --notes-from-tag
+    awk '/^## \[<version>\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > notes.md
+    gh release create v<version> markcopy-<version>.vsix --notes-file notes.md
+    rm notes.md
     ```
 12. Verify both registries show the new version (Phase 2 is done only when both report it):
     ```bash
