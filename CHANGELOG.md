@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Reveal in the OS file manager from the right-click menu.** The Markdown, CSV, spreadsheet, Word, PowerPoint, PDF, LaTeX, and video previews draw their own menu, so VS Code's tab menu is out of reach there. Each now has a row worded as VS Code words it on that platform (**Reveal in Finder**, **Reveal in File Explorer**, or **Open Containing Folder**) that opens the file's folder. The webview sends no path: the host uses its own document, and for a LaTeX preview that is the `.tex` source. A file that is not on disk (untitled or virtual) shows a status bar note instead.
+
 ### Planned
 
 - PlantUML support.

@@ -12,6 +12,7 @@ import { createMarkdownIt } from '../../src/render';
 import { renderCsvHtml } from '../../src/csv';
 import { renderWorkbookHtml } from '../../src/xlsx';
 import { buildXlsx, row, sheetData } from '../xlsx/fixture';
+import { revealLabel } from '../../src/webview/menu';
 
 let h: Harness;
 
@@ -136,6 +137,7 @@ describe('copy from a CSV cell being edited', () => {
     'Save as PDF…',
     'Save as Word…',
     'Save as PowerPoint…',
+    revealLabel(),
     'Preferences',
   ];
 

@@ -6,7 +6,7 @@
 // does not need to be. The <video> element is handed a webview-resource URI and
 // streams the file straight off disk, seeking with range requests, so a 2 GB
 // clip costs the same in memory as a 2 MB one.
-import { createMenu, type MenuEntry } from './menu';
+import { createMenu, revealLabel, type MenuEntry } from './menu';
 import {
   describeMediaError,
   formatBytes,
@@ -824,6 +824,11 @@ document.addEventListener('contextmenu', (e) => {
       kind: 'item',
       label: 'Open in Default App',
       run: () => vscode.postMessage({ type: 'openExternal' }),
+    },
+    {
+      kind: 'item',
+      label: revealLabel(),
+      run: () => vscode.postMessage({ type: 'revealInOS' }),
     },
   ];
 

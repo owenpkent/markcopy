@@ -368,3 +368,21 @@ export function createMenu(root: HTMLDivElement): MenuController {
     },
   };
 }
+
+/**
+ * The row label that reveals the open file in the OS file manager, worded the
+ * way VS Code words its own command on each platform. Takes the two navigator
+ * strings so it can be tested without a browser.
+ */
+export function revealLabel(
+  platform: string = typeof navigator === 'undefined' ? '' : navigator.platform || '',
+  userAgent: string = typeof navigator === 'undefined' ? '' : navigator.userAgent || '',
+): string {
+  if (/mac|iphone|ipad/i.test(platform) || /Macintosh|Mac OS X/i.test(userAgent)) {
+    return 'Reveal in Finder';
+  }
+  if (/win/i.test(platform) || /Windows/i.test(userAgent)) {
+    return 'Reveal in File Explorer';
+  }
+  return 'Open Containing Folder';
+}

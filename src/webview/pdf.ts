@@ -5,7 +5,7 @@ import type {
   PDFPageProxy,
   RenderTask,
 } from 'pdfjs-dist';
-import { createMenu, type MenuEntry } from './menu';
+import { createMenu, revealLabel, type MenuEntry } from './menu';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -879,6 +879,12 @@ document.addEventListener('contextmenu', (e) => {
     });
   }
 
+  entries.push({ kind: 'divider' });
+  entries.push({
+    kind: 'item',
+    label: revealLabel(),
+    run: () => vscode.postMessage({ type: 'revealInOS' }),
+  });
   entries.push({ kind: 'divider' });
   entries.push({ kind: 'submenu', label: 'Preferences', entries: preferenceEntries() });
 
