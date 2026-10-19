@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { revealInOs } from './revealInOs';
 import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
@@ -159,6 +160,8 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
       webview.onDidReceiveMessage(async (msg) => {
         if (msg?.type === 'ready') {
           await draw();
+        } else if (msg?.type === 'revealInOS') {
+          revealInOs(document.uri);
         } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
           this.exportPdf(document.uri, msg.bodyHtml);
         } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {

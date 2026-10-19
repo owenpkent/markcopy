@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMenu, type MenuEntry } from '../src/webview/menu';
+import { createMenu, revealLabel, type MenuEntry } from '../src/webview/menu';
 
 function makeRoot(): HTMLDivElement {
   document.body.innerHTML = '<div id="mc-menu" class="mc-menu" role="menu" hidden></div>';
@@ -341,5 +341,13 @@ describe('createMenu', () => {
     expect(root.hidden).toBe(false);
 
     document.removeEventListener('click', onClick);
+  });
+});
+
+describe('revealLabel', () => {
+  it('words the row the way VS Code does on each platform', () => {
+    expect(revealLabel('MacIntel', '')).toBe('Reveal in Finder');
+    expect(revealLabel('Win32', '')).toBe('Reveal in File Explorer');
+    expect(revealLabel('Linux x86_64', 'X11; Linux')).toBe('Open Containing Folder');
   });
 });

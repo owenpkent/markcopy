@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { revealInOs } from './revealInOs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
@@ -84,6 +85,9 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
         await session.start();
+      } else if (msg?.type === 'revealInOS') {
+        // The .tex source, not the temp PDF it compiles to.
+        revealInOs(document.uri);
       } else if (msg?.type === 'texRecompile') {
         await session.run();
       } else if (msg?.type === 'saveComments') {

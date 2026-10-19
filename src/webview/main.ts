@@ -5,7 +5,7 @@ import { htmlToMarkdown } from './markdownConvert';
 import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
-import { createMenu, type MenuEntry } from './menu';
+import { createMenu, revealLabel, type MenuEntry } from './menu';
 import {
   anchorHref,
   hostFollowsLink,
@@ -1002,6 +1002,12 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
+  entries.push({ kind: 'divider' });
+  entries.push({
+    kind: 'item',
+    label: revealLabel(),
+    run: () => vscode.postMessage({ type: 'revealInOS' }),
+  });
   entries.push({ kind: 'divider' });
   entries.push({ kind: 'submenu', label: 'Preferences', entries: buildSettingsEntries() });
   return entries;

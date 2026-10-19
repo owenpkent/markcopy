@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { revealInOs } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
@@ -91,6 +92,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         // would report `playable` again into a session that has already made
         // its one offer.
         await this.sendLoad(webview, document.uri, proxy.current);
+      } else if (msg?.type === 'revealInOS') {
+        revealInOs(document.uri);
       } else if (msg?.type === 'saveFrame') {
         await saveFrame(document.uri, msg.name, msg.data, webview);
       } else if (msg?.type === 'openExternal') {

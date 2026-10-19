@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { revealInOs } from './revealInOs';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
 import { EOL_CRLF, EOL_LF, editTargetsDocument, planBlockEdit } from './blockEdit';
@@ -817,7 +818,9 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
 
   const disposables: vscode.Disposable[] = [
     panel.webview.onDidReceiveMessage((msg) => {
-      if (msg?.type === 'revealLine') {
+      if (msg?.type === 'revealInOS') {
+        revealInOs(state.docUri);
+      } else if (msg?.type === 'revealLine') {
         revealEditorLine(state.docUri, msg.line);
       } else if (msg?.type === 'toast') {
         vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
