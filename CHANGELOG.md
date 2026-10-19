@@ -4,14 +4,16 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Added
-
-- **Reveal in the OS file manager from the right-click menu.** The Markdown, CSV, spreadsheet, Word, PowerPoint, PDF, LaTeX, and video previews draw their own menu, so VS Code's tab menu is out of reach there. Each now has a row worded as VS Code words it on that platform (**Reveal in Finder**, **Reveal in File Explorer**, or **Open Containing Folder**) that opens the file's folder. The webview sends no path: the host uses its own document, and for a LaTeX preview that is the `.tex` source. A file that is not on disk (untitled or virtual) shows a status bar note instead.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [0.18.0] - 2026-10-19
+
+### Added
+
+- **Reveal in the OS file manager from the right-click menu.** The Markdown, CSV, spreadsheet, Word, PowerPoint, PDF, LaTeX, and video previews draw their own menu, so VS Code's tab menu is out of reach there. Each now has a row worded as VS Code words it on that platform (**Reveal in Finder**, **Reveal in File Explorer**, or **Open Containing Folder**) that opens the file's folder. The webview sends no path: the host uses its own document, and for a LaTeX preview that is the `.tex` source. A file that is not on disk (untitled or virtual) shows a status bar note instead.
 
 ## [0.17.0] - 2026-10-16
 
@@ -408,7 +410,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/owenpkent/markcopy/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/owenpkent/markcopy/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/owenpkent/markcopy/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/owenpkent/markcopy/compare/v0.14.1...v0.15.0
