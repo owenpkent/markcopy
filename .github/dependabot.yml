@@ -7,9 +7,10 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       # @types/node tracks the Node the extension host actually runs, not the
-      # newest Node that exists. VS Code ^1.90 ships Node 20 and CI builds on 20,
-      # so a bump to 22+ would let code type-check against APIs that are not
-      # there at runtime. Raise this deliberately when engines.vscode moves.
+      # newest Node that exists. VS Code ^1.90 ships Node 20, so a bump to 22+
+      # would let code type-check against APIs that are not there at runtime.
+      # CI runs Node 22 for the packaging tools, but that is not the host.
+      # Raise this deliberately when engines.vscode moves.
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
       # @types/vscode is pinned to the engine floor, not the newest VS Code that
@@ -19,14 +20,10 @@ updates:
       # type is ignored: 1.90 -> 1.134 is only a minor, and it still breaks.
       # Raise this together with engines.vscode, never on its own.
       - dependency-name: '@types/vscode'
-      # jsdom 30 requires Node 22 or newer; the test job runs Node 20, where it
-      # fails at worker startup on a missing undici internal. Same reasoning:
-      # unpin when the project's Node floor moves.
-      - dependency-name: 'jsdom'
-        update-types: ['version-update:semver-major']
-      # Vitest 5 requires Node 22.12+ and @types/node 22+, but CI and the
-      # extension host type definitions still target Node 20. Raise this
-      # deliberately when the project's Node floor moves.
+      # Vitest 5 requires @types/node 22+, but the extension host type
+      # definitions stay on Node 20 (see @types/node above), so CI's move to
+      # Node 22 does not unblock it. Raise this deliberately when
+      # engines.vscode moves.
       - dependency-name: 'vitest'
         update-types: ['version-update:semver-major']
       # typescript-eslint 8 peers on `typescript >=4.8.4 <6.1.0`, so a bump to 7
@@ -35,12 +32,6 @@ updates:
       # under this tsconfig. Both want a deliberate PR that moves the linter and
       # the tsconfig together, not an automated bump.
       - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-      # @vscode/vsce 4 declares Node 22 or newer, but CI packages the VSIX on
-      # Node 20. It happens to run there today, outside its supported range, and
-      # ovsx 1.2 still nests vsce 3 anyway. Same reasoning as jsdom and vitest:
-      # unpin when the project's Node floor moves.
-      - dependency-name: '@vscode/vsce'
         update-types: ['version-update:semver-major']
     groups:
       dev-dependencies:

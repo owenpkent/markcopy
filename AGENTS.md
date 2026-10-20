@@ -33,9 +33,10 @@ boundary.
 
 ## Dependency compatibility
 
-CI uses Node 20, and `engines.vscode` currently starts at VS Code 1.90. Keep
-`@types/node` on the host's supported major and `@types/vscode` aligned with the
-engine floor. Review `.github/dependabot.yml` before upgrading TypeScript,
+CI uses Node 22 (the floor for `@vscode/vsce` 4 and `ovsx` 1.3), and
+`engines.vscode` currently starts at VS Code 1.90. Keep `@types/node` on the
+extension host's Node major (20 for VS Code 1.90), not the CI version, and
+`@types/vscode` aligned with the engine floor. Review `.github/dependabot.yml` before upgrading TypeScript,
 jsdom, or Vitest across majors. Do not bypass dependency conflicts with
 `--force` or `--legacy-peer-deps`.
 
