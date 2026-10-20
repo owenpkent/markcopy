@@ -6,7 +6,7 @@ Repository guidance for coding agents is in [AGENTS.md](../AGENTS.md).
 
 ## Prerequisites
 
-- Node.js 20 or newer (matches the version CI builds and tests on).
+- Node.js 22 or newer (matches the version CI builds and tests on, and the floor for the `vsce` and `ovsx` packaging tools).
 - VS Code 1.90 or newer (matches `engines.vscode`).
 
 ## Setup
