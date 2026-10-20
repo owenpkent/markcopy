@@ -4,14 +4,16 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Fixed
-
-- **Crafted inline HTML or long link reference definitions no longer stall the preview.** MarkCopy renders with raw HTML enabled, and markdown-it took quadratic time on some inline HTML and on a single multi-line link reference definition, so a hostile or unusual file could freeze rendering ([GHSA-vfgh-jcmw-g37q](https://github.com/advisories/GHSA-vfgh-jcmw-g37q), [GHSA-gfr2-rv44-r23c](https://github.com/advisories/GHSA-gfr2-rv44-r23c)). Fixed upstream in markdown-it 15.0.3, now the minimum version.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [0.18.1] - 2026-10-20
+
+### Fixed
+
+- **Crafted inline HTML or long link reference definitions no longer stall the preview.** MarkCopy renders with raw HTML enabled, and markdown-it took quadratic time on some inline HTML and on a single multi-line link reference definition, so a hostile or unusual file could freeze rendering ([GHSA-vfgh-jcmw-g37q](https://github.com/advisories/GHSA-vfgh-jcmw-g37q), [GHSA-gfr2-rv44-r23c](https://github.com/advisories/GHSA-gfr2-rv44-r23c)). Fixed upstream in markdown-it 15.0.3, now the minimum version.
 
 ## [0.18.0] - 2026-10-19
 
@@ -414,7 +416,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/owenpkent/markcopy/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/owenpkent/markcopy/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/owenpkent/markcopy/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/owenpkent/markcopy/compare/v0.15.0...v0.16.0
