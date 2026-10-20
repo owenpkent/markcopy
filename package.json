@@ -694,7 +694,7 @@
     "markdown-it-anchor": "^10.0.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-texmath": "^1.0.0",
-    "numfmt": "^3.2.6",
+    "numfmt": "^4.0.1",
     "pdfjs-dist": "^6.4.299",
     "saxes": "^6.0.0",
     "three": "^0.186.1",
