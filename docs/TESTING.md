@@ -420,6 +420,26 @@ ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvp
 - [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
 - [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.
 
+## Video review
+
+Review mode (phase 1, read-only). Make a clip whose frames are numbered so a step that lands on the wrong frame is visible: `ffmpeg -f lavfi -i "testsrc=size=320x240:rate=25:duration=10" -vf "drawtext=text='%{frame_num}':fontsize=64:fontcolor=white:x=10:y=10" -c:v libx264 -pix_fmt yuv420p frames.mp4` (needs an ffmpeg built with a font). Then write `frames.review.yaml` beside it, or copy the pair in `tests/fixtures/review/` and rename them to match the clip. Automated tests cover the parsing, timecode, layout and Markdown; none of the rest.
+
+- [ ] ★ Opening `frames.mp4` with the sidecar beside it shows the transport, a scrubber with markers, and the notes panel beside the video. Opening a video with no sidecar looks exactly as it did before.
+- [ ] Right-click -> **Review Notes** on a plain video turns review mode on and shows an empty panel; unticking it turns it off. `markcopy.video.review` follows the tick, and with it `true` a video without a sidecar opens in review mode.
+- [ ] ★ **Frame stepping**: the readout says `25 fps` (from the sidecar if it has one, otherwise from ffprobe), **Left** and **Right** move exactly one burned-in number, and `,` and `.` do the same. The timecode frame field changes by one per step and wraps at 25.
+- [ ] Pressing a card, and pressing its marker, seeks to the note and shows the note's own frame number, not a neighbour. Both select the card.
+- [ ] **J** slows, **K** pauses, **L** speeds up, **space**, **m** and **f** still play, mute and go fullscreen. Typing in any text field (the Quick Open box, say) triggers none of them.
+- [ ] The speed button cycles 0.5x, 1x, 2x and the playing video follows it.
+- [ ] ★ **Markers**: give two notes times 0.1 s apart and a third far away. The close pair draw as one marker with a count, the third as its own, and a range note (`out` after `at`) draws a bar. Pressing the cluster seeks to one of its notes, and each further press goes to the next one.
+- [ ] ★ **External edit**: leave the video open, add a note to the sidecar in Marker (or a text editor, then save). The panel and markers update without reopening the tab. Delete the sidecar: the notes clear and **Copy Notes as Markdown** greys out.
+- [ ] ★ **Malformed sidecar**: break the YAML, then set `version: 2`, then add an unknown field. Each time the panel shows its notes (where they parse) under a "Read-only: ..." banner naming the reason, and the file on disk is unchanged byte for byte. **Copy Notes as Markdown** shows an error and writes no `.review.md`.
+- [ ] **Frame rate source**: a sidecar with no usable `fps` on a clip with ffmpeg available reads the rate from the probe; with ffmpeg off `PATH` the readout says `30 fps (assumed)`. With `markcopy.video.transcode` at `off` and ffmpeg installed the rate still comes from the probe.
+- [ ] ★ **Copy Notes as Markdown** (menu, and the panel button): a toast says "Copied n notes, saved frames.review.md", the file appears beside the video, and its text matches the clipboard. Pasting into a chat or issue gives plain Markdown with `## n1  00:00:01:00  note` headings and no stray quote marks or markup.
+- [ ] A second copy replaces the `.review.md` without leaving a `.tmp` file behind. A read-only folder shows an error toast and no half file.
+- [ ] Narrow the editor below 720 px: the panel moves below the video and nothing overflows horizontally. Controls and cards stay at least 44 px high.
+- [ ] ★ **Themes**: in Auto (both a light and a dark VS Code theme), Light, Dark and Green, the panel, cards, selected card, markers, range bars, banner and transport are all legible, including the focus ring on a button.
+- [ ] Marker desktop open on the same video, a note saved in Marker: the panel picks it up. Do not add a note in Marker after MarkCopy has copied while both are open and expect both to agree: Marker saves its whole in-memory copy (owenpkent/Marker#14).
+
 ## LaTeX preview
 
 Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equation, which resolves only on a second compile pass, so it is a reasonable stand-in for a real document. This section needs a real LaTeX engine installed; **Tectonic** is the cheapest way to get one, a single binary that fetches packages as the document needs them, against a multi-gigabyte TeX Live, MacTeX, or MiKTeX install.

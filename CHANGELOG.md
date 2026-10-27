@@ -4,6 +4,19 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Review mode in the video preview (read-only first version).** A video with a notes file beside it (`clip.review.yaml` for `clip.mp4`), the file Marker and the okstudio-video-kit write, opens with a transport, a scrubber carrying a marker for each note, and a notes panel. Turn it on for any video with `markcopy.video.review` or the right-click **Review Notes** entry. The plan is in [VIDEO-REVIEW-DESIGN](docs/VIDEO-REVIEW-DESIGN.md).
+  - The transport has play, frame back and forward at the video's real frame rate, speed 0.5x, 1x or 2x, and a timecode readout that names the frame rate and its source. **Left** and **Right** step a frame and **J**, **K** and **L** slow, pause and speed up; **space**, **m** and **f** are unchanged, and keys are ignored while typing in a text field.
+  - Markers cluster when close and a range note gets a bar. Pressing a marker or a card seeks to it. The panel sits beside the video, or below it under 720 px.
+  - The frame rate is the notes file's own, else ffprobe's average rate (in review mode it probes even with `markcopy.video.transcode` set to `off`, as long as ffmpeg exists), else 30, labelled as assumed.
+  - A watcher reloads the panel when Marker or another tool changes the notes file. A file that fails validation, or is another version, shows its notes under a read-only banner and is never written. Notes are added in Marker for now. Marker desktop does not re-read its file before saving, so do not edit one video in both at once (tracked as owenpkent/Marker#14).
+  - **Copy Notes as Markdown**, in the right-click menu and on the panel, saves `clip.review.md` beside the video and puts the same text on the clipboard. It is disabled with no notes file, and refused with an error when the file is invalid.
+
+### Security
+
+- **The video preview can now write a file without a save dialog.** Copy Notes as Markdown writes `<stem>.review.md` beside the video, at a path the host derives from the open document, never one the webview supplies. It writes through a temporary file and a rename, only after the explicit copy action, and only from a notes file that validated. The PDF preview's comment sidecar is the precedent. See [SECURITY](.github/SECURITY.md#video-preview).
+
 ### Planned
 
 - PlantUML support.

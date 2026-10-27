@@ -1,6 +1,6 @@
 # Video review: design note
 
-**Status: planned.** This note is written before the work starts. It brings the review
+**Status: phase 1 implemented.** Phases 2 and 3 are still plans. It brings the review
 loop from [Marker](https://github.com/owenpkent/Marker) (timecoded notes, In and Out
 ranges, a markdown hand-off) into the existing video preview. Once a phase ships, the
 current behavior is described in [Video preview](ARCHITECTURE.md#video-preview), not
