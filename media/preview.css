@@ -1075,8 +1075,9 @@ body.mc-video .mc-rv-rate {
   color: var(--rv-muted);
 }
 
-/* Buttons. Each is a 44px target with a 28px drawn area behind its label: a quiet
-   tint on hover for text buttons, an edge for keys (In, Out), a fill for Send. */
+/* Buttons. Each is a 44px target with a drawn area of about 28px behind its icon
+   and label: ghosts tint on hover, keys (Copy, In, Out) carry an edge, the play
+   button is a filled round hero and Send a filled primary. */
 body.mc-video .mc-rv-btn {
   position: relative;
   isolation: isolate;
@@ -1084,6 +1085,10 @@ body.mc-video .mc-rv-btn {
   min-height: 44px;
   padding: 0 12px;
   box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -1091,8 +1096,16 @@ body.mc-video .mc-rv-btn {
   color: var(--mc-video-fg);
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
+  transition:
+    color 120ms,
+    transform 120ms;
+}
+body.mc-video .mc-rv-btn svg {
+  flex: none;
+  opacity: 0.85;
+  transition: opacity 120ms;
 }
 body.mc-video .mc-rv-btn::before {
   content: '';
@@ -1101,17 +1114,32 @@ body.mc-video .mc-rv-btn::before {
   inset: 8px 0;
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
+  transition:
+    background-color 120ms,
+    border-color 120ms;
+}
+body.mc-video .mc-rv-btn:hover:not(:disabled) svg {
+  opacity: 1;
 }
 body.mc-video .mc-rv-btn:hover:not(:disabled)::before {
-  background: var(--rv-hover);
+  background: color-mix(in srgb, var(--rv-accent) 14%, transparent);
+}
+body.mc-video .mc-rv-btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 body.mc-video .mc-rv-btn:active:not(:disabled)::before {
-  background: color-mix(in srgb, var(--rv-accent) 24%, var(--mc-video-bg));
+  background: color-mix(in srgb, var(--rv-accent) 24%, transparent);
 }
 body.mc-video .mc-rv-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+}
+body.mc-video .mc-rv-ghost {
+  padding: 0 8px;
+}
+body.mc-video .mc-rv-ghost::before {
+  inset: 6px 4px;
 }
 body.mc-video .mc-rv-tool,
 body.mc-video .mc-rv-quiet {
@@ -1123,23 +1151,70 @@ body.mc-video .mc-rv-tool:hover:not(:disabled) {
 body.mc-video .mc-rv-quiet:hover:not(:disabled) {
   color: var(--mc-error-fg);
 }
+body.mc-video .mc-rv-quiet:hover:not(:disabled)::before {
+  background: color-mix(in srgb, var(--mc-error-fg) 14%, transparent);
+}
 body.mc-video .mc-rv-key {
-  padding: 0 14px;
+  padding: 0 12px;
 }
 body.mc-video .mc-rv-key::before {
   border-color: var(--rv-edge);
   background: var(--rv-surface);
 }
+body.mc-video .mc-rv-key:hover:not(:disabled)::before {
+  border-color: var(--rv-accent);
+  background: color-mix(in srgb, var(--rv-accent) 14%, var(--rv-surface));
+}
+/* In and Out are toggles: a soft accent tint while set. */
 body.mc-video .mc-rv-point[aria-pressed='true'] {
   color: var(--rv-accent);
 }
+body.mc-video .mc-rv-point[aria-pressed='true'] svg {
+  opacity: 1;
+}
 body.mc-video .mc-rv-point[aria-pressed='true']::before {
   border-color: var(--rv-accent);
-  background: var(--rv-hover);
+  background: color-mix(in srgb, var(--rv-accent) 22%, var(--mc-video-bg));
 }
+/* The play button: the one filled round control in the transport. */
+body.mc-video .mc-rv-hero {
+  min-width: 44px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--mc-video-bg);
+}
+body.mc-video .mc-rv-hero svg {
+  opacity: 1;
+}
+body.mc-video .mc-rv-hero::before {
+  inset: 6px;
+  border-radius: 50%;
+  border-color: var(--rv-accent);
+  background: var(--rv-accent);
+}
+body.mc-video .mc-rv-hero:hover:not(:disabled)::before {
+  background: color-mix(in srgb, var(--rv-accent) 86%, var(--mc-video-fg));
+}
+body.mc-video .mc-rv-hero:active:not(:disabled)::before {
+  background: color-mix(in srgb, var(--rv-accent) 78%, var(--mc-video-bg));
+}
+/* The speed: a small mono pill. */
+body.mc-video .mc-rv-pill {
+  padding: 0 14px;
+  font: 600 12px/1 var(--rv-mono);
+}
+body.mc-video .mc-rv-pill::before {
+  inset: 10px 4px;
+  border-radius: 12px;
+  border-color: var(--rv-edge);
+}
+/* Send: the filled primary. */
 body.mc-video .mc-rv-send {
   color: var(--mc-video-bg);
   font-weight: 600;
+}
+body.mc-video .mc-rv-send svg {
+  opacity: 1;
 }
 body.mc-video .mc-rv-send::before,
 body.mc-video .mc-rv-send:hover:not(:disabled)::before {
@@ -1147,7 +1222,10 @@ body.mc-video .mc-rv-send:hover:not(:disabled)::before {
   background: var(--rv-accent);
 }
 body.mc-video .mc-rv-send:hover:not(:disabled)::before {
-  filter: brightness(1.1);
+  background: color-mix(in srgb, var(--rv-accent) 86%, var(--mc-video-fg));
+}
+body.mc-video .mc-rv-send:active:not(:disabled)::before {
+  background: color-mix(in srgb, var(--rv-accent) 78%, var(--mc-video-bg));
 }
 body.mc-video .mc-rv button:focus-visible,
 body.mc-video .mc-rv-slider:focus-visible {
@@ -1159,6 +1237,13 @@ body.mc-video .mc-rv-chip[hidden],
 body.mc-video .mc-rv-fpsnote[hidden],
 body.mc-video .mc-rv-ring[hidden] {
   display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.mc-video .mc-rv-btn,
+  body.mc-video .mc-rv-btn svg,
+  body.mc-video .mc-rv-btn::before {
+    transition: none;
+  }
 }
 
 /* Scrubber and markers. */
@@ -1306,7 +1391,7 @@ body.mc-video .mc-rv-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 0 8px;
-  margin-left: -12px;
+  margin-left: -8px;
 }
 body.mc-video .mc-rv-banner {
   padding: 8px 12px;
@@ -1470,7 +1555,7 @@ body.mc-video .mc-rv-actions {
   display: flex;
 }
 body.mc-video .mc-rv-card--selected .mc-rv-meta {
-  padding-right: 64px;
+  padding-right: 52px;
 }
 body.mc-video .mc-rv-composer {
   flex: none;

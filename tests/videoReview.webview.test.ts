@@ -206,6 +206,39 @@ describe('review mode', () => {
     expect(posted).toContainEqual({ type: 'reviewCopy' });
   });
 
+  it('says Copied for a moment once the host confirms the copy, then goes back', async () => {
+    vi.useFakeTimers();
+    try {
+      await open();
+      fromHost(review());
+      const btn = copyButton();
+      btn.click();
+      // Not before the host has written the file and the clipboard.
+      expect(btn.textContent).toBe('Copy as Markdown');
+      fromHost({ type: 'toast', message: 'Copied 2 notes, saved clip.review.md' });
+      expect(btn.textContent).toBe('Copied');
+      expect(btn.querySelector('svg')).not.toBeNull();
+      expect(document.getElementById('mc-toast')?.textContent).toBe(
+        'Copied 2 notes, saved clip.review.md',
+      );
+      vi.advanceTimersByTime(1600);
+      expect(btn.textContent).toBe('Copy as Markdown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never says Copied when the copy fails', async () => {
+    await open();
+    fromHost(review());
+    const btn = copyButton();
+    btn.click();
+    fromHost({ type: 'reviewError', message: 'Could not save clip.review.md' });
+    // A later, unrelated toast must not be taken for the copy's success.
+    fromHost({ type: 'toast', message: 'Something else' });
+    expect(btn.textContent).toBe('Copy as Markdown');
+  });
+
   it('shows the toast for a reviewError', async () => {
     await open();
     fromHost({ type: 'reviewError', message: 'Could not write clip.review.md' });
@@ -660,7 +693,7 @@ describe('sort', () => {
     expect(root().querySelector('[aria-label^="Filter"]')).toBeNull();
     expect(names()).toEqual(['n2', 'n4', 'n1', 'n3']);
     expect(root().querySelector('.mc-rv-count')?.textContent).toBe('4 notes');
-    expect(byLabel('Sort: Time')!.textContent).toBe('Sort: Time');
+    expect(byLabel('Sort: Time')!.textContent).toBe('Time');
 
     byLabel('Sort: Time')!.click();
     expect(byLabel('Sort: Newest')).not.toBeNull();

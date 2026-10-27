@@ -130,6 +130,56 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Simple 24-grid glyphs in MarkCopy's inline icon style (see pdf.ts, editMode.ts):
+// 16px, stroked in currentColor, so they follow each button's colour in every theme.
+const ICONS = {
+  play: ['M7 4.5v15l12-7.5z'],
+  pause: ['M7 5h3v14H7z', 'M14 5h3v14h-3z'],
+  stepBack: ['M19 20L9 12l10-8z', 'M5 19V5'],
+  stepForward: ['M5 4l10 8-10 8z', 'M19 5v14'],
+  copy: ['M8 8h12v12H8z', 'M16 8V4H4v12h4'],
+  check: ['M5 12.5l4.5 4.5L19 7.5'],
+  sort: ['M8 4v16', 'M4 16l4 4 4-4', 'M16 20V4', 'M12 8l4-4 4 4'],
+  bracketIn: ['M14 4H9v16h5'],
+  bracketOut: ['M10 4h5v16h-5'],
+  send: ['M12 19V5', 'M5 12l7-7 7 7'],
+  trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M6 7l1 13h10l1-13', 'M9 7V4h6v3'],
+} satisfies Record<string, string[]>;
+type IconName = keyof typeof ICONS;
+
+function icon(name: IconName, filled = false): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('fill', filled ? 'currentColor' : 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  for (const d of ICONS[name]) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/** Put an icon and an optional label in a button, replacing what it held. */
+function face(b: HTMLElement, name: IconName | null, text = '', filled = false): void {
+  b.textContent = '';
+  if (name) {
+    b.appendChild(icon(name, filled));
+  }
+  if (text) {
+    b.appendChild(el('span', 'mc-rv-lbl', text));
+  }
+}
+
 function button(
   className: string,
   text: string,
@@ -262,12 +312,19 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const transport = el('div', 'mc-rv-transport');
     transport.setAttribute('role', 'group');
     transport.setAttribute('aria-label', 'Playback');
-    const play = button('mc-rv-btn mc-rv-bare', 'Play', 'Play', togglePlay);
-    const back = button('mc-rv-btn mc-rv-bare', '-1 frame', 'Back one frame', () => step(-1));
-    const forward = button('mc-rv-btn mc-rv-bare', '+1 frame', 'Forward one frame', () => step(1));
-    const speed = button('mc-rv-btn mc-rv-bare', '1x', 'Playback speed', () =>
+    const play = button('mc-rv-btn mc-rv-hero', '', 'Play', togglePlay);
+    play.title = 'Play (Space)';
+    face(play, 'play', '', true);
+    const back = button('mc-rv-btn mc-rv-ghost', '', 'Back one frame', () => step(-1));
+    back.title = 'Back one frame (Left)';
+    face(back, 'stepBack');
+    const forward = button('mc-rv-btn mc-rv-ghost', '', 'Forward one frame', () => step(1));
+    forward.title = 'Forward one frame (Right)';
+    face(forward, 'stepForward');
+    const speed = button('mc-rv-btn mc-rv-pill', '1x', 'Playback speed', () =>
       setRate(nextCycleRate()),
     );
+    speed.title = 'Playback speed (J, L)';
     const readout = el('span', 'mc-rv-time', positionTimecode(0, 30));
     readout.setAttribute('role', 'timer');
     const total = el('span', 'mc-rv-total');
@@ -301,17 +358,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
     panel.setAttribute('aria-label', 'Review notes');
     const head = el('div', 'mc-rv-head');
     const count = el('h2', 'mc-rv-count');
-    const sortBtn = button('mc-rv-btn mc-rv-tool', 'Sort: Time', 'Sort: Time', () => {
+    const sortBtn = button('mc-rv-btn mc-rv-ghost mc-rv-tool', '', 'Sort: Time', () => {
       sort = SORTS[(SORTS.indexOf(sort) + 1) % SORTS.length];
       saveView();
       renderPanel();
     });
-    const copy = button(
-      'mc-rv-btn mc-rv-tool',
-      'Copy as Markdown',
-      'Copy notes as Markdown',
-      copyNotes,
-    );
+    face(sortBtn, 'sort', 'Time');
+    const copy = button('mc-rv-btn mc-rv-key', '', 'Copy notes as Markdown', copyNotes);
+    face(copy, 'copy', 'Copy as Markdown');
     const tools = el('div', 'mc-rv-tools');
     tools.append(sortBtn, copy);
     head.append(count, tools);
@@ -331,24 +385,26 @@ export function createReview(deps: ReviewDeps): ReviewController {
     composer.setAttribute('aria-label', 'Write a note');
     const fpsNote = el('p', 'mc-rv-fpsnote', 'Frame rate unknown: notes will be saved at 30 fps');
     fpsNote.hidden = true;
-    const inBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '[ In', 'Set In to this frame', setIn);
-    const outBtn = button(
-      'mc-rv-btn mc-rv-key mc-rv-point',
-      'Out ]',
-      'Set Out to this frame',
-      setOut,
-    );
+    const inBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Set In to this frame', setIn);
+    inBtn.title = 'Set In (I)';
+    face(inBtn, 'bracketIn', 'In');
+    const outBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Set Out to this frame', setOut);
+    outBtn.title = 'Set Out (O)';
+    face(outBtn, 'bracketOut', 'Out');
     const chip = el('span', 'mc-rv-chip');
     chip.hidden = true;
     const clearBtn = button('mc-rv-btn mc-rv-quiet', 'Clear', 'Clear the range', clearRange);
     clearBtn.hidden = true;
-    const cplay = button('mc-rv-btn mc-rv-bare', 'Play', 'Play', togglePlay);
+    const cplay = button('mc-rv-btn mc-rv-ghost', '', 'Play', togglePlay);
+    cplay.title = 'Play (Space)';
+    face(cplay, 'play');
     const field = el('input', 'mc-rv-field');
     field.type = 'text';
     field.maxLength = 10000;
     field.placeholder = 'Write a note';
     field.setAttribute('aria-label', 'Note text');
-    const send = button('mc-rv-btn mc-rv-key mc-rv-send', 'Send', 'Add note', sendNote);
+    const send = button('mc-rv-btn mc-rv-key mc-rv-send', '', 'Add note', sendNote);
+    face(send, 'send', 'Send');
     // A press on these must not take focus from the field, or its blur would drop
     // the pending resume.
     for (const b of [inBtn, outBtn, clearBtn, send]) {
@@ -487,10 +543,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const playing = !video.paused && !video.ended;
-    ui.play.textContent = playing ? 'Pause' : 'Play';
-    ui.play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    ui.cplay.textContent = playing ? 'Pause' : 'Play';
-    ui.cplay.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    const verb = playing ? 'Pause' : 'Play';
+    face(ui.play, playing ? 'pause' : 'play', '', true);
+    face(ui.cplay, playing ? 'pause' : 'play');
+    for (const b of [ui.play, ui.cplay]) {
+      b.setAttribute('aria-label', verb);
+      b.title = `${verb} (Space)`;
+    }
     const r = Number(video.playbackRate.toFixed(2));
     ui.speed.textContent = `${r}x`;
     ui.speed.setAttribute('aria-label', `Playback speed ${r}x, press to change`);
@@ -705,9 +764,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
   /** Delete, shown on the selected card only. */
   function actions(note: ReviewNote, locked: boolean): HTMLElement {
     const row = el('div', 'mc-rv-actions');
-    const del = button('mc-rv-btn mc-rv-quiet', 'Delete', `Delete ${note.id}`, () =>
+    const del = button('mc-rv-btn mc-rv-ghost mc-rv-quiet', '', `Delete ${note.id}`, () =>
       post({ type: 'reviewDelete', id: note.id }),
     );
+    del.title = `Delete ${note.id}`;
+    face(del, 'trash');
     del.disabled = locked;
     row.append(del);
     return row;
@@ -896,7 +957,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const n = state.notes.length;
     const shown = arrangeNotes(state.notes, sort);
     ui.count.textContent = `${n} ${n === 1 ? 'note' : 'notes'}`;
-    ui.sortBtn.textContent = `Sort: ${SORT_NAME[sort]}`;
+    face(ui.sortBtn, 'sort', SORT_NAME[sort]);
     ui.sortBtn.setAttribute('aria-label', `Sort: ${SORT_NAME[sort]}`);
     ui.sortBtn.title = `Sort: ${SORT_NAME[sort]}, press to change`;
     ui.copy.disabled = state.sidecar === null;
@@ -972,15 +1033,36 @@ export function createReview(deps: ReviewDeps): ReviewController {
     }
   }
 
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  // A copy is waiting for the host: its success toast flashes "Copied" on the
+  // button, and a reviewError means it failed, so the button never claims a copy
+  // that did not happen.
+  let copyPending = false;
   function copyNotes(): void {
     if (state?.sidecar) {
+      copyPending = true;
       post({ type: 'reviewCopy' });
+    }
+  }
+
+  function flashCopied(): void {
+    if (ui) {
+      face(ui.copy, 'check', 'Copied');
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => ui && face(ui.copy, 'copy', 'Copy as Markdown'), 1500);
     }
   }
 
   return {
     onMessage(msg) {
+      if (msg.type === 'toast' && copyPending) {
+        copyPending = false;
+        flashCopied();
+        // Not consumed: the viewer still shows the toast itself.
+        return false;
+      }
       if (msg.type === 'reviewError') {
+        copyPending = false;
         if ((msg as unknown as { failed?: string }).failed === 'add') {
           sendFailed();
         }
