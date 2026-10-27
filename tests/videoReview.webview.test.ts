@@ -580,6 +580,34 @@ describe('review toggle', () => {
     expect(root().hidden).toBe(false);
   });
 
+  it('settles a pending draft acknowledged while review mode is off', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+    field().value = 'saved while hidden';
+    byLabel('Add note')!.click();
+    expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
+    expect(field().disabled).toBe(true);
+
+    pressMenu('Review Notes');
+    fromHost(review({ added: 'n3', notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
+    expect(play).not.toHaveBeenCalled();
+
+    pressMenu('Review Notes');
+    fromHost(review({ added: null, notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
+    expect(cards().some((c) => c.textContent?.includes('saved'))).toBe(true);
+    expect(field().disabled).toBe(false);
+    expect(byLabel('Add note')!.disabled).toBe(false);
+    expect(field().value).toBe('');
+    expect(play).not.toHaveBeenCalled();
+
+    field().value = 'second';
+    byLabel('Add note')!.click();
+    expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(2);
+  });
+
   it('copies from the menu only with a sidecar', async () => {
     await open();
     fromHost(review({ sidecar: null, notes: [] }));

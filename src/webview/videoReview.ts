@@ -833,11 +833,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   /** The host saved the note: drop the draft and pick playback up where it was. */
-  function sendSucceeded(): void {
+  /** The host saved the note. `resumePlayback` is false while review mode is hidden. */
+  function sendSucceeded(resumePlayback = true): void {
     if (!ui || !sending) {
       return;
     }
-    const resume = sending.resume;
+    const resume = sending.resume && resumePlayback;
     sending = null;
     pendingIn = pendingOut = -1;
     pendingPoint = null;
@@ -1018,10 +1019,15 @@ export function createReview(deps: ReviewDeps): ReviewController {
       if (msg.type !== 'review') {
         return false;
       }
+      const next = msg as ReviewStateMessage;
       if (turnedOff) {
+        // Hidden, but a save this panel started has still landed: settle the
+        // draft so the composer is not left locked when review comes back.
+        if (next.added) {
+          sendSucceeded(false);
+        }
         return true;
       }
-      const next = msg as ReviewStateMessage;
       state = next;
       // The note this panel just added is the one to look at.
       if (next.added) {

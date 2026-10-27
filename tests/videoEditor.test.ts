@@ -551,6 +551,29 @@ notes:
     expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n1', 'n2']);
   });
 
+  it('acknowledges a saved note even when the read after the save fails', async () => {
+    const { posted, send } = await open(SIDECAR);
+    const vs = await import('vscode');
+    const rename = vi.mocked(vs.workspace.fs.rename);
+    const real = rename.getMockImplementation()!;
+    // Let both writes land, then make only the next read fail.
+    rename.mockImplementation(async (from, to) => {
+      await real(from, to);
+      if ((to as { path: string }).path === MD) {
+        readFailure.next = Object.assign(new Error('EIO'), { code: 'Unknown' });
+      }
+    });
+    await send({ type: 'reviewAdd', at: 2.4, text: 'Cut here.' });
+    rename.mockImplementation(real);
+    readFailure.next = undefined;
+
+    expect(files.get(YAML)!.match(/^- id: n2$/gm)).toHaveLength(1);
+    expect(posted.filter((m) => m.type === 'review' && m.added === 'n2')).toHaveLength(1);
+    expect(failures(posted).filter((m) => m.failed === 'add')).toEqual([]);
+    await send({ type: 'reviewEnable' });
+    expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n1', 'n2']);
+  });
+
   it('writes a pin, cleaned, after out and before nothing else', async () => {
     const { posted, send } = await open(SIDECAR);
     await send({ type: 'reviewAdd', at: 2.4, text: 'Pinned.', point: [0.123456, 1] });

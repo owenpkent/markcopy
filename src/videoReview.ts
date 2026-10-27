@@ -1246,7 +1246,7 @@ export class ReviewSession {
       this.error(`Saved the notes, but could not write ${name} (${String(err)})`);
     }
     this.editing = false;
-    await this.post(result.added ?? null);
+    await this.post(result.added ?? null, result.text);
   }
 
   /** Write beside the target and rename over it, so a reader never sees half a file. */
@@ -1304,20 +1304,27 @@ export class ReviewSession {
     return this.probePromise;
   }
 
-  private async post(added: string | null = null): Promise<void> {
+  /**
+   * Post the panel's state. After an edit, `written` is the text just written and
+   * validated, so the acknowledgement does not depend on reading it back: a
+   * failed reread must not leave a saved note unacknowledged.
+   */
+  private async post(added: string | null = null, written?: string): Promise<void> {
     if (this.disposed) {
       return;
     }
     const generation = ++this.generation;
-    let text: string | undefined;
-    try {
-      text = await this.read();
-    } catch (err) {
-      // Leave the panel as it is: an unreadable file is not an empty one.
-      if (generation === this.generation && !this.disposed) {
-        this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
+    let text = written;
+    if (written === undefined) {
+      try {
+        text = await this.read();
+      } catch (err) {
+        // Leave the panel as it is: an unreadable file is not an empty one.
+        if (generation === this.generation && !this.disposed) {
+          this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
+        }
+        return;
       }
-      return;
     }
     if (generation !== this.generation || this.disposed) {
       return;
