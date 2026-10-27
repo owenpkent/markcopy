@@ -574,6 +574,54 @@ notes:
     expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n1', 'n2']);
   });
 
+  it('does not post stale notes when another editor saves during the markdown write', async () => {
+    const n2 = (text: string) =>
+      `- id: n2\n  target: source\n  at: 4.0\n  kind: note\n  text: ${text}\n  done: false\n  applied_op: null\n  checkpoint: null\n  drawing: []\n  created: '2026-01-02T03:04:05'\n`;
+    const two = SIDECAR.replace('next_note_id: 2', 'next_note_id: 3') + n2('Cut this range.');
+    const { posted, send } = await open(two);
+    const vs = await import('vscode');
+    const rename = vi.mocked(vs.workspace.fs.rename);
+    const real = rename.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding!: () => void;
+    const reachedMd = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+    rename.mockImplementation(async (from, to) => {
+      if ((to as { path: string }).path === MD) {
+        holding();
+        await held;
+      }
+      await real(from, to);
+    });
+    const adding = send({ type: 'reviewAdd', at: 2.4, text: 'Cut here.' });
+    await reachedMd;
+    // The sidecar is already saved with n3; another editor now changes n2.
+    const external = files
+      .get(YAML)!
+      .replace('Cut this range.', 'External update during markdown save.');
+    expect(external).toContain('id: n3');
+    files.set(YAML, external);
+    (watcher.onDidChange.mock.calls[0][0] as () => void)();
+    await vi.waitFor(() =>
+      expect(JSON.stringify(lastReview(posted))).toContain('External update during markdown save.'),
+    );
+    release();
+    await adding;
+    rename.mockImplementation(real);
+
+    expect(posted.filter((m) => m.type === 'review' && m.added === 'n3')).toHaveLength(1);
+    const last = lastReview(posted) as unknown as { notes: Array<{ id: string; text: string }> };
+    expect(last.notes.find((n) => n.id === 'n2')?.text).toBe(
+      'External update during markdown save.',
+    );
+    expect(files.get(YAML)).toContain('External update during markdown save.');
+    expect(files.get(YAML)).not.toContain('Cut this range.');
+  });
+
   it('writes a pin, cleaned, after out and before nothing else', async () => {
     const { posted, send } = await open(SIDECAR);
     await send({ type: 'reviewAdd', at: 2.4, text: 'Pinned.', point: [0.123456, 1] });

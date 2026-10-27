@@ -982,6 +982,10 @@ export class ReviewSession {
   // The sidecar text this panel last wrote, so the watcher event it raises is not
   // answered with a second post.
   private lastWritten: string | undefined;
+  // A note this panel saved whose `added` has not reached the page yet. It rides
+  // on whichever post goes out next, so a newer post that supersedes the edit's
+  // own one still carries it, and the page's draft is never left waiting.
+  private unacked: string | null = null;
   private tmpCount = 0;
   // Ids of notes this panel added and has not deleted: if one vanishes in a reload,
   // another program replaced the file.
@@ -1246,7 +1250,10 @@ export class ReviewSession {
       this.error(`Saved the notes, but could not write ${name} (${String(err)})`);
     }
     this.editing = false;
-    await this.post(result.added ?? null, result.text);
+    if (result.added) {
+      this.unacked = result.added;
+    }
+    await this.post();
   }
 
   /** Write beside the target and rename over it, so a reader never sees half a file. */
@@ -1305,30 +1312,37 @@ export class ReviewSession {
   }
 
   /**
-   * Post the panel's state. After an edit, `written` is the text just written and
-   * validated, so the acknowledgement does not depend on reading it back: a
-   * failed reread must not leave a saved note unacknowledged.
+   * Post the panel's state, read fresh from disk, so a newer external edit is
+   * never replaced by older text. A saved note still waiting for its `added`
+   * (`unacked`) goes out with it; if that read fails, the text this panel last
+   * wrote stands in, because a failed reread must not leave a saved note
+   * unacknowledged.
    */
-  private async post(added: string | null = null, written?: string): Promise<void> {
+  private async post(): Promise<void> {
     if (this.disposed) {
       return;
     }
     const generation = ++this.generation;
-    let text = written;
-    if (written === undefined) {
-      try {
-        text = await this.read();
-      } catch (err) {
-        // Leave the panel as it is: an unreadable file is not an empty one.
-        if (generation === this.generation && !this.disposed) {
-          this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
-        }
+    let text: string | undefined;
+    try {
+      text = await this.read();
+    } catch (err) {
+      if (generation !== this.generation || this.disposed) {
         return;
       }
+      if (this.unacked === null || this.lastWritten === undefined) {
+        // Leave the panel as it is: an unreadable file is not an empty one.
+        this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
+        return;
+      }
+      text = this.lastWritten;
     }
+    // A newer post is on its way and carries `unacked` with it.
     if (generation !== this.generation || this.disposed) {
       return;
     }
+    const added = this.unacked;
+    this.unacked = null;
     const loaded = text === undefined ? undefined : loadSidecar(text);
     // Only a sidecar without a usable fps needs the probe.
     if (loaded?.fps === undefined && this.probeInfo === undefined) {
