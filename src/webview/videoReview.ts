@@ -145,6 +145,11 @@ const ICONS = {
   bracketIn: ['M14 4H9v16h5'],
   bracketOut: ['M10 4h5v16h-5'],
   send: ['M12 19V5', 'M5 12l7-7 7 7'],
+  close: ['M6 6l12 12', 'M18 6L6 18'],
+  pin: [
+    'M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z',
+    'M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+  ],
   trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M6 7l1 13h10l1-13', 'M9 7V4h6v3'],
 } satisfies Record<string, string[]>;
 type IconName = keyof typeof ICONS;
@@ -210,6 +215,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
   let resumeAfterNote = false;
   // The pin being placed for the next note: [x, y] of the picture, or null.
   let pendingPoint: [number, number] | null = null;
+  // Whether a press on the picture places the pin. Off, it plays and pauses as usual.
+  let pinMode = false;
   // The draft handed to the host and not yet acknowledged. It stays in the
   // composer, locked, so a failed save can put it back untouched.
   let sending: {
@@ -217,6 +224,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     in: number;
     out: number;
     point: [number, number] | null;
+    pin: boolean;
     resume: boolean;
   } | null = null;
   let sort: NoteSort = 'time';
@@ -368,7 +376,17 @@ export function createReview(deps: ReviewDeps): ReviewController {
     face(copy, 'copy', 'Copy as Markdown');
     const tools = el('div', 'mc-rv-tools');
     tools.append(sortBtn, copy);
-    head.append(count, tools);
+    const close = button(
+      'mc-rv-btn mc-rv-ghost mc-rv-tool mc-rv-close',
+      '',
+      'Close video notes',
+      () => setReview(false),
+    );
+    close.title = 'Close video notes';
+    face(close, 'close');
+    const titleRow = el('div', 'mc-rv-titlerow');
+    titleRow.append(count, close);
+    head.append(titleRow, tools);
     const banner = el('div', 'mc-rv-banner');
     banner.setAttribute('role', 'status');
     banner.hidden = true;
@@ -391,9 +409,21 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const outBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Set Out to this frame', setOut);
     outBtn.title = 'Set Out (O)';
     face(outBtn, 'bracketOut', 'Out');
+    const pinBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Pin a spot', () =>
+      setPinMode(!pinMode),
+    );
+    pinBtn.title = 'Pin a spot (P)';
+    face(pinBtn, 'pin', 'Pin');
     const chip = el('span', 'mc-rv-chip');
     chip.hidden = true;
-    const clearBtn = button('mc-rv-btn mc-rv-quiet', 'Clear', 'Clear the range', clearRange);
+    const clearBtn = button(
+      'mc-rv-btn mc-rv-ghost mc-rv-quiet mc-rv-clear',
+      '',
+      'Clear range and pin',
+      clearRange,
+    );
+    clearBtn.title = 'Clear range and pin';
+    face(clearBtn, 'close');
     clearBtn.hidden = true;
     const cplay = button('mc-rv-btn mc-rv-ghost', '', 'Play', togglePlay);
     cplay.title = 'Play (Space)';
@@ -407,7 +437,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     face(send, 'send', 'Send');
     // A press on these must not take focus from the field, or its blur would drop
     // the pending resume.
-    for (const b of [inBtn, outBtn, clearBtn, send]) {
+    for (const b of [inBtn, outBtn, pinBtn, clearBtn, send]) {
       b.addEventListener('mousedown', (e) => e.preventDefault());
     }
     field.addEventListener('focus', () => {
@@ -440,7 +470,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
     pins.appendChild(ring);
     stage.appendChild(pins);
 
-    composer.append(inBtn, outBtn, chip, clearBtn, cplay, field, send);
+    // Two rows that never wrap: the range keys with the pending range and Clear, then
+    // play, the note field and Send.
+    const keys = el('div', 'mc-rv-row');
+    keys.append(inBtn, outBtn, pinBtn, chip, clearBtn);
+    const write = el('div', 'mc-rv-row');
+    write.append(cplay, field, send);
+    composer.append(keys, write);
     panel.append(head, banner, restore, list, fpsNote, composer);
 
     root.append(main, panel);
@@ -503,6 +539,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       fpsNote,
       inBtn,
       outBtn,
+      pinBtn,
       chip,
       clearBtn,
       cplay,
@@ -710,7 +747,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function onPicture(e: MouseEvent): boolean {
-    if (!isActive || !ui || !state || state.readOnly !== null) {
+    if (!isActive || !ui || !state || state.readOnly !== null || !pinMode) {
       return false;
     }
     if (sending) {
@@ -838,6 +875,19 @@ export function createReview(deps: ReviewDeps): ReviewController {
   function clearRange(): void {
     pendingIn = pendingOut = -1;
     pendingPoint = null;
+    pinMode = false;
+    renderPending();
+  }
+
+  /** Turn pin mode on or off; off drops a pending pin. */
+  function setPinMode(on: boolean): void {
+    if (!ui || !state || state.readOnly !== null || sending) {
+      return;
+    }
+    pinMode = on;
+    if (!on) {
+      pendingPoint = null;
+    }
     renderPending();
   }
 
@@ -868,6 +918,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       in: pendingIn,
       out: pendingOut,
       point: pendingPoint,
+      pin: pinMode,
       resume: resumeAfterNote,
     };
     resumeAfterNote = false;
@@ -887,6 +938,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     sending = null;
     pendingIn = pendingOut = -1;
     pendingPoint = null;
+    pinMode = false;
     ui.field.value = '';
     renderComposer();
     if (resume) {
@@ -903,6 +955,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     pendingIn = sending.in;
     pendingOut = sending.out;
     pendingPoint = sending.point;
+    pinMode = sending.pin;
     sending = null;
     renderComposer();
   }
@@ -916,14 +969,17 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const rate = fps();
     ui.inBtn.setAttribute('aria-pressed', String(set));
     ui.outBtn.setAttribute('aria-pressed', String(pendingOut > pendingIn && set));
-    ui.chip.hidden = !any;
+    ui.pinBtn.setAttribute('aria-pressed', String(pinMode));
+    ui.root.classList.toggle('mc-rv--pin', pinMode);
+    ui.chip.hidden = !set;
     ui.clearBtn.hidden = !any;
     const range = !set
       ? ''
       : pendingOut > pendingIn
         ? `${secondsToTimecode(pendingIn, rate)} to ${secondsToTimecode(pendingOut, rate)}`
         : secondsToTimecode(pendingIn, rate);
-    ui.chip.textContent = pendingPoint ? (range ? `${range} + Pin` : 'Pin') : range;
+    ui.chip.textContent = range;
+    ui.chip.title = range;
     renderMarkers();
     renderPins(true);
   }
@@ -934,7 +990,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     }
     const locked = state.readOnly !== null;
     // While a note is in flight the draft is frozen, so a failed save restores it as sent.
-    for (const c of [ui.inBtn, ui.outBtn, ui.clearBtn, ui.field]) {
+    if (locked) {
+      pinMode = false;
+    }
+    for (const c of [ui.inBtn, ui.outBtn, ui.pinBtn, ui.clearBtn, ui.field]) {
       c.disabled = locked || sending !== null;
     }
     ui.composer.classList.toggle('mc-rv-composer--busy', sending !== null);
@@ -1140,6 +1199,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
             return false;
           }
           setOut();
+          break;
+        case 'p':
+        case 'P':
+          if (!state || state.readOnly !== null) {
+            return false;
+          }
+          setPinMode(!pinMode);
           break;
         default:
           return false;

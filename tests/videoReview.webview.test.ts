@@ -266,14 +266,14 @@ describe('composer', () => {
     const inBtn = byLabel('Set In to this frame')!;
     const outBtn = byLabel('Set Out to this frame')!;
     expect(chip().hidden).toBe(true);
-    expect(byLabel('Clear the range')!.hidden).toBe(true);
+    expect(byLabel('Clear range and pin')!.hidden).toBe(true);
 
     at(video, 31);
     inBtn.click();
     expect(inBtn.getAttribute('aria-pressed')).toBe('true');
     expect(outBtn.getAttribute('aria-pressed')).toBe('false');
     expect(chip().textContent).toBe('00:00:31:00');
-    expect(byLabel('Clear the range')!.hidden).toBe(false);
+    expect(byLabel('Clear range and pin')!.hidden).toBe(false);
 
     at(video, 36);
     outBtn.click();
@@ -281,7 +281,7 @@ describe('composer', () => {
     expect(chip().textContent).toBe('00:00:31:00 to 00:00:36:00');
     expect(root().querySelectorAll('.mc-rv-pending')).toHaveLength(1);
 
-    byLabel('Clear the range')!.click();
+    byLabel('Clear range and pin')!.click();
     expect(chip().hidden).toBe(true);
     expect(inBtn.getAttribute('aria-pressed')).toBe('false');
     expect(root().querySelectorAll('.mc-rv-pending')).toHaveLength(0);
@@ -373,6 +373,7 @@ describe('composer', () => {
     fromHost(review());
     const play = vi.mocked(HTMLMediaElement.prototype.play);
     play.mockClear();
+    byLabel('Pin a spot')!.click();
     video.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 250, clientY: 250 }),
     );
@@ -381,7 +382,8 @@ describe('composer', () => {
     expect(root().querySelector<HTMLElement>('.mc-rv-ring')!.hidden).toBe(false);
 
     fromHost({ type: 'reviewError', message: 'Could not write', failed: 'add' });
-    expect(chip().textContent).toBe('Pin');
+    expect(chip().hidden).toBe(true);
+    expect(byLabel('Clear range and pin')!.hidden).toBe(false);
     expect(root().querySelector<HTMLElement>('.mc-rv-ring')!.hidden).toBe(false);
     expect(play).not.toHaveBeenCalled();
     byLabel('Add note')!.click();
@@ -595,6 +597,15 @@ describe('review toggle', () => {
     expect(root().hidden).toBe(true);
 
     fromHost(review());
+    expect(video.controls).toBe(true);
+    expect(root().hidden).toBe(true);
+  });
+
+  it('closes from the panel header like the menu does', async () => {
+    const video = await open();
+    fromHost(review());
+    byLabel('Close video notes')!.click();
+    expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: false });
     expect(video.controls).toBe(true);
     expect(root().hidden).toBe(true);
   });
@@ -852,14 +863,17 @@ describe('pins', () => {
   it('places a pending pin from a picture press and sends it as a point', async () => {
     const video = await openSized();
     fromHost(review());
+    byLabel('Pin a spot')!.click();
     at(video, 5);
     expect(ring().hidden).toBe(true);
 
     press(video, 500, 250);
     expect(ring().hidden).toBe(false);
     expect(ring().getAttribute('aria-label')).toBe('Pending pin, press the picture to move it');
-    expect(chip().hidden).toBe(false);
-    expect(chip().textContent).toBe('Pin');
+    // Only the range is written in the chip; the lit Pin toggle says there is a pin.
+    expect(chip().hidden).toBe(true);
+    expect(byLabel('Clear range and pin')!.hidden).toBe(false);
+    expect(byLabel('Pin a spot')!.getAttribute('aria-pressed')).toBe('true');
     expect(document.activeElement).toBe(field());
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
 
@@ -868,7 +882,7 @@ describe('pins', () => {
     expect(ring().style.left).toBe(`${750 - 22}px`);
 
     byLabel('Set In to this frame')!.click();
-    expect(chip().textContent).toBe('00:00:05:00 + Pin');
+    expect(chip().textContent).toBe('00:00:05:00');
 
     field().value = 'look here';
     byLabel('Add note')!.click();
@@ -886,12 +900,13 @@ describe('pins', () => {
   it('ignores a press in the letterbox and clears the pin with Clear', async () => {
     const video = await openSized();
     fromHost(review());
+    byLabel('Pin a spot')!.click();
     press(video, 100, 250);
     expect(ring().hidden).toBe(true);
     expect(chip().hidden).toBe(true);
 
     press(video, 500, 250);
-    byLabel('Clear the range')!.click();
+    byLabel('Clear range and pin')!.click();
     expect(ring().hidden).toBe(true);
     expect(chip().hidden).toBe(true);
   });
@@ -899,6 +914,7 @@ describe('pins', () => {
   it('resumes after sending only when it was playing before the first press', async () => {
     const video = await openSized();
     fromHost(review());
+    byLabel('Pin a spot')!.click();
     Object.defineProperty(video, 'paused', { value: false, configurable: true });
     press(video, 500, 250);
     Object.defineProperty(video, 'paused', { value: true, configurable: true });
@@ -909,11 +925,82 @@ describe('pins', () => {
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
 
     (HTMLMediaElement.prototype.play as ReturnType<typeof vi.fn>).mockClear();
+    // A sent note leaves pin mode.
+    byLabel('Pin a spot')!.click();
     press(video, 500, 250);
     field().value = 'y';
     byLabel('Add note')!.click();
     ack();
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  });
+
+  it('plays and pauses on a picture press while pin mode is off, and pins with it on', async () => {
+    const video = await openSized();
+    fromHost(review());
+    const pin = byLabel('Pin a spot')!;
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+    expect(pin.title).toBe('Pin a spot (P)');
+    press(video, 500, 250);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+    expect(ring().hidden).toBe(true);
+
+    pin.click();
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    expect(root().classList.contains('mc-rv--pin')).toBe(true);
+    press(video, 500, 250);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+    expect(ring().hidden).toBe(false);
+
+    // Off again: the pending pin goes and presses play and pause.
+    pin.click();
+    expect(ring().hidden).toBe(true);
+    expect(chip().hidden).toBe(true);
+    press(video, 500, 250);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
+  });
+
+  it('toggles pin mode with P, but not while typing, and leaves it with Clear', async () => {
+    await open();
+    fromHost(review());
+    const pin = byLabel('Pin a spot')!;
+    key('p');
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    key('p', field());
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    key('P');
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+
+    pin.click();
+    byLabel('Clear range and pin')!.click();
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('turns pin mode off on a successful send and restores it after a failed one', async () => {
+    const video = await openSized();
+    fromHost(review());
+    const pin = byLabel('Pin a spot')!;
+    pin.click();
+    press(video, 500, 250);
+    field().value = 'look';
+    byLabel('Add note')!.click();
+    expect(pin.disabled).toBe(true);
+
+    fromHost({ type: 'reviewError', message: 'Could not save', failed: 'add' });
+    expect(pin.disabled).toBe(false);
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    expect(ring().hidden).toBe(false);
+
+    byLabel('Add note')!.click();
+    ack();
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('disables the pin chip while read-only', async () => {
+    await open();
+    fromHost(review({ readOnly: 'schema version 2' }));
+    expect(byLabel('Pin a spot')!.disabled).toBe(true);
+    key('p');
+    expect(byLabel('Pin a spot')!.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('keeps the picture press as play and pause outside review mode', async () => {

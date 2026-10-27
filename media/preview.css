@@ -1387,6 +1387,21 @@ body.mc-video .mc-rv-count {
   font-weight: 600;
   line-height: 1.3;
 }
+/* The title row: the count, and a close button at the far right. */
+body.mc-video .mc-rv-titlerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+body.mc-video .mc-rv-close {
+  margin: -12px -8px -12px 0;
+}
+/* Pin mode: the picture takes a press as a pin, so it shows a crosshair. */
+body.mc-video .mc-rv--pin video,
+body.mc-video .mc-rv--pin .mc-rv-pins {
+  cursor: crosshair;
+}
 body.mc-video .mc-rv-tools {
   display: flex;
   flex-wrap: wrap;
@@ -1560,13 +1575,29 @@ body.mc-video .mc-rv-card--selected .mc-rv-meta {
 body.mc-video .mc-rv-composer {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 8px;
-  padding: 0 8px;
+  flex-direction: column;
+  padding: 0 4px;
   background: var(--mc-video-bg);
   border: 1px solid var(--rv-line);
   border-radius: 8px;
+}
+/* Neither row wraps: the range keys and the pending range, then play, the field, Send. */
+body.mc-video .mc-rv-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+body.mc-video .mc-rv-row .mc-rv-key {
+  padding: 0 6px;
+  gap: 4px;
+}
+body.mc-video .mc-rv-row .mc-rv-ghost {
+  flex: none;
+}
+body.mc-video .mc-rv-clear {
+  margin-left: auto;
 }
 body.mc-video .mc-rv-fpsnote {
   flex: none;
@@ -1578,9 +1609,13 @@ body.mc-video .mc-rv-fpsnote {
   background: var(--mc-video-bg);
 }
 body.mc-video .mc-rv-chip {
-  font: 14px/1.4 var(--rv-mono);
-  padding: 0 4px;
-  overflow-wrap: anywhere;
+  flex: 1 1 0;
+  min-width: 0;
+  font: 13px/1.4 var(--rv-mono);
+  color: var(--rv-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The field is 32px drawn inside a 44px row; its edge is held to 3:1. */
 body.mc-video .mc-rv-field {
