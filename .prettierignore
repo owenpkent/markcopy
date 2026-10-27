@@ -11,3 +11,6 @@ node_modules
 *.vsix
 package-lock.json
 CHANGELOG.md
+
+# Golden fixtures are compared byte for byte
+tests/fixtures/review
