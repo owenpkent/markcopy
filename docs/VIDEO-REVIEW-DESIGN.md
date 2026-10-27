@@ -1,11 +1,27 @@
 # Video review: design note
 
-**Status: phases 1 to 3 implemented.** It brings the review
-loop from [Marker](https://github.com/owenpkent/Marker) (timecoded notes, In and Out
-ranges, a markdown hand-off) into the existing video preview. Once a phase ships, the
-current behavior is described in [Video preview](ARCHITECTURE.md#video-preview), not
-here. File and line references are as of commit `2905d2c` (MarkCopy), `bed7d13`
-(Marker) and `467ec02` (okstudio-video-kit, whose schema is the contract).
+**Status: implemented.** This is the design note written _before_ the feature was
+built, kept as the record of why it is shaped the way it is. It is not maintained as a
+description of the current code: see [Video review](ARCHITECTURE.md#video-review) for
+that, and treat any file or line reference below as of its time of writing (MarkCopy
+`2905d2c`, Marker `bed7d13`, okstudio-video-kit `467ec02`, whose schema is the
+contract). It brings the review loop from [Marker](https://github.com/owenpkent/Marker)
+(timecoded notes, In and Out ranges, a markdown hand-off) into the existing video
+preview.
+
+What changed in the building. The sidecar is named from the stem (`clip.review.yaml`);
+an early draft of this plan had `clip.mp4.review.yaml`, which the kit's `review_path`
+does not produce. The host does not parse and stringify the YAML as planned under "YAML
+library": it finds each node's range with the `yaml` package, splices the original text,
+and ports PyYAML's scalar quoting and wrapping, so an edit is byte-identical to the
+kit's own save (22 kit-generated before/after pairs under `tests/fixtures/review/edit/`;
+the exceptions are `y`, `n`, `.` and exponent-like strings such as `e2`, which are
+quoted where PyYAML leaves them plain). Python's `round()` half-to-even was needed
+twice, once for timecodes (`roundHalfEven` in `src/review/timecode.ts`) and once for pin
+coordinates (`cleanPoint`, where 0.03125 becomes 0.0312). The copy writes the clipboard
+from the host, not the page. And ffprobe was already running on most opens, so the
+frame rate reuses that cached probe (`avg_frame_rate`) instead of adding a second run;
+only review mode probes when `markcopy.video.transcode` is `off`.
 
 ## Verdict
 
@@ -76,7 +92,8 @@ A note with another kind (keep or reject, from cutline) is listed like any other
 keeps its kind. Validation on load also applies the kit's cross-field rules: `out`
 greater than `at`, and keep or reject only with `target: source`.
 
-**YAML library.** Add [`yaml`](https://www.npmjs.com/package/yaml) as a runtime
+**YAML library.** _(As built, the document is spliced, not stringified; see the status
+paragraph above.)_ Add [`yaml`](https://www.npmjs.com/package/yaml) as a runtime
 dependency of the host bundle (no dependencies of its own, types included). Parse to a
 `Document`, apply edits to it and stringify, so key order and untouched fields survive.
 Manifest and lockfile change together, and `npm audit` is checked after. Measured
@@ -254,7 +271,7 @@ markdown file is derived output and is never read back.
 ## Documentation per phase
 
 - [README](../README.md) and [CHANGELOG](../CHANGELOG.md).
-- [ARCHITECTURE](ARCHITECTURE.md), "Video preview": the review mode, messages, sidecar
+- [ARCHITECTURE](ARCHITECTURE.md), "Video review" (planned as part of "Video preview"): the review mode, messages, sidecar
   ownership and the watcher.
 - [COPY-MATRIX](COPY-MATRIX.md), video section: it says the frame is the only thing
   worth copying. Add notes as Markdown.
