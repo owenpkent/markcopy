@@ -48,6 +48,11 @@ export interface ReviewStateMessage {
 export interface ReviewErrorMessage {
   type: 'reviewError';
   message: string;
+  /**
+   * Set when the error answers a `reviewAdd` that was not saved, so the webview
+   * can give the draft back instead of losing it. Absent for other errors.
+   */
+  failed?: 'add';
 }
 
 export type ReviewHostMessage = ReviewStateMessage | ReviewErrorMessage;

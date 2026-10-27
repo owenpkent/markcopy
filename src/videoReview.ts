@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap, type YAMLSeq } from 'yaml';
 import type {
   FpsSource,
+  ReviewErrorMessage,
   ReviewNote,
   ReviewStateMessage,
   ReviewWebviewMessage,
@@ -313,6 +314,12 @@ export function copyToast(count: number, markdownFile: string): string {
 // original text. Re-stringifying the document would re-wrap long strings and
 // re-pick quote styles in notes the edit never meant to touch.
 // ---------------------------------------------------------------------------
+
+/** The file system provider's file-not-found, however the host or a test spells it. */
+function isNotFound(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === 'FileNotFound' || code === 'ENOENT';
+}
 
 /** A failure the toast can say as is. */
 export class EditError extends Error {}
@@ -784,6 +791,18 @@ const rangeOf = (node: unknown): Range => {
   return r;
 };
 
+/** The offset just past the `:` after a pair's key, which may sit apart from it (`notes  :`). */
+function colonEnd(text: string, pair: Pair): number {
+  let at = rangeOf(pair.key)[1];
+  while (text[at] === ' ' || text[at] === '\t') {
+    at++;
+  }
+  if (text[at] !== ':') {
+    throw new EditError(UNSUPPORTED);
+  }
+  return at + 1;
+}
+
 const UNSUPPORTED = 'The notes list is written in a layout MarkCopy cannot edit safely';
 
 interface Located {
@@ -832,7 +851,7 @@ function insertNote(text: string, raw: string, index: number, relead: boolean): 
   const items = noteMaps(seq);
   if (items.length === 0) {
     // `notes: []` becomes a block list, as PyYAML writes the first note.
-    const from = rangeOf(pair.key)[1] + 1;
+    const from = colonEnd(text, pair);
     const end = rangeOf(seq)[1];
     return text.slice(0, from) + eol + withEol(raw.replace(/\n$/, ''), eol) + text.slice(end);
   }
@@ -913,7 +932,7 @@ export function removeNoteText(
   const removed = { id, index, raw: raw.endsWith('\n') ? raw : `${raw}\n` };
   if (items.length === 1) {
     // The last note goes and the list reads `notes: []`, as PyYAML writes an empty one.
-    const from = rangeOf(pair.key)[1] + 1;
+    const from = colonEnd(text, pair);
     return { text: `${text.slice(0, from)} []${eolOf(text)}${text.slice(end)}`, removed };
   }
   return { text: text.slice(0, start) + text.slice(end), removed };
@@ -991,7 +1010,12 @@ export class ReviewSession {
     const setting = vscode.workspace
       .getConfiguration('markcopy', this.source)
       .get<boolean>('video.review', false);
-    if (setting || (await this.read()) !== undefined) {
+    // An unreadable sidecar is still a sidecar: turn on and let post() report it.
+    const exists = await this.read().then(
+      (text) => text !== undefined,
+      () => true,
+    );
+    if (setting || exists) {
       await this.enable();
     }
   }
@@ -1019,7 +1043,13 @@ export class ReviewSession {
 
   /** Build the markdown from the sidecar, save it beside the sidecar, and copy it. */
   async copy(): Promise<void> {
-    const text = await this.read();
+    let text: string | undefined;
+    try {
+      text = await this.read();
+    } catch (err) {
+      this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
+      return;
+    }
     if (text === undefined) {
       this.error('There are no notes to copy yet');
       return;
@@ -1073,7 +1103,7 @@ export class ReviewSession {
         const next = addNoteText(base, note, file);
         return { text: next.text, added: next.id, applied: () => this.written.add(next.id) };
       }, true);
-    });
+    }, 'add');
   }
 
   setDone(msg: unknown): Promise<void> {
@@ -1139,11 +1169,12 @@ export class ReviewSession {
     this.watcher = undefined;
   }
 
-  private enqueue(job: () => Promise<void>): Promise<void> {
+  private enqueue(job: () => Promise<void>, failed?: 'add'): Promise<void> {
     const run = this.queue.then(job).catch((err) => {
       this.editing = false;
       this.error(
         err instanceof EditError ? err.message : `Could not save the notes (${String(err)})`,
+        failed,
       );
     });
     this.queue = run;
@@ -1163,8 +1194,18 @@ export class ReviewSession {
     if (this.disposed) {
       return;
     }
+    // Only an add creates the file, and it is the one edit whose draft the page can take back.
+    const failed = createsFile ? 'add' : undefined;
     this.editing = true;
-    const text = await this.read();
+    let text: string | undefined;
+    try {
+      text = await this.read();
+    } catch (err) {
+      // Not "absent": writing now would replace a file that is there but unreadable.
+      this.editing = false;
+      this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`, failed);
+      return;
+    }
     const loaded = text === undefined ? undefined : loadSidecar(text);
     if (loaded?.readOnly || (!createsFile && loaded === undefined)) {
       this.editing = false;
@@ -1172,32 +1213,37 @@ export class ReviewSession {
         loaded?.readOnly
           ? `The notes file is read-only: ${loaded.readOnly}`
           : 'The notes file is no longer there',
+        failed,
       );
       return;
     }
     const result = change(text, loaded);
     if (typeof result === 'string') {
       this.editing = false;
-      this.error(result);
+      this.error(result, failed);
+      return;
+    }
+    // A splice that misjudged the layout must never reach the disk.
+    const candidate = loadSidecar(result.text);
+    if (!candidate.file || candidate.readOnly) {
+      this.editing = false;
+      this.error('That change would leave the notes file invalid, so nothing was saved', failed);
       return;
     }
     try {
       await this.writeAtomic(this.sidecarUri, result.text);
     } catch (err) {
       this.editing = false;
-      this.error(`Could not save ${sidecarName(this.videoName)} (${String(err)})`);
+      this.error(`Could not save ${sidecarName(this.videoName)} (${String(err)})`, failed);
       return;
     }
     this.lastWritten = result.text;
     result.applied?.();
     const name = markdownName(this.videoName);
-    const saved = loadSidecar(result.text).file;
-    if (saved) {
-      try {
-        await this.writeAtomic(vscode.Uri.joinPath(this.dir, name), reviewMarkdown(saved));
-      } catch (err) {
-        this.error(`Saved the notes, but could not write ${name} (${String(err)})`);
-      }
+    try {
+      await this.writeAtomic(vscode.Uri.joinPath(this.dir, name), reviewMarkdown(candidate.file));
+    } catch (err) {
+      this.error(`Saved the notes, but could not write ${name} (${String(err)})`);
     }
     this.editing = false;
     await this.post(result.added ?? null);
@@ -1219,19 +1265,30 @@ export class ReviewSession {
     }
   }
 
-  /** The sidecar's text, or undefined when there is none. */
+  /**
+   * The sidecar's text, or undefined when there is none. Any other failure (no
+   * permission, an I/O error) throws: the file may well be there, and treating it
+   * as absent would let the next add replace it.
+   */
   private async read(): Promise<string | undefined> {
     try {
       return Buffer.from(await vscode.workspace.fs.readFile(this.sidecarUri)).toString('utf8');
-    } catch {
-      return undefined;
+    } catch (err) {
+      if (isNotFound(err)) {
+        return undefined;
+      }
+      throw err;
     }
   }
 
   /** The file changed on disk. Our own write is already on screen, so it is not posted again. */
   private async reload(): Promise<void> {
-    if (this.lastWritten !== undefined && (await this.read()) === this.lastWritten) {
-      return;
+    try {
+      if (this.lastWritten !== undefined && (await this.read()) === this.lastWritten) {
+        return;
+      }
+    } catch {
+      // post() reads again and says so.
     }
     await this.post();
   }
@@ -1252,7 +1309,16 @@ export class ReviewSession {
       return;
     }
     const generation = ++this.generation;
-    const text = await this.read();
+    let text: string | undefined;
+    try {
+      text = await this.read();
+    } catch (err) {
+      // Leave the panel as it is: an unreadable file is not an empty one.
+      if (generation === this.generation && !this.disposed) {
+        this.error(`Could not read ${sidecarName(this.videoName)} (${String(err)})`);
+      }
+      return;
+    }
     if (generation !== this.generation || this.disposed) {
       return;
     }
@@ -1283,7 +1349,10 @@ export class ReviewSession {
     void this.webview.postMessage(msg);
   }
 
-  private error(message: string): void {
-    void this.webview.postMessage({ type: 'reviewError', message });
+  private error(message: string, failed?: 'add'): void {
+    const msg: ReviewErrorMessage = failed
+      ? { type: 'reviewError', message, failed }
+      : { type: 'reviewError', message };
+    void this.webview.postMessage(msg);
   }
 }

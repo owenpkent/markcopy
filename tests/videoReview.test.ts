@@ -409,6 +409,26 @@ notes:
     expect(loadSidecar(restoreNoteText(first.text, first.removed)).notes[0].id).toBe('n1');
   });
 
+  it('keeps a space before the colon: first add to `notes  : []`', () => {
+    const text = 'version: 1\nsource: c.mp4\nfps: 25\nnotes  : []\n';
+    const added = addNoteText(
+      text,
+      { at: 2, text: 'b', created: CREATED },
+      loadSidecar(text).file!,
+    );
+    expect(added.text).toContain('notes  :\n- id: n1\n');
+    expect(loadSidecar(added.text).notes.map((n) => n.id)).toEqual(['n1']);
+  });
+
+  it('keeps a space before the colon: deleting the last note of `notes  :`', () => {
+    const text = `version: 1\nsource: c.mp4\nfps: 25\nnotes  :\n- id: n1\n  target: source\n  at: 1\n  kind: note\n  done: false\n  created: '${CREATED}'\n`;
+    const gone = removeNoteText(text, 'n1')!;
+    expect(gone.text).toBe('version: 1\nsource: c.mp4\nfps: 25\nnotes  : []\n');
+    const back = restoreNoteText(gone.text, gone.removed);
+    expect(back).toContain('notes  :\n- id: n1\n');
+    expect(loadSidecar(back).notes.map((n) => n.id)).toEqual(['n1']);
+  });
+
   it('refuses a flow-style list of notes rather than guess', () => {
     const flow = `version: 1\nsource: c.mp4\nfps: 25\nnotes: [{id: n1, target: source, at: 1, kind: note, done: false, created: '${CREATED}'}]\n`;
     const file = loadSidecar(flow).file!;

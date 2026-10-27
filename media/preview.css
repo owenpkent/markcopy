@@ -1433,6 +1433,10 @@ body.mc-video .mc-rv-field:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* A note in flight: the draft stays visible but waits for the host's answer. */
+body.mc-video .mc-rv-composer--busy .mc-rv-field:disabled {
+  cursor: progress;
+}
 
 /* ---- TeX compile-status overlay ------------------------------------------
    Built lazily in pdf.ts (see ensureTexOverlay) once a texEditor host starts

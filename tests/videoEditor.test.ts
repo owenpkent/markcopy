@@ -26,6 +26,8 @@ const watcher = vi.hoisted(() => ({
   dispose: vi.fn(),
 }));
 const reviewSetting = vi.hoisted(() => ({ on: false }));
+// An error for the next readFile to throw, once: a transient failure on a file that is there.
+const readFailure = vi.hoisted(() => ({ next: undefined as Error | undefined }));
 
 vi.mock('vscode', () => {
   const asUri = (fsPath: string) => ({
@@ -59,9 +61,15 @@ vi.mock('vscode', () => {
       fs: {
         stat: vi.fn(async () => ({ size: 1 })),
         readFile: vi.fn(async (uri: { path: string }) => {
+          if (readFailure.next) {
+            const err = readFailure.next;
+            readFailure.next = undefined;
+            throw err;
+          }
           const text = files.get(uri.path);
           if (text === undefined) {
-            throw new Error('ENOENT');
+            // What a provider throws for a missing file: vscode.FileSystemError.FileNotFound.
+            throw Object.assign(new Error('FileNotFound'), { code: 'FileNotFound' });
           }
           return Buffer.from(text);
         }),
@@ -329,6 +337,7 @@ notes:
   beforeEach(() => {
     vi.clearAllMocks();
     files.clear();
+    readFailure.next = undefined;
     reviewSetting.on = false;
     tools.findFfmpeg.mockResolvedValue({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' });
     tools.probeSource.mockResolvedValue({
@@ -638,6 +647,84 @@ notes:
     await send({ type: 'reviewDelete', id: 'n9' });
     expect(files.get(YAML)).toBe(SIDECAR);
     expect(errors(posted)).toHaveLength(4);
+  });
+
+  const failures = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === 'reviewError');
+
+  it('marks only the errors for an add that was not saved with failed: add', async () => {
+    const v2 = 'version: 2\nsource: clip.mp4\nfps: 25\n';
+    const ro = await open(v2);
+    await ro.send({ type: 'reviewAdd', at: 1, text: 'x' });
+    await ro.send({ type: 'reviewAdd', at: 1, out: 1, text: 'bad range' });
+    await ro.send({ type: 'reviewDelete', id: 'n1' });
+    await ro.send({ type: 'reviewSetDone', id: 'n1', done: true });
+    await ro.send({ type: 'reviewCopy' });
+    expect(failures(ro.posted).map((m) => m.failed)).toEqual([
+      'add',
+      'add',
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    files.set(YAML, SIDECAR);
+    const wf = await open();
+    readFailure.next = Object.assign(new Error('EACCES'), { code: 'NoPermissions' });
+    await wf.send({ type: 'reviewAdd', at: 1, text: 'read' });
+    const vs = await import('vscode');
+    vi.mocked(vs.workspace.fs.writeFile).mockRejectedValueOnce(new Error('disk full'));
+    await wf.send({ type: 'reviewAdd', at: 1, text: 'write' });
+    expect(failures(wf.posted).map((m) => m.failed)).toEqual(['add', 'add']);
+    expect(files.get(YAML)).toBe(SIDECAR);
+  });
+
+  it('does not treat a failed read as a missing file: nothing is written', async () => {
+    const two =
+      SIDECAR.replace('next_note_id: 2', 'next_note_id: 3') +
+      "- id: n2\n  target: source\n  at: 2.0\n  kind: note\n  text: Second.\n  done: false\n  applied_op: null\n  checkpoint: null\n  drawing: []\n  created: '2026-01-02T03:04:05'\n";
+    const { posted, send } = await open(two);
+    await send({ type: 'reviewCopy' });
+    const md = files.get(MD);
+    expect(md).toContain('## n2');
+    const vs = await import('vscode');
+    const writes = vi.mocked(vs.workspace.fs.writeFile).mock.calls.length;
+    const renames = vi.mocked(vs.workspace.fs.rename).mock.calls.length;
+    const states = posted.filter((m) => m.type === 'review').length;
+    readFailure.next = Object.assign(new Error('EACCES'), { code: 'NoPermissions' });
+    await send({ type: 'reviewAdd', at: 3, text: 'lost?' });
+    expect(vi.mocked(vs.workspace.fs.writeFile).mock.calls).toHaveLength(writes);
+    expect(vi.mocked(vs.workspace.fs.rename).mock.calls).toHaveLength(renames);
+    expect(files.get(YAML)).toBe(two);
+    expect(files.get(MD)).toBe(md);
+    expect(failures(posted)).toEqual([
+      { type: 'reviewError', message: expect.stringMatching(/Could not read/), failed: 'add' },
+    ]);
+    expect(posted.filter((m) => m.type === 'review')).toHaveLength(states);
+  });
+
+  it('keeps the panel as it is when a reload cannot read the file', async () => {
+    const { posted, send } = await open(SIDECAR);
+    const states = posted.filter((m) => m.type === 'review').length;
+    readFailure.next = Object.assign(new Error('EIO'), { code: 'Unknown' });
+    (watcher.onDidChange.mock.calls[0][0] as () => void)();
+    await vi.waitFor(() => expect(errors(posted)).toHaveLength(1));
+    expect(posted.filter((m) => m.type === 'review')).toHaveLength(states);
+    expect(failures(posted)[0].failed).toBeUndefined();
+    await send({ type: 'reviewAdd', at: 2, text: 'still works' });
+    expect(files.get(YAML)).toContain('- id: n2\n');
+  });
+
+  it('refuses a change that would leave an invalid sidecar, without writing', async () => {
+    // A flow mapping at the root: a block list spliced in would not parse.
+    const flow = '{version: 1, source: clip.mp4, fps: 25.0, next_note_id: 1, notes: []}\n';
+    const { posted, send } = await open(flow);
+    await send({ type: 'reviewAdd', at: 1, text: 'x' });
+    expect(files.get(YAML)).toBe(flow);
+    expect(files.has(MD)).toBe(false);
+    expect(failures(posted)).toEqual([
+      { type: 'reviewError', message: expect.stringMatching(/invalid/), failed: 'add' },
+    ]);
   });
 
   it('checks times against the probed duration before creating a sidecar', async () => {

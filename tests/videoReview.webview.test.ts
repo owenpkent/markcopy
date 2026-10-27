@@ -105,6 +105,10 @@ const field = () => root().querySelector<HTMLInputElement>('.mc-rv-field')!;
 const chip = () => root().querySelector<HTMLElement>('.mc-rv-chip')!;
 const fpsNote = () => root().querySelector<HTMLElement>('.mc-rv-fpsnote')!;
 
+/** The host saved the note: the state message that names it as added. */
+const ack = () =>
+  fromHost(review({ added: 'n4', notes: [note('n1', 1), note('n4', 2, { text: 'sent' })] }));
+
 /** Put the playhead inside the frame that starts at this many seconds (30 fps). */
 function at(video: HTMLVideoElement, seconds: number): void {
   video.currentTime = seconds + 1 / 60;
@@ -286,8 +290,81 @@ describe('composer', () => {
     const sent = posted.find((m) => m.type === 'reviewAdd')!;
     expect(sent.at).toBeCloseTo(31, 9);
     expect(sent).toMatchObject({ out: 36, text: 'tighten this' });
+    // The draft stays, locked, until the host acknowledges the save.
+    expect(field().value).toBe('  tighten this  ');
+    expect(chip().hidden).toBe(false);
+    ack();
     expect(field().value).toBe('');
     expect(chip().hidden).toBe(true);
+  });
+
+  it('locks the draft while a send is pending, then restores it on a failed save', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 31);
+    byLabel('Set In to this frame')!.click();
+    at(video, 36);
+    byLabel('Set Out to this frame')!.click();
+    field().value = 'tighten this';
+    byLabel('Add note')!.click();
+    expect(byLabel('Add note')!.disabled).toBe(true);
+    expect(field().disabled).toBe(true);
+    key('Enter', field());
+    byLabel('Add note')!.click();
+    expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
+
+    fromHost({ type: 'reviewError', message: 'Could not write clip.review.yaml', failed: 'add' });
+    expect(field().value).toBe('tighten this');
+    expect(field().disabled).toBe(false);
+    expect(byLabel('Add note')!.disabled).toBe(false);
+    expect(chip().textContent).toBe('00:00:31:00 to 00:00:36:00');
+    expect(byLabel('Set In to this frame')!.getAttribute('aria-pressed')).toBe('true');
+    expect(byLabel('Set Out to this frame')!.getAttribute('aria-pressed')).toBe('true');
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+
+    // A retry sends the same draft again.
+    byLabel('Add note')!.click();
+    const sent = posted.filter((m) => m.type === 'reviewAdd');
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ out: 36, text: 'tighten this' });
+  });
+
+  it('restores a pin on a failed save and does not resume playback', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'videoWidth', { value: 500, configurable: true });
+    Object.defineProperty(video, 'videoHeight', { value: 500, configurable: true });
+    const box = { left: 0, top: 0, right: 500, bottom: 500, width: 500, height: 500 } as DOMRect;
+    video.getBoundingClientRect = () => box;
+    document.getElementById('mc-stage')!.getBoundingClientRect = () => box;
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+    video.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 250, clientY: 250 }),
+    );
+    field().value = 'look here';
+    byLabel('Add note')!.click();
+    expect(root().querySelector<HTMLElement>('.mc-rv-ring')!.hidden).toBe(false);
+
+    fromHost({ type: 'reviewError', message: 'Could not write', failed: 'add' });
+    expect(chip().textContent).toBe('Pin');
+    expect(root().querySelector<HTMLElement>('.mc-rv-ring')!.hidden).toBe(false);
+    expect(play).not.toHaveBeenCalled();
+    byLabel('Add note')!.click();
+    const sent = posted.filter((m) => m.type === 'reviewAdd');
+    expect(sent[1]).toMatchObject({ text: 'look here', point: [0.5, 0.5] });
+  });
+
+  it('leaves a pending draft alone on a reviewError that is not a failed add', async () => {
+    await open();
+    fromHost(review());
+    field().value = 'keep me';
+    byLabel('Add note')!.click();
+    fromHost({ type: 'reviewError', message: 'Could not delete n1' });
+    expect(field().disabled).toBe(true);
+    expect(byLabel('Add note')!.disabled).toBe(true);
+    expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
   });
 
   it('sends at the playhead frame without a range, and Enter sends', async () => {
@@ -301,6 +378,7 @@ describe('composer', () => {
     expect(sent[0].at).toBeCloseTo(12, 9);
     expect(sent[0]).not.toHaveProperty('out');
     expect(sent[0].text).toBe('cut here');
+    ack();
     expect(field().value).toBe('');
   });
 
@@ -322,6 +400,9 @@ describe('composer', () => {
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
     field().value = 'x';
     byLabel('Add note')!.click();
+    // Playback picks up only once the save is acknowledged.
+    expect(play).not.toHaveBeenCalled();
+    ack();
     expect(play).toHaveBeenCalledTimes(1);
   });
 
@@ -334,6 +415,7 @@ describe('composer', () => {
     field().dispatchEvent(new FocusEvent('focus'));
     field().value = 'x';
     byLabel('Add note')!.click();
+    ack();
     expect(play).not.toHaveBeenCalled();
   });
 
@@ -355,6 +437,7 @@ describe('composer', () => {
     byLabel('Pause')!.click();
     field().value = 'x';
     byLabel('Add note')!.click();
+    ack();
     expect(play).not.toHaveBeenCalled();
   });
 
@@ -693,6 +776,27 @@ describe('pins', () => {
     expect(studs()).toHaveLength(0);
   });
 
+  it('places a pin again when the picture size arrives after the review state', async () => {
+    const video = await open();
+    const box = { left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500 } as DOMRect;
+    video.getBoundingClientRect = () => box;
+    document.getElementById('mc-stage')!.getBoundingClientRect = () => box;
+    // State arrives with the playhead at frame zero and no intrinsic size yet.
+    fromHost(review({ notes: [note('n1', 0, { point: [0.1, 0.5], out: 5 })] }));
+    expect(studs()).toHaveLength(1);
+    expect(studs()[0].style.left).not.toBe('278px');
+
+    Object.defineProperty(video, 'videoWidth', { value: 500, configurable: true });
+    Object.defineProperty(video, 'videoHeight', { value: 500, configurable: true });
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(studs()[0].style.left).toBe(`${250 + 50 - 22}px`);
+
+    // A source switch changes the intrinsic size without a new frame.
+    Object.defineProperty(video, 'videoWidth', { value: 1000, configurable: true });
+    video.dispatchEvent(new Event('resize'));
+    expect(studs()[0].style.left).toBe(`${100 - 22}px`);
+  });
+
   it('selects and seeks on a stud press, and marks the card with the word Pin', async () => {
     const video = await openSized();
     fromHost(pinNotes());
@@ -735,6 +839,7 @@ describe('pins', () => {
       text: 'look here',
       point: [1, 0],
     });
+    ack();
     expect(ring().hidden).toBe(true);
     expect(chip().hidden).toBe(true);
   });
@@ -761,12 +866,14 @@ describe('pins', () => {
     press(video, 520, 250);
     field().value = 'x';
     byLabel('Add note')!.click();
+    ack();
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
 
     (HTMLMediaElement.prototype.play as ReturnType<typeof vi.fn>).mockClear();
     press(video, 500, 250);
     field().value = 'y';
     byLabel('Add note')!.click();
+    ack();
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
   });
 

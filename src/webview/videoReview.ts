@@ -170,6 +170,15 @@ export function createReview(deps: ReviewDeps): ReviewController {
   let resumeAfterNote = false;
   // The pin being placed for the next note: [x, y] of the picture, or null.
   let pendingPoint: [number, number] | null = null;
+  // The draft handed to the host and not yet acknowledged. It stays in the
+  // composer, locked, so a failed save can put it back untouched.
+  let sending: {
+    text: string;
+    in: number;
+    out: number;
+    point: [number, number] | null;
+    resume: boolean;
+  } | null = null;
   let filter: NoteFilter = 'all';
   let sort: NoteSort = 'time';
   // The frame the pins were last drawn for, so playback redraws only on a new one.
@@ -409,10 +418,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
       updateTransport();
       renderMarkers();
     });
+    // Pins laid out before the picture size was known, or before a source switch
+    // changed it, need placing again even though the frame has not moved.
     video.addEventListener('loadedmetadata', () => {
       updateTransport();
       renderMarkers();
+      renderPins(true);
     });
+    video.addEventListener('resize', () => renderPins(true));
     video.addEventListener('play', () => {
       updateTransport();
       tick();
@@ -450,6 +463,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       cplay,
       field,
       send,
+      composer,
     };
   }
 
@@ -649,6 +663,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (!isActive || !ui || !state || state.readOnly !== null) {
       return false;
     }
+    if (sending) {
+      return true;
+    }
     if (!video.videoWidth) {
       return true;
     }
@@ -780,7 +797,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function sendNote(): void {
-    if (!ui || !state || state.readOnly !== null || state.fpsSource === 'pending') {
+    if (!ui || !state || state.readOnly !== null || state.fpsSource === 'pending' || sending) {
       return;
     }
     const text = ui.field.value.trim();
@@ -800,18 +817,48 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (pendingPoint) {
       msg.point = pendingPoint;
     }
+    // Keep the draft on screen until the host says the note was saved.
+    sending = {
+      text,
+      in: pendingIn,
+      out: pendingOut,
+      point: pendingPoint,
+      resume: resumeAfterNote,
+    };
+    resumeAfterNote = false;
     post(msg);
+    // Hand the keyboard back to the player.
+    ui.field.blur();
+    renderComposer();
+  }
+
+  /** The host saved the note: drop the draft and pick playback up where it was. */
+  function sendSucceeded(): void {
+    if (!ui || !sending) {
+      return;
+    }
+    const resume = sending.resume;
+    sending = null;
     pendingIn = pendingOut = -1;
     pendingPoint = null;
     ui.field.value = '';
-    renderPending();
-    // Hand the keyboard back to the player, then pick playback up where it was.
-    const resume = resumeAfterNote;
-    resumeAfterNote = false;
-    ui.field.blur();
+    renderComposer();
     if (resume) {
       void video.play().catch(() => toast('Playback was blocked, press play again'));
     }
+  }
+
+  /** The host did not save the note: put the whole draft back, playback stays paused. */
+  function sendFailed(): void {
+    if (!ui || !sending) {
+      return;
+    }
+    ui.field.value = sending.text;
+    pendingIn = sending.in;
+    pendingOut = sending.out;
+    pendingPoint = sending.point;
+    sending = null;
+    renderComposer();
   }
 
   function renderPending(): void {
@@ -840,11 +887,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const locked = state.readOnly !== null;
+    // While a note is in flight the draft is frozen, so a failed save restores it as sent.
     for (const c of [ui.inBtn, ui.outBtn, ui.clearBtn, ui.field]) {
-      c.disabled = locked;
+      c.disabled = locked || sending !== null;
     }
+    ui.composer.classList.toggle('mc-rv-composer--busy', sending !== null);
     // Until the host knows the rate, a note would be saved at the wrong one.
-    ui.send.disabled = locked || state.fpsSource === 'pending';
+    ui.send.disabled = locked || state.fpsSource === 'pending' || sending !== null;
     ui.fpsNote.hidden = !(state.sidecar === null && state.fpsSource === 'assumed');
     ui.restore.hidden = !state.restorable;
     ui.restore.disabled = locked;
@@ -960,6 +1009,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
   return {
     onMessage(msg) {
       if (msg.type === 'reviewError') {
+        if ((msg as unknown as { failed?: string }).failed === 'add') {
+          sendFailed();
+        }
         toast((msg as unknown as { message: string }).message);
         return true;
       }
@@ -983,6 +1035,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       }
       renderAll();
       if (next.added) {
+        sendSucceeded();
         scrollCardIntoView(next.added);
       }
       return true;
