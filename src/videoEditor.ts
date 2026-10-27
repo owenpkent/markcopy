@@ -3,6 +3,7 @@ import { revealInOs } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
+import { ReviewSession } from './videoReview';
 import {
   audioCodecLabel,
   canRemux,
@@ -37,7 +38,10 @@ export function isViewerSetting(key: string, value: unknown): boolean {
   if (key === 'theme') {
     return typeof value === 'string' && THEMES.includes(value);
   }
-  return (key === 'video.loop' || key === 'video.autoplay') && typeof value === 'boolean';
+  return (
+    (key === 'video.loop' || key === 'video.autoplay' || key === 'video.review') &&
+    typeof value === 'boolean'
+  );
 }
 
 export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider {
@@ -84,6 +88,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
       this.sendLoad(webview, document.uri, built),
     );
 
+    const review = new ReviewSession(document.uri, webview, () => proxy.averageFrameRate());
+
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
         // A webview that reloads inside the same panel starts over from `ready`.
@@ -92,6 +98,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         // would report `playable` again into a session that has already made
         // its one offer.
         await this.sendLoad(webview, document.uri, proxy.current);
+        // Review mode follows the sidecar: one beside the video, or the setting.
+        await review.onReady();
       } else if (msg?.type === 'revealInOS') {
         revealInOs(document.uri);
       } else if (msg?.type === 'saveFrame') {
@@ -116,6 +124,10 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         await proxy.build(msg.kind === 'sound' ? 'sound' : 'picture');
       } else if (msg?.type === 'proxyCancel') {
         proxy.cancel();
+      } else if (msg?.type === 'reviewEnable') {
+        await review.enable();
+      } else if (msg?.type === 'reviewCopy') {
+        await review.copy();
       } else if (
         msg?.type === 'updateSetting' &&
         typeof msg.key === 'string' &&
@@ -143,6 +155,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     });
     panel.onDidDispose(() => {
       themeListener.dispose();
+      review.dispose();
       // The proxy is scratch, not an export: nothing offers to keep it, so the
       // panel closing is what it was scoped to.
       void proxy.dispose();
@@ -410,7 +423,7 @@ class ProxySession {
   // what lets a cancelled encode come back offering to build the same named
   // codec, rather than falling back to the generic message.
   private tools: FfmpegTools | undefined;
-  private probed: SourceProbe | undefined;
+  private probed: Promise<SourceProbe> | undefined;
   // The sound offer is made at most once per panel, so a webview that reports
   // `playable` again (a reload, a second load) cannot nag after a Dismiss.
   private soundOffered = false;
@@ -482,6 +495,20 @@ class ProxySession {
       return;
     }
     await this.build('sound');
+  }
+
+  /**
+   * The video's average frame rate for review mode, or 0 when it cannot be
+   * known. Unlike `offerSound` this probes even when `video.transcode` is `off`,
+   * because the rate has nothing to do with transcoding; it still needs ffmpeg.
+   * Shares the cached probe, so it never costs a second ffprobe run.
+   */
+  async averageFrameRate(): Promise<number> {
+    const tools = await this.find(vscode.workspace.getConfiguration('markcopy', this.source));
+    if (!tools) {
+      return 0;
+    }
+    return (await this.probe(tools.ffprobe)).avgFrameRate;
   }
 
   /** Encode the proxy, reporting progress, and play it when it lands. */
@@ -648,25 +675,21 @@ class ProxySession {
    * percentage, the checkerboard behind an alpha channel), and `transcodeArgs`
    * already treats an empty probe as "take the plain path".
    */
-  private async probe(ffprobe: string): Promise<SourceProbe> {
-    if (this.probed) {
-      return this.probed;
-    }
-    try {
-      this.probed = await probeSource(ffprobe, this.source.fsPath);
-    } catch {
-      this.probed = {
-        durationSec: 0,
-        width: 0,
-        height: 0,
-        frameRate: 0,
-        hasAlpha: false,
-        hasAudio: false,
-        audioCodec: '',
-        codec: '',
-        profile: '',
-      };
-    }
+  private probe(ffprobe: string): Promise<SourceProbe> {
+    // The promise is the cache, so two callers racing (the sound check and the
+    // review frame rate) share one ffprobe run.
+    this.probed ??= probeSource(ffprobe, this.source.fsPath).catch(() => ({
+      durationSec: 0,
+      width: 0,
+      height: 0,
+      frameRate: 0,
+      avgFrameRate: 0,
+      hasAlpha: false,
+      hasAudio: false,
+      audioCodec: '',
+      codec: '',
+      profile: '',
+    }));
     return this.probed;
   }
 

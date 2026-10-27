@@ -1001,6 +1001,265 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   z-index: 1100;
 }
 
+/* ---- Video review mode ---------------------------------------------------
+   Built by src/webview/videoReview.ts. Colours come only from the video
+   viewer's own --mc-video-bg / --mc-video-fg (set per markcopy.theme in
+   src/videoEditor.ts), mixed for surfaces and borders, so every control is
+   legible in auto, light, dark and green. Targets are 44px with 8px between
+   neighbours, text is 14px or more, and focus is a 2px ring in the foreground. */
+body.mc-video .mc-rv {
+  --rv-surface: color-mix(in srgb, var(--mc-video-fg) 8%, var(--mc-video-bg));
+  --rv-raised: color-mix(in srgb, var(--mc-video-fg) 16%, var(--mc-video-bg));
+  --rv-line: color-mix(in srgb, var(--mc-video-fg) 40%, var(--mc-video-bg));
+  position: fixed;
+  inset: 0 0 calc(30px + var(--mc-notice-h, 0px)) 0;
+  display: flex;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+body.mc-video .mc-rv[hidden] {
+  display: none;
+}
+body.mc-video .mc-rv--narrow {
+  flex-direction: column;
+}
+body.mc-video .mc-rv-main {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+/* The stage leaves its fixed position over the page and shares the column. */
+body.mc-review #mc-stage {
+  position: relative;
+  inset: auto;
+  flex: 1 1 0;
+  min-height: 120px;
+  padding: 12px 0 0;
+}
+body.mc-review #mc-stage[hidden] {
+  display: none;
+}
+
+body.mc-video .mc-rv-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+body.mc-video .mc-rv-time {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 16px;
+}
+body.mc-video .mc-rv-total,
+body.mc-video .mc-rv-rate {
+  opacity: 0.85;
+}
+
+body.mc-video .mc-rv-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--mc-video-fg);
+  background: var(--rv-raised);
+  border: 1px solid var(--rv-line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+body.mc-video .mc-rv-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--mc-video-fg) 26%, var(--mc-video-bg));
+}
+body.mc-video .mc-rv-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+body.mc-video .mc-rv button:focus-visible,
+body.mc-video .mc-rv-slider:focus-visible {
+  outline: 2px solid var(--mc-video-fg);
+  outline-offset: 2px;
+}
+
+body.mc-video .mc-rv-timeline {
+  flex: none;
+}
+body.mc-video .mc-rv-markers,
+body.mc-video .mc-rv-bands {
+  position: relative;
+}
+body.mc-video .mc-rv-markers {
+  height: 44px;
+}
+body.mc-video .mc-rv-bands {
+  height: 4px;
+}
+body.mc-video .mc-rv-marker {
+  position: absolute;
+  top: 0;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: var(--mc-video-fg);
+  font: inherit;
+  cursor: pointer;
+}
+body.mc-video .mc-rv-dot {
+  min-width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--mc-video-fg);
+  border-radius: 14px;
+  background: var(--rv-raised);
+  font-size: 14px;
+  line-height: 1;
+}
+/* Done is a dashed edge as well as a dimmer dot, so it is not told by tone alone. */
+body.mc-video .mc-rv-dot--done {
+  border-style: dashed;
+  opacity: 0.7;
+}
+body.mc-video .mc-rv-marker[aria-pressed='true'] .mc-rv-dot {
+  background: var(--mc-video-fg);
+  color: var(--mc-video-bg);
+}
+body.mc-video .mc-rv-band {
+  position: absolute;
+  top: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--mc-video-fg);
+  opacity: 0.8;
+}
+/* The scrubber's thumb is the same 44px as a marker's target, so the two
+   travel the same distance and a marker sits over the frame it names. */
+body.mc-video .mc-rv-slider {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+body.mc-video .mc-rv-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--rv-line);
+}
+body.mc-video .mc-rv-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 44px;
+  height: 44px;
+  margin-top: -19px;
+  border: 0;
+  background: linear-gradient(var(--mc-video-fg), var(--mc-video-fg)) center / 4px 100% no-repeat;
+}
+
+body.mc-video .mc-rv-panel {
+  flex: none;
+  width: 320px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow: hidden;
+  background: var(--rv-surface);
+  border-left: 1px solid var(--rv-line);
+}
+body.mc-video .mc-rv--narrow .mc-rv-panel {
+  width: auto;
+  height: 40%;
+  border-left: 0;
+  border-top: 1px solid var(--rv-line);
+}
+body.mc-video .mc-rv-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+body.mc-video .mc-rv-count {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+body.mc-video .mc-rv-banner {
+  padding: 8px 12px;
+  border: 1px solid var(--rv-line);
+  border-left: 4px solid var(--mc-video-fg);
+  border-radius: 4px;
+  background: var(--rv-raised);
+}
+body.mc-video .mc-rv-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+body.mc-video .mc-rv-empty {
+  margin: 0;
+  opacity: 0.85;
+  line-height: 1.5;
+}
+body.mc-video .mc-rv-card {
+  flex: none;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  text-align: left;
+  font: inherit;
+  color: var(--mc-video-fg);
+  background: var(--mc-video-bg);
+  border: 1px solid var(--rv-line);
+  border-left: 4px solid var(--rv-line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+body.mc-video .mc-rv-card:hover {
+  background: var(--rv-raised);
+}
+body.mc-video .mc-rv-card--selected {
+  background: var(--rv-raised);
+  border-left-color: var(--mc-video-fg);
+}
+body.mc-video .mc-rv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+body.mc-video .mc-rv-tc {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 600;
+}
+body.mc-video .mc-rv-id,
+body.mc-video .mc-rv-kind,
+body.mc-video .mc-rv-done {
+  opacity: 0.85;
+}
+body.mc-video .mc-rv-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
 /* ---- TeX compile-status overlay ------------------------------------------
    Built lazily in pdf.ts (see ensureTexOverlay) once a texEditor host starts
    sending texState messages; a plain .pdf never creates any of this. Sits

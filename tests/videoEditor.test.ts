@@ -14,8 +14,18 @@
 // helpers (silentAudio and the label functions) stay real, so the probe below
 // has to look silent to the real predicate for the sound offer to be made.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { posix } from 'node:path';
 
 const configUpdate = vi.hoisted(() => vi.fn(async () => undefined));
+// Files by path; a path not listed does not exist.
+const files = vi.hoisted(() => new Map<string, string>());
+const watcher = vi.hoisted(() => ({
+  onDidChange: vi.fn(),
+  onDidCreate: vi.fn(),
+  onDidDelete: vi.fn(),
+  dispose: vi.fn(),
+}));
+const reviewSetting = vi.hoisted(() => ({ on: false }));
 
 vi.mock('vscode', () => {
   const asUri = (fsPath: string) => ({
@@ -28,17 +38,44 @@ vi.mock('vscode', () => {
     Uri: {
       file: (fsPath: string) => asUri(fsPath),
       joinPath: (base: { path: string }, ...segments: string[]) =>
-        asUri(`${base.path}/${segments.join('/')}`),
+        asUri(posix.normalize(`${base.path}/${segments.join('/')}`)),
+    },
+    RelativePattern: class {
+      constructor(
+        public base: unknown,
+        public pattern: string,
+      ) {}
     },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
-    env: { openExternal: vi.fn() },
+    env: { openExternal: vi.fn(), clipboard: { writeText: vi.fn(async () => undefined) } },
     workspace: {
       getConfiguration: vi.fn(() => ({
-        get: (key: string, fallback: unknown) => (key === 'video.transcode' ? 'auto' : fallback),
+        get: (key: string, fallback: unknown) =>
+          key === 'video.transcode' ? 'auto' : key === 'video.review' ? reviewSetting.on : fallback,
         inspect: () => undefined,
         update: configUpdate,
       })),
-      fs: { stat: vi.fn(async () => ({ size: 1 })) },
+      createFileSystemWatcher: vi.fn(() => watcher),
+      fs: {
+        stat: vi.fn(async () => ({ size: 1 })),
+        readFile: vi.fn(async (uri: { path: string }) => {
+          const text = files.get(uri.path);
+          if (text === undefined) {
+            throw new Error('ENOENT');
+          }
+          return Buffer.from(text);
+        }),
+        writeFile: vi.fn(async (uri: { path: string }, data: Uint8Array) => {
+          files.set(uri.path, Buffer.from(data).toString('utf8'));
+        }),
+        rename: vi.fn(async (from: { path: string }, to: { path: string }) => {
+          files.set(to.path, files.get(from.path) ?? '');
+          files.delete(from.path);
+        }),
+        delete: vi.fn(async (uri: { path: string }) => {
+          files.delete(uri.path);
+        }),
+      },
       onDidChangeConfiguration: vi.fn(() => ({ dispose: () => undefined })),
     },
     window: { showSaveDialog: vi.fn(), showErrorMessage: vi.fn() },
@@ -59,7 +96,7 @@ vi.mock('../src/videoProxy', async (importOriginal) => ({
   ...tools,
 }));
 
-import { VideoEditorProvider } from '../src/videoEditor';
+import { isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
 import type * as vscode from 'vscode';
 import type * as VideoProxy from '../src/videoProxy';
 
@@ -107,6 +144,7 @@ describe('VideoEditorProvider sound copy', () => {
       width: 1920,
       height: 1080,
       frameRate: 24,
+      avgFrameRate: 24,
       hasAlpha: false,
       hasAudio: true,
       audioCodec: 'aac',
@@ -182,6 +220,7 @@ describe('VideoEditorProvider container offers', () => {
     width: 1920,
     height: 1080,
     frameRate: 24,
+    avgFrameRate: 24,
     hasAlpha: false,
     hasAudio: true,
     audioCodec: 'aac',
@@ -260,5 +299,154 @@ describe('VideoEditorProvider container offers', () => {
     const { posted, send } = await open('clip.wmv');
     await send({ type: 'proxyRequest' });
     expect(posted.filter((m) => m.type === 'load').at(-1)?.proxyNote).toBe('ffmpeg preview copy');
+  });
+});
+
+describe('isViewerSetting', () => {
+  it('accepts video.review booleans only', () => {
+    expect(isViewerSetting('video.review', true)).toBe(true);
+    expect(isViewerSetting('video.review', false)).toBe(true);
+    expect(isViewerSetting('video.review', 'true')).toBe(false);
+    expect(isViewerSetting('video.review', 1)).toBe(false);
+    expect(isViewerSetting('video.ffmpegPath', true)).toBe(false);
+  });
+});
+
+describe('VideoEditorProvider review mode', () => {
+  const SIDECAR = `version: 1
+source: clip.mp4
+fps: 25
+notes:
+  - id: n1
+    target: source
+    at: 1
+    kind: note
+    text: Soft focus.
+    done: false
+    created: '2026-01-02T03:04:05'
+`;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    files.clear();
+    reviewSetting.on = false;
+    tools.findFfmpeg.mockResolvedValue({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' });
+    tools.probeSource.mockResolvedValue({
+      durationSec: 5,
+      width: 1920,
+      height: 1080,
+      frameRate: 60,
+      avgFrameRate: 29.97,
+      hasAlpha: false,
+      hasAudio: false,
+      audioCodec: '',
+      codec: 'h264',
+      profile: '',
+    });
+    tools.proxyDir.mockReturnValue('/proxies');
+  });
+
+  async function open() {
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: '/videos/clip.mp4',
+      fsPath: '/videos/clip.mp4',
+    } as vscode.Uri);
+    const harness = createPanel();
+    await provider.resolveCustomEditor(document, harness.panel);
+    return harness;
+  }
+
+  const reviews = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === 'review');
+
+  it('stays a plain preview without a sidecar or the setting', async () => {
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    expect(reviews(posted)).toHaveLength(0);
+    expect(tools.probeSource).not.toHaveBeenCalled();
+  });
+
+  it('turns on for a sidecar, using its fps without probing', async () => {
+    files.set('/videos/clip.review.yaml', SIDECAR);
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    expect(reviews(posted)).toMatchObject([
+      { fps: 25, fpsSource: 'sidecar', sidecar: 'clip.review.yaml', readOnly: null },
+    ]);
+    expect(tools.probeSource).not.toHaveBeenCalled();
+  });
+
+  it('turns on from reviewEnable, pending until the probe lands', async () => {
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    await send({ type: 'reviewEnable' });
+    await vi.waitFor(() => expect(reviews(posted)).toHaveLength(2));
+    expect(reviews(posted)[0]).toMatchObject({ fpsSource: 'pending', sidecar: null, notes: [] });
+    expect(reviews(posted)[1]).toMatchObject({ fpsSource: 'probe' });
+    expect(reviews(posted)[1].fps).toBeCloseTo(29.97, 2);
+  });
+
+  it('turns on from the setting and probes even with transcoding off', async () => {
+    const vs = await import('vscode');
+    vi.mocked(vs.workspace.getConfiguration).mockImplementation(
+      () =>
+        ({
+          get: (key: string, fallback: unknown) =>
+            key === 'video.transcode' ? 'off' : key === 'video.review' ? true : fallback,
+          inspect: () => undefined,
+          update: configUpdate,
+        }) as never,
+    );
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    await vi.waitFor(() => expect(reviews(posted).at(-1)).toMatchObject({ fpsSource: 'probe' }));
+  });
+
+  it('assumes 30 when ffmpeg is missing', async () => {
+    tools.findFfmpeg.mockResolvedValue(undefined);
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    await send({ type: 'reviewEnable' });
+    await vi.waitFor(() =>
+      expect(reviews(posted).at(-1)).toMatchObject({ fps: 30, fpsSource: 'assumed' }),
+    );
+  });
+
+  it('reloads when the sidecar changes', async () => {
+    files.set('/videos/clip.review.yaml', SIDECAR);
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    const onChange = watcher.onDidChange.mock.calls[0][0] as () => void;
+    files.set('/videos/clip.review.yaml', 'version: 2\nsource: clip.mp4\nfps: 25\n');
+    onChange();
+    await vi.waitFor(() => expect(reviews(posted)).toHaveLength(2));
+    expect(reviews(posted)[1].readOnly).toMatch(/Version 2/);
+  });
+
+  it('copies the notes: writes the markdown atomically, clipboard, toast', async () => {
+    files.set('/videos/clip.review.yaml', SIDECAR);
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    await send({ type: 'reviewCopy' });
+    const md = files.get('/videos/clip.review.md');
+    expect(md).toContain('## n1  00:00:01:00  note');
+    expect([...files.keys()].filter((k) => k.endsWith('.tmp'))).toEqual([]);
+    const vs = await import('vscode');
+    expect(vs.env.clipboard.writeText).toHaveBeenCalledWith(md);
+    expect(posted.at(-1)).toEqual({
+      type: 'toast',
+      message: 'Copied 1 note, saved clip.review.md',
+    });
+  });
+
+  it('reports an error instead of creating a file when there is no sidecar', async () => {
+    const { posted, send } = await open();
+    await send({ type: 'ready' });
+    await send({ type: 'reviewCopy' });
+    expect(posted.at(-1)?.type).toBe('reviewError');
+    expect(files.size).toBe(0);
   });
 });
