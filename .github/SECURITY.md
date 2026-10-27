@@ -214,7 +214,8 @@ parsed by a small header scanner in `src/webview/gifInfo.ts` and decoded by
 Chromium's `ImageDecoder`. The scanner never decodes pixels, bounds every read
 by the buffer's length, and advances on every step, so malformed input ends the
 scan rather than looping. The CSP is `default-src 'none'` with `img-src`
-limited to the webview origin, `blob:`, and `data:`, and a bare nonced
+limited to the webview origin, `blob:`, and `data:`, `style-src` and `font-src`
+limited to the webview origin (plus inline styles), and a bare nonced
 `script-src`; there is no `media-src`, `connect-src`, or `worker-src`. The
 webview may ask the host to save a PNG frame (through a save dialog), open the
 document in the default app, reveal it, or write `markcopy.theme`; the host

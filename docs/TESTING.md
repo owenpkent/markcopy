@@ -422,7 +422,13 @@ ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvp
 
 ## GIF viewer
 
-There is no committed GIF fixture. Use any animated GIF with at least a dozen frames and visibly uneven delays (a screen-recording GIF is ideal), plus a one-frame GIF and a copy of the animated one renamed `.GIF`.
+There is no committed GIF fixture. Use any animated GIF with at least a dozen frames and visibly uneven delays (a screen-recording GIF is ideal), plus a one-frame GIF and a copy of the animated one renamed `.GIF`. If ffmpeg is installed, it makes a counter whose frame number is drawn on each frame, a play-once copy, and a still:
+
+```sh
+ffmpeg -f lavfi -i testsrc=duration=3:size=320x240:rate=10 -loop 0 counter-loops.gif
+ffmpeg -f lavfi -i testsrc=duration=3:size=320x240:rate=10 -loop -1 counter-plays-once.gif
+ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -frames:v 1 -loop 0 still.gif
+```
 
 ### Loading and playback
 
@@ -431,7 +437,8 @@ There is no committed GIF fixture. Use any animated GIF with at least a dozen fr
 - [ ] A GIF with no loop block plays once and stops on its last frame; one that loops forever keeps going. Right-click -> **Playback** -> **Loop** on the first makes it repeat and shows a checkmark next time the menu opens.
 - [ ] The status line gives the file name, size, dimensions, `frame i / n` advancing as it plays, the length of one pass, and the loop description.
 - [ ] A very large pixel size and a very narrow split: the picture is scaled to fit and never pushes the status line off-screen.
-- [ ] A one-frame GIF shows `frame 1 / 1` and the stepping keys do nothing harmful.
+- [ ] A one-frame GIF shows `frame 1 / 1` and the stepping keys do nothing harmful. Left open, it uses no CPU in Task Manager: a still is drawn once, not redrawn on a timer.
+- [ ] ★ Right-click opens the menu as a popup at the pointer, styled like the video player's, not as a plain list at the top of the page.
 
 ### Frame controls
 
