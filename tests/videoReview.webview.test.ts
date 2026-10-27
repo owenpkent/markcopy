@@ -652,15 +652,15 @@ describe('review toggle', () => {
     expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(2);
   });
 
-  it('copies from the menu only with a sidecar', async () => {
+  it('keeps Copy off the right-click menu: it lives on the panel', async () => {
     await open();
-    fromHost(review({ sidecar: null, notes: [] }));
-    pressMenu('Copy Notes as Markdown');
-    expect(posted.some((m) => m.type === 'reviewCopy')).toBe(false);
-
     fromHost(review());
-    pressMenu('Copy Notes as Markdown');
-    expect(posted).toContainEqual({ type: 'reviewCopy' });
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const rows = [...document.querySelectorAll<HTMLElement>('#mc-menu [role^="menuitem"]')].map(
+      (r) => r.textContent ?? '',
+    );
+    expect(rows.some((t) => t.includes('Close Video Notes'))).toBe(true);
+    expect(rows.some((t) => /copy notes/i.test(t))).toBe(false);
   });
 });
 

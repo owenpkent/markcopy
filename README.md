@@ -304,7 +304,7 @@ Right-click for the copy actions:
 - **Save Frame as PNG…** writes it to disk, defaulting to the video's own folder with the timecode in the name (`clip-1m23.400s.png`), so successive grabs never overwrite each other.
 - **Copy as** gives the file name or full path.
 - **Playback** sets looping (persisted to `markcopy.video.loop`) and speed from 0.25x to 2x.
-- **Open Video Notes** turns review mode on (it reads **Close Video Notes** while it is on), and **Copy Notes as Markdown** sits beside it (see below).
+- **Open Video Notes** turns review mode on (it reads **Close Video Notes** while it is on).
 - **Preferences → Theme** shares the setting with every other MarkCopy preview.
 
 **Review mode.** A video with a `<stem>.review.yaml` file beside it (`clip.review.yaml` for `clip.mp4`), the notes file written by [Marker](https://github.com/owenpkent/Marker) and the okstudio-video-kit, opens in review mode. So does every video when `markcopy.video.review` is on, and any video after choosing **Open Video Notes** in the right-click menu. MarkCopy reloads the panel when another tool changes the file. A notes file MarkCopy cannot validate (broken YAML, another version) still shows its notes, under a read-only banner, and is never written.
@@ -317,7 +317,7 @@ Right-click for the copy actions:
 
 The first note on a video with no notes file creates `<stem>.review.yaml`, at the video's frame rate, or at 30 fps with a line above the composer saying so when the rate is unknown. Every change is written to the notes file in the same layout the okstudio-video-kit uses, so Marker opens it, and `<stem>.review.md` is rewritten after each one.
 
-**Copy Notes as Markdown** (in the menu and on the panel, disabled while there is no notes file) builds the same Markdown Marker writes, saves it as `<stem>.review.md` beside the video, and puts it on the clipboard, so you can paste it into a chat or leave it for an agent working in the folder. A pinned note reads "Pin: 42% from left, 30% from top". The video preview writes the notes file and this Markdown file without asking where, and never touches the video.
+**Copy as Markdown** (on the notes panel, disabled while there is no notes file) builds the same Markdown Marker writes, saves it as `<stem>.review.md` beside the video, and puts it on the clipboard, so you can paste it into a chat or leave it for an agent working in the folder. A pinned note reads "Pin: 42% from left, 30% from top". The video preview writes the notes file and this Markdown file without asking where, and never touches the video.
 
 **Working alongside Marker.** Marker desktop does not re-read its notes before saving, so a note MarkCopy writes while Marker has the same video open is lost at Marker's next save. The panel then says "Notes were replaced by another program". Do not edit one video in both at once; the fix belongs in Marker (owenpkent/Marker#14).
 

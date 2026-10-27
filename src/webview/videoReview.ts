@@ -1220,12 +1220,6 @@ export function createReview(deps: ReviewDeps): ReviewController {
           label: isActive ? 'Close Video Notes' : 'Open Video Notes',
           run: () => setReview(!isActive),
         },
-        {
-          kind: 'item',
-          label: 'Copy Notes as Markdown',
-          run: copyNotes,
-          disabled: !state?.sidecar,
-        },
       ];
     },
   };
