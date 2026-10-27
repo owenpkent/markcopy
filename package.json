@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL & Video Preview",
-  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video & GIF Preview",
+  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, and GIF preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
   "version": "0.18.1",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -57,6 +57,8 @@
     "mp4",
     "video",
     "video player",
+    "gif",
+    "gif viewer",
     "preview",
     "copy",
     "rich text",
@@ -370,6 +372,19 @@
           },
           {
             "filenamePattern": "*.3GP"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "markcopy.gifPreview",
+        "displayName": "MarkCopy GIF Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.gif"
+          },
+          {
+            "filenamePattern": "*.GIF"
           }
         ],
         "priority": "default"

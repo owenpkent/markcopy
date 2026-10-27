@@ -237,3 +237,23 @@ Notes:
 - **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
+
+## GIF (.gif)
+
+Like the video player, the GIF viewer's menu has one thing worth putting on a clipboard: the frame you are looking at.
+
+| Action                  | Clipboard flavor | Pastes cleanly into                                     |
+| ----------------------- | ---------------- | ------------------------------------------------------- |
+| **Copy Frame as PNG**   | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save Frame as PNG…**  | (writes a file)  | Anywhere, via a save dialog                             |
+| **Copy as > File Name** | `text/plain`     | Anywhere                                                |
+| **Copy as > Full Path** | `text/plain`     | A terminal, a script, another editor                    |
+
+Notes:
+
+- **The frame is copied at the GIF's own size**, not the size it is displayed at. The decoder returns fully composited frames, so a frame that only updates part of the picture still copies whole.
+- **The saved file carries the frame number**, as `anim-frame-012.png` beside the GIF, the same number the status line shows (`frame 12 / 40`).
+- **Step with `,` and `.`** to land on the frame you want before copying it. Stepping pauses playback.
+- **Both frame actions need `ImageDecoder`.** Where it is missing the GIF is shown in a plain image element and the two rows are greyed out under a "Frames unavailable in this viewer" label. PNG copy additionally needs clipboard image support, as elsewhere in this matrix.
+
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a canvas.

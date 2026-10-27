@@ -16,6 +16,8 @@ media/stl.js
 media/stl.js.map
 media/video.js
 media/video.js.map
+media/gif.js
+media/gif.js.map
 *.vsix
 .DS_Store
 
