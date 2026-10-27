@@ -21,7 +21,7 @@ twice, once for timecodes (`roundHalfEven` in `src/review/timecode.ts`) and once
 coordinates (`cleanPoint`, where 0.03125 becomes 0.0312). The copy writes the clipboard
 from the host, not the page. And ffprobe was already running on most opens, so the
 frame rate reuses that cached probe (`avg_frame_rate`) instead of adding a second run;
-only review mode probes when `markcopy.video.transcode` is `off`. The filter and the Done toggle were dropped after hands-on testing (sort was kept, and a note Marker marked done still shows as done, read-only), and the panel was restyled to the alex-style instrument-panel look with vendored Roboto. The right-click entry became a plain Open Video Notes / Close Video Notes item.
+only review mode probes when `markcopy.video.transcode` is `off`. The filter and the Done toggle were dropped after hands-on testing (sort was kept, and a note Marker marked done still shows as done, read-only), and the panel was restyled to MarkCopy's own Primer-based tokens with the blue accent after an earlier instrument-panel attempt. The right-click entry became a plain Open Video Notes / Close Video Notes item.
 
 ## Verdict
 
