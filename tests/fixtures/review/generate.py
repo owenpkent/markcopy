@@ -110,6 +110,11 @@ CASES = [
     ("add-unicode", "minimal", "add", {"at": 3.0, "text": "Café ☃ \U0001F600, tab\there"}),
     ("add-first", "empty", "add", {"at": 1.0, "text": "First note."}),
     ("add-to-full", "full", "add", {"at": 61.5, "out": 62.0, "text": "New on a rich file."}),
+    ("add-pin", "minimal", "add", {"at": 2.5, "text": "Logo here.", "point": [0.42, 0.3]}),
+    ("add-pin-range", "minimal", "add", {"at": 8.0, "out": 9.25, "text": "Track this.", "point": [0.5, 0.75]}),
+    ("add-pin-clean", "minimal", "add", {"at": 3.0, "text": "Rounded.", "point": [0.123456789, 0.99996]}),
+    ("add-pin-edges", "minimal", "add", {"at": 3.0, "text": "Corners.", "point": [0, 1]}),
+    ("add-pin-to-full", "full", "add", {"at": 61.5, "text": "On a rich file.", "point": [0.0001, 0.3333333]}),
     ("done-true", "three", "done", {"id": "n1", "done": True}),
     ("done-false", "three", "done", {"id": "n2", "done": False}),
     ("done-on-full", "full", "done", {"id": "n1", "done": True}),
@@ -136,7 +141,9 @@ def edits() -> None:
         rev = Review.load(before)
         rev.path = after
         if op == "add":
-            note = rev.add_note(at=args["at"], out=args.get("out"), text=args["text"])
+            note = rev.add_note(
+                at=args["at"], out=args.get("out"), text=args["text"], point=args.get("point")
+            )
             note["created"] = CREATED
         elif op == "done":
             rev.update_note(args["id"], done=args["done"])

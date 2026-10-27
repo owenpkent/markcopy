@@ -15,6 +15,8 @@ export interface ReviewNote {
   done: boolean;
   /** As written by the kit: local time, `YYYY-MM-DDTHH:MM:SS`. */
   created: string;
+  /** A pin: `[x, y]`, each 0 to 1 of the picture from the left and the top. */
+  point?: [number, number];
 }
 
 /**
@@ -63,7 +65,7 @@ export type ReviewHostMessage = ReviewStateMessage | ReviewErrorMessage;
 export type ReviewWebviewMessage =
   | { type: 'reviewEnable' }
   | { type: 'reviewCopy' }
-  | { type: 'reviewAdd'; at: number; out?: number; text: string }
+  | { type: 'reviewAdd'; at: number; out?: number; text: string; point?: [number, number] }
   | { type: 'reviewSetDone'; id: string; done: boolean }
   | { type: 'reviewDelete'; id: string }
   | { type: 'reviewRestore' };

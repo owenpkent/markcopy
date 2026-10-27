@@ -1091,15 +1091,19 @@ body.mc-video .mc-rv-slider:focus-visible {
 body.mc-video .mc-rv-timeline {
   flex: none;
 }
-body.mc-video .mc-rv-markers,
-body.mc-video .mc-rv-bands {
-  position: relative;
-}
 body.mc-video .mc-rv-markers {
+  position: relative;
   height: 44px;
 }
+/* The bands lie over the slider's track, the full height of it, and let every
+   press through to the slider and its thumb. */
+body.mc-video .mc-rv-track {
+  position: relative;
+}
 body.mc-video .mc-rv-bands {
-  height: 4px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 body.mc-video .mc-rv-marker {
   position: absolute;
@@ -1138,13 +1142,30 @@ body.mc-video .mc-rv-marker[aria-pressed='true'] .mc-rv-dot {
   background: var(--mc-video-fg);
   color: var(--mc-video-bg);
 }
-body.mc-video .mc-rv-band {
+/* A range note: a translucent band with a bracket at each end (the caps are the
+   side borders plus a short return top and bottom). Selected is brighter. */
+body.mc-video .mc-rv-band,
+body.mc-video .mc-rv-pending {
+  --rv-band: var(--mc-video-fg);
+  --rv-cap: 3px;
   position: absolute;
   top: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--mc-video-fg);
-  opacity: 0.8;
+  bottom: 0;
+  box-sizing: border-box;
+  border: solid var(--rv-band);
+  border-width: 0 var(--rv-cap);
+  /* Four short returns make each side a bracket; the last layer is the fill. */
+  background:
+    linear-gradient(var(--rv-band), var(--rv-band)) left top / 10px var(--rv-cap) no-repeat,
+    linear-gradient(var(--rv-band), var(--rv-band)) left bottom / 10px var(--rv-cap) no-repeat,
+    linear-gradient(var(--rv-band), var(--rv-band)) right top / 10px var(--rv-cap) no-repeat,
+    linear-gradient(var(--rv-band), var(--rv-band)) right bottom / 10px var(--rv-cap) no-repeat,
+    color-mix(in srgb, var(--rv-band) 22%, transparent);
+  background-origin: border-box;
+}
+body.mc-video .mc-rv-band--selected {
+  --rv-cap: 4px;
+  background-color: color-mix(in srgb, var(--rv-band) 50%, transparent);
 }
 /* The scrubber's thumb is the same 44px as a marker's target, so the two
    travel the same distance and a marker sits over the frame it names. */
@@ -1194,6 +1215,21 @@ body.mc-video .mc-rv-head {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+body.mc-video .mc-rv-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+body.mc-video .mc-rv-glyph {
+  padding: 0;
+}
+body.mc-video .mc-rv-view {
+  margin: 0;
+  opacity: 0.85;
+}
+body.mc-video .mc-rv-view[hidden] {
+  display: none;
 }
 body.mc-video .mc-rv-count {
   margin: 0;
@@ -1264,20 +1300,69 @@ body.mc-video .mc-rv-text {
   line-height: 1.4;
 }
 
-/* The pending range sits on the same strip as the note bands, in the accent
-   colour and thicker so it reads as a different thing. In alone is a tick. */
+/* The pending range uses the band drawing in the accent colour. */
 body.mc-video .mc-rv-pending {
-  position: absolute;
-  top: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--rv-accent);
+  --rv-band: var(--rv-accent);
   outline: 1px solid var(--mc-video-bg);
 }
+/* In alone: the opening bracket only. */
 body.mc-video .mc-rv-pending--point {
-  top: -8px;
-  width: 4px;
-  height: 20px;
+  width: 14px;
+  border-right: 0;
+  background:
+    linear-gradient(var(--rv-band), var(--rv-band)) left top / 10px var(--rv-cap) no-repeat,
+    linear-gradient(var(--rv-band), var(--rv-band)) left bottom / 10px var(--rv-cap) no-repeat;
+}
+
+/* Pins over the picture. The layer fills the stage and lets presses through to the
+   picture; the studs and the pending ring are the only parts that take them. */
+body.mc-video .mc-rv-pins {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+body.mc-video .mc-rv-pin,
+body.mc-video .mc-rv-ring {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+body.mc-video .mc-rv-pin {
+  pointer-events: auto;
+  color: var(--mc-video-fg);
+  background: var(--rv-raised);
+  border: 2px solid var(--mc-video-fg);
+  /* A halo so the stud reads on any picture, light or dark. */
+  box-shadow: 0 0 0 2px var(--mc-video-bg);
+}
+body.mc-video .mc-rv-pin--selected {
+  color: var(--mc-video-bg);
+  background: var(--mc-video-fg);
+}
+body.mc-video .mc-rv-ring {
+  pointer-events: none;
+  font-size: 20px;
+  color: var(--mc-video-fg);
+  background: color-mix(in srgb, var(--rv-accent) 35%, var(--mc-video-bg));
+  border: 3px solid var(--rv-accent);
+  box-shadow: 0 0 0 2px var(--mc-video-bg);
+}
+body.mc-video .mc-rv-ring[hidden] {
+  display: none;
+}
+body.mc-video .mc-rv-pins button:focus-visible {
+  outline: 2px solid var(--mc-video-fg);
+  outline-offset: 4px;
 }
 
 /* Notes written in review mode: the card and its actions share one item. */

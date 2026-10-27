@@ -10,6 +10,7 @@ vi.mock('vscode', () => ({}));
 
 import {
   addNoteText,
+  cleanPoint,
   copyToast,
   isReviewAdd,
   isReviewDelete,
@@ -164,7 +165,14 @@ describe('golden edits against the kit', () => {
   interface Case {
     name: string;
     op: 'add' | 'done' | 'remove';
-    args: { at?: number; out?: number; text?: string; id?: string; done?: boolean };
+    args: {
+      at?: number;
+      out?: number;
+      text?: string;
+      id?: string;
+      done?: boolean;
+      point?: [number, number];
+    };
   }
   const cases = JSON.parse(fixture('edit', 'cases.json')) as Case[];
 
@@ -181,7 +189,13 @@ describe('golden edits against the kit', () => {
         const file = loadSidecar(before).file!;
         got = addNoteText(
           before,
-          { at: c.args.at!, out: c.args.out, text: c.args.text!, created: CREATED },
+          {
+            at: c.args.at!,
+            out: c.args.out,
+            text: c.args.text!,
+            point: c.args.point,
+            created: CREATED,
+          },
           file,
         ).text;
       } else if (c.op === 'done') {
@@ -200,6 +214,74 @@ describe('golden edits against the kit', () => {
       const before = fixture('edit', `${c.name}.before.review.yaml`);
       const gone = removeNoteText(before, c.args.id!)!;
       expect(restoreNoteText(gone.text, gone.removed), c.name).toBe(before);
+    }
+  });
+});
+
+describe('pins', () => {
+  const pinned = (name: string) => {
+    const file = loadSidecar(fixture('edit', `${name}.after.review.yaml`));
+    return file.notes.at(-1)!;
+  };
+
+  it('writes the kit cleaned point, 4 decimals, in flow style', () => {
+    expect(pinned('add-pin-clean').point).toEqual([0.1235, 1]);
+    expect(fixture('edit', 'add-pin-edges.after.review.yaml')).toContain('  point: [0.0, 1.0]\n');
+    expect(fixture('edit', 'add-pin-to-full.after.review.yaml')).toContain(
+      '  point: [0.0001, 0.3333]\n',
+    );
+    expect(fixture('edit', 'add-pin-range.after.review.yaml')).toContain(
+      '  out: 9.25\n  point: [0.5, 0.75]\n',
+    );
+  });
+
+  it('passes a pin through to the page, also from a file that failed validation', () => {
+    expect(pinned('add-pin').point).toEqual([0.42, 0.3]);
+    const text = `version: 1
+fps: 25
+notes:
+  - {id: n1, at: 1, text: a, point: [0.1, 0.2]}
+  - {id: n2, at: 2, text: b, point: [2, 0.2]}
+  - {id: n3, at: 3, text: c, point: [0.5]}
+`;
+    const loaded = loadSidecar(text);
+    expect(loaded.readOnly).not.toBeNull();
+    expect(loaded.notes.map((n) => n.point)).toEqual([[0.1, 0.2], undefined, undefined]);
+  });
+
+  it('markdown for a note MarkCopy pinned carries the Pin line', () => {
+    const before = fixture('edit', 'add-pin.before.review.yaml');
+    const next = addNoteText(
+      before,
+      { at: 2.5, text: 'Logo here.', point: [0.42, 0.3], created: CREATED },
+      loadSidecar(before).file!,
+    ).text;
+    const md = reviewMarkdown(loadSidecar(next).file!);
+    expect(md).toContain(
+      '## n3  00:00:02:15  note\n\nPin: 42% from left, 30% from top\n\nLogo here.',
+    );
+  });
+
+  it('refuses a bad pin and accepts a good one', () => {
+    const bounds = { durationSec: 10, fps: 25 };
+    const base = { type: 'reviewAdd', at: 1, text: 'x' };
+    const bad = (point: unknown) => reviewAddError({ ...base, point }, bounds);
+    expect(reviewAddError({ ...base, point: [0, 1] }, bounds)).toBeNull();
+    expect(reviewAddError({ ...base, point: undefined }, bounds)).toBeNull();
+    for (const point of [
+      null,
+      [],
+      [0.5],
+      [0.1, 0.2, 0.3],
+      [-0.01, 0.5],
+      [0.5, 1.01],
+      [Number.NaN, 0.5],
+      [0.5, Infinity],
+      ['0.5', '0.5'],
+      '0.5,0.5',
+      { 0: 0.5, 1: 0.5 },
+    ]) {
+      expect(bad(point), JSON.stringify(point)).toMatch(/pin must be two numbers from 0 to 1/);
     }
   });
 });
@@ -426,5 +508,23 @@ describe('edit validators', () => {
     expect(isReviewRestore({ type: 'reviewRestore' })).toBe(true);
     expect(isReviewRestore({ type: 'reviewRestore', id: 'n1' })).toBe(false);
     expect(isReviewRestore(undefined)).toBe(false);
+  });
+});
+
+describe('cleanPoint', () => {
+  // Expected values are Python's own round(v, 4), run against the kit's interpreter.
+  it.each([
+    [0.03125, 0.0312],
+    [0.15625, 0.1562],
+    [0.96875, 0.9688],
+    [0.00005, 0.0001],
+    [0.00015, 0.0001],
+    [0.12345, 0.1235],
+    [0.99995, 1],
+    [0.5, 0.5],
+    [0, 0],
+    [1, 1],
+  ])('rounds %d as Python does', (v, expected) => {
+    expect(cleanPoint(v)).toBe(expected);
   });
 });

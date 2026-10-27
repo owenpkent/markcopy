@@ -542,6 +542,16 @@ notes:
     expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n1', 'n2']);
   });
 
+  it('writes a pin, cleaned, after out and before nothing else', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 2.4, text: 'Pinned.', point: [0.123456, 1] });
+    expect(files.get(YAML)).toContain("created: '2026-01-02T03:04:05'\n  point: [0.1235, 1.0]\n");
+    expect(files.get(MD)).toContain('Pin: 12% from left, 100% from top');
+    expect(lastReview(posted).notes.at(-1)).toMatchObject({ point: [0.1235, 1] });
+    await send({ type: 'reviewAdd', at: 3, text: 'bad', point: [2, 0] });
+    expect(errors(posted).at(-1)).toMatch(/pin must be/);
+  });
+
   it('runs edits in order: two adds in a row get n1 and n2', async () => {
     const { posted, send } = await open();
     // No sidecar yet: the first add creates it, once the probe has said 24 fps.

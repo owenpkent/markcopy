@@ -710,7 +710,13 @@ function togglePlay(): void {
   }
 }
 
-const review = createReview({ video, stage, post: (msg) => vscode.postMessage(msg), toast });
+const review = createReview({
+  video,
+  stage,
+  post: (msg) => vscode.postMessage(msg),
+  toast,
+  viewState: { get: () => vscode.getState(), set: (value) => vscode.setState(value) },
+});
 
 function nudge(seconds: number): void {
   if (!Number.isFinite(video.duration)) {
@@ -722,7 +728,8 @@ function nudge(seconds: number): void {
 stage.addEventListener('click', (e) => {
   // Clicks on the native control bar are the browser's; only the picture itself
   // is a play/pause target.
-  if (e.target === video) {
+  // In review mode a press on the picture places a pin instead.
+  if (e.target === video && !review.onPicture(e)) {
     togglePlay();
   }
 });

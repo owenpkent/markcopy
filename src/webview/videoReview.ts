@@ -1,4 +1,4 @@
-// Review mode for the video preview (see docs/VIDEO-REVIEW-DESIGN.md, phases 1 and 2).
+// Review mode for the video preview (see docs/VIDEO-REVIEW-DESIGN.md, phases 1 to 3).
 //
 // Called from src/webview/video.ts. Once the host sends its first `review`
 // message the native controls give way to a transport, a scrubber carrying the
@@ -19,9 +19,13 @@ import {
   DOT_HIT,
   bandGeometry,
   cycleTarget,
+  fitRect,
+  frameIndex,
   frameStartSeconds,
   layoutDots,
   pendingBand,
+  pinVisible,
+  pointInRect,
   seekMsForFrame,
   seekTarget,
   stepTarget,
@@ -36,6 +40,8 @@ export interface ReviewDeps {
   /** Anything the host handles: review messages and `updateSetting`. */
   post(msg: ReviewWebviewMessage | { type: 'updateSetting'; key: string; value: unknown }): void;
   toast(text: string): void;
+  /** The webview's saved state (vscode getState/setState), for the filter and sort. */
+  viewState?: { get(): unknown; set(value: unknown): void };
 }
 
 export interface ReviewController {
@@ -47,6 +53,11 @@ export interface ReviewController {
   step(direction: number): void;
   /** Review-only shortcuts; true when the key was used. */
   onKeydown(e: KeyboardEvent): boolean;
+  /**
+   * A press on the picture. True when review mode took it (placing a pin, or
+   * ignoring a press in the letterbox); false when the caller should toggle play.
+   */
+  onPicture(e: MouseEvent): boolean;
   /** The "Review Notes" toggle and the copy action, for the right-click menu. */
   menuEntries(): MenuEntry[];
 }
@@ -57,6 +68,37 @@ const SPEED_LADDER = [0.25, 0.5, 1, 1.5, 2];
 // The panel's width, and the least the video is given before the panel drops below it.
 const PANEL_W = 320;
 const MIN_VIDEO_W = 400;
+
+export type NoteFilter = 'all' | 'pending' | 'done';
+export type NoteSort = 'time' | 'newest';
+const FILTERS: NoteFilter[] = ['all', 'pending', 'done'];
+const SORTS: NoteSort[] = ['time', 'newest'];
+const FILTER_NAME: Record<NoteFilter, string> = { all: 'All', pending: 'Pending', done: 'Done' };
+const SORT_NAME: Record<NoteSort, string> = { time: 'Time', newest: 'Newest' };
+// The pin stud's size, which is also its hit target.
+const PIN_SIZE = 44;
+
+function noteNum(id: string): number {
+  const digits = [...String(id)].filter((c) => c >= '0' && c <= '9').join('');
+  return digits ? parseInt(digits, 10) : 0;
+}
+
+/** The notes a filter keeps, in a sort's order (Newest: latest `created` first, ties by id number). */
+export function arrangeNotes(
+  notes: ReviewNote[],
+  filter: NoteFilter,
+  sort: NoteSort,
+): ReviewNote[] {
+  const kept = notes.filter((n) =>
+    filter === 'all' ? true : filter === 'done' ? n.done : !n.done,
+  );
+  return kept.sort((a, b) =>
+    sort === 'newest'
+      ? (a.created < b.created ? 1 : a.created > b.created ? -1 : 0) ||
+        noteNum(b.id) - noteNum(a.id)
+      : a.at - b.at || noteNum(a.id) - noteNum(b.id),
+  );
+}
 
 /** "29.97 fps", "30 fps (assumed)", or a placeholder while the host is still probing. */
 export function fpsLabel(fps: number, source: FpsSource): string {
@@ -126,7 +168,30 @@ export function createReview(deps: ReviewDeps): ReviewController {
   // Whether playback was running when the note field took focus, so sending can
   // pick it up again. Any other press on the player drops it.
   let resumeAfterNote = false;
+  // The pin being placed for the next note: [x, y] of the picture, or null.
+  let pendingPoint: [number, number] | null = null;
+  let filter: NoteFilter = 'all';
+  let sort: NoteSort = 'time';
+  // The frame the pins were last drawn for, so playback redraws only on a new one.
+  let pinFrame = -1;
   let ui: ReturnType<typeof build> | undefined;
+
+  const saved = (
+    deps.viewState?.get() as { review?: { filter?: unknown; sort?: unknown } } | undefined
+  )?.review;
+  if (saved && FILTERS.includes(saved.filter as NoteFilter)) {
+    filter = saved.filter as NoteFilter;
+  }
+  if (saved && SORTS.includes(saved.sort as NoteSort)) {
+    sort = saved.sort as NoteSort;
+  }
+  function saveView(): void {
+    const prior = deps.viewState?.get();
+    deps.viewState?.set({
+      ...(prior && typeof prior === 'object' ? prior : {}),
+      review: { filter, sort },
+    });
+  }
 
   const fps = (): number => (state && state.fps > 0 ? state.fps : 30);
   const duration = (): number => (Number.isFinite(video.duration) ? video.duration : 0);
@@ -189,6 +254,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     }
     renderSelection();
     renderMarkers();
+    renderPins(true);
   }
 
   // -------------------------------------------------------------------------
@@ -227,7 +293,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     slider.addEventListener('input', () => {
       seekMs(seekTarget(Number(slider.value) * 1000, fps(), duration()));
     });
-    timeline.append(markers, bands, slider);
+    // The bands lie over the slider's own track, the full height of it.
+    const track = el('div', 'mc-rv-track');
+    track.append(slider, bands);
+    timeline.append(markers, track);
 
     main.append(stage, transport, timeline);
 
@@ -235,8 +304,22 @@ export function createReview(deps: ReviewDeps): ReviewController {
     panel.setAttribute('aria-label', 'Review notes');
     const head = el('div', 'mc-rv-head');
     const count = el('h2', 'mc-rv-count');
+    const filterBtn = button('mc-rv-btn mc-rv-glyph', '\u25BC', 'Filter: All', () => {
+      filter = FILTERS[(FILTERS.indexOf(filter) + 1) % FILTERS.length];
+      saveView();
+      renderPanel();
+    });
+    const sortBtn = button('mc-rv-btn mc-rv-glyph', '\u21C5', 'Sort: Time', () => {
+      sort = SORTS[(SORTS.indexOf(sort) + 1) % SORTS.length];
+      saveView();
+      renderPanel();
+    });
+    const view = el('p', 'mc-rv-view');
+    view.hidden = true;
     const copy = button('mc-rv-btn', 'Copy notes as Markdown', 'Copy notes as Markdown', copyNotes);
-    head.append(count, copy);
+    const tools = el('div', 'mc-rv-tools');
+    tools.append(filterBtn, sortBtn, copy);
+    head.append(count, tools, view);
     const banner = el('div', 'mc-rv-banner');
     banner.setAttribute('role', 'status');
     banner.hidden = true;
@@ -286,6 +369,21 @@ export function createReview(deps: ReviewDeps): ReviewController {
         field.blur();
       }
     });
+    // The picture never takes focus, so a press on it keeps the note field (and its
+    // pending resume) as they are while the pin moves.
+    video.addEventListener('mousedown', (e) => {
+      if (isActive && state?.readOnly === null) {
+        e.preventDefault();
+      }
+    });
+    const pins = el('div', 'mc-rv-pins');
+    const ring = button('mc-rv-ring', '+', 'Pending pin, press the picture to move it', () =>
+      ui?.field.focus(),
+    );
+    ring.hidden = true;
+    pins.appendChild(ring);
+    stage.appendChild(pins);
+
     composer.append(inBtn, outBtn, chip, clearBtn, cplay, field, send);
     panel.append(head, banner, restore, list, fpsNote, composer);
 
@@ -298,6 +396,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
         root.clientWidth > 0 && root.clientWidth < PANEL_W + MIN_VIDEO_W,
       );
       renderMarkers();
+      renderPins(true);
     };
     if (typeof ResizeObserver === 'function') {
       new ResizeObserver(relayout).observe(root);
@@ -333,6 +432,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
       slider,
       markers,
       bands,
+      pins,
+      ring,
+      filterBtn,
+      sortBtn,
+      view,
       count,
       copy,
       banner,
@@ -372,6 +476,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     ui.readout.textContent = code;
     ui.slider.value = String(video.currentTime);
     ui.slider.setAttribute('aria-valuetext', code);
+    renderPins(false);
   }
 
   function updateTransport(): void {
@@ -443,6 +548,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
       if (n.out !== undefined && n.out > n.at) {
         const [x, w] = bandGeometry(n.at, n.out, dur, width);
         const bar = el('div', 'mc-rv-band');
+        bar.classList.toggle('mc-rv-band--selected', n.id === selected);
+        bar.dataset.id = n.id;
         bar.style.left = `${x}px`;
         bar.style.width = `${w}px`;
         bands.appendChild(bar);
@@ -457,6 +564,108 @@ export function createReview(deps: ReviewDeps): ReviewController {
       }
       bands.appendChild(bar);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Pins
+  // -------------------------------------------------------------------------
+  // Pin buttons live across frames, keyed by note id, and are updated in place:
+  // replacing one while it is pressed could swallow its click during playback.
+  const pinButtons = new Map<string, HTMLButtonElement>();
+
+  interface Picture {
+    box: DOMRect;
+    stage: DOMRect;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }
+
+  /** The picture inside the video element's box (letterboxed), plus the box and stage. */
+  function pictureRect(): Picture {
+    const box = video.getBoundingClientRect();
+    const r = fitRect(box.width, box.height, video.videoWidth, video.videoHeight);
+    return { box, stage: stage.getBoundingClientRect(), ...r };
+  }
+
+  function placeAt(node: HTMLElement, point: [number, number], r: Picture): void {
+    const cx = r.box.left - r.stage.left + r.x + point[0] * r.w;
+    const cy = r.box.top - r.stage.top + r.y + point[1] * r.h;
+    node.style.left = `${cx - PIN_SIZE / 2}px`;
+    node.style.top = `${cy - PIN_SIZE / 2}px`;
+  }
+
+  function renderPins(force: boolean): void {
+    if (!ui) {
+      return;
+    }
+    const frame = frameIndex(video.currentTime * 1000, fps());
+    if (!force && frame === pinFrame) {
+      return;
+    }
+    pinFrame = frame;
+    const r = pictureRect();
+    const live = new Set<string>();
+    if (isActive && state) {
+      for (const n of state.notes) {
+        if (!n.point || !pinVisible(n.at, n.out ?? null, video.currentTime * 1000, fps())) {
+          continue;
+        }
+        live.add(n.id);
+        let b = pinButtons.get(n.id);
+        if (!b) {
+          b = el('button', 'mc-rv-pin');
+          b.type = 'button';
+          const id = n.id;
+          b.addEventListener('click', () => {
+            select(id, true);
+            scrollCardIntoView(id);
+          });
+          pinButtons.set(n.id, b);
+          ui.pins.insertBefore(b, ui.ring);
+        }
+        const num = noteNum(n.id);
+        b.textContent = num ? String(num) : n.id;
+        b.setAttribute('aria-label', `Pin for ${n.id}`);
+        b.setAttribute('aria-pressed', String(n.id === selected));
+        b.classList.toggle('mc-rv-pin--selected', n.id === selected);
+        placeAt(b, n.point, r);
+      }
+    }
+    for (const [id, b] of pinButtons) {
+      if (!live.has(id)) {
+        b.remove();
+        pinButtons.delete(id);
+      }
+    }
+    ui.ring.hidden = !(isActive && pendingPoint);
+    if (pendingPoint) {
+      placeAt(ui.ring, pendingPoint, r);
+    }
+  }
+
+  function onPicture(e: MouseEvent): boolean {
+    if (!isActive || !ui || !state || state.readOnly !== null) {
+      return false;
+    }
+    if (!video.videoWidth) {
+      return true;
+    }
+    const r = pictureRect();
+    const pt = pointInRect(e.clientX - r.box.left, e.clientY - r.box.top, r);
+    if (!pt) {
+      return true;
+    }
+    // Resume after sending if playback was running before the first press. A
+    // pending resume survives later presses; a deliberate play or pause clears it.
+    const resume = resumeAfterNote || !video.paused;
+    pendingPoint = pt;
+    video.pause();
+    ui.field.focus();
+    resumeAfterNote = resume;
+    renderPending();
+    return true;
   }
 
   function scrollCardIntoView(id: string): void {
@@ -520,6 +729,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (note.kind !== 'note') {
       meta.appendChild(el('span', 'mc-rv-kind', note.kind));
     }
+    if (note.point) {
+      meta.appendChild(el('span', 'mc-rv-kind', 'Pin'));
+    }
     b.appendChild(meta);
     if (note.text) {
       b.appendChild(el('span', 'mc-rv-text', note.text));
@@ -563,6 +775,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
 
   function clearRange(): void {
     pendingIn = pendingOut = -1;
+    pendingPoint = null;
     renderPending();
   }
 
@@ -576,12 +789,20 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const at = pendingIn >= 0 ? pendingIn : here();
-    const msg: ReviewWebviewMessage =
-      pendingIn >= 0 && pendingOut > pendingIn
-        ? { type: 'reviewAdd', at, out: pendingOut, text }
-        : { type: 'reviewAdd', at, text };
+    const msg: Extract<ReviewWebviewMessage, { type: 'reviewAdd' }> = {
+      type: 'reviewAdd',
+      at,
+      text,
+    };
+    if (pendingIn >= 0 && pendingOut > pendingIn) {
+      msg.out = pendingOut;
+    }
+    if (pendingPoint) {
+      msg.point = pendingPoint;
+    }
     post(msg);
     pendingIn = pendingOut = -1;
+    pendingPoint = null;
     ui.field.value = '';
     renderPending();
     // Hand the keyboard back to the player, then pick playback up where it was.
@@ -598,17 +819,20 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const set = pendingIn >= 0;
+    const any = set || pendingPoint !== null;
     const rate = fps();
     ui.inBtn.setAttribute('aria-pressed', String(set));
     ui.outBtn.setAttribute('aria-pressed', String(pendingOut > pendingIn && set));
-    ui.chip.hidden = !set;
-    ui.clearBtn.hidden = !set;
-    ui.chip.textContent = !set
+    ui.chip.hidden = !any;
+    ui.clearBtn.hidden = !any;
+    const range = !set
       ? ''
       : pendingOut > pendingIn
         ? `${secondsToTimecode(pendingIn, rate)} to ${secondsToTimecode(pendingOut, rate)}`
         : secondsToTimecode(pendingIn, rate);
+    ui.chip.textContent = pendingPoint ? (range ? `${range} + Pin` : 'Pin') : range;
     renderMarkers();
+    renderPins(true);
   }
 
   function renderComposer(): void {
@@ -636,7 +860,21 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const n = state.notes.length;
-    ui.count.textContent = `${n} ${n === 1 ? 'note' : 'notes'}`;
+    const shown = arrangeNotes(state.notes, filter, sort);
+    ui.count.textContent =
+      filter !== 'all' && n > 0
+        ? `${shown.length} of ${n} notes`
+        : `${n} ${n === 1 ? 'note' : 'notes'}`;
+    ui.filterBtn.setAttribute('aria-label', `Filter: ${FILTER_NAME[filter]}`);
+    ui.filterBtn.title = `Filter: ${FILTER_NAME[filter]}, press to change`;
+    ui.sortBtn.setAttribute('aria-label', `Sort: ${SORT_NAME[sort]}`);
+    ui.sortBtn.title = `Sort: ${SORT_NAME[sort]}, press to change`;
+    const parts = [
+      ...(filter === 'all' ? [] : [FILTER_NAME[filter]]),
+      ...(sort === 'time' ? [] : ['newest first']),
+    ];
+    ui.view.hidden = parts.length === 0;
+    ui.view.textContent = parts.length ? `Showing ${parts.join(', ')}` : '';
     ui.copy.disabled = state.sidecar === null;
     ui.copy.title = state.sidecar === null ? 'No notes file for this video yet' : '';
     ui.banner.hidden = state.readOnly === null;
@@ -655,7 +893,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
         ),
       );
     }
-    for (const note of state.notes) {
+    if (n > 0 && shown.length === 0) {
+      ui.list.appendChild(el('p', 'mc-rv-empty', 'No notes match this filter.'));
+    }
+    for (const note of shown) {
       ui.list.appendChild(card(note));
     }
     ui.list.scrollTop = scroll;
@@ -667,6 +908,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     updateTransport();
     renderPanel();
     renderMarkers();
+    renderPins(true);
   }
 
   // -------------------------------------------------------------------------
@@ -687,6 +929,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     isActive = false;
     document.body.classList.remove('mc-review');
     video.controls = true;
+    renderPins(true);
     if (ui) {
       document.body.insertBefore(stage, ui.root);
       ui.root.hidden = true;
@@ -745,6 +988,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return true;
     },
     active: () => isActive,
+    onPicture,
     step,
     onKeydown(e) {
       if (!isActive || isTextEntry(e.target)) {

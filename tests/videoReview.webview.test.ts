@@ -529,3 +529,254 @@ describe('frame rate label', () => {
     }
   });
 });
+
+const names = () => cards().map((c) => c.querySelector('.mc-rv-id')?.textContent);
+const caption = () => root().querySelector<HTMLElement>('.mc-rv-view')!;
+
+describe('filter and sort', () => {
+  const mixed = () =>
+    review({
+      notes: [
+        note('n1', 5, { created: '2026-01-01T00:00:03' }),
+        note('n2', 1, { done: true, created: '2026-01-01T00:00:05' }),
+        note('n3', 9, { created: '2026-01-01T00:00:05' }),
+        note('n4', 3, { done: true, created: '2026-01-01T00:00:01' }),
+      ],
+    });
+
+  it('walks the filter and sort, naming the state and showing a caption', async () => {
+    await open();
+    fromHost(mixed());
+    expect(names()).toEqual(['n2', 'n4', 'n1', 'n3']);
+    expect(byLabel('Filter: All')).not.toBeNull();
+    expect(byLabel('Sort: Time')).not.toBeNull();
+    expect(caption().hidden).toBe(true);
+
+    byLabel('Filter: All')!.click();
+    expect(names()).toEqual(['n1', 'n3']);
+    expect(byLabel('Filter: Pending')).not.toBeNull();
+    expect(root().querySelector('.mc-rv-count')?.textContent).toBe('2 of 4 notes');
+    expect(caption().hidden).toBe(false);
+    expect(caption().textContent).toBe('Showing Pending');
+    // Markers still show every note.
+    expect(markers()[0].textContent).toBe('4');
+
+    byLabel('Filter: Pending')!.click();
+    expect(names()).toEqual(['n2', 'n4']);
+
+    byLabel('Sort: Time')!.click();
+    expect(byLabel('Sort: Newest')).not.toBeNull();
+    // Latest created first, ties by id number (higher first).
+    expect(names()).toEqual(['n2', 'n4']);
+    expect(caption().textContent).toBe('Showing Done, newest first');
+
+    byLabel('Filter: Done')!.click();
+    expect(names()).toEqual(['n3', 'n2', 'n1', 'n4']);
+    expect(root().querySelector('.mc-rv-count')?.textContent).toBe('4 notes');
+    expect(caption().textContent).toBe('Showing newest first');
+
+    byLabel('Sort: Newest')!.click();
+    expect(caption().hidden).toBe(true);
+  });
+
+  it('says so when the filter keeps nothing', async () => {
+    await open();
+    fromHost(review({ notes: [note('n1', 1, { done: true })] }));
+    byLabel('Filter: All')!.click();
+    expect(cards()).toHaveLength(0);
+    expect(root().querySelector('.mc-rv-empty')?.textContent).toBe('No notes match this filter.');
+  });
+
+  it('restores from getState and saves with setState', async () => {
+    const setState = vi.fn();
+    vi.stubGlobal('acquireVsCodeApi', () => ({
+      postMessage: (msg: Record<string, unknown>) => posted.push(msg),
+      getState: () => ({ review: { filter: 'done', sort: 'newest' } }),
+      setState,
+    }));
+    await open();
+    fromHost(mixed());
+    expect(names()).toEqual(['n2', 'n4']);
+    expect(byLabel('Filter: Done')).not.toBeNull();
+    expect(byLabel('Sort: Newest')).not.toBeNull();
+    expect(caption().textContent).toBe('Showing Done, newest first');
+
+    byLabel('Filter: Done')!.click();
+    expect(setState).toHaveBeenLastCalledWith({ review: { filter: 'all', sort: 'newest' } });
+  });
+});
+
+describe('range bands', () => {
+  it('draws a band per range note, brighter when selected', async () => {
+    await open();
+    fromHost(review());
+    const band = () => root().querySelector<HTMLElement>('.mc-rv-band')!;
+    expect(band().dataset.id).toBe('n3');
+    expect(band().classList.contains('mc-rv-band--selected')).toBe(false);
+    markers()[2].click();
+    expect(band().classList.contains('mc-rv-band--selected')).toBe(true);
+    markers()[0].click();
+    expect(band().classList.contains('mc-rv-band--selected')).toBe(false);
+  });
+
+  it('draws the pending range, the In bracket alone until Out is set', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 5);
+    byLabel('Set In to this frame')!.click();
+    expect(root().querySelector('.mc-rv-pending--point')).not.toBeNull();
+    at(video, 9);
+    byLabel('Set Out to this frame')!.click();
+    expect(root().querySelector('.mc-rv-pending')).not.toBeNull();
+    expect(root().querySelector('.mc-rv-pending--point')).toBeNull();
+  });
+});
+
+describe('pins', () => {
+  const pinNotes = () =>
+    review({
+      notes: [
+        note('n1', 1, { point: [0.5, 0.5] }),
+        note('n2', 8, { point: [0.1, 0.9], out: 12, kind: 'reject' }),
+        note('n3', 20),
+      ],
+    });
+
+  /** A 1000 x 500 stage showing a square picture: 250 px of letterbox each side. */
+  async function openSized(): Promise<HTMLVideoElement> {
+    const video = await open();
+    Object.defineProperty(video, 'videoWidth', { value: 500, configurable: true });
+    Object.defineProperty(video, 'videoHeight', { value: 500, configurable: true });
+    const box = {
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 500,
+      width: 1000,
+      height: 500,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+    video.getBoundingClientRect = () => box;
+    document.getElementById('mc-stage')!.getBoundingClientRect = () => box;
+    return video;
+  }
+  const studs = () => [...root().querySelectorAll<HTMLButtonElement>('.mc-rv-pin')];
+  const ring = () => root().querySelector<HTMLButtonElement>('.mc-rv-ring')!;
+  const press = (video: HTMLVideoElement, x: number, y: number) =>
+    video.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+    );
+
+  it('shows a pin only while its note is in view, mapped through the letterbox', async () => {
+    const video = await openSized();
+    fromHost(pinNotes());
+    expect(studs()).toHaveLength(0);
+
+    at(video, 1);
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(studs()).toHaveLength(1);
+    expect(studs()[0].getAttribute('aria-label')).toBe('Pin for n1');
+    expect(studs()[0].textContent).toBe('1');
+    // Picture spans x 250..750; the centre minus half of 44 px.
+    expect(studs()[0].style.left).toBe('478px');
+    expect(studs()[0].style.top).toBe('228px');
+
+    at(video, 10);
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(studs().map((s) => s.getAttribute('aria-label'))).toEqual(['Pin for n2']);
+    expect(studs()[0].style.left).toBe(`${250 + 50 - 22}px`);
+
+    at(video, 12.5);
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(studs()).toHaveLength(0);
+  });
+
+  it('selects and seeks on a stud press, and marks the card with the word Pin', async () => {
+    const video = await openSized();
+    fromHost(pinNotes());
+    at(video, 1);
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(cards()[0].textContent).toContain('Pin');
+    expect(cards()[2].textContent).not.toContain('Pin');
+    studs()[0].click();
+    expect(cards()[0].getAttribute('aria-pressed')).toBe('true');
+    expect(video.currentTime).toBeCloseTo((30 * (1000 / 30) + 1000 / 60) / 1000, 6);
+    expect(studs()[0].getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('places a pending pin from a picture press and sends it as a point', async () => {
+    const video = await openSized();
+    fromHost(review());
+    at(video, 5);
+    expect(ring().hidden).toBe(true);
+
+    press(video, 500, 250);
+    expect(ring().hidden).toBe(false);
+    expect(ring().getAttribute('aria-label')).toBe('Pending pin, press the picture to move it');
+    expect(chip().hidden).toBe(false);
+    expect(chip().textContent).toBe('Pin');
+    expect(document.activeElement).toBe(field());
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+
+    // Pressing again moves it.
+    press(video, 750, 0);
+    expect(ring().style.left).toBe(`${750 - 22}px`);
+
+    byLabel('Set In to this frame')!.click();
+    expect(chip().textContent).toBe('00:00:05:00 + Pin');
+
+    field().value = 'look here';
+    byLabel('Add note')!.click();
+    expect(posted).toContainEqual({
+      type: 'reviewAdd',
+      at: 5,
+      text: 'look here',
+      point: [1, 0],
+    });
+    expect(ring().hidden).toBe(true);
+    expect(chip().hidden).toBe(true);
+  });
+
+  it('ignores a press in the letterbox and clears the pin with Clear', async () => {
+    const video = await openSized();
+    fromHost(review());
+    press(video, 100, 250);
+    expect(ring().hidden).toBe(true);
+    expect(chip().hidden).toBe(true);
+
+    press(video, 500, 250);
+    byLabel('Clear the range')!.click();
+    expect(ring().hidden).toBe(true);
+    expect(chip().hidden).toBe(true);
+  });
+
+  it('resumes after sending only when it was playing before the first press', async () => {
+    const video = await openSized();
+    fromHost(review());
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    press(video, 500, 250);
+    Object.defineProperty(video, 'paused', { value: true, configurable: true });
+    press(video, 520, 250);
+    field().value = 'x';
+    byLabel('Add note')!.click();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+
+    (HTMLMediaElement.prototype.play as ReturnType<typeof vi.fn>).mockClear();
+    press(video, 500, 250);
+    field().value = 'y';
+    byLabel('Add note')!.click();
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  });
+
+  it('keeps the picture press as play and pause outside review mode', async () => {
+    const video = await openSized();
+    press(video, 500, 250);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+
+    fromHost(review({ readOnly: 'schema version 2' }));
+    press(video, 500, 250);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
+  });
+});

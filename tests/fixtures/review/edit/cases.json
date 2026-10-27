@@ -82,6 +82,67 @@
     }
   },
   {
+    "name": "add-pin",
+    "op": "add",
+    "args": {
+      "at": 2.5,
+      "text": "Logo here.",
+      "point": [
+        0.42,
+        0.3
+      ]
+    }
+  },
+  {
+    "name": "add-pin-range",
+    "op": "add",
+    "args": {
+      "at": 8.0,
+      "out": 9.25,
+      "text": "Track this.",
+      "point": [
+        0.5,
+        0.75
+      ]
+    }
+  },
+  {
+    "name": "add-pin-clean",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "Rounded.",
+      "point": [
+        0.123456789,
+        0.99996
+      ]
+    }
+  },
+  {
+    "name": "add-pin-edges",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "Corners.",
+      "point": [
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "name": "add-pin-to-full",
+    "op": "add",
+    "args": {
+      "at": 61.5,
+      "text": "On a rich file.",
+      "point": [
+        0.0001,
+        0.3333333
+      ]
+    }
+  },
+  {
     "name": "done-true",
     "op": "done",
     "args": {

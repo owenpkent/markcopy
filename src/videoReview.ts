@@ -245,6 +245,9 @@ function toReviewNote(n: Record<string, unknown>): ReviewNote {
   if (isNumber(n.out) && n.out > note.at) {
     note.out = n.out;
   }
+  if (isPair(n.point)) {
+    note.point = [...(n.point as [number, number])] as [number, number];
+  }
   return note;
 }
 
@@ -337,7 +340,7 @@ export function reviewAddError(msg: unknown, bounds: ReviewBounds): string | nul
   if (!isObject(msg)) {
     return 'That note is not valid';
   }
-  const extra = extraKey(msg, ['type', 'at', 'out', 'text']);
+  const extra = extraKey(msg, ['type', 'at', 'out', 'text', 'point']);
   if (extra) {
     return `That note has an unexpected field "${extra}"`;
   }
@@ -347,6 +350,9 @@ export function reviewAddError(msg: unknown, bounds: ReviewBounds): string | nul
   const hasOut = msg.out !== undefined;
   if (hasOut && (!isNumber(msg.out) || msg.out <= msg.at)) {
     return 'The range end must be after its start';
+  }
+  if (msg.point !== undefined && !isPair(msg.point)) {
+    return 'The pin must be two numbers from 0 to 1';
   }
   if (!isString(msg.text) || msg.text.length > MAX_NOTE_TEXT) {
     return `The note text must be ${MAX_NOTE_TEXT.toLocaleString('en-US')} characters or fewer`;
@@ -668,6 +674,26 @@ export interface NewNote {
   out?: number;
   text: string;
   created: string;
+  /** A pin as the page sent it; written as the kit's `_clean_point` leaves it. */
+  point?: readonly [number, number];
+}
+
+/**
+ * `_clean_point`: Python's `round(v, 4)` for a value already 0 to 1. `toFixed(4)`
+ * agrees except on an exact tie, where Python goes to the even digit: a click 25 px
+ * into an 800 px picture is exactly 0.03125, which Python writes as 0.0312 and
+ * `toFixed` as 0.0313. `toFixed(100)` is the double's exact decimal expansion for
+ * any value a tie can occur at, so it tells a true tie from a near one (0.00005 is
+ * really 0.0000500000000000000024, which rounds up in both).
+ */
+export function cleanPoint(v: number): number {
+  const exact = v.toFixed(100);
+  const dot = exact.indexOf('.');
+  if (/^50*$/.test(exact.slice(dot + 5))) {
+    const kept = Number(exact.slice(0, dot + 5));
+    return Number(exact[dot + 4]) % 2 === 0 ? kept : Number((kept + 0.0001).toFixed(4));
+  }
+  return Number(v.toFixed(4));
 }
 
 /** One note exactly as `Review.add_note` and `safe_dump` write it, LF line ends. */
@@ -686,6 +712,9 @@ export function noteYaml(note: NewNote): string {
   ];
   if (note.out !== undefined) {
     lines.push(`  out: ${pyFloat(note.out)}`);
+  }
+  if (note.point !== undefined) {
+    lines.push(`  point: [${note.point.map((v) => pyFloat(cleanPoint(v))).join(', ')}]`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -1038,6 +1067,7 @@ export class ReviewSession {
           at: msg.at,
           out: msg.out,
           text: msg.text,
+          point: msg.point,
           created: localTimestamp(new Date()),
         };
         const next = addNoteText(base, note, file);

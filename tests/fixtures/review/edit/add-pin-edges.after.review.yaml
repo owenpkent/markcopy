@@ -1,0 +1,43 @@
+version: 1
+id: aaaaaaaaaaaa
+source: minimal.mp4
+fps: 30.0
+next_note_id: 4
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  at: 1.0
+  kind: note
+  text: Soft focus through the whole pan.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n2
+  target: source
+  at: 4.5
+  kind: note
+  text: Cut this range.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  out: 6.0
+- id: n3
+  target: source
+  at: 3.0
+  kind: note
+  text: Corners.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  point: [0.0, 1.0]
