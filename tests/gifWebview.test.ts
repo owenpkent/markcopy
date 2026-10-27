@@ -52,8 +52,26 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
+// Each test re-imports the module, which subscribes to window and document;
+// drop those so an earlier test's instance does not answer a later test's events.
+const listeners: Array<[EventTarget, string, EventListenerOrEventListenerObject]> = [];
+for (const target of [window, document]) {
+  const add = target.addEventListener.bind(target) as EventTarget['addEventListener'];
+  target.addEventListener = ((
+    type: string,
+    fn: EventListenerOrEventListenerObject,
+    opts?: never,
+  ) => {
+    listeners.push([target, type, fn]);
+    add(type, fn, opts);
+  }) as EventTarget['addEventListener'];
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  for (const [target, type, fn] of listeners.splice(0)) {
+    target.removeEventListener(type, fn);
+  }
 });
 
 function fromHost(data: unknown): void {
@@ -123,5 +141,94 @@ describe('gif webview fallback', () => {
     expect(menu.textContent).toContain('Frames unavailable in this viewer');
     expect(menu.textContent).toContain('Copy Frame as PNG');
     expect(menu.textContent).toContain('Open in Default App');
+  });
+});
+
+// The ImageDecoder path, with a stub whose decodes the test can hold open.
+describe('gif webview playback', () => {
+  let draws: number;
+  let pending: Array<{ index: number; release: () => void }>;
+  let hold: boolean;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    draws = 0;
+    pending = [];
+    hold = false;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
+      return {
+        clearRect: () => undefined,
+        drawImage: () => {
+          if (this.isConnected) {
+            draws += 1;
+          }
+        },
+      };
+    } as never;
+    class FakeDecoder {
+      tracks = { ready: Promise.resolve(), selectedTrack: { frameCount: 2 } };
+      decode({ frameIndex }: { frameIndex: number }): Promise<{ image: { close(): void } }> {
+        const image = { close: () => undefined };
+        if (!hold) {
+          return Promise.resolve({ image });
+        }
+        return new Promise((resolve) => {
+          pending.push({ index: frameIndex, release: () => resolve({ image }) });
+        });
+      }
+      close(): void {}
+    }
+    vi.stubGlobal('ImageDecoder', FakeDecoder);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function loadAndPlay(): Promise<void> {
+    await import('../src/webview/gif');
+    fromHost({ type: 'load', name: 'anim.gif', path: '/p/anim.gif', size: 1, data: gifBase64() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(draws).toBe(1);
+  }
+
+  async function startDecodeThenPause(how: 'space' | 'click'): Promise<void> {
+    await loadAndPlay();
+    hold = true;
+    // The first frame's 200 ms delay elapses and advance() starts decoding frame 1.
+    await vi.advanceTimersByTimeAsync(250);
+    expect(pending).toHaveLength(1);
+    if (how === 'space') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    } else {
+      document
+        .getElementById('mc-canvas')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+  }
+
+  for (const how of ['space', 'click'] as const) {
+    it(`does not paint a pending decode after pausing with ${how}`, async () => {
+      await startDecodeThenPause(how);
+      pending[0].release();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(draws).toBe(1);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  }
+
+  it('still paints a seek made while paused, and only the latest of several', async () => {
+    await loadAndPlay();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    hold = true;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(pending.map((p) => p.index)).toEqual([1, 0]);
+    pending[0].release();
+    pending[1].release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(draws).toBe(2);
+    expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
   });
 });

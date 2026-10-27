@@ -256,7 +256,7 @@ function play(): void {
     // Play from the end means play again, not sit on the last frame.
     passes = 0;
     generation += 1;
-    void show(0, generation).then(() => scheduleNext());
+    void show(0, generation).then((ok) => ok && scheduleNext());
     playing = true;
     return;
   }
@@ -266,6 +266,9 @@ function play(): void {
 
 function pause(): void {
   playing = false;
+  // A playback decode may already be awaiting; moving the generation keeps it
+  // from painting a frame after playback has stopped.
+  generation += 1;
   stopTimer();
 }
 
