@@ -651,19 +651,20 @@ notes:
     const adds = posted.filter((m) => m.type === 'review' && m.added).map((m) => m.added);
     expect(adds).toEqual(['n1', 'n2']);
     // The post after the next, unrelated change carries no `added`.
-    await send({ type: 'reviewSetDone', id: 'n1', done: true });
+    await send({ type: 'reviewDelete', id: 'n1' });
     expect(lastReview(posted).added).toBeNull();
   });
 
-  it('flips done and rewrites the markdown only through an edit', async () => {
-    const { posted, send } = await open(SIDECAR);
+  it('rewrites the markdown only through an edit, and leaves a done note alone', async () => {
+    const marked = SIDECAR.replace('done: false', 'done: true');
+    const { posted, send } = await open(marked);
     expect(files.has(MD)).toBe(false);
-    await send({ type: 'reviewSetDone', id: 'n1', done: true });
-    expect(files.get(YAML)).toBe(SIDECAR.replace('done: false', 'done: true'));
+    await send({ type: 'reviewAdd', at: 2, text: 'b' });
+    expect(files.get(YAML)).toContain(marked.slice(marked.indexOf('- id: n1')));
     expect(files.has(MD)).toBe(true);
     // A reload caused by another program leaves the markdown alone.
     files.delete(MD);
-    files.set(YAML, SIDECAR);
+    files.set(YAML, marked);
     (watcher.onDidChange.mock.calls[0][0] as () => void)();
     await vi.waitFor(() =>
       expect(posted.filter((m) => m.type === 'review').length).toBeGreaterThan(2),
@@ -702,7 +703,6 @@ notes:
     const v2 = 'version: 2\nsource: clip.mp4\nfps: 25\n';
     const { posted, send } = await open(v2);
     await send({ type: 'reviewAdd', at: 1, text: 'x' });
-    await send({ type: 'reviewSetDone', id: 'n1', done: true });
     await send({ type: 'reviewDelete', id: 'n1' });
     await send({ type: 'reviewRestore' });
     expect(files.get(YAML)).toBe(v2);
@@ -714,10 +714,9 @@ notes:
     const { posted, send } = await open(SIDECAR);
     await send({ type: 'reviewAdd', at: 1, text: 'x', color: 'red' });
     await send({ type: 'reviewAdd', at: 1, out: 1, text: 'empty range' });
-    await send({ type: 'reviewSetDone', id: 'n9', done: true });
     await send({ type: 'reviewDelete', id: 'n9' });
     expect(files.get(YAML)).toBe(SIDECAR);
-    expect(errors(posted)).toHaveLength(4);
+    expect(errors(posted)).toHaveLength(3);
   });
 
   const failures = (posted: Array<Record<string, unknown>>) =>
@@ -729,15 +728,8 @@ notes:
     await ro.send({ type: 'reviewAdd', at: 1, text: 'x' });
     await ro.send({ type: 'reviewAdd', at: 1, out: 1, text: 'bad range' });
     await ro.send({ type: 'reviewDelete', id: 'n1' });
-    await ro.send({ type: 'reviewSetDone', id: 'n1', done: true });
     await ro.send({ type: 'reviewCopy' });
-    expect(failures(ro.posted).map((m) => m.failed)).toEqual([
-      'add',
-      'add',
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    expect(failures(ro.posted).map((m) => m.failed)).toEqual(['add', 'add', undefined, undefined]);
 
     files.set(YAML, SIDECAR);
     const wf = await open();

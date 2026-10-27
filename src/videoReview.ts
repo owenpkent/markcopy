@@ -334,7 +334,6 @@ export interface ReviewBounds {
 }
 
 type AddMessage = Extract<ReviewWebviewMessage, { type: 'reviewAdd' }>;
-type SetDoneMessage = Extract<ReviewWebviewMessage, { type: 'reviewSetDone' }>;
 type DeleteMessage = Extract<ReviewWebviewMessage, { type: 'reviewDelete' }>;
 type RestoreMessage = Extract<ReviewWebviewMessage, { type: 'reviewRestore' }>;
 
@@ -381,15 +380,6 @@ export function isReviewAdd(msg: unknown, bounds: ReviewBounds): msg is AddMessa
 
 const knownId = (id: unknown, ids: readonly string[]): id is string =>
   isString(id) && ids.includes(id);
-
-export function isReviewSetDone(msg: unknown, ids: readonly string[]): msg is SetDoneMessage {
-  return (
-    isObject(msg) &&
-    !extraKey(msg, ['type', 'id', 'done']) &&
-    knownId(msg.id, ids) &&
-    typeof msg.done === 'boolean'
-  );
-}
 
 export function isReviewDelete(msg: unknown, ids: readonly string[]): msg is DeleteMessage {
   return isObject(msg) && !extraKey(msg, ['type', 'id']) && knownId(msg.id, ids);
@@ -892,18 +882,6 @@ export function addNoteText(
   return { text: insertNote(bumped, noteYaml({ ...note, id }), Infinity, true), id };
 }
 
-/** Flip a note's `done` in place. Returns null when no note has that id. */
-export function setDoneText(text: string, id: string, done: boolean): string | null {
-  const { seq } = locate(text);
-  const note = seq && noteMaps(seq).find((m) => m.get('id') === id);
-  const flag = note?.items.find((p) => isScalar(p.key) && p.key.value === 'done');
-  if (!note || !flag || !isScalar(flag.value)) {
-    return null;
-  }
-  const [start, end] = rangeOf(flag.value);
-  return text.slice(0, start) + String(done) + text.slice(end);
-}
-
 /** A note taken out of the file: its lines and where it was, so Restore can put it back. */
 export interface RemovedNote {
   id: string;
@@ -1108,18 +1086,6 @@ export class ReviewSession {
         return { text: next.text, added: next.id, applied: () => this.written.add(next.id) };
       }, true);
     }, 'add');
-  }
-
-  setDone(msg: unknown): Promise<void> {
-    return this.enqueue(() =>
-      this.commit((text, loaded) => {
-        if (text === undefined || !isReviewSetDone(msg, idsOf(loaded))) {
-          return 'That note is no longer in the notes file';
-        }
-        const next = setDoneText(text, msg.id, msg.done);
-        return next === null ? 'That note is no longer in the notes file' : { text: next };
-      }),
-    );
   }
 
   delete(msg: unknown): Promise<void> {

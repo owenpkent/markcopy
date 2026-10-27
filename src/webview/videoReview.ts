@@ -40,7 +40,7 @@ export interface ReviewDeps {
   /** Anything the host handles: review messages and `updateSetting`. */
   post(msg: ReviewWebviewMessage | { type: 'updateSetting'; key: string; value: unknown }): void;
   toast(text: string): void;
-  /** The webview's saved state (vscode getState/setState), for the filter and sort. */
+  /** The webview's saved state (vscode getState/setState), for the sort. */
   viewState?: { get(): unknown; set(value: unknown): void };
 }
 
@@ -58,7 +58,7 @@ export interface ReviewController {
    * ignoring a press in the letterbox); false when the caller should toggle play.
    */
   onPicture(e: MouseEvent): boolean;
-  /** The "Review Notes" toggle and the copy action, for the right-click menu. */
+  /** "Open Video Notes" or "Close Video Notes", and the copy action, for the right-click menu. */
   menuEntries(): MenuEntry[];
 }
 
@@ -69,11 +69,8 @@ const SPEED_LADDER = [0.25, 0.5, 1, 1.5, 2];
 const PANEL_W = 320;
 const MIN_VIDEO_W = 400;
 
-export type NoteFilter = 'all' | 'pending' | 'done';
 export type NoteSort = 'time' | 'newest';
-const FILTERS: NoteFilter[] = ['all', 'pending', 'done'];
 const SORTS: NoteSort[] = ['time', 'newest'];
-const FILTER_NAME: Record<NoteFilter, string> = { all: 'All', pending: 'Pending', done: 'Done' };
 const SORT_NAME: Record<NoteSort, string> = { time: 'Time', newest: 'Newest' };
 // The pin stud's size, which is also its hit target.
 const PIN_SIZE = 44;
@@ -83,16 +80,9 @@ function noteNum(id: string): number {
   return digits ? parseInt(digits, 10) : 0;
 }
 
-/** The notes a filter keeps, in a sort's order (Newest: latest `created` first, ties by id number). */
-export function arrangeNotes(
-  notes: ReviewNote[],
-  filter: NoteFilter,
-  sort: NoteSort,
-): ReviewNote[] {
-  const kept = notes.filter((n) =>
-    filter === 'all' ? true : filter === 'done' ? n.done : !n.done,
-  );
-  return kept.sort((a, b) =>
+/** The notes in a sort's order (Newest: latest `created` first, ties by id number). */
+export function arrangeNotes(notes: ReviewNote[], sort: NoteSort): ReviewNote[] {
+  return [...notes].sort((a, b) =>
     sort === 'newest'
       ? (a.created < b.created ? 1 : a.created > b.created ? -1 : 0) ||
         noteNum(b.id) - noteNum(a.id)
@@ -179,18 +169,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
     point: [number, number] | null;
     resume: boolean;
   } | null = null;
-  let filter: NoteFilter = 'all';
   let sort: NoteSort = 'time';
   // The frame the pins were last drawn for, so playback redraws only on a new one.
   let pinFrame = -1;
   let ui: ReturnType<typeof build> | undefined;
 
-  const saved = (
-    deps.viewState?.get() as { review?: { filter?: unknown; sort?: unknown } } | undefined
-  )?.review;
-  if (saved && FILTERS.includes(saved.filter as NoteFilter)) {
-    filter = saved.filter as NoteFilter;
-  }
+  const saved = (deps.viewState?.get() as { review?: { sort?: unknown } } | undefined)?.review;
   if (saved && SORTS.includes(saved.sort as NoteSort)) {
     sort = saved.sort as NoteSort;
   }
@@ -198,7 +182,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const prior = deps.viewState?.get();
     deps.viewState?.set({
       ...(prior && typeof prior === 'object' ? prior : {}),
-      review: { filter, sort },
+      review: { sort },
     });
   }
 
@@ -264,6 +248,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     renderSelection();
     renderMarkers();
     renderPins(true);
+    // The list scrolls inside the panel; keep the selected card (and its Delete) in view.
+    scrollCardIntoView(id);
   }
 
   // -------------------------------------------------------------------------
@@ -276,10 +262,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const transport = el('div', 'mc-rv-transport');
     transport.setAttribute('role', 'group');
     transport.setAttribute('aria-label', 'Playback');
-    const play = button('mc-rv-btn', 'Play', 'Play', togglePlay);
-    const back = button('mc-rv-btn', '-1 frame', 'Back one frame', () => step(-1));
-    const forward = button('mc-rv-btn', '+1 frame', 'Forward one frame', () => step(1));
-    const speed = button('mc-rv-btn', '1x', 'Playback speed', () => setRate(nextCycleRate()));
+    const play = button('mc-rv-btn mc-rv-bare', 'Play', 'Play', togglePlay);
+    const back = button('mc-rv-btn mc-rv-bare', '-1 frame', 'Back one frame', () => step(-1));
+    const forward = button('mc-rv-btn mc-rv-bare', '+1 frame', 'Forward one frame', () => step(1));
+    const speed = button('mc-rv-btn mc-rv-bare', '1x', 'Playback speed', () =>
+      setRate(nextCycleRate()),
+    );
     const readout = el('span', 'mc-rv-time', positionTimecode(0, 30));
     readout.setAttribute('role', 'timer');
     const total = el('span', 'mc-rv-total');
@@ -313,27 +301,25 @@ export function createReview(deps: ReviewDeps): ReviewController {
     panel.setAttribute('aria-label', 'Review notes');
     const head = el('div', 'mc-rv-head');
     const count = el('h2', 'mc-rv-count');
-    const filterBtn = button('mc-rv-btn mc-rv-glyph', '\u25BC', 'Filter: All', () => {
-      filter = FILTERS[(FILTERS.indexOf(filter) + 1) % FILTERS.length];
-      saveView();
-      renderPanel();
-    });
-    const sortBtn = button('mc-rv-btn mc-rv-glyph', '\u21C5', 'Sort: Time', () => {
+    const sortBtn = button('mc-rv-btn mc-rv-tool', 'Sort: Time', 'Sort: Time', () => {
       sort = SORTS[(SORTS.indexOf(sort) + 1) % SORTS.length];
       saveView();
       renderPanel();
     });
-    const view = el('p', 'mc-rv-view');
-    view.hidden = true;
-    const copy = button('mc-rv-btn', 'Copy notes as Markdown', 'Copy notes as Markdown', copyNotes);
+    const copy = button(
+      'mc-rv-btn mc-rv-tool',
+      'Copy as Markdown',
+      'Copy notes as Markdown',
+      copyNotes,
+    );
     const tools = el('div', 'mc-rv-tools');
-    tools.append(filterBtn, sortBtn, copy);
-    head.append(count, tools, view);
+    tools.append(sortBtn, copy);
+    head.append(count, tools);
     const banner = el('div', 'mc-rv-banner');
     banner.setAttribute('role', 'status');
     banner.hidden = true;
     const list = el('div', 'mc-rv-list');
-    const restore = button('mc-rv-btn', '', '', () => {
+    const restore = button('mc-rv-btn mc-rv-tool', '', '', () => {
       if (state?.restorable) {
         post({ type: 'reviewRestore' });
       }
@@ -345,19 +331,24 @@ export function createReview(deps: ReviewDeps): ReviewController {
     composer.setAttribute('aria-label', 'Write a note');
     const fpsNote = el('p', 'mc-rv-fpsnote', 'Frame rate unknown: notes will be saved at 30 fps');
     fpsNote.hidden = true;
-    const inBtn = button('mc-rv-btn mc-rv-point', '[ In', 'Set In to this frame', setIn);
-    const outBtn = button('mc-rv-btn mc-rv-point', 'Out ]', 'Set Out to this frame', setOut);
+    const inBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '[ In', 'Set In to this frame', setIn);
+    const outBtn = button(
+      'mc-rv-btn mc-rv-key mc-rv-point',
+      'Out ]',
+      'Set Out to this frame',
+      setOut,
+    );
     const chip = el('span', 'mc-rv-chip');
     chip.hidden = true;
-    const clearBtn = button('mc-rv-btn', 'Clear', 'Clear the range', clearRange);
+    const clearBtn = button('mc-rv-btn mc-rv-quiet', 'Clear', 'Clear the range', clearRange);
     clearBtn.hidden = true;
-    const cplay = button('mc-rv-btn', 'Play', 'Play', togglePlay);
+    const cplay = button('mc-rv-btn mc-rv-bare', 'Play', 'Play', togglePlay);
     const field = el('input', 'mc-rv-field');
     field.type = 'text';
     field.maxLength = 10000;
     field.placeholder = 'Write a note';
     field.setAttribute('aria-label', 'Note text');
-    const send = button('mc-rv-btn mc-rv-send', 'Send', 'Add note', sendNote);
+    const send = button('mc-rv-btn mc-rv-key mc-rv-send', 'Send', 'Add note', sendNote);
     // A press on these must not take focus from the field, or its blur would drop
     // the pending resume.
     for (const b of [inBtn, outBtn, clearBtn, send]) {
@@ -447,9 +438,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       bands,
       pins,
       ring,
-      filterBtn,
       sortBtn,
-      view,
       count,
       copy,
       banner,
@@ -536,7 +525,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
       b.type = 'button';
       b.style.left = `${dot.x}px`;
       b.style.width = `${DOT_HIT}px`;
-      const face = el('span', 'mc-rv-dot', dot.label);
+      // A cluster reads as a count (x3) with a stacked edge; a single note keeps its number.
+      const face = el('span', 'mc-rv-dot', dot.count > 1 ? `×${dot.count}` : dot.label);
+      face.classList.toggle('mc-rv-dot--cluster', dot.count > 1);
       face.classList.toggle('mc-rv-dot--done', dot.done);
       b.appendChild(face);
       const isSelected = dot.ids.includes(selected);
@@ -711,21 +702,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
     }
   }
 
-  /** Done and Delete, shown on the selected card only. */
+  /** Delete, shown on the selected card only. */
   function actions(note: ReviewNote, locked: boolean): HTMLElement {
     const row = el('div', 'mc-rv-actions');
-    const done = button(
-      'mc-rv-btn',
-      note.done ? 'Not done' : 'Done',
-      note.done ? `Mark ${note.id} not done` : `Mark ${note.id} done`,
-      () => post({ type: 'reviewSetDone', id: note.id, done: !note.done }),
-    );
-    const del = button('mc-rv-btn', 'Delete', `Delete ${note.id}`, () =>
+    const del = button('mc-rv-btn mc-rv-quiet', 'Delete', `Delete ${note.id}`, () =>
       post({ type: 'reviewDelete', id: note.id }),
     );
-    done.disabled = locked;
     del.disabled = locked;
-    row.append(done, del);
+    row.append(del);
     return row;
   }
 
@@ -910,21 +894,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const n = state.notes.length;
-    const shown = arrangeNotes(state.notes, filter, sort);
-    ui.count.textContent =
-      filter !== 'all' && n > 0
-        ? `${shown.length} of ${n} notes`
-        : `${n} ${n === 1 ? 'note' : 'notes'}`;
-    ui.filterBtn.setAttribute('aria-label', `Filter: ${FILTER_NAME[filter]}`);
-    ui.filterBtn.title = `Filter: ${FILTER_NAME[filter]}, press to change`;
+    const shown = arrangeNotes(state.notes, sort);
+    ui.count.textContent = `${n} ${n === 1 ? 'note' : 'notes'}`;
+    ui.sortBtn.textContent = `Sort: ${SORT_NAME[sort]}`;
     ui.sortBtn.setAttribute('aria-label', `Sort: ${SORT_NAME[sort]}`);
     ui.sortBtn.title = `Sort: ${SORT_NAME[sort]}, press to change`;
-    const parts = [
-      ...(filter === 'all' ? [] : [FILTER_NAME[filter]]),
-      ...(sort === 'time' ? [] : ['newest first']),
-    ];
-    ui.view.hidden = parts.length === 0;
-    ui.view.textContent = parts.length ? `Showing ${parts.join(', ')}` : '';
     ui.copy.disabled = state.sidecar === null;
     ui.copy.title = state.sidecar === null ? 'No notes file for this video yet' : '';
     ui.banner.hidden = state.readOnly === null;
@@ -942,9 +916,6 @@ export function createReview(deps: ReviewDeps): ReviewController {
             : `No notes yet in ${state.sidecar}.`,
         ),
       );
-    }
-    if (n > 0 && shown.length === 0) {
-      ui.list.appendChild(el('p', 'mc-rv-empty', 'No notes match this filter.'));
     }
     for (const note of shown) {
       ui.list.appendChild(card(note));
@@ -1097,9 +1068,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     menuEntries() {
       return [
         {
-          kind: 'checkbox',
-          label: 'Review Notes',
-          checked: isActive,
+          kind: 'item',
+          label: isActive ? 'Close Video Notes' : 'Open Video Notes',
           run: () => setReview(!isActive),
         },
         {

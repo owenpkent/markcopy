@@ -71,6 +71,5 @@ export type ReviewWebviewMessage =
   | { type: 'reviewEnable' }
   | { type: 'reviewCopy' }
   | { type: 'reviewAdd'; at: number; out?: number; text: string; point?: [number, number] }
-  | { type: 'reviewSetDone'; id: string; done: boolean }
   | { type: 'reviewDelete'; id: string }
   | { type: 'reviewRestore' };

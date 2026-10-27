@@ -54,7 +54,7 @@ script-src 'nonce-${nonce}' 'strict-dynamic';
 
 The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the five webview surfaces (shared preview, PDF, LaTeX, video, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
+The STL preview is the most restrictive of the five webview surfaces (shared preview, PDF, LaTeX, video, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element `img-src ${cspSource} blob: data:` for frame capture, and `font-src ${cspSource}` for the notes panel's bundled Roboto (no remote fonts), but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 
@@ -112,7 +112,7 @@ source file's size; use a trusted ffmpeg build and treat untrusted media as
 hostile input.
 
 Review mode reads a `<stem>.review.yaml` file beside the video. It writes that
-file when a note is added, marked done, deleted or restored, and writes
+file when a note is added, deleted or restored, and writes
 `<stem>.review.md` beside it on those edits and on the **Copy Notes as
 Markdown** action, all without a save dialog. These are the silent writes in the
 video preview; the precedent is the PDF preview's `<file>.pdf.mccomments.json`.
@@ -126,10 +126,10 @@ video preview; the precedent is the PDF preview's `<file>.pdf.mccomments.json`.
   and is refused when it is read-only (parse or schema failure, another
   version); the sidecar is never overwritten in that state. Only the first note
   on a video with no sidecar creates one.
-- **Edit messages are validated on the host.** `reviewAdd`, `reviewSetDone`,
-  `reviewDelete` and `reviewRestore` carry data from the page, so each is
-  checked before any write (`reviewAddError`, `isReviewSetDone`,
-  `isReviewDelete`, `isReviewRestore`): extra fields refused, finite times with
+- **Edit messages are validated on the host.** `reviewAdd`, `reviewDelete`
+  and `reviewRestore` carry data from the page, so each is
+  checked before any write (`reviewAddError`, `isReviewDelete`,
+  `isReviewRestore`): extra fields refused, finite times with
   `out` after `at` and both within the duration plus one frame when it is
   known, note text a string of at most 10,000 characters, an optional pin
   (`point`) of two finite numbers from 0 to 1, and ids that exist in the file

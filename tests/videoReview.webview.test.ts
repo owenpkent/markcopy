@@ -8,7 +8,7 @@
 // their own panels, so queries go to the newest `.mc-rv`, which is this test's.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewNote, ReviewStateMessage } from '../src/review/protocol';
-import { fpsLabel } from '../src/webview/videoReview';
+import { arrangeNotes, fpsLabel } from '../src/webview/videoReview';
 
 const BODY = `
   <div id="mc-stage"><video id="mc-video" controls></video></div>
@@ -96,7 +96,7 @@ const cards = () => [...root().querySelectorAll<HTMLButtonElement>('.mc-rv-card'
 const markers = () => [...root().querySelectorAll<HTMLButtonElement>('.mc-rv-marker')];
 const copyButton = () =>
   [...root().querySelectorAll<HTMLButtonElement>('.mc-rv-btn')].find(
-    (b) => b.textContent === 'Copy notes as Markdown',
+    (b) => b.textContent === 'Copy as Markdown',
   ) as HTMLButtonElement;
 
 const byLabel = (label: string): HTMLButtonElement | null =>
@@ -184,7 +184,7 @@ describe('review mode', () => {
     expect(cards()).toHaveLength(4);
     expect(markers()).toHaveLength(2);
     const cluster = markers()[0];
-    expect(cluster.textContent).toBe('3');
+    expect(cluster.textContent).toBe('×3');
 
     cluster.click();
     expect(cards()[0].getAttribute('aria-pressed')).toBe('true');
@@ -460,7 +460,6 @@ describe('composer', () => {
     expect(byLabel('Restore n4')!.disabled).toBe(true);
     cards()[0].click();
     expect(byLabel('Delete n1')!.disabled).toBe(true);
-    expect(byLabel('Mark n1 done')!.disabled).toBe(true);
     key('i');
     expect(chip().hidden).toBe(true);
   });
@@ -482,7 +481,7 @@ describe('composer', () => {
 });
 
 describe('card actions', () => {
-  it('offers Done and Delete on the selected card only', async () => {
+  it('offers Delete on the selected card only, and no Done toggle', async () => {
     await open();
     fromHost(review());
     expect(root().querySelectorAll('.mc-rv-actions')).toHaveLength(0);
@@ -492,18 +491,18 @@ describe('card actions', () => {
     expect(cards()[0].parentElement!.querySelector('.mc-rv-actions')).not.toBeNull();
     expect(byLabel('Delete n2')).toBeNull();
 
-    byLabel('Mark n1 done')!.click();
-    expect(posted).toContainEqual({ type: 'reviewSetDone', id: 'n1', done: true });
+    expect(byLabel('Mark n1 done')).toBeNull();
     byLabel('Delete n1')!.click();
     expect(posted).toContainEqual({ type: 'reviewDelete', id: 'n1' });
   });
 
-  it('toggles a done note back', async () => {
+  it('shows a note already done in Marker as done, read-only', async () => {
     await open();
     fromHost(review());
     cards()[2].click();
-    byLabel('Mark n3 not done')!.click();
-    expect(posted).toContainEqual({ type: 'reviewSetDone', id: 'n3', done: false });
+    expect(cards()[2].querySelector('.mc-rv-done')?.textContent).toBe('Done');
+    expect(byLabel('Mark n3 not done')).toBeNull();
+    expect(posted.some((m) => m.type === 'reviewSetDone')).toBe(false);
   });
 
   it('shows Restore when the host holds a note and posts reviewRestore', async () => {
@@ -556,7 +555,8 @@ describe('review toggle', () => {
     fromHost(review());
     expect(video.controls).toBe(false);
 
-    pressMenu('Review Notes');
+    const close = pressMenu('Close Video Notes');
+    expect(close.getAttribute('role')).toBe('menuitem');
     expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: false });
     expect(video.controls).toBe(true);
     expect(root().hidden).toBe(true);
@@ -569,10 +569,10 @@ describe('review toggle', () => {
   it('turns back on from the menu and asks the host', async () => {
     const video = await open();
     fromHost(review());
-    pressMenu('Review Notes');
+    pressMenu('Close Video Notes');
     posted.length = 0;
 
-    pressMenu('Review Notes');
+    pressMenu('Open Video Notes');
     expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: true });
     expect(posted).toContainEqual({ type: 'reviewEnable' });
     expect(video.controls).toBe(false);
@@ -591,11 +591,11 @@ describe('review toggle', () => {
     expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
     expect(field().disabled).toBe(true);
 
-    pressMenu('Review Notes');
+    pressMenu('Close Video Notes');
     fromHost(review({ added: 'n3', notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
     expect(play).not.toHaveBeenCalled();
 
-    pressMenu('Review Notes');
+    pressMenu('Open Video Notes');
     fromHost(review({ added: null, notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
     expect(cards().some((c) => c.textContent?.includes('saved'))).toBe(true);
     expect(field().disabled).toBe(false);
@@ -642,9 +642,8 @@ describe('frame rate label', () => {
 });
 
 const names = () => cards().map((c) => c.querySelector('.mc-rv-id')?.textContent);
-const caption = () => root().querySelector<HTMLElement>('.mc-rv-view')!;
 
-describe('filter and sort', () => {
+describe('sort', () => {
   const mixed = () =>
     review({
       notes: [
@@ -655,47 +654,22 @@ describe('filter and sort', () => {
       ],
     });
 
-  it('walks the filter and sort, naming the state and showing a caption', async () => {
+  it('has no filter, keeps every note, and walks the sort', async () => {
     await open();
     fromHost(mixed());
+    expect(root().querySelector('[aria-label^="Filter"]')).toBeNull();
     expect(names()).toEqual(['n2', 'n4', 'n1', 'n3']);
-    expect(byLabel('Filter: All')).not.toBeNull();
-    expect(byLabel('Sort: Time')).not.toBeNull();
-    expect(caption().hidden).toBe(true);
-
-    byLabel('Filter: All')!.click();
-    expect(names()).toEqual(['n1', 'n3']);
-    expect(byLabel('Filter: Pending')).not.toBeNull();
-    expect(root().querySelector('.mc-rv-count')?.textContent).toBe('2 of 4 notes');
-    expect(caption().hidden).toBe(false);
-    expect(caption().textContent).toBe('Showing Pending');
-    // Markers still show every note.
-    expect(markers()[0].textContent).toBe('4');
-
-    byLabel('Filter: Pending')!.click();
-    expect(names()).toEqual(['n2', 'n4']);
+    expect(root().querySelector('.mc-rv-count')?.textContent).toBe('4 notes');
+    expect(byLabel('Sort: Time')!.textContent).toBe('Sort: Time');
 
     byLabel('Sort: Time')!.click();
     expect(byLabel('Sort: Newest')).not.toBeNull();
     // Latest created first, ties by id number (higher first).
-    expect(names()).toEqual(['n2', 'n4']);
-    expect(caption().textContent).toBe('Showing Done, newest first');
-
-    byLabel('Filter: Done')!.click();
     expect(names()).toEqual(['n3', 'n2', 'n1', 'n4']);
-    expect(root().querySelector('.mc-rv-count')?.textContent).toBe('4 notes');
-    expect(caption().textContent).toBe('Showing newest first');
+    expect(markers()[0].textContent).toBe('×4');
 
     byLabel('Sort: Newest')!.click();
-    expect(caption().hidden).toBe(true);
-  });
-
-  it('says so when the filter keeps nothing', async () => {
-    await open();
-    fromHost(review({ notes: [note('n1', 1, { done: true })] }));
-    byLabel('Filter: All')!.click();
-    expect(cards()).toHaveLength(0);
-    expect(root().querySelector('.mc-rv-empty')?.textContent).toBe('No notes match this filter.');
+    expect(names()).toEqual(['n2', 'n4', 'n1', 'n3']);
   });
 
   it('restores from getState and saves with setState', async () => {
@@ -707,13 +681,17 @@ describe('filter and sort', () => {
     }));
     await open();
     fromHost(mixed());
-    expect(names()).toEqual(['n2', 'n4']);
-    expect(byLabel('Filter: Done')).not.toBeNull();
+    expect(names()).toEqual(['n3', 'n2', 'n1', 'n4']);
     expect(byLabel('Sort: Newest')).not.toBeNull();
-    expect(caption().textContent).toBe('Showing Done, newest first');
 
-    byLabel('Filter: Done')!.click();
-    expect(setState).toHaveBeenLastCalledWith({ review: { filter: 'all', sort: 'newest' } });
+    byLabel('Sort: Newest')!.click();
+    expect(setState).toHaveBeenLastCalledWith({ review: { sort: 'time' } });
+  });
+
+  it('arranges without changing its input', () => {
+    const input = [note('n2', 9), note('n1', 1)];
+    expect(arrangeNotes(input, 'time').map((n) => n.id)).toEqual(['n1', 'n2']);
+    expect(input.map((n) => n.id)).toEqual(['n2', 'n1']);
   });
 });
 

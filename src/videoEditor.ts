@@ -132,8 +132,6 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         // The edits carry data from the page, so the session checks each one with
         // its exported validator before it touches the file.
         await review.add(msg);
-      } else if (msg?.type === 'reviewSetDone') {
-        await review.setDone(msg);
       } else if (msg?.type === 'reviewDelete') {
         await review.delete(msg);
       } else if (msg?.type === 'reviewRestore') {

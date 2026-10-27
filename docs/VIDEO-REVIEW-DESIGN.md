@@ -14,14 +14,14 @@ an early draft of this plan had `clip.mp4.review.yaml`, which the kit's `review_
 does not produce. The host does not parse and stringify the YAML as planned under "YAML
 library": it finds each node's range with the `yaml` package, splices the original text,
 and ports PyYAML's scalar quoting and wrapping, so an edit is byte-identical to the
-kit's own save (22 kit-generated before/after pairs under `tests/fixtures/review/edit/`;
+kit's own save (19 kit-generated before/after pairs under `tests/fixtures/review/edit/`;
 the exceptions are `y`, `n`, `.` and exponent-like strings such as `e2`, which are
 quoted where PyYAML leaves them plain). Python's `round()` half-to-even was needed
 twice, once for timecodes (`roundHalfEven` in `src/review/timecode.ts`) and once for pin
 coordinates (`cleanPoint`, where 0.03125 becomes 0.0312). The copy writes the clipboard
 from the host, not the page. And ffprobe was already running on most opens, so the
 frame rate reuses that cached probe (`avg_frame_rate`) instead of adding a second run;
-only review mode probes when `markcopy.video.transcode` is `off`.
+only review mode probes when `markcopy.video.transcode` is `off`. The filter and the Done toggle were dropped after hands-on testing (sort was kept, and a note Marker marked done still shows as done, read-only), and the panel was restyled to the alex-style instrument-panel look with vendored Roboto. The right-click entry became a plain Open Video Notes / Close Video Notes item.
 
 ## Verdict
 
@@ -143,7 +143,6 @@ Webview to host, each with an exported pure validator in the style of
 | Message         | Fields                                | Checks                                                                                                                                                                                |
 | --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reviewAdd`     | `at`, optional `out`, optional `text` | finite numbers, `0 <= at`, `out > at`, both within the duration plus one frame when a probe gave a duration (without ffmpeg the host has none), text a string up to 10,000 characters |
-| `reviewSetDone` | `id`, `done`                          | id is a string naming a note in the file, `done` is boolean                                                                                                                           |
 | `reviewDelete`  | `id`                                  | id exists                                                                                                                                                                             |
 | `reviewRestore` | none                                  | a deleted note is held                                                                                                                                                                |
 | `reviewEnable`  | none                                  | none                                                                                                                                                                                  |

@@ -15,7 +15,6 @@ import {
   isReviewAdd,
   isReviewDelete,
   isReviewRestore,
-  isReviewSetDone,
   loadSidecar,
   localTimestamp,
   markdownName,
@@ -27,7 +26,6 @@ import {
   restoreNoteText,
   reviewAddError,
   reviewStem,
-  setDoneText,
   sidecarName,
   MAX_NOTE_TEXT,
 } from '../src/videoReview';
@@ -164,20 +162,19 @@ const crlf = (s: string) => s.replace(/\n/g, '\r\n');
 describe('golden edits against the kit', () => {
   interface Case {
     name: string;
-    op: 'add' | 'done' | 'remove';
+    op: 'add' | 'remove';
     args: {
       at?: number;
       out?: number;
       text?: string;
       id?: string;
-      done?: boolean;
       point?: [number, number];
     };
   }
   const cases = JSON.parse(fixture('edit', 'cases.json')) as Case[];
 
-  it('covers add, done and remove', () => {
-    expect(new Set(cases.map((c) => c.op))).toEqual(new Set(['add', 'done', 'remove']));
+  it('covers add and remove', () => {
+    expect(new Set(cases.map((c) => c.op))).toEqual(new Set(['add', 'remove']));
   });
 
   for (const c of cases) {
@@ -198,8 +195,6 @@ describe('golden edits against the kit', () => {
           },
           file,
         ).text;
-      } else if (c.op === 'done') {
-        got = setDoneText(before, c.args.id!, c.args.done!);
       } else {
         got = removeNoteText(before, c.args.id!)?.text ?? null;
       }
@@ -353,14 +348,10 @@ describe('edits that must not disturb the file', () => {
     expect(next.text).toBe(crlf(fixture('edit', 'add-point.after.review.yaml')));
   });
 
-  it('deletes and flips in a CRLF file', () => {
+  it('deletes in a CRLF file', () => {
     const three = crlf(fixture('edit', 'remove-middle.before.review.yaml'));
     expect(removeNoteText(three, 'n2')!.text).toBe(
       crlf(fixture('edit', 'remove-middle.after.review.yaml')),
-    );
-    const doneBefore = crlf(fixture('edit', 'done-true.before.review.yaml'));
-    expect(setDoneText(doneBefore, 'n1', true)).toBe(
-      crlf(fixture('edit', 'done-true.after.review.yaml')),
     );
   });
 
@@ -386,12 +377,24 @@ notes:
     expect(added.text).toContain('  - id: n1 # first\n');
     expect(added.text).toContain('  - id: n2\n    target: source\n    at: 2.0\n');
     expect(loadSidecar(added.text).readOnly).toBeNull();
-    expect(setDoneText(text, 'n1', true)).toBe(text.replace('done: false', 'done: true'));
+  });
+
+  it('leaves a note Marker marked done byte-identical through an add and a delete', () => {
+    const before = fixture('edit', 'remove-first.before.review.yaml');
+    const doneNote = /- id: n2\n(?: {2}.*\n)*? {2}done: true\n(?: {2}.*\n)*/.exec(before)![0];
+    expect(loadSidecar(before).notes.find((x) => x.id === 'n2')?.done).toBe(true);
+    const added = addNoteText(
+      before,
+      { at: 4, text: 'New.', created: CREATED },
+      loadSidecar(before).file!,
+    );
+    expect(added.text).toContain(doneNote);
+    expect(removeNoteText(added.text, 'n1')!.text).toContain(doneNote);
+    expect(removeNoteText(before, 'n3')!.text).toContain(doneNote);
   });
 
   it('returns null for an id that is not there', () => {
-    const before = fixture('edit', 'done-true.before.review.yaml');
-    expect(setDoneText(before, 'n99', true)).toBeNull();
+    const before = fixture('edit', 'remove-first.before.review.yaml');
     expect(removeNoteText(before, 'n99')).toBeNull();
   });
 
@@ -513,11 +516,6 @@ describe('edit validators', () => {
 
   it('checks ids against the notes and refuses extra fields', () => {
     const ids = ['n1', 'n2'];
-    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: true }, ids)).toBe(true);
-    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n9', done: true }, ids)).toBe(false);
-    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: 'yes' }, ids)).toBe(false);
-    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: true, x: 1 }, ids)).toBe(false);
-    expect(isReviewSetDone({ type: 'reviewSetDone', id: 1, done: true }, ids)).toBe(false);
     expect(isReviewDelete({ type: 'reviewDelete', id: 'n2' }, ids)).toBe(true);
     expect(isReviewDelete({ type: 'reviewDelete', id: 'n3' }, ids)).toBe(false);
     expect(isReviewDelete({ type: 'reviewDelete', id: 'n2', force: true }, ids)).toBe(false);

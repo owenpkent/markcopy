@@ -143,30 +143,6 @@
     }
   },
   {
-    "name": "done-true",
-    "op": "done",
-    "args": {
-      "id": "n1",
-      "done": true
-    }
-  },
-  {
-    "name": "done-false",
-    "op": "done",
-    "args": {
-      "id": "n2",
-      "done": false
-    }
-  },
-  {
-    "name": "done-on-full",
-    "op": "done",
-    "args": {
-      "id": "n1",
-      "done": true
-    }
-  },
-  {
     "name": "remove-first",
     "op": "remove",
     "args": {
