@@ -9,12 +9,26 @@ import { join } from 'node:path';
 vi.mock('vscode', () => ({}));
 
 import {
+  addNoteText,
   copyToast,
+  isReviewAdd,
+  isReviewDelete,
+  isReviewRestore,
+  isReviewSetDone,
   loadSidecar,
+  localTimestamp,
   markdownName,
+  newSidecarText,
+  nextNoteNumber,
+  pyFloat,
+  removeNoteText,
   resolveFps,
+  restoreNoteText,
+  reviewAddError,
   reviewStem,
+  setDoneText,
   sidecarName,
+  MAX_NOTE_TEXT,
 } from '../src/videoReview';
 import { reviewMarkdown } from '../src/review/markdown';
 
@@ -138,5 +152,279 @@ describe('copyToast', () => {
   it('counts the notes', () => {
     expect(copyToast(3, 'clip.review.md')).toBe('Copied 3 notes, saved clip.review.md');
     expect(copyToast(1, 'clip.review.md')).toBe('Copied 1 note, saved clip.review.md');
+  });
+});
+
+/** The text of a fixture under tests/fixtures/review. */
+const fixture = (...parts: string[]) => readFileSync(join(FIXTURES, ...parts), 'utf8');
+const CREATED = '2026-01-02T03:04:05';
+const crlf = (s: string) => s.replace(/\n/g, '\r\n');
+
+describe('golden edits against the kit', () => {
+  interface Case {
+    name: string;
+    op: 'add' | 'done' | 'remove';
+    args: { at?: number; out?: number; text?: string; id?: string; done?: boolean };
+  }
+  const cases = JSON.parse(fixture('edit', 'cases.json')) as Case[];
+
+  it('covers add, done and remove', () => {
+    expect(new Set(cases.map((c) => c.op))).toEqual(new Set(['add', 'done', 'remove']));
+  });
+
+  for (const c of cases) {
+    it(`${c.name}: the same bytes as the kit`, () => {
+      const before = fixture('edit', `${c.name}.before.review.yaml`);
+      const after = fixture('edit', `${c.name}.after.review.yaml`);
+      let got: string | null;
+      if (c.op === 'add') {
+        const file = loadSidecar(before).file!;
+        got = addNoteText(
+          before,
+          { at: c.args.at!, out: c.args.out, text: c.args.text!, created: CREATED },
+          file,
+        ).text;
+      } else if (c.op === 'done') {
+        got = setDoneText(before, c.args.id!, c.args.done!);
+      } else {
+        got = removeNoteText(before, c.args.id!)?.text ?? null;
+      }
+      expect(got).toBe(after);
+      // The result is a valid sidecar again.
+      expect(loadSidecar(got!).readOnly).toBeNull();
+    });
+  }
+
+  it('a removed note restores to the exact bytes it left', () => {
+    for (const c of cases.filter((x) => x.op === 'remove')) {
+      const before = fixture('edit', `${c.name}.before.review.yaml`);
+      const gone = removeNoteText(before, c.args.id!)!;
+      expect(restoreNoteText(gone.text, gone.removed), c.name).toBe(before);
+    }
+  });
+});
+
+describe('new sidecar', () => {
+  it('is what the kit writes for Review.new', () => {
+    const text = newSidecarText('empty.mp4', 30, 'dddddddddddd');
+    expect(text).toBe(fixture('edit', 'add-first.before.review.yaml'));
+    expect(text).toContain('fps: 30.0\n');
+    expect(text).toContain('notes: []\n');
+  });
+
+  it('quotes an all-digit id and a source that would read as another type', () => {
+    expect(newSidecarText('clip.mp4', 25, '123456789012')).toContain("id: '123456789012'\n");
+    const loaded = loadSidecar(newSidecarText('yes', 25, 'abcdef012345'));
+    expect(loaded.file?.source).toBe('yes');
+  });
+});
+
+describe('id allocation', () => {
+  const noMark = `version: 1
+source: clip.mp4
+fps: 30.0
+notes:
+- id: n1
+  target: source
+  at: 1.0
+  kind: note
+  done: false
+  created: '${CREATED}'
+- id: n5
+  target: source
+  at: 2.0
+  kind: note
+  done: false
+  created: '${CREATED}'
+`;
+
+  it('starts one past the highest id when next_note_id is missing', () => {
+    const file = loadSidecar(noMark).file!;
+    expect(nextNoteNumber(file)).toBe(6);
+    const next = addNoteText(noMark, { at: 3, text: 'x', created: CREATED }, file);
+    expect(next.id).toBe('n6');
+    // The key lands at the end, where the kit's dict puts a key it had to create.
+    expect(next.text.endsWith('next_note_id: 7\n')).toBe(true);
+    expect(loadSidecar(next.text).readOnly).toBeNull();
+  });
+
+  it('keeps the mark when it is higher than the ids present', () => {
+    const marked = noMark.replace('notes:', 'next_note_id: 9\nnotes:');
+    const file = loadSidecar(marked).file!;
+    expect(nextNoteNumber(file)).toBe(9);
+    const next = addNoteText(marked, { at: 3, text: 'x', created: CREATED }, file);
+    expect(next.id).toBe('n9');
+    expect(next.text).toContain('next_note_id: 10\n');
+  });
+
+  it('ignores ids that are not n<k>', () => {
+    const odd = noMark.replace('id: n5', 'id: custom');
+    expect(nextNoteNumber(loadSidecar(odd).file!)).toBe(2);
+  });
+});
+
+describe('edits that must not disturb the file', () => {
+  it('adds with the line ends the file already has', () => {
+    const before = crlf(fixture('edit', 'add-point.before.review.yaml'));
+    const file = loadSidecar(before).file!;
+    const next = addNoteText(before, { at: 2.5, text: 'Cut on the beat.', created: CREATED }, file);
+    expect(next.text).toBe(crlf(fixture('edit', 'add-point.after.review.yaml')));
+  });
+
+  it('deletes and flips in a CRLF file', () => {
+    const three = crlf(fixture('edit', 'remove-middle.before.review.yaml'));
+    expect(removeNoteText(three, 'n2')!.text).toBe(
+      crlf(fixture('edit', 'remove-middle.after.review.yaml')),
+    );
+    const doneBefore = crlf(fixture('edit', 'done-true.before.review.yaml'));
+    expect(setDoneText(doneBefore, 'n1', true)).toBe(
+      crlf(fixture('edit', 'done-true.after.review.yaml')),
+    );
+  });
+
+  it('keeps comments and an indented list', () => {
+    const text = `# hand notes
+version: 1
+source: clip.mp4
+fps: 25
+notes:
+  - id: n1 # first
+    target: source
+    at: 1
+    kind: note
+    done: false
+    created: '${CREATED}'
+`;
+    const added = addNoteText(
+      text,
+      { at: 2, text: 'b', created: CREATED },
+      loadSidecar(text).file!,
+    );
+    expect(added.text.startsWith('# hand notes\n')).toBe(true);
+    expect(added.text).toContain('  - id: n1 # first\n');
+    expect(added.text).toContain('  - id: n2\n    target: source\n    at: 2.0\n');
+    expect(loadSidecar(added.text).readOnly).toBeNull();
+    expect(setDoneText(text, 'n1', true)).toBe(text.replace('done: false', 'done: true'));
+  });
+
+  it('returns null for an id that is not there', () => {
+    const before = fixture('edit', 'done-true.before.review.yaml');
+    expect(setDoneText(before, 'n99', true)).toBeNull();
+    expect(removeNoteText(before, 'n99')).toBeNull();
+  });
+
+  it('restores at the old index, clamped, without touching next_note_id', () => {
+    const before = fixture('edit', 'remove-first.before.review.yaml');
+    const gone = removeNoteText(before, 'n3')!;
+    expect(gone.removed).toMatchObject({ id: 'n3', index: 2 });
+    // The list shrank meanwhile: index 2 is clamped to the end.
+    const shorter = removeNoteText(gone.text, 'n1')!.text;
+    const back = restoreNoteText(shorter, gone.removed);
+    expect(loadSidecar(back).notes.map((n) => n.id)).toEqual(['n2', 'n3']);
+    expect(back).toContain('next_note_id: 4\n');
+    // The first note goes back to the front.
+    const first = removeNoteText(before, 'n1')!;
+    expect(loadSidecar(restoreNoteText(first.text, first.removed)).notes[0].id).toBe('n1');
+  });
+
+  it('refuses a flow-style list of notes rather than guess', () => {
+    const flow = `version: 1\nsource: c.mp4\nfps: 25\nnotes: [{id: n1, target: source, at: 1, kind: note, done: false, created: '${CREATED}'}]\n`;
+    const file = loadSidecar(flow).file!;
+    expect(() => addNoteText(flow, { at: 2, text: 'x', created: CREATED }, file)).toThrow(
+      /cannot edit safely/,
+    );
+  });
+});
+
+describe('PyYAML number and time formats', () => {
+  it('always gives a float a fraction, and uses Python exponent form', () => {
+    expect(pyFloat(2)).toBe('2.0');
+    expect(pyFloat(0)).toBe('0.0');
+    expect(pyFloat(2.5)).toBe('2.5');
+    expect(pyFloat(29.97)).toBe('29.97');
+    expect(pyFloat(100000)).toBe('100000.0');
+    expect(pyFloat(0.0001)).toBe('0.0001');
+    expect(pyFloat(0.00005)).toBe('5.0e-05');
+    expect(pyFloat(1.5e-7)).toBe('1.5e-07');
+    expect(pyFloat(1e16)).toBe('1.0e+16');
+  });
+
+  it('writes the local time without a zone', () => {
+    expect(localTimestamp(new Date(2026, 0, 2, 3, 4, 5))).toBe('2026-01-02T03:04:05');
+    expect(localTimestamp(new Date(2026, 11, 31, 23, 59, 59))).toBe('2026-12-31T23:59:59');
+  });
+
+  it('quotes the created timestamp, so Python does not read it as a datetime', () => {
+    const before = fixture('edit', 'add-point.before.review.yaml');
+    const next = addNoteText(
+      before,
+      { at: 1, text: 'x', created: CREATED },
+      loadSidecar(before).file!,
+    );
+    expect(next.text).toContain(`created: '${CREATED}'\n`);
+  });
+});
+
+describe('edit validators', () => {
+  const bounds = { durationSec: 10, fps: 25 };
+
+  it('accepts a point and a range note', () => {
+    expect(isReviewAdd({ type: 'reviewAdd', at: 1, text: 'x' }, bounds)).toBe(true);
+    expect(isReviewAdd({ type: 'reviewAdd', at: 1, out: 2, text: '' }, bounds)).toBe(true);
+    // An explicit undefined survives structured clone and means no out.
+    expect(isReviewAdd({ type: 'reviewAdd', at: 0, out: undefined, text: 'x' }, bounds)).toBe(true);
+  });
+
+  it('rejects extra fields, non-finite and negative times, and a bad range', () => {
+    const base = { type: 'reviewAdd', at: 1, text: 'x' };
+    expect(isReviewAdd({ ...base, color: 'red' }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: -0.1 }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: Number.NaN }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: Infinity }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: '1' }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, out: 1 }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, out: 0.5 }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, out: Infinity }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, out: null }, bounds)).toBe(false);
+    expect(isReviewAdd(null, bounds)).toBe(false);
+    expect(isReviewAdd([], bounds)).toBe(false);
+  });
+
+  it('limits the text to 10,000 characters and requires a string', () => {
+    const base = { type: 'reviewAdd', at: 1 };
+    expect(isReviewAdd({ ...base, text: 'x'.repeat(MAX_NOTE_TEXT) }, bounds)).toBe(true);
+    expect(reviewAddError({ ...base, text: 'x'.repeat(MAX_NOTE_TEXT + 1) }, bounds)).toMatch(
+      /10,000/,
+    );
+    expect(isReviewAdd({ ...base, text: 5 }, bounds)).toBe(false);
+    expect(isReviewAdd(base, bounds)).toBe(false);
+  });
+
+  it('keeps times within the duration plus one frame, when a duration is known', () => {
+    const base = { type: 'reviewAdd', text: 'x' };
+    expect(isReviewAdd({ ...base, at: 10.04 }, bounds)).toBe(true);
+    expect(isReviewAdd({ ...base, at: 10.05 }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: 1, out: 10.05 }, bounds)).toBe(false);
+    expect(isReviewAdd({ ...base, at: 1e6 }, { fps: 25 })).toBe(true);
+    expect(isReviewAdd({ ...base, at: 1e6 }, { durationSec: 0, fps: 25 })).toBe(true);
+  });
+
+  it('checks ids against the notes and refuses extra fields', () => {
+    const ids = ['n1', 'n2'];
+    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: true }, ids)).toBe(true);
+    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n9', done: true }, ids)).toBe(false);
+    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: 'yes' }, ids)).toBe(false);
+    expect(isReviewSetDone({ type: 'reviewSetDone', id: 'n1', done: true, x: 1 }, ids)).toBe(false);
+    expect(isReviewSetDone({ type: 'reviewSetDone', id: 1, done: true }, ids)).toBe(false);
+    expect(isReviewDelete({ type: 'reviewDelete', id: 'n2' }, ids)).toBe(true);
+    expect(isReviewDelete({ type: 'reviewDelete', id: 'n3' }, ids)).toBe(false);
+    expect(isReviewDelete({ type: 'reviewDelete', id: 'n2', force: true }, ids)).toBe(false);
+    expect(isReviewDelete({ type: 'reviewDelete', id: ['n2'] }, ids)).toBe(false);
+  });
+
+  it('accepts a restore with no fields only', () => {
+    expect(isReviewRestore({ type: 'reviewRestore' })).toBe(true);
+    expect(isReviewRestore({ type: 'reviewRestore', id: 'n1' })).toBe(false);
+    expect(isReviewRestore(undefined)).toBe(false);
   });
 });

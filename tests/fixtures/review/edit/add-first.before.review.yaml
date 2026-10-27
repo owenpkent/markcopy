@@ -1,0 +1,11 @@
+version: 1
+id: dddddddddddd
+source: empty.mp4
+fps: 30.0
+next_note_id: 1
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes: []

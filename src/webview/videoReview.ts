@@ -1,9 +1,10 @@
-// Review mode for the video preview (see docs/VIDEO-REVIEW-DESIGN.md, phase 1).
+// Review mode for the video preview (see docs/VIDEO-REVIEW-DESIGN.md, phases 1 and 2).
 //
 // Called from src/webview/video.ts. Once the host sends its first `review`
 // message the native controls give way to a transport, a scrubber carrying the
-// notes as markers, and a read-only notes panel. Everything here is a view of the
-// host's sidecar: no edit is sent, only `reviewEnable` and `reviewCopy`.
+// notes as markers, and a notes panel with a composer at its foot. Everything here
+// is a view of the host's sidecar: an edit is only ever a small message (add, done,
+// delete, restore) and the page waits for the host's next `review` to show it.
 //
 // Layout and seek maths come from src/review/ (ports of Marker's timeline.js and
 // timecode.js), so a timecode or a marker position matches what Marker shows.
@@ -18,7 +19,9 @@ import {
   DOT_HIT,
   bandGeometry,
   cycleTarget,
+  frameStartSeconds,
   layoutDots,
+  pendingBand,
   seekMsForFrame,
   seekTarget,
   stepTarget,
@@ -117,6 +120,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
   // (a sidecar change, fps resolving) must not pull them back in.
   let turnedOff = false;
   let selected = '';
+  // The range being set for the next note, in seconds; -1 while unset.
+  let pendingIn = -1;
+  let pendingOut = -1;
+  // Whether playback was running when the note field took focus, so sending can
+  // pick it up again. Any other press on the player drops it.
+  let resumeAfterNote = false;
   let ui: ReturnType<typeof build> | undefined;
 
   const fps = (): number => (state && state.fps > 0 ? state.fps : 30);
@@ -163,6 +172,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function togglePlay(): void {
+    // A deliberate play or pause while typing is the reader's call, not ours to undo.
+    resumeAfterNote = false;
     if (video.paused) {
       void video.play().catch(() => undefined);
     } else {
@@ -230,7 +241,53 @@ export function createReview(deps: ReviewDeps): ReviewController {
     banner.setAttribute('role', 'status');
     banner.hidden = true;
     const list = el('div', 'mc-rv-list');
-    panel.append(head, banner, list);
+    const restore = button('mc-rv-btn', '', '', () => {
+      if (state?.restorable) {
+        post({ type: 'reviewRestore' });
+      }
+    });
+    restore.hidden = true;
+
+    const composer = el('div', 'mc-rv-composer');
+    composer.setAttribute('role', 'group');
+    composer.setAttribute('aria-label', 'Write a note');
+    const fpsNote = el('p', 'mc-rv-fpsnote', 'Frame rate unknown: notes will be saved at 30 fps');
+    fpsNote.hidden = true;
+    const inBtn = button('mc-rv-btn mc-rv-point', '[ In', 'Set In to this frame', setIn);
+    const outBtn = button('mc-rv-btn mc-rv-point', 'Out ]', 'Set Out to this frame', setOut);
+    const chip = el('span', 'mc-rv-chip');
+    chip.hidden = true;
+    const clearBtn = button('mc-rv-btn', 'Clear', 'Clear the range', clearRange);
+    clearBtn.hidden = true;
+    const cplay = button('mc-rv-btn', 'Play', 'Play', togglePlay);
+    const field = el('input', 'mc-rv-field');
+    field.type = 'text';
+    field.maxLength = 10000;
+    field.placeholder = 'Write a note';
+    field.setAttribute('aria-label', 'Note text');
+    const send = button('mc-rv-btn mc-rv-send', 'Send', 'Add note', sendNote);
+    // A press on these must not take focus from the field, or its blur would drop
+    // the pending resume.
+    for (const b of [inBtn, outBtn, clearBtn, send]) {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+    }
+    field.addEventListener('focus', () => {
+      resumeAfterNote = !video.paused;
+      video.pause();
+    });
+    field.addEventListener('blur', () => {
+      resumeAfterNote = false;
+    });
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        sendNote();
+      } else if (e.key === 'Escape') {
+        field.blur();
+      }
+    });
+    composer.append(inBtn, outBtn, chip, clearBtn, cplay, field, send);
+    panel.append(head, banner, restore, list, fpsNote, composer);
 
     root.append(main, panel);
     document.body.appendChild(root);
@@ -279,7 +336,16 @@ export function createReview(deps: ReviewDeps): ReviewController {
       count,
       copy,
       banner,
+      restore,
       list,
+      fpsNote,
+      inBtn,
+      outBtn,
+      chip,
+      clearBtn,
+      cplay,
+      field,
+      send,
     };
   }
 
@@ -315,6 +381,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const playing = !video.paused && !video.ended;
     ui.play.textContent = playing ? 'Pause' : 'Play';
     ui.play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    ui.cplay.textContent = playing ? 'Pause' : 'Play';
+    ui.cplay.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     const r = Number(video.playbackRate.toFixed(2));
     ui.speed.textContent = `${r}x`;
     ui.speed.setAttribute('aria-label', `Playback speed ${r}x, press to change`);
@@ -380,6 +448,15 @@ export function createReview(deps: ReviewDeps): ReviewController {
         bands.appendChild(bar);
       }
     }
+    const pb = pendingBand(pendingIn, pendingOut, dur, width);
+    if (pb.visible) {
+      const bar = el('div', pb.hasOut ? 'mc-rv-pending' : 'mc-rv-pending mc-rv-pending--point');
+      bar.style.left = `${pb.x}px`;
+      if (pb.hasOut) {
+        bar.style.width = `${pb.width}px`;
+      }
+      bands.appendChild(bar);
+    }
   }
 
   function scrollCardIntoView(id: string): void {
@@ -394,20 +471,47 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (!ui) {
       return;
     }
-    for (const card of ui.list.querySelectorAll<HTMLElement>('.mc-rv-card')) {
-      const on = card.dataset.id === selected;
+    const locked = state?.readOnly != null;
+    for (const item of ui.list.querySelectorAll<HTMLElement>('.mc-rv-item')) {
+      const on = item.dataset.id === selected;
+      const card = item.querySelector<HTMLElement>('.mc-rv-card')!;
       card.classList.toggle('mc-rv-card--selected', on);
       card.setAttribute('aria-pressed', String(on));
+      item.querySelector('.mc-rv-actions')?.remove();
+      const note = on ? state?.notes.find((n) => n.id === selected) : undefined;
+      if (note) {
+        item.appendChild(actions(note, locked));
+      }
     }
   }
 
-  function card(note: ReviewNote): HTMLButtonElement {
+  /** Done and Delete, shown on the selected card only. */
+  function actions(note: ReviewNote, locked: boolean): HTMLElement {
+    const row = el('div', 'mc-rv-actions');
+    const done = button(
+      'mc-rv-btn',
+      note.done ? 'Not done' : 'Done',
+      note.done ? `Mark ${note.id} not done` : `Mark ${note.id} done`,
+      () => post({ type: 'reviewSetDone', id: note.id, done: !note.done }),
+    );
+    const del = button('mc-rv-btn', 'Delete', `Delete ${note.id}`, () =>
+      post({ type: 'reviewDelete', id: note.id }),
+    );
+    done.disabled = locked;
+    del.disabled = locked;
+    row.append(done, del);
+    return row;
+  }
+
+  function card(note: ReviewNote): HTMLElement {
     const rate = fps();
     const start = secondsToTimecode(note.at, rate);
     const when =
       note.out !== undefined && note.out > note.at
         ? `${start} to ${secondsToTimecode(note.out, rate)}`
         : start;
+    const item = el('div', 'mc-rv-item');
+    item.dataset.id = note.id;
     const b = el('button', 'mc-rv-card');
     b.type = 'button';
     b.dataset.id = note.id;
@@ -424,7 +528,107 @@ export function createReview(deps: ReviewDeps): ReviewController {
       b.appendChild(el('span', 'mc-rv-done', 'Done'));
     }
     b.addEventListener('click', () => select(note.id, true));
-    return b;
+    item.appendChild(b);
+    return item;
+  }
+
+  // -------------------------------------------------------------------------
+  // Composer
+  // -------------------------------------------------------------------------
+  /** The start of the frame on screen, which is what a note stores. */
+  const here = (): number => frameStartSeconds(video.currentTime * 1000, fps());
+
+  function setIn(): void {
+    pendingIn = here();
+    // Marker's rule: an In at or past the Out drops the Out.
+    if (pendingOut <= pendingIn) {
+      pendingOut = -1;
+    }
+    renderPending();
+  }
+
+  function setOut(): void {
+    if (pendingIn < 0) {
+      toast('Set In first');
+      return;
+    }
+    const out = here();
+    if (out <= pendingIn) {
+      toast('Out must be after In');
+      return;
+    }
+    pendingOut = out;
+    renderPending();
+  }
+
+  function clearRange(): void {
+    pendingIn = pendingOut = -1;
+    renderPending();
+  }
+
+  function sendNote(): void {
+    if (!ui || !state || state.readOnly !== null || state.fpsSource === 'pending') {
+      return;
+    }
+    const text = ui.field.value.trim();
+    if (!text) {
+      toast('Write the note first');
+      return;
+    }
+    const at = pendingIn >= 0 ? pendingIn : here();
+    const msg: ReviewWebviewMessage =
+      pendingIn >= 0 && pendingOut > pendingIn
+        ? { type: 'reviewAdd', at, out: pendingOut, text }
+        : { type: 'reviewAdd', at, text };
+    post(msg);
+    pendingIn = pendingOut = -1;
+    ui.field.value = '';
+    renderPending();
+    // Hand the keyboard back to the player, then pick playback up where it was.
+    const resume = resumeAfterNote;
+    resumeAfterNote = false;
+    ui.field.blur();
+    if (resume) {
+      void video.play().catch(() => toast('Playback was blocked, press play again'));
+    }
+  }
+
+  function renderPending(): void {
+    if (!ui) {
+      return;
+    }
+    const set = pendingIn >= 0;
+    const rate = fps();
+    ui.inBtn.setAttribute('aria-pressed', String(set));
+    ui.outBtn.setAttribute('aria-pressed', String(pendingOut > pendingIn && set));
+    ui.chip.hidden = !set;
+    ui.clearBtn.hidden = !set;
+    ui.chip.textContent = !set
+      ? ''
+      : pendingOut > pendingIn
+        ? `${secondsToTimecode(pendingIn, rate)} to ${secondsToTimecode(pendingOut, rate)}`
+        : secondsToTimecode(pendingIn, rate);
+    renderMarkers();
+  }
+
+  function renderComposer(): void {
+    if (!ui || !state) {
+      return;
+    }
+    const locked = state.readOnly !== null;
+    for (const c of [ui.inBtn, ui.outBtn, ui.clearBtn, ui.field]) {
+      c.disabled = locked;
+    }
+    // Until the host knows the rate, a note would be saved at the wrong one.
+    ui.send.disabled = locked || state.fpsSource === 'pending';
+    ui.fpsNote.hidden = !(state.sidecar === null && state.fpsSource === 'assumed');
+    ui.restore.hidden = !state.restorable;
+    ui.restore.disabled = locked;
+    if (state.restorable) {
+      ui.restore.textContent = `Restore ${state.restorable}`;
+      ui.restore.setAttribute('aria-label', `Restore ${state.restorable}`);
+    }
+    renderPending();
   }
 
   function renderPanel(): void {
@@ -456,6 +660,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     }
     ui.list.scrollTop = scroll;
     renderSelection();
+    renderComposer();
   }
 
   function renderAll(): void {
@@ -523,6 +728,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
       }
       const next = msg as ReviewStateMessage;
       state = next;
+      // The note this panel just added is the one to look at.
+      if (next.added) {
+        selected = next.added;
+      }
       if (!next.notes.some((n) => n.id === selected)) {
         selected = '';
       }
@@ -530,6 +739,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
         enter();
       }
       renderAll();
+      if (next.added) {
+        scrollCardIntoView(next.added);
+      }
       return true;
     },
     active: () => isActive,
@@ -558,6 +770,20 @@ export function createReview(deps: ReviewDeps): ReviewController {
         case 'l':
         case 'L':
           setRate(ladderRate(1));
+          break;
+        case 'i':
+        case 'I':
+          if (!state || state.readOnly !== null) {
+            return false;
+          }
+          setIn();
+          break;
+        case 'o':
+        case 'O':
+          if (!state || state.readOnly !== null) {
+            return false;
+          }
+          setOut();
           break;
         default:
           return false;

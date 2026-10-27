@@ -1,0 +1,136 @@
+[
+  {
+    "name": "add-point",
+    "op": "add",
+    "args": {
+      "at": 2.5,
+      "text": "Cut on the beat."
+    }
+  },
+  {
+    "name": "add-range",
+    "op": "add",
+    "args": {
+      "at": 8.0,
+      "out": 9.25,
+      "text": "Hold this shot."
+    }
+  },
+  {
+    "name": "add-long-text",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "The pan loses focus as the subject walks past the window, and the highlights on the glass clip hard before the cut, so please check both takes."
+    }
+  },
+  {
+    "name": "add-multiline",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "Line one.\n\nLine two: 'quoted' and more."
+    }
+  },
+  {
+    "name": "add-empty-text",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": ""
+    }
+  },
+  {
+    "name": "add-reserved-words",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "yes"
+    }
+  },
+  {
+    "name": "add-number-text",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "12"
+    }
+  },
+  {
+    "name": "add-unicode",
+    "op": "add",
+    "args": {
+      "at": 3.0,
+      "text": "Caf\u00e9 \u2603 \ud83d\ude00, tab\there"
+    }
+  },
+  {
+    "name": "add-first",
+    "op": "add",
+    "args": {
+      "at": 1.0,
+      "text": "First note."
+    }
+  },
+  {
+    "name": "add-to-full",
+    "op": "add",
+    "args": {
+      "at": 61.5,
+      "out": 62.0,
+      "text": "New on a rich file."
+    }
+  },
+  {
+    "name": "done-true",
+    "op": "done",
+    "args": {
+      "id": "n1",
+      "done": true
+    }
+  },
+  {
+    "name": "done-false",
+    "op": "done",
+    "args": {
+      "id": "n2",
+      "done": false
+    }
+  },
+  {
+    "name": "done-on-full",
+    "op": "done",
+    "args": {
+      "id": "n1",
+      "done": true
+    }
+  },
+  {
+    "name": "remove-first",
+    "op": "remove",
+    "args": {
+      "id": "n1"
+    }
+  },
+  {
+    "name": "remove-middle",
+    "op": "remove",
+    "args": {
+      "id": "n2"
+    }
+  },
+  {
+    "name": "remove-last",
+    "op": "remove",
+    "args": {
+      "id": "n3"
+    }
+  },
+  {
+    "name": "remove-from-full",
+    "op": "remove",
+    "args": {
+      "id": "n3"
+    }
+  }
+]

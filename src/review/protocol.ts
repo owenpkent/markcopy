@@ -36,6 +36,10 @@ export interface ReviewStateMessage {
   notes: ReviewNote[];
   /** Why the sidecar cannot be edited (parse or schema failure, other version), or null. */
   readOnly: string | null;
+  /** The id of the note Restore would bring back (one level, this panel only), or null. */
+  restorable: string | null;
+  /** The id of the note this panel just added, so the webview can select it; else null. */
+  added: string | null;
 }
 
 /** Host to webview: an error for the toast. */
@@ -51,6 +55,15 @@ export type ReviewHostMessage = ReviewStateMessage | ReviewErrorMessage;
  * the host resolves fps, loads any sidecar and answers with `review`.
  * `reviewCopy`: build the markdown from the sidecar, write `<stem>.review.md`
  * and put the text on the clipboard; the host answers with the existing `toast`.
- * Neither carries data, so neither needs more validation than its type.
+ *
+ * The edits carry data from the page, so the host checks each with an exported
+ * validator before acting, and answers every one with `review` (or `reviewError`).
+ * Times are seconds in source time. The host allocates ids; the page never does.
  */
-export type ReviewWebviewMessage = { type: 'reviewEnable' } | { type: 'reviewCopy' };
+export type ReviewWebviewMessage =
+  | { type: 'reviewEnable' }
+  | { type: 'reviewCopy' }
+  | { type: 'reviewAdd'; at: number; out?: number; text: string }
+  | { type: 'reviewSetDone'; id: string; done: boolean }
+  | { type: 'reviewDelete'; id: string }
+  | { type: 'reviewRestore' };

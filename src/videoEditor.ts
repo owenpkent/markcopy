@@ -3,7 +3,7 @@ import { revealInOs } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
-import { ReviewSession } from './videoReview';
+import { ReviewSession, type ProbeInfo } from './videoReview';
 import {
   audioCodecLabel,
   canRemux,
@@ -88,7 +88,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
       this.sendLoad(webview, document.uri, built),
     );
 
-    const review = new ReviewSession(document.uri, webview, () => proxy.averageFrameRate());
+    const review = new ReviewSession(document.uri, webview, () => proxy.reviewProbe());
 
     webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === 'ready') {
@@ -128,6 +128,16 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         await review.enable();
       } else if (msg?.type === 'reviewCopy') {
         await review.copy();
+      } else if (msg?.type === 'reviewAdd') {
+        // The edits carry data from the page, so the session checks each one with
+        // its exported validator before it touches the file.
+        await review.add(msg);
+      } else if (msg?.type === 'reviewSetDone') {
+        await review.setDone(msg);
+      } else if (msg?.type === 'reviewDelete') {
+        await review.delete(msg);
+      } else if (msg?.type === 'reviewRestore') {
+        await review.restore(msg);
       } else if (
         msg?.type === 'updateSetting' &&
         typeof msg.key === 'string' &&
@@ -498,17 +508,18 @@ class ProxySession {
   }
 
   /**
-   * The video's average frame rate for review mode, or 0 when it cannot be
-   * known. Unlike `offerSound` this probes even when `video.transcode` is `off`,
-   * because the rate has nothing to do with transcoding; it still needs ffmpeg.
-   * Shares the cached probe, so it never costs a second ffprobe run.
+   * The video's average frame rate and duration for review mode, 0 where they
+   * cannot be known. Unlike `offerSound` this probes even when `video.transcode`
+   * is `off`, because neither has anything to do with transcoding; it still needs
+   * ffmpeg. Shares the cached probe, so it never costs a second ffprobe run.
    */
-  async averageFrameRate(): Promise<number> {
+  async reviewProbe(): Promise<ProbeInfo> {
     const tools = await this.find(vscode.workspace.getConfiguration('markcopy', this.source));
     if (!tools) {
-      return 0;
+      return { fps: 0, durationSec: 0 };
     }
-    return (await this.probe(tools.ffprobe)).avgFrameRate;
+    const probe = await this.probe(tools.ffprobe);
+    return { fps: probe.avgFrameRate, durationSec: probe.durationSec };
   }
 
   /** Encode the proxy, reporting progress, and play it when it lands. */

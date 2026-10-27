@@ -1011,6 +1011,10 @@ body.mc-video .mc-rv {
   --rv-surface: color-mix(in srgb, var(--mc-video-fg) 8%, var(--mc-video-bg));
   --rv-raised: color-mix(in srgb, var(--mc-video-fg) 16%, var(--mc-video-bg));
   --rv-line: color-mix(in srgb, var(--mc-video-fg) 40%, var(--mc-video-bg));
+  /* The text field's boundary, held to 3:1 against the panel in every theme. */
+  --rv-edge: color-mix(in srgb, var(--mc-video-fg) 65%, var(--mc-video-bg));
+  /* The pending range and a lit In or Out: the one non-foreground colour. */
+  --rv-accent: var(--vscode-focusBorder, #3794ff);
   position: fixed;
   inset: 0 0 calc(30px + var(--mc-notice-h, 0px)) 0;
   display: flex;
@@ -1258,6 +1262,91 @@ body.mc-video .mc-rv-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.4;
+}
+
+/* The pending range sits on the same strip as the note bands, in the accent
+   colour and thicker so it reads as a different thing. In alone is a tick. */
+body.mc-video .mc-rv-pending {
+  position: absolute;
+  top: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rv-accent);
+  outline: 1px solid var(--mc-video-bg);
+}
+body.mc-video .mc-rv-pending--point {
+  top: -8px;
+  width: 4px;
+  height: 20px;
+}
+
+/* Notes written in review mode: the card and its actions share one item. */
+body.mc-video .mc-rv-item {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+body.mc-video .mc-rv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+body.mc-video .mc-rv-composer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--mc-video-bg);
+  border: 1px solid var(--rv-edge);
+  border-radius: 4px;
+}
+body.mc-video .mc-rv-fpsnote {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--rv-line);
+  border-left: 4px solid var(--rv-accent);
+  border-radius: 4px;
+  background: var(--rv-raised);
+}
+body.mc-video .mc-rv-fpsnote[hidden],
+body.mc-video .mc-rv-chip[hidden],
+body.mc-video .mc-rv-btn[hidden] {
+  display: none;
+}
+body.mc-video .mc-rv-point[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--rv-accent) 45%, var(--mc-video-bg));
+  border-color: var(--rv-accent);
+  border-width: 2px;
+  font-weight: 600;
+}
+body.mc-video .mc-rv-chip {
+  font-family: var(--vscode-editor-font-family, monospace);
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+body.mc-video .mc-rv-field {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--mc-video-fg);
+  background: var(--mc-video-bg);
+  border: 1px solid var(--rv-edge);
+  border-radius: 4px;
+}
+body.mc-video .mc-rv-field:focus-visible {
+  outline: 2px solid var(--mc-video-fg);
+  outline-offset: 2px;
+}
+body.mc-video .mc-rv-field:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ---- TeX compile-status overlay ------------------------------------------

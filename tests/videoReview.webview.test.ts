@@ -73,6 +73,8 @@ const review = (extra: Partial<ReviewStateMessage> = {}): ReviewStateMessage => 
   sidecar: 'clip.review.yaml',
   notes: [note('n1', 1), note('n2', 8), note('n3', 30, { out: 40, kind: 'keep', done: true })],
   readOnly: null,
+  restorable: null,
+  added: null,
   ...extra,
 });
 
@@ -96,6 +98,20 @@ const copyButton = () =>
   [...root().querySelectorAll<HTMLButtonElement>('.mc-rv-btn')].find(
     (b) => b.textContent === 'Copy notes as Markdown',
   ) as HTMLButtonElement;
+
+const byLabel = (label: string): HTMLButtonElement | null =>
+  root().querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+const field = () => root().querySelector<HTMLInputElement>('.mc-rv-field')!;
+const chip = () => root().querySelector<HTMLElement>('.mc-rv-chip')!;
+const fpsNote = () => root().querySelector<HTMLElement>('.mc-rv-fpsnote')!;
+
+/** Put the playhead inside the frame that starts at this many seconds (30 fps). */
+function at(video: HTMLVideoElement, seconds: number): void {
+  video.currentTime = seconds + 1 / 60;
+}
+
+const key = (k: string, target: EventTarget = document) =>
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
 
 /** Right-click, then press the menu row with this label. */
 function pressMenu(label: string): HTMLElement {
@@ -203,6 +219,251 @@ describe('review mode', () => {
     document.body.appendChild(input);
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(video.currentTime).toBeCloseTo(0.06, 6);
+  });
+});
+
+describe('composer', () => {
+  it('lights In and Out, shows the chip and clears the range', async () => {
+    const video = await open();
+    fromHost(review());
+    const inBtn = byLabel('Set In to this frame')!;
+    const outBtn = byLabel('Set Out to this frame')!;
+    expect(chip().hidden).toBe(true);
+    expect(byLabel('Clear the range')!.hidden).toBe(true);
+
+    at(video, 31);
+    inBtn.click();
+    expect(inBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(outBtn.getAttribute('aria-pressed')).toBe('false');
+    expect(chip().textContent).toBe('00:00:31:00');
+    expect(byLabel('Clear the range')!.hidden).toBe(false);
+
+    at(video, 36);
+    outBtn.click();
+    expect(outBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(chip().textContent).toBe('00:00:31:00 to 00:00:36:00');
+    expect(root().querySelectorAll('.mc-rv-pending')).toHaveLength(1);
+
+    byLabel('Clear the range')!.click();
+    expect(chip().hidden).toBe(true);
+    expect(inBtn.getAttribute('aria-pressed')).toBe('false');
+    expect(root().querySelectorAll('.mc-rv-pending')).toHaveLength(0);
+  });
+
+  it('draws In alone as a tick and follows the Out before In rules', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 10);
+    byLabel('Set Out to this frame')!.click();
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Set In first');
+    expect(chip().hidden).toBe(true);
+
+    byLabel('Set In to this frame')!.click();
+    expect(root().querySelector('.mc-rv-pending--point')).not.toBeNull();
+    // Out at or before In is refused.
+    byLabel('Set Out to this frame')!.click();
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Out must be after In');
+    expect(chip().textContent).toBe('00:00:10:00');
+
+    at(video, 20);
+    byLabel('Set Out to this frame')!.click();
+    // A later In past the Out drops the Out.
+    at(video, 25);
+    byLabel('Set In to this frame')!.click();
+    expect(chip().textContent).toBe('00:00:25:00');
+  });
+
+  it('sends a range note, then clears the range and the field', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 31);
+    byLabel('Set In to this frame')!.click();
+    at(video, 36);
+    byLabel('Set Out to this frame')!.click();
+    field().value = '  tighten this  ';
+    byLabel('Add note')!.click();
+
+    const sent = posted.find((m) => m.type === 'reviewAdd')!;
+    expect(sent.at).toBeCloseTo(31, 9);
+    expect(sent).toMatchObject({ out: 36, text: 'tighten this' });
+    expect(field().value).toBe('');
+    expect(chip().hidden).toBe(true);
+  });
+
+  it('sends at the playhead frame without a range, and Enter sends', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 12);
+    field().value = 'cut here';
+    key('Enter', field());
+    const sent = posted.filter((m) => m.type === 'reviewAdd');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].at).toBeCloseTo(12, 9);
+    expect(sent[0]).not.toHaveProperty('out');
+    expect(sent[0].text).toBe('cut here');
+    expect(field().value).toBe('');
+  });
+
+  it('does not send an empty note', async () => {
+    await open();
+    fromHost(review());
+    key('Enter', field());
+    expect(posted.some((m) => m.type === 'reviewAdd')).toBe(false);
+  });
+
+  it('pauses on focus and resumes on send when it was playing', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+
+    field().dispatchEvent(new FocusEvent('focus'));
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    field().value = 'x';
+    byLabel('Add note')!.click();
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a paused video paused after a send', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: true, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockClear();
+    field().dispatchEvent(new FocusEvent('focus'));
+    field().value = 'x';
+    byLabel('Add note')!.click();
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('respects a deliberate play button press while typing', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    field().dispatchEvent(new FocusEvent('focus'));
+    play.mockClear();
+    // The focus stopped the video; the reader starts it, then stops it again.
+    Object.defineProperty(video, 'paused', { value: true, configurable: true });
+    video.dispatchEvent(new Event('pause'));
+    byLabel('Play')!.click();
+    expect(play).toHaveBeenCalledTimes(1);
+    play.mockClear();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    video.dispatchEvent(new Event('pause'));
+    byLabel('Pause')!.click();
+    field().value = 'x';
+    byLabel('Add note')!.click();
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('leaves the field on Escape', async () => {
+    await open();
+    fromHost(review());
+    field().focus();
+    expect(document.activeElement).toBe(field());
+    key('Escape', field());
+    expect(document.activeElement).not.toBe(field());
+  });
+
+  it('is disabled while read-only', async () => {
+    await open();
+    fromHost(review({ readOnly: 'schema version 2', restorable: 'n4' }));
+    expect(field().disabled).toBe(true);
+    expect(byLabel('Add note')!.disabled).toBe(true);
+    expect(byLabel('Set In to this frame')!.disabled).toBe(true);
+    expect(byLabel('Set Out to this frame')!.disabled).toBe(true);
+    expect(byLabel('Restore n4')!.disabled).toBe(true);
+    cards()[0].click();
+    expect(byLabel('Delete n1')!.disabled).toBe(true);
+    expect(byLabel('Mark n1 done')!.disabled).toBe(true);
+    key('i');
+    expect(chip().hidden).toBe(true);
+  });
+
+  it('warns about an assumed rate before the first note and waits for a pending one', async () => {
+    await open();
+    fromHost(review({ sidecar: null, notes: [], fpsSource: 'assumed' }));
+    expect(fpsNote().hidden).toBe(false);
+    expect(fpsNote().textContent).toBe('Frame rate unknown: notes will be saved at 30 fps');
+    expect(byLabel('Add note')!.disabled).toBe(false);
+
+    fromHost(review({ sidecar: null, notes: [], fpsSource: 'pending' }));
+    expect(fpsNote().hidden).toBe(true);
+    expect(byLabel('Add note')!.disabled).toBe(true);
+
+    fromHost(review({ fpsSource: 'assumed' }));
+    expect(fpsNote().hidden).toBe(true);
+  });
+});
+
+describe('card actions', () => {
+  it('offers Done and Delete on the selected card only', async () => {
+    await open();
+    fromHost(review());
+    expect(root().querySelectorAll('.mc-rv-actions')).toHaveLength(0);
+
+    cards()[0].click();
+    expect(root().querySelectorAll('.mc-rv-actions')).toHaveLength(1);
+    expect(cards()[0].parentElement!.querySelector('.mc-rv-actions')).not.toBeNull();
+    expect(byLabel('Delete n2')).toBeNull();
+
+    byLabel('Mark n1 done')!.click();
+    expect(posted).toContainEqual({ type: 'reviewSetDone', id: 'n1', done: true });
+    byLabel('Delete n1')!.click();
+    expect(posted).toContainEqual({ type: 'reviewDelete', id: 'n1' });
+  });
+
+  it('toggles a done note back', async () => {
+    await open();
+    fromHost(review());
+    cards()[2].click();
+    byLabel('Mark n3 not done')!.click();
+    expect(posted).toContainEqual({ type: 'reviewSetDone', id: 'n3', done: false });
+  });
+
+  it('shows Restore when the host holds a note and posts reviewRestore', async () => {
+    await open();
+    fromHost(review());
+    expect(root().querySelector<HTMLElement>('.mc-rv-panel > .mc-rv-btn')!.hidden).toBe(true);
+    fromHost(review({ restorable: 'n4' }));
+    const restore = byLabel('Restore n4')!;
+    expect(restore.hidden).toBe(false);
+    expect(restore.textContent).toBe('Restore n4');
+    restore.click();
+    expect(posted).toContainEqual({ type: 'reviewRestore' });
+  });
+
+  it('selects the note the host says was just added', async () => {
+    await open();
+    fromHost(review());
+    fromHost(review({ notes: [note('n1', 1), note('n4', 20)], added: 'n4' }));
+    expect(cards()[1].getAttribute('aria-pressed')).toBe('true');
+    expect(markers()[1].getAttribute('aria-pressed')).toBe('true');
+    expect(byLabel('Delete n4')).not.toBeNull();
+  });
+});
+
+describe('review shortcuts', () => {
+  it('sets In and Out with I and O', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 5);
+    key('i');
+    expect(chip().textContent).toBe('00:00:05:00');
+    at(video, 9);
+    key('O');
+    expect(chip().textContent).toBe('00:00:05:00 to 00:00:09:00');
+  });
+
+  it('ignores letters typed in the note field', async () => {
+    const video = await open();
+    fromHost(review());
+    at(video, 5);
+    key('i', field());
+    key('o', field());
+    expect(chip().hidden).toBe(true);
   });
 });
 

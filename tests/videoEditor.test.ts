@@ -13,7 +13,7 @@
 // of src/videoProxy.ts is replaced so no process is spawned, while the pure
 // helpers (silentAudio and the label functions) stay real, so the probe below
 // has to look silent to the real predicate for the sound offer to be made.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { posix } from 'node:path';
 
 const configUpdate = vi.hoisted(() => vi.fn(async () => undefined));
@@ -446,7 +446,240 @@ notes:
     const { posted, send } = await open();
     await send({ type: 'ready' });
     await send({ type: 'reviewCopy' });
-    expect(posted.at(-1)?.type).toBe('reviewError');
+    // The review setting is left on by an earlier test, so a probe's `review` may land after.
+    expect(posted.filter((m) => m.type === 'reviewError')).toHaveLength(1);
     expect(files.size).toBe(0);
+  });
+});
+
+describe('VideoEditorProvider review edits', () => {
+  const SIDECAR = `version: 1
+id: aaaaaaaaaaaa
+source: clip.mp4
+fps: 25.0
+next_note_id: 2
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  at: 1.0
+  kind: note
+  text: Soft focus.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+`;
+  const YAML = '/videos/clip.review.yaml';
+  const MD = '/videos/clip.review.md';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    files.clear();
+    reviewSetting.on = false;
+    tools.findFfmpeg.mockResolvedValue({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' });
+    tools.probeSource.mockResolvedValue({
+      durationSec: 5,
+      width: 1920,
+      height: 1080,
+      frameRate: 60,
+      avgFrameRate: 24,
+      hasAlpha: false,
+      hasAudio: false,
+      audioCodec: '',
+      codec: 'h264',
+      profile: '',
+    });
+    tools.proxyDir.mockReturnValue('/proxies');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 0, 2, 3, 4, 5));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function open(sidecar?: string) {
+    if (sidecar !== undefined) {
+      files.set(YAML, sidecar);
+    }
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: '/videos/clip.mp4',
+      fsPath: '/videos/clip.mp4',
+    } as vscode.Uri);
+    const harness = createPanel();
+    await provider.resolveCustomEditor(document, harness.panel);
+    await harness.send({ type: 'ready' });
+    return harness;
+  }
+
+  const lastReview = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === 'review').at(-1) as Record<string, unknown> & {
+      notes: Array<{ id: string }>;
+    };
+  const errors = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === 'reviewError').map((m) => m.message);
+
+  it('adds a note, rewrites the markdown, and says which note is new', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 2.4, text: 'Cut here.' });
+    const sidecar = files.get(YAML)!;
+    expect(sidecar).toContain('next_note_id: 3\n');
+    expect(sidecar).toContain(
+      "- id: n2\n  target: source\n  at: 2.4\n  kind: note\n  text: Cut here.\n  done: false\n  applied_op: null\n  checkpoint: null\n  drawing: []\n  created: '2026-01-02T03:04:05'\n",
+    );
+    expect(files.get(MD)).toContain('## n2  00:00:02:10  note');
+    expect([...files.keys()].filter((k) => k.endsWith('.tmp'))).toEqual([]);
+    expect(lastReview(posted)).toMatchObject({ added: 'n2', restorable: null });
+    expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n1', 'n2']);
+  });
+
+  it('runs edits in order: two adds in a row get n1 and n2', async () => {
+    const { posted, send } = await open();
+    // No sidecar yet: the first add creates it, once the probe has said 24 fps.
+    await send({ type: 'reviewEnable' });
+    await Promise.all([
+      send({ type: 'reviewAdd', at: 1, text: 'one' }),
+      send({ type: 'reviewAdd', at: 2, out: 3, text: 'two' }),
+    ]);
+    const loaded = files.get(YAML)!;
+    expect(loaded).toMatch(
+      /^version: 1\nid: [0-9a-f]{12}\nsource: clip.mp4\nfps: 24.0\nnext_note_id: 3\n/,
+    );
+    expect(loaded).toContain(
+      "asset:\n  rating: 0\n  status: none\n  keywords: []\n  notes: ''\nnotes:\n- id: n1\n",
+    );
+    expect(loaded.indexOf('id: n1')).toBeLessThan(loaded.indexOf('id: n2'));
+    const adds = posted.filter((m) => m.type === 'review' && m.added).map((m) => m.added);
+    expect(adds).toEqual(['n1', 'n2']);
+    // The post after the next, unrelated change carries no `added`.
+    await send({ type: 'reviewSetDone', id: 'n1', done: true });
+    expect(lastReview(posted).added).toBeNull();
+  });
+
+  it('flips done and rewrites the markdown only through an edit', async () => {
+    const { posted, send } = await open(SIDECAR);
+    expect(files.has(MD)).toBe(false);
+    await send({ type: 'reviewSetDone', id: 'n1', done: true });
+    expect(files.get(YAML)).toBe(SIDECAR.replace('done: false', 'done: true'));
+    expect(files.has(MD)).toBe(true);
+    // A reload caused by another program leaves the markdown alone.
+    files.delete(MD);
+    files.set(YAML, SIDECAR);
+    (watcher.onDidChange.mock.calls[0][0] as () => void)();
+    await vi.waitFor(() =>
+      expect(posted.filter((m) => m.type === 'review').length).toBeGreaterThan(2),
+    );
+    expect(files.has(MD)).toBe(false);
+  });
+
+  it('deletes, then restores under the same id at the same place', async () => {
+    const two =
+      SIDECAR.replace('next_note_id: 2', 'next_note_id: 3') +
+      "- id: n2\n  target: source\n  at: 4.0\n  kind: note\n  text: Second.\n  done: false\n  applied_op: null\n  checkpoint: null\n  drawing: []\n  created: '2026-01-02T03:04:05'\n";
+    const { posted, send } = await open(two);
+    await send({ type: 'reviewDelete', id: 'n1' });
+    expect(lastReview(posted)).toMatchObject({ restorable: 'n1' });
+    expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n2']);
+    await send({ type: 'reviewRestore' });
+    expect(files.get(YAML)).toBe(two);
+    expect(lastReview(posted)).toMatchObject({ restorable: null });
+    // One level only: nothing is held now.
+    await send({ type: 'reviewRestore' });
+    expect(errors(posted)).toEqual(['There is no deleted note to restore']);
+  });
+
+  it('holds one deleted note: a second delete replaces the first', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 2, text: 'b' });
+    await send({ type: 'reviewDelete', id: 'n1' });
+    await send({ type: 'reviewDelete', id: 'n2' });
+    expect(lastReview(posted).restorable).toBe('n2');
+    await send({ type: 'reviewRestore' });
+    expect(lastReview(posted).notes.map((n) => n.id)).toEqual(['n2']);
+    expect(files.get(YAML)).toContain('next_note_id: 3\n');
+  });
+
+  it('refuses every edit while the sidecar is read-only, and leaves it alone', async () => {
+    const v2 = 'version: 2\nsource: clip.mp4\nfps: 25\n';
+    const { posted, send } = await open(v2);
+    await send({ type: 'reviewAdd', at: 1, text: 'x' });
+    await send({ type: 'reviewSetDone', id: 'n1', done: true });
+    await send({ type: 'reviewDelete', id: 'n1' });
+    await send({ type: 'reviewRestore' });
+    expect(files.get(YAML)).toBe(v2);
+    expect(files.has(MD)).toBe(false);
+    expect(errors(posted).every((m) => /read-only/.test(String(m)))).toBe(true);
+  });
+
+  it('refuses invalid messages and unknown ids without writing', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 1, text: 'x', color: 'red' });
+    await send({ type: 'reviewAdd', at: 1, out: 1, text: 'empty range' });
+    await send({ type: 'reviewSetDone', id: 'n9', done: true });
+    await send({ type: 'reviewDelete', id: 'n9' });
+    expect(files.get(YAML)).toBe(SIDECAR);
+    expect(errors(posted)).toHaveLength(4);
+  });
+
+  it('checks times against the probed duration before creating a sidecar', async () => {
+    const { posted, send } = await open();
+    await send({ type: 'reviewEnable' });
+    // The 5 second probe lands first; one frame (at 24 fps) of slack is allowed.
+    await send({ type: 'reviewAdd', at: 5.1, text: 'past the end' });
+    expect(files.has(YAML)).toBe(false);
+    expect(errors(posted)).toEqual(['That time is past the end of the video']);
+    await send({ type: 'reviewAdd', at: 5.04, text: 'last frame' });
+    expect(files.get(YAML)).toContain('at: 5.04\n');
+  });
+
+  it('says so once when a note this panel wrote is gone after a reload', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 2, text: 'b' });
+    expect(errors(posted)).toEqual([]);
+    const onChange = watcher.onDidChange.mock.calls[0][0] as () => void;
+    // Marker saves its in-memory copy, which never had n2.
+    files.set(YAML, SIDECAR);
+    onChange();
+    await vi.waitFor(() =>
+      expect(errors(posted)).toEqual(['Notes were replaced by another program']),
+    );
+    onChange();
+    await vi.waitFor(() =>
+      expect(posted.filter((m) => m.type === 'review').length).toBeGreaterThan(3),
+    );
+    expect(errors(posted)).toHaveLength(1);
+  });
+
+  it('does not call a note this panel deleted a replacement', async () => {
+    const { posted, send } = await open(SIDECAR);
+    await send({ type: 'reviewAdd', at: 2, text: 'b' });
+    await send({ type: 'reviewDelete', id: 'n2' });
+    (watcher.onDidChange.mock.calls[0][0] as () => void)();
+    await vi.waitFor(() =>
+      expect(posted.filter((m) => m.type === 'review').length).toBeGreaterThan(2),
+    );
+    expect(errors(posted)).toEqual([]);
+  });
+
+  it('reads the file again for each edit, so an outside change is kept', async () => {
+    const { send } = await open(SIDECAR);
+    // Another program added n2 and bumped the mark behind this panel's back.
+    files.set(
+      YAML,
+      SIDECAR.replace('next_note_id: 2', 'next_note_id: 3') +
+        "- id: n2\n  target: source\n  at: 4.0\n  kind: note\n  done: false\n  created: '2026-01-02T03:04:05'\n",
+    );
+    await send({ type: 'reviewAdd', at: 5, text: 'mine' });
+    expect(files.get(YAML)).toContain('- id: n2\n  target: source\n  at: 4.0\n');
+    expect(files.get(YAML)).toContain('- id: n3\n');
   });
 });
