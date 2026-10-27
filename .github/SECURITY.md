@@ -131,8 +131,9 @@ video preview; the precedent is the PDF preview's `<file>.pdf.mccomments.json`.
   checked before any write (`reviewAddError`, `isReviewSetDone`,
   `isReviewDelete`, `isReviewRestore`): extra fields refused, finite times with
   `out` after `at` and both within the duration plus one frame when it is
-  known, note text a string of at most 10,000 characters, and ids that exist in
-  the file just read. Ids and timestamps are made by the host. Edits run one at
+  known, note text a string of at most 10,000 characters, an optional pin
+  (`point`) of two finite numbers from 0 to 1, and ids that exist in the file
+  just read. Ids and timestamps are made by the host. Edits run one at
   a time through a queue, so a second cannot act on a stale read.
 - **Edits touch only what they change.** The new text is a splice of the
   original file, not a re-serialisation, so fields MarkCopy does not edit are
