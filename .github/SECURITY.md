@@ -18,6 +18,16 @@ The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions 
 these overrides when the CLI resolves patched versions without them. The direct Mocha
 dependency uses version 12 and does not need these overrides.
 
+`npm audit` reports one open advisory,
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5) in
+`@azure/msal-node` 6, which `@vscode/vsce` pulls in through `@azure/identity`.
+It concerns MSAL's authorization code flow and is fixed in `msal-node` 7.1.0,
+a major version above what every released `@azure/identity` accepts, so it is
+not overridden. The chain is publish-time tooling only: releases authenticate
+with a personal access token, not the Azure credential path (see
+[RELEASING](../docs/RELEASING.md)), and none of it is bundled into the
+extension. Drop this note when `@vscode/vsce` resolves a patched `msal-node`.
+
 The `package.json` override for `mermaid` makes it use the project's own `katex`
 (`"$katex"` resolves to the direct dependency's version) instead of a nested copy
 from its `^0.16` range. This keeps one KaTeX version in the lockfile, so Mermaid's
