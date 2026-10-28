@@ -686,7 +686,7 @@ class ProxySession {
 
 // Write a grabbed frame wherever the reader points the save dialog, defaulting
 // to the video's own folder.
-async function saveFrame(
+export async function saveFrame(
   videoUri: vscode.Uri,
   name: unknown,
   data: unknown,
@@ -711,7 +711,7 @@ async function saveFrame(
   }
 }
 
-function basename(uri: vscode.Uri): string {
+export function basename(uri: vscode.Uri): string {
   const p = uri.path;
   return p.substring(p.lastIndexOf('/') + 1);
 }

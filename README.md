@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL & Video Preview
+# MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video & GIF Preview
 
 [![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/OwenPKent.markcopy.svg?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -53,6 +53,8 @@ Flip the lock/pencil pill in the top-right corner to edit Markdown right in the 
 | STL 3D model preview                     |    No    |            No             | **Yes**  |
 | QuickTime (.mov) video preview           |    No    |            No             | **Yes**  |
 | Copy a video frame as PNG                |    No    |            No             | **Yes**  |
+| GIF preview with pause and frame step    |    No    |            No             | **Yes**  |
+| Copy a GIF frame as PNG                  |    No    |            No             | **Yes**  |
 | Word (.docx) preview                     |    No    |            No             | **Yes**  |
 | Export to Word (.docx)                   |    No    |        Via Pandoc         | **Yes**  |
 | PowerPoint (.pptx) preview               |    No    |            No             | **Yes**  |
@@ -106,10 +108,11 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **Mermaid diagrams** (flowchart, sequence, class, state, gantt, pie, and more) that follow the light/dark theme, plus syntax-highlighted code, out of the box. Configure Mermaid via `markcopy.mermaid`; diagrams keep the classic layout and look unless you set `"layout": "elk"` or `"look": "neo"`.
 - **Math rendering with KaTeX.** Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-click one to copy it as a PNG or restore its original LaTeX source; "Copy as Markdown" also restores the LaTeX rather than the rendered markup. Toggle with `markcopy.math` (on by default, turn it off for docs that use literal dollar signs).
 - **Local images render in the preview.** Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
-- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, and video.
+- **PDF preview built in.** Open any `.pdf` and MarkCopy renders it with pdf.js, with a real selectable text layer, right-click **Copy Page as PNG** or **Copy Selection**, and **Copy as** for page or document text. A floating toolbar shows the current page (click it to jump to any page), zooms from 50 to 400 percent while keeping pages crisp, and has a fit-width button that sizes the page to the pane and keeps it fitted as you resize; a **Preferences** submenu toggles between a Hand tool (drag to pan) and a Pointer tool (select text), and right-click **Add Comment Here** drops a pin comment saved next to the PDF. The pages share the Markdown preview's **Theme** submenu (Auto, Light, Dark, or **Green on black** phosphor), plus a session-only **Dark Pages** / **Light Pages** quick toggle, both under **Preferences**. One extension previews Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, and GIF.
 - **LaTeX preview.** Open or focus a `.tex`, `.ltx`, or `.latex` file and the preview opens automatically beside it, the same as Markdown, CSV, and TSV (`markcopy.autoPreview`); it is also reachable by hand from **Reopen Editor With...**. The file itself still opens in the text editor, since it is contributed at `option` priority, not default: it is a file you spend most of the day editing, and the preview simply arrives as a second tab beside it. MarkCopy compiles it with an external LaTeX engine and shows the result through the very same PDF viewer above, inheriting all of it: text selection, **Copy Page as PNG**, comments, zoom, and the **Theme** submenu. It rebuilds on save, and a floating **Recompile** button, a toolbar icon, and a right-click **Recompile LaTeX** entry rebuild it without one. Requires a LaTeX engine on your machine already; see [LaTeX preview](#latex-preview) for what to install.
 - **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
 - **Video preview with frame grabs.** Open a `.mov`, `.mp4`, `.m4v`, `.mkv`, `.webm`, `.avi`, `.wmv`, `.flv`, `.mpg`, `.mpeg`, or `.3gp` and it plays inline with full transport controls, rather than opening as binary or not at all: VS Code ships no preview for QuickTime files. Right-click for **Copy Frame as PNG** and **Save Frame as PNG…**, so a still from a screen recording goes straight into a bug report. A **Playback** submenu sets looping, speed, and autoplay, and `,` and `.` step a frame at a time to line the shot up. A file VS Code cannot decode (ProRes, DNxHD, most HEVC) plays anyway when you have ffmpeg: MarkCopy builds a throwaway H.264 copy in a temp folder, laying a clip with an alpha channel over a transparency checkerboard rather than flattening it onto black. Without ffmpeg it says what is wrong and offers your default player. See [Video preview](#video-preview).
+- **GIF preview with pause and frame step.** Open a `.gif` and it plays on a canvas you can control: click or press **space** to pause, **`,`** and **`.`** to step a frame, **Home** and **End** to jump to the ends, and right-click for **Copy Frame as PNG**, **Save Frame as PNG…**, and a **Playback** submenu for speed and looping.
 - **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** / **Footnotes** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
@@ -318,6 +321,24 @@ Unlike the PDF and STL viewers, the file is streamed rather than read: the webvi
 A clip with an **alpha channel** (a ProRes 4444 lower third, say) is laid over a transparency checkerboard rather than flattened onto black, because a 99%-transparent graphic composited onto black looks exactly like a clip that renders nothing. The status line says `alpha on checkerboard` in that case, which also tells you the board is baked into any frame you grab.
 
 Set `markcopy.video.transcode` to `ask` if you work with long 4K masters and would rather press a button than have an encode start on its own, or to `off` to keep the old behaviour: a message naming the likely cause and an **Open in Default App** button. With no ffmpeg installed you get that same message, plus a note that installing one would let MarkCopy play the file here.
+
+## GIF preview
+
+MarkCopy registers as the editor for `.gif`, so an animation opens in a viewer with controls instead of VS Code's built-in image preview, which plays it with no way to pause or step. (**Reopen Editor With...** still reaches the built-in one.)
+
+Each frame is decoded on demand and drawn at the delay the file gives it, so playback is paced by the GIF itself. Like browsers, the viewer plays a delay of 0 or 10 ms or less as 100 ms. The file's loop count is respected: a GIF with no loop block plays once and stops on its last frame, one marked to repeat forever repeats forever.
+
+**Space** or a click on the picture plays and pauses, **`,`** and **`.`** step one frame back and forward (and pause), and **Home** and **End** jump to the first and last frame. The status line gives the file name, size, dimensions, `frame 3 / 24`, the length of one pass, and what the file says about repeating.
+
+Right-click for the actions:
+
+- **Copy Frame as PNG** puts the frame on screen on the clipboard at the GIF's own size.
+- **Save Frame as PNG…** writes it to disk, defaulting to the GIF's folder with the frame number in the name (`anim-frame-012.png`).
+- **Copy as** gives the file name or full path.
+- **Playback** has Play/Pause, a session-only **Loop** (forever) toggle, and speed from 0.25x to 2x.
+- **Preferences → Theme** shares the setting with every other MarkCopy preview.
+
+The viewer uses the browser's WebCodecs `ImageDecoder`. Where that is missing, the GIF is shown in a plain image element: it still plays and the status line still reports its size, but the frame actions and playback controls are unavailable. The file is read whole and sent to the viewer, so a GIF above 64 MiB shows a message instead of loading.
 
 ## LaTeX preview
 

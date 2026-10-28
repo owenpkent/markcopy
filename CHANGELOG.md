@@ -4,6 +4,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **GIF preview with pause, frame stepping, and frame copy.** `.gif` files now open in a MarkCopy viewer ahead of VS Code's built-in image preview, which plays them with no way to pause or step.
+  - **Space** or a click pauses and resumes, **`,`** and **`.`** step a frame back and forward, and **Home** and **End** jump to the ends. The status line shows the frame position, the length of one pass, and what the file says about looping.
+  - **Copy Frame as PNG** and **Save Frame as PNG…** use the frame on screen at the GIF's own size; the saved name carries the frame number (`anim-frame-012.png`).
+  - **Playback** sets speed from 0.25x to 2x and a session-only **Loop**. The file's own loop count is respected by default, and a frame delay of 0 or 10 ms or less plays as 100 ms, as in browsers.
+  - Frames are decoded with the browser's `ImageDecoder`; where that is missing the GIF still plays in a plain image element, without the frame actions. A GIF above 64 MiB shows a message instead of loading.
+
 ### Planned
 
 - PlantUML support.
