@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.19.0] - 2026-10-27
+
 ### Added
 
 - **Review mode in the video preview.** A video with a notes file beside it (`clip.review.yaml` for `clip.mp4`), the file Marker and the okstudio-video-kit write, opens with a transport, a scrubber carrying a marker for each note, and a notes panel. Turn it on for any video with `markcopy.video.review` or the right-click **Open Video Notes** entry (**Close Video Notes** while it is on). Notes can be read, written, deleted, restored, sorted and pinned to the picture, and every change is written in the kit's own layout, so Marker opens the result. The design note is [VIDEO-REVIEW-DESIGN](docs/VIDEO-REVIEW-DESIGN.md).
@@ -22,14 +29,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - **Playback** sets speed from 0.25x to 2x and a session-only **Loop**. The file's own loop count is respected by default, and a frame delay of 0 or 10 ms or less plays as 100 ms, as in browsers.
   - Frames are decoded with the browser's `ImageDecoder`; where that is missing the GIF still plays in a plain image element, without the frame actions. A GIF above 64 MiB shows a message instead of loading.
 
+### Changed
+
+- **Spreadsheet number formats now round and print as Excel does.** The spreadsheet preview's number formatting library moved to numfmt 4: `0.00` of 1.005 shows `1.01` (it showed `1.00`), very large numbers print in full instead of as garbled digits, and a time that rounds up to midnight moves to the next day. Formats that already matched Excel are unchanged.
+- KaTeX 0.19.1 (patch release) for math rendering.
+
 ### Security
 
 - **The video preview can now write files without a save dialog.** Copy as Markdown and every note edit write `<stem>.review.md` beside the video, and an edit writes the notes file `<stem>.review.yaml`, at paths the host derives from the open document, never ones the webview supplies. Each write goes through a temporary file and a rename, only after an explicit copy or note action. An edit re-reads the notes file and is refused when it is read-only, and the host validates every edit message (extra fields refused, finite times, ids that exist, text up to 10,000 characters, times within the duration, a pin of two finite numbers from 0 to 1). The PDF preview's comment sidecar is the precedent. See [SECURITY](.github/SECURITY.md#video-preview).
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [0.18.1] - 2026-10-20
 
@@ -438,7 +445,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/owenpkent/markcopy/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/owenpkent/markcopy/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/owenpkent/markcopy/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/owenpkent/markcopy/compare/v0.16.0...v0.17.0
