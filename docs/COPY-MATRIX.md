@@ -220,7 +220,29 @@ The STL viewer has **no copy actions**, and its absence from this matrix is deli
 
 ## Video (.mov / .mp4 / .m4v)
 
-The video player's menu is short, because there is exactly one thing in a video worth putting on a clipboard: the frame you are looking at.
+The video player's menu is short, because there are only two things in a video worth putting on a clipboard: the frame you are looking at, and, when a `<stem>.review.yaml` file sits beside it, the review notes.
+
+| Action                             | Clipboard flavor                  | Pastes cleanly into                                     |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| **Copy Frame as PNG**              | `image/png`                       | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save Frame as PNG…**             | (writes a file)                   | Anywhere, via a save dialog                             |
+| **Copy as Markdown** (notes panel) | `text/plain` (also writes a file) | A chat, an issue, an editor, an agent in the folder     |
+| **Copy as > File Name**            | `text/plain`                      | Anywhere                                                |
+| **Copy as > Full Path**            | `text/plain`                      | A terminal, a script, another editor                    |
+
+Notes:
+
+- **The frame is copied at the video's own resolution**, not the size it happens to be displayed at. A 4K clip in a narrow pane still yields a 3840x2160 PNG.
+- **The saved file carries the timecode**, as `clip-1m23.400s.png` beside the video, milliseconds included so two grabs a few frames apart do not overwrite each other. Colons cannot appear in a Windows filename, so this is not the timecode the player displays.
+- **Copy as Markdown is plain text only**, written by the host with `vscode.env.clipboard.writeText` rather than from the page, so there is no rich flavor and no image support to depend on. It also saves the same text as `<stem>.review.md` beside the video without a dialog (a temporary file, then a rename), then shows "Copied 3 notes, saved clip.review.md". The same file is also rewritten after every note edit in the panel (add, delete, restore), so it always matches the notes file. It is a button on the notes panel, not a right-click menu entry, and is disabled while there is no notes file, so it never creates a file for a video without notes. A notes file that is invalid or another version is refused with an error and nothing is written. The format is the okstudio-video-kit's `export_markdown`, the one Marker desktop writes: a `# Review notes: clip.mp4` heading, a status line, then a heading per note with its timecode (`## n1  00:00:01:00 to 00:00:03:00  note`) and its text.
+- **Nudge with `,` and `.`** to land on the frame you want before grabbing it: roughly a frame at 30fps, or exactly one frame at the video's real rate in review mode.
+- **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
+
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
+
+## GIF (.gif)
+
+Like the video player, the GIF viewer's menu has one thing worth putting on a clipboard: the frame you are looking at.
 
 | Action                  | Clipboard flavor | Pastes cleanly into                                     |
 | ----------------------- | ---------------- | ------------------------------------------------------- |
@@ -231,9 +253,9 @@ The video player's menu is short, because there is exactly one thing in a video 
 
 Notes:
 
-- **The frame is copied at the video's own resolution**, not the size it happens to be displayed at. A 4K clip in a narrow pane still yields a 3840x2160 PNG.
-- **The saved file carries the timecode**, as `clip-1m23.400s.png` beside the video, milliseconds included so two grabs a few frames apart do not overwrite each other. Colons cannot appear in a Windows filename, so this is not the timecode the player displays.
-- **Nudge with `,` and `.`** (roughly a frame at 30fps) to land on the frame you want before grabbing it.
-- **PNG copy needs clipboard image support**, exactly as it does elsewhere in this matrix, and it additionally needs the frame to be readable back off the canvas. If the host serves the file without CORS headers the player still plays it, and the frame actions say they are unavailable rather than failing silently.
+- **The frame is copied at the GIF's own size**, not the size it is displayed at. The decoder returns fully composited frames, so a frame that only updates part of the picture still copies whole.
+- **The saved file carries the frame number**, as `anim-frame-012.png` beside the GIF, the same number the status line shows (`frame 12 / 40`).
+- **Step with `,` and `.`** to land on the frame you want before copying it. Stepping pauses playback.
+- **Both frame actions need `ImageDecoder`.** Where it is missing the GIF is shown in a plain image element and the two rows are greyed out under a "Frames unavailable in this viewer" label. PNG copy additionally needs clipboard image support, as elsewhere in this matrix.
 
-**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a canvas.

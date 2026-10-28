@@ -1,0 +1,21 @@
+version: 1
+id: dddddddddddd
+source: empty.mp4
+fps: 30.0
+next_note_id: 2
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  at: 1.0
+  kind: note
+  text: First note.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'

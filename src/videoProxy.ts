@@ -62,6 +62,8 @@ export interface SourceProbe {
   height: number;
   /** Frames per second, or 0 when unknown. */
   frameRate: number;
+  /** ffprobe's `avg_frame_rate`, which the review sidecar records; 0 when unknown (`0/0`). */
+  avgFrameRate: number;
   hasAlpha: boolean;
   hasAudio: boolean;
   /** ffmpeg's name for the first audio stream's codec, e.g. `aac`. Empty when there is none. */
@@ -260,7 +262,7 @@ export function probeArgs(input: string): string[] {
     '-print_format',
     'json',
     '-show_entries',
-    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate:stream_tags=alpha_mode',
+    'format=duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate,avg_frame_rate:stream_tags=alpha_mode',
     '-i',
     input,
   ];
@@ -300,6 +302,7 @@ export function parseProbe(json: string): SourceProbe {
     width: 0,
     height: 0,
     frameRate: 0,
+    avgFrameRate: 0,
     hasAlpha: false,
     hasAudio: false,
     audioCodec: '',
@@ -321,6 +324,7 @@ export function parseProbe(json: string): SourceProbe {
     width: firstNumber(video?.width),
     height: firstNumber(video?.height),
     frameRate: parseRate(video?.r_frame_rate),
+    avgFrameRate: parseRate(video?.avg_frame_rate),
     hasAlpha:
       hasAlphaPixelFormat(typeof video?.pix_fmt === 'string' ? video.pix_fmt : '') ||
       (video?.tags as { alpha_mode?: unknown } | undefined)?.alpha_mode === '1',

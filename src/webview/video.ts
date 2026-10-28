@@ -21,6 +21,7 @@ import {
   soundOffer,
   soundProgress,
 } from './videoInfo';
+import { createReview, isTextEntry } from './videoReview';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -709,6 +710,14 @@ function togglePlay(): void {
   }
 }
 
+const review = createReview({
+  video,
+  stage,
+  post: (msg) => vscode.postMessage(msg),
+  toast,
+  viewState: { get: () => vscode.getState(), set: (value) => vscode.setState(value) },
+});
+
 function nudge(seconds: number): void {
   if (!Number.isFinite(video.duration)) {
     return;
@@ -719,13 +728,19 @@ function nudge(seconds: number): void {
 stage.addEventListener('click', (e) => {
   // Clicks on the native control bar are the browser's; only the picture itself
   // is a play/pause target.
-  if (e.target === video) {
+  // In review mode a press on the picture places a pin instead.
+  if (e.target === video && !review.onPicture(e)) {
     togglePlay();
   }
 });
 
 document.addEventListener('keydown', (e) => {
-  if (contextMenu.isOpen() || e.ctrlKey || e.metaKey || e.altKey) {
+  if (contextMenu.isOpen() || e.ctrlKey || e.metaKey || e.altKey || isTextEntry(e.target)) {
+    return;
+  }
+  // Review mode adds Left and Right, J K L, and steps `,` and `.` at the real
+  // frame rate; everything else falls through to the keys below.
+  if (review.onKeydown(e)) {
     return;
   }
   switch (e.key) {
@@ -818,6 +833,8 @@ document.addEventListener('contextmenu', (e) => {
       ],
     },
     { kind: 'divider' },
+    ...review.menuEntries(),
+    { kind: 'divider' },
     { kind: 'submenu', label: 'Preferences', entries: themeItems() },
     { kind: 'divider' },
     {
@@ -878,7 +895,7 @@ window.addEventListener('message', (event: MessageEvent) => {
     | { type: 'error'; message: string }
     | { type: 'setTheme'; value: string }
     | { type: 'toast'; message: string };
-  if (!msg) {
+  if (!msg || review.onMessage(msg)) {
     return;
   }
   if (msg.type === 'load') {

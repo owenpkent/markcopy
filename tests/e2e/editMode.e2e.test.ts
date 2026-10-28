@@ -48,7 +48,7 @@ function show(ackEdit?: number): Promise<void> {
 }
 
 function block(line: number): HTMLElement {
-  return h.find(`#content > [data-source-line="${line}"]`);
+  return h.find(`:scope > [data-source-line="${line}"]`);
 }
 
 function click(el: Element): void {

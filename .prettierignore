@@ -7,7 +7,11 @@ media/pdf.js
 media/pdf.worker.js
 media/stl.js
 media/video.js
+media/gif.js
 node_modules
 *.vsix
 package-lock.json
 CHANGELOG.md
+
+# Golden fixtures are compared byte for byte
+tests/fixtures/review

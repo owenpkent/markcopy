@@ -30,6 +30,7 @@ const PROBE: SourceProbe = {
   width: 1920,
   height: 1080,
   frameRate: 24,
+  avgFrameRate: 24,
   hasAlpha: false,
   hasAudio: false,
   audioCodec: '',
@@ -167,6 +168,7 @@ describe('parseProbe', () => {
       width: 1920,
       height: 1080,
       frameRate: 24,
+      avgFrameRate: 0,
       hasAlpha: true,
       hasAudio: true,
       audioCodec: 'pcm_s24le',
@@ -180,6 +182,21 @@ describe('parseProbe', () => {
       JSON.stringify({ streams: [{ codec_type: 'video', r_frame_rate: '30000/1001' }] }),
     );
     expect(ntsc.frameRate).toBeCloseTo(29.97, 2);
+  });
+
+  it('reads the average rate beside the nominal one, and asks for both', () => {
+    expect(probeArgs('a.mp4').join(' ')).toContain('r_frame_rate,avg_frame_rate');
+    const avg = (raw: unknown) =>
+      parseProbe(
+        JSON.stringify({
+          streams: [{ codec_type: 'video', r_frame_rate: '60/1', avg_frame_rate: raw }],
+        }),
+      );
+    expect(avg('30000/1001').avgFrameRate).toBeCloseTo(29.97, 2);
+    expect(avg('30000/1001').frameRate).toBe(60);
+    expect(avg('0/0').avgFrameRate).toBe(0);
+    expect(avg(undefined).avgFrameRate).toBe(0);
+    expect(avg('25').avgFrameRate).toBe(25);
   });
 
   it('answers blankly rather than throwing on junk', () => {
