@@ -726,11 +726,14 @@
     "@vscode/test-cli": {
       "mocha": {
         "diff": "^8.0.4",
-        "serialize-javascript": "^7.0.6"
+        "serialize-javascript": "^7.1.4"
       }
     },
     "mermaid": {
       "katex": "$katex"
+    },
+    "@vscode/vsce": {
+      "@azure/msal-node": "^7.1.2"
     }
   },
   "devDependencies": {
