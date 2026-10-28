@@ -732,9 +732,7 @@
     "mermaid": {
       "katex": "$katex"
     },
-    "@vscode/vsce": {
-      "@azure/msal-node": "^7.1.2"
-    }
+    "@azure/msal-node": "^7.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
