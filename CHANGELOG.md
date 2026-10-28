@@ -9,6 +9,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [0.19.1] - 2026-10-28
+
+### Security
+
+- Development and publishing tooling moved to patched dependencies: `serialize-javascript` 7.1.4 under the Mocha test runner ([GHSA-m5mm-p8h7-m29v](https://github.com/advisories/GHSA-m5mm-p8h7-m29v)) and `@azure/msal-node` 7.1.2 under `@vscode/vsce` ([GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5)). Neither is bundled into the extension, so the shipped code is the same as 0.19.0. The overrides are recorded in [SECURITY](.github/SECURITY.md).
+
 ## [0.19.0] - 2026-10-27
 
 ### Added
@@ -445,7 +451,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/owenpkent/markcopy/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/owenpkent/markcopy/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/owenpkent/markcopy/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/owenpkent/markcopy/compare/v0.17.0...v0.18.0
