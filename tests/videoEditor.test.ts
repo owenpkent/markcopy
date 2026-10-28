@@ -105,6 +105,8 @@ vi.mock('../src/videoProxy', async (importOriginal) => ({
 }));
 
 import { isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
+import { loadSidecar } from '../src/videoReview';
+import { reviewMarkdown } from '../src/review/markdown';
 import type * as vscode from 'vscode';
 import type * as VideoProxy from '../src/videoProxy';
 
@@ -620,6 +622,43 @@ notes:
     );
     expect(files.get(YAML)).toContain('External update during markdown save.');
     expect(files.get(YAML)).not.toContain('Cut this range.');
+  });
+
+  it('never lets a slow copy rename an older export over a later edit', async () => {
+    const { send } = await open(SIDECAR);
+    const vs = await import('vscode');
+    const rename = vi.mocked(vs.workspace.fs.rename);
+    const real = rename.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding!: () => void;
+    const reachedMd = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+    // Hold only the copy's Markdown rename.
+    let first = true;
+    rename.mockImplementation(async (from, to) => {
+      if (first && (to as { path: string }).path === MD) {
+        first = false;
+        holding();
+        await held;
+      }
+      await real(from, to);
+    });
+    const copying = send({ type: 'reviewCopy' });
+    await reachedMd;
+    const adding = send({ type: 'reviewAdd', at: 2.4, text: 'Added during the copy.' });
+    // Every chance for an add that skipped the queue to finish first.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await copying;
+    await adding;
+    rename.mockImplementation(real);
+
+    expect(files.get(YAML)).toContain('Added during the copy.');
+    expect(files.get(MD)).toBe(reviewMarkdown(loadSidecar(files.get(YAML)!).file!));
   });
 
   it('writes a pin, cleaned, after out and before nothing else', async () => {

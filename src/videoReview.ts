@@ -1024,7 +1024,16 @@ export class ReviewSession {
   }
 
   /** Build the markdown from the sidecar, save it beside the sidecar, and copy it. */
-  async copy(): Promise<void> {
+  copy(): Promise<void> {
+    // Through the edit queue, so a slow copy cannot rename an older export over
+    // the Markdown a later edit has already written.
+    return this.enqueue(() => this.copyNow());
+  }
+
+  private async copyNow(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     let text: string | undefined;
     try {
       text = await this.read();
