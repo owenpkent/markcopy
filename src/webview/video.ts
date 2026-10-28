@@ -725,7 +725,18 @@ function nudge(seconds: number): void {
   video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), video.duration);
 }
 
+// A click that only dismisses the context menu shouldn't also play or pause.
+// Read at press time: the menu has already closed by the time the click lands.
+let pressClosedMenu = false;
+stage.addEventListener('pointerdown', (e) => {
+  pressClosedMenu = contextMenu.isOpen() && !contextMenu.owns(e.target);
+});
+
 stage.addEventListener('click', (e) => {
+  if (pressClosedMenu) {
+    pressClosedMenu = false;
+    return;
+  }
   // Clicks on the native control bar are the browser's; only the picture itself
   // is a play/pause target.
   // In review mode a press on the picture places a pin instead.

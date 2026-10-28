@@ -1045,8 +1045,6 @@ function rerenderPages(): void {
   refresh();
 }
 
-document.addEventListener('click', () => contextMenu.hide());
-
 // ---------------------------------------------------------------------------
 // Hand tool (drag to scroll): active only in hand mode
 // ---------------------------------------------------------------------------

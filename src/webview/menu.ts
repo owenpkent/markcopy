@@ -150,15 +150,38 @@ export function createMenu(root: HTMLDivElement): MenuController {
 
   function wirePanel(panel: HTMLDivElement): void {
     // Panel chrome (the padding, the dividers, the group headings) has no click
-    // behavior of its own, and the document-level handler each webview uses to
-    // close the menu can't tell a stray click on it from a click outside the
-    // menu. Swallow those, so a slightly-off click does nothing instead of
-    // tearing down every open panel.
+    // behavior of its own. Keep those clicks from reaching the surface's own
+    // document handlers, so a slightly-off click does nothing.
     panel.addEventListener('click', (ev) => ev.stopPropagation());
     // Reaching any panel means the pointer was travelling towards it, not away.
     panel.addEventListener('mouseenter', cancelPendingClose);
   }
   wirePanel(root);
+
+  // Dismissal lives here rather than in each webview, so a surface cannot ship
+  // a menu that never closes. A click outside every panel closes it; capture
+  // phase, so it is shut before the surface's own handlers see the click. The
+  // click is still delivered, and by now the browser has moved the focus to its
+  // target (see closeFrom).
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (panels.length > 0 && !owns(ev.target)) closeFrom(0);
+    },
+    true,
+  );
+  // Escape reaches the document only from the top-level panel: a submenu row
+  // stops it after stepping back out. Stopped here too, so the keys a surface
+  // binds don't also act on the press that closed the menu.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && panels.length > 0) {
+      ev.stopImmediatePropagation();
+      closeFrom(0);
+    }
+  });
+  // Focus leaving the webview (a click into the editor, another panel, another
+  // window) closes it, as a native menu does.
+  window.addEventListener('blur', () => closeFrom(0));
 
   function openSubmenu(anchor: HTMLElement, entries: MenuEntry[], depth: number): void {
     const parent = panels[depth - 1];
