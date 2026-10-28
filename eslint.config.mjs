@@ -7,6 +7,7 @@ export default tseslint.config(
     ignores: [
       'dist',
       'out',
+      'fuzz/corpus',
       '.vscode-test',
       '.claude',
       'node_modules',
@@ -68,8 +69,8 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.mocha } },
   },
   {
-    // Build and config scripts are CommonJS run directly by Node.
-    files: ['*.js', 'scripts/**/*.js'],
+    // Build, fuzz and config scripts are CommonJS run directly by Node.
+    files: ['*.js', 'scripts/**/*.js', 'fuzz/*.js'],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

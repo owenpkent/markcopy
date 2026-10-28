@@ -15,3 +15,6 @@ CHANGELOG.md
 
 # Golden fixtures are compared byte for byte
 tests/fixtures/review
+
+# Fuzz seeds are binary and arbitrary text, left exactly as found
+fuzz/corpus

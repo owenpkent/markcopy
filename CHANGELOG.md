@@ -4,6 +4,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, XML, CSV, video notes and Markdown parsers. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
+
+### Fixed
+
+- A video notes file (`*.review.yaml`) with an alias that has no anchor, or more alias expansions than the YAML reader allows, threw while loading instead of opening read-only with a "Not valid YAML" message. Found by the new fuzzing.
+
 ### Planned
 
 - PlantUML support.

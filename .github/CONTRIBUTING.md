@@ -41,6 +41,8 @@ npm run format        # prettier --write .
 npm run format:check  # prettier --check . (what CI runs)
 ```
 
+A separate nightly workflow fuzzes the file parsers (`npm run fuzz -- <target> [seconds]`; see [TESTING](../docs/TESTING.md#fuzzing)).
+
 CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type-check, unit tests, build, package) and an integration-test job (VS Code under xvfb). Run `npm run format` before committing so `format:check` stays green.
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
@@ -133,6 +135,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `tests/`                         | Vitest unit tests.                                                                                                           |
 | `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                                                     |
 | `tests/e2e/`                     | Webview E2E: the menu, the copy flavors, the sheet grid, scroll sync.                                                        |
+| `fuzz/`                          | Jazzer.js fuzz targets, seed corpus, and runner (`npm run fuzz`).                                                            |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                   |
 | `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                                                |
 | `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).                                                                   |

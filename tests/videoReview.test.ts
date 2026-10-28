@@ -93,6 +93,20 @@ describe('loadSidecar', () => {
     expect(loadSidecar(`${BASE}asset:\n  mood: sad\n`).readOnly).toMatch(/asset/);
   });
 
+  // Found by the review fuzz target: these fail only when the tree is resolved,
+  // after the parse-error check, and used to throw out of loadSidecar.
+  it('reports an unresolved alias or an alias bomb as invalid YAML instead of throwing', () => {
+    expect(loadSidecar('*\x19').readOnly).toMatch(/^Not valid YAML/);
+    const bomb = ['a: &a [x, x, x, x, x, x, x, x, x, x]'];
+    for (const [i, name] of ['b', 'c', 'd', 'e'].entries()) {
+      const prev = String.fromCharCode(97 + i);
+      bomb.push(`${name}: &${name} [${Array(10).fill(`*${prev}`).join(', ')}]`);
+    }
+    const loaded = loadSidecar(bomb.join('\n'));
+    expect(loaded.readOnly).toMatch(/^Not valid YAML/);
+    expect(loaded.notes).toEqual([]);
+  });
+
   it('rejects out at or before at, and still lists the notes', () => {
     for (const out of ['1', '0.5']) {
       const loaded = loadSidecar(BASE.replace('at: 1', `at: 1\n    out: ${out}`));
