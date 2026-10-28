@@ -590,6 +590,11 @@
           "default": false,
           "description": "Repeat a video when it reaches the end. Also toggled from the preview's right-click Playback menu."
         },
+        "markcopy.video.review": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open videos in review mode, with timecoded notes and a notes panel, even when there is no review file beside them yet. A video with a .review.yaml file beside it opens in review mode regardless. Also set from the preview's right-click Open Video Notes / Close Video Notes item."
+        },
         "markcopy.video.transcode": {
           "type": "string",
           "enum": [
@@ -714,7 +719,8 @@
     "saxes": "^6.0.0",
     "three": "^0.186.1",
     "turndown": "^7.2.4",
-    "turndown-plugin-gfm": "^1.0.2"
+    "turndown-plugin-gfm": "^1.0.2",
+    "yaml": "^2.9.1"
   },
   "overrides": {
     "@vscode/test-cli": {

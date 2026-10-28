@@ -111,6 +111,47 @@ deleted when the preview closes. This does not sandbox ffmpeg or limit the
 source file's size; use a trusted ffmpeg build and treat untrusted media as
 hostile input.
 
+Review mode reads a `<stem>.review.yaml` file beside the video. It writes that
+file when a note is added, deleted or restored, and writes
+`<stem>.review.md` beside it on those edits and on the **Copy Notes as
+Markdown** action, all without a save dialog. These are the silent writes in the
+video preview; the precedent is the PDF preview's `<file>.pdf.mccomments.json`.
+
+- **The path is the host's.** Both names come from the open document's own file
+  name and folder. The webview's `reviewEnable` and `reviewCopy` messages carry
+  no data, so the page cannot name a path, a content or a destination.
+- **Only on an explicit action, from a valid file.** Nothing is written on open
+  or when the file changes. Copy re-reads the sidecar, and a missing, invalid or
+  non-version-1 file is refused with an error. An edit also re-reads the sidecar
+  and is refused when it is read-only (parse or schema failure, another
+  version); the sidecar is never overwritten in that state. Only the first note
+  on a video with no sidecar creates one.
+- **Edit messages are validated on the host.** `reviewAdd`, `reviewDelete`
+  and `reviewRestore` carry data from the page, so each is
+  checked before any write (`reviewAddError`, `isReviewDelete`,
+  `isReviewRestore`): extra fields refused, finite times with
+  `out` after `at` and both within the duration plus one frame when it is
+  known, note text a string of at most 10,000 characters, an optional pin
+  (`point`) of two finite numbers from 0 to 1, and ids that exist in the file
+  just read. Ids and timestamps are made by the host. Edits run one at
+  a time through a queue, so a second cannot act on a stale read.
+- **Edits touch only what they change.** The new text is a splice of the
+  original file, not a re-serialisation, so fields MarkCopy does not edit are
+  kept byte for byte (see [ARCHITECTURE](../docs/ARCHITECTURE.md#video-review)).
+- **Parsed as data.** The sidecar is parsed with the `yaml` package and checked
+  against the review schema (unknown fields rejected, numbers finite, version 1
+  only); the text of a note is rendered as text, never as HTML.
+- **No half files.** The sidecar and the Markdown each go to a dot-prefixed
+  temporary file in the same folder and are renamed over the target; the temporary file is deleted if
+  either step fails. A copy replaces an existing `<stem>.review.md`, and a file
+  by that name is derived output, never read back.
+- **A watcher on the sidecar** only re-reads it, through a `RelativePattern` on
+  the video's folder, and is disposed with the panel.
+- **The clipboard is written by the host** (`vscode.env.clipboard`), not by the
+  page. Marker desktop does not re-read its notes before saving, so editing one
+  video in both tools at once can lose notes; this is data loss, not a security
+  boundary.
+
 ## Word export
 
 Save as Word converts the sanitized, serialized preview XHTML in memory and
