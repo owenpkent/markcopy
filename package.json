@@ -2,7 +2,7 @@
   "name": "markcopy",
   "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video & GIF Preview",
   "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, and GIF preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
-  "version": "0.18.1",
+  "version": "0.19.0",
   "publisher": "OwenPKent",
   "license": "MIT",
   "author": "OK Studio",
