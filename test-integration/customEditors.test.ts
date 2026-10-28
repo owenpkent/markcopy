@@ -18,6 +18,7 @@ const DOCX_VIEW = 'markcopy.docxPreview';
 const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
+const GIF_VIEW = 'markcopy.gifPreview';
 const MARKDOWN_VIEW = 'markcopy.markdownPreview';
 const CSV_VIEW = 'markcopy.csvPreview';
 const TEX_VIEW = 'markcopy.texPreview';
@@ -345,6 +346,29 @@ suite('MarkCopy custom editors', () => {
       customTabs().find((candidate) => candidate.uri === uri.toString()),
     );
     assert.strictEqual(tab?.viewType, VIDEO_VIEW, 'clip.mp4 did not open in the MarkCopy player');
+  });
+
+  test('.gif and .GIF open in the GIF preview, ahead of the built-in one', async () => {
+    // VS Code's built-in image preview claims *.gif at priority "builtin", which
+    // MarkCopy's "default" outranks. Distinct base names, since a case-insensitive file system would make anim.gif and ANIM.GIF one file. The fixture is the smallest valid GIF: one
+    // 1x1 frame, so this proves the registration (both cases), not the viewer.
+    const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    for (const name of ['anim.gif', 'LOUD.GIF']) {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      fs.writeFileSync(uri.fsPath, gif);
+
+      await vscode.commands.executeCommand('vscode.open', uri);
+
+      const tab = await waitFor(() =>
+        customTabs().find((candidate) => candidate.uri === uri.toString()),
+      );
+      assert.strictEqual(
+        tab?.viewType,
+        GIF_VIEW,
+        `${name} did not open in the MarkCopy GIF preview`,
+      );
+    }
   });
 
   test('containers VS Code cannot open (.mkv, .webm, .AVI) open in the video preview', async () => {

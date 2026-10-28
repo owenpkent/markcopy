@@ -27,10 +27,10 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
-engine against the opened source and its included files. Video preview hands
+engine against the opened source and its included files. Video and GIF previews hand
 media to Chromium and can optionally run ffprobe and ffmpeg. Word export parses
 webview-produced XHTML and writes an OOXML package, including external links.
 
@@ -54,7 +54,7 @@ script-src 'nonce-${nonce}' 'strict-dynamic';
 
 The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the five webview surfaces (shared preview, PDF, LaTeX, video, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element `img-src ${cspSource} blob: data:` for frame capture, and `font-src ${cspSource}` for the notes panel's bundled Roboto (no remote fonts), but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
+The STL preview is the most restrictive of the six webview surfaces (shared preview, PDF, LaTeX, video, GIF, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 
@@ -246,3 +246,20 @@ Copy actions only ever write to the clipboard, and only in response to a user ac
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.xlsx`, `.pdf`, or `.stl`), and the observed behavior. You will get an acknowledgement and a fix timeline.
+
+## GIF preview
+
+The GIF viewer reads the file on the extension host (refusing anything above
+64 MiB before it is read) and posts it to the webview as base64, where it is
+parsed by a small header scanner in `src/webview/gifInfo.ts` and decoded by
+Chromium's `ImageDecoder`. The scanner never decodes pixels, bounds every read
+by the buffer's length, and advances on every step, so malformed input ends the
+scan rather than looping. The CSP is `default-src 'none'` with `img-src`
+limited to the webview origin, `blob:`, and `data:`, `style-src` and `font-src`
+limited to the webview origin (plus inline styles), and a bare nonced
+`script-src`; there is no `media-src`, `connect-src`, or `worker-src`. The
+webview may ask the host to save a PNG frame (through a save dialog), open the
+document in the default app, reveal it, or write `markcopy.theme`; the host
+checks the setting key and value against an allowlist of that one setting. As
+with video, the browser's decoder still processes the file, so a malformed GIF
+could consume resources or trigger a vulnerability in the host's Chromium build.
