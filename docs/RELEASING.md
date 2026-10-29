@@ -85,6 +85,7 @@ Everything here happens **before** Phase 1 below; nothing in it is destructive, 
 
 - [ ] `main` is green in CI and your working tree is clean (`git status`). After pulling, run `npm ci` so `node_modules` matches the lockfile (see [A stale `node_modules`](#a-stale-node_modules-fails-npm-run-vsix)).
 - [ ] The local gate passes: `npm run lint && npm test && npm run format:check && npm run compile`. (`npm test` is the unit suite and the webview E2E suite together.)
+- [ ] No `Fuzz crash:` issue is open (the nightly [fuzz workflow](../.github/workflows/fuzz.yml) files one per failing target; see [Fuzzing](TESTING.md#fuzzing)). A fixed crash has a regression test in `tests/`.
 - [ ] Integration tests pass: `npm run test:integration` (on Linux: `xvfb-run -a npm run test:integration`).
 - [ ] The manual pass in [docs/TESTING.md](TESTING.md) is done: the ★ smoke rows plus the sections a change touched for a **patch**, the full checklist (including the paste-target pass) for a **minor or major**. Rows marked ☑ are covered by the two commands above and want a glance rather than a careful pass, provided both actually ran green.
 - [ ] [CHANGELOG.md](../CHANGELOG.md) `[Unreleased]` matches what actually shipped since the last tag (`git log v<last>..HEAD --oneline` is the ground truth), and user-facing changes are reflected in [README.md](../README.md) and `docs/`.
