@@ -3,7 +3,7 @@
 // lives in fuzz/.corpus/<target>/ (untracked) and is seeded from the committed
 // fuzz/corpus/<target>/; crashing inputs land in fuzz/crashes/<target>/.
 const { spawnSync } = require('node:child_process');
-const { cpSync, existsSync, mkdirSync } = require('node:fs');
+const { cpSync, existsSync, mkdirSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 
 const target = process.argv[2];
@@ -42,6 +42,11 @@ if (existsSync(seeds)) {
 
 // Run from the crash directory's parent so libFuzzer's crash-<hash> files land
 // in a predictable place: -artifact_prefix sets it explicitly.
+// An async target (paste-export awaits a lazy import) must not run in sync mode:
+// Jazzer.js would drop its promises unawaited and memory would grow without end.
+const isAsync = /export\s+async\s+function\s+fuzz\b/.test(
+  readFileSync(path.join(root, 'fuzz/targets', `${target}.fuzz.ts`), 'utf8'),
+);
 const jazzer = require.resolve('@jazzer.js/core/dist/cli.js');
 const result = spawnSync(
   process.execPath,
@@ -49,7 +54,7 @@ const result = spawnSync(
     jazzer,
     targetFile,
     evolved,
-    '--sync',
+    ...(isAsync ? [] : ['--sync']),
     // Per-input timeout. Jazzer hands libFuzzer its own -timeout from this
     // option (default 5 s), overriding one passed after `--`.
     '--timeout=10000',

@@ -7,6 +7,9 @@ const { globSync } = require('node:fs');
 
 const entryPoints = [
   ...globSync('src/**/*.ts', { exclude: (name) => name === 'webview' }),
+  // The browser bundle is skipped, bar the modules that are pure functions of strings.
+  'src/webview/links.ts',
+  'src/webview/markdownConvert.ts',
   ...globSync('fuzz/targets/*.ts'),
 ].filter((f) => !f.endsWith('.d.ts'));
 

@@ -35,6 +35,15 @@ async function getTurndown(): Promise<TurndownService> {
     },
   });
 
+  // The GFM table rule reads the first row of every <table> to decide whether it
+  // has a heading, and throws on one with no rows (a selection can end up with an
+  // empty table, and so can pasted HTML). An empty table has nothing to convert.
+  // Rules added later win over the plugin's, so this one is checked first.
+  turndown.addRule('emptyTable', {
+    filter: (node) => node.nodeName === 'TABLE' && (node as HTMLTableElement).rows.length === 0,
+    replacement: () => '',
+  });
+
   _turndown = turndown;
   return turndown;
 }
