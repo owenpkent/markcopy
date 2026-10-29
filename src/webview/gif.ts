@@ -314,7 +314,18 @@ function toggleLoop(): void {
 
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 
+// A click that only dismisses the context menu shouldn't also play or pause.
+// Read at press time: the menu has already closed by the time the click lands.
+let pressClosedMenu = false;
+stage.addEventListener('pointerdown', (e) => {
+  pressClosedMenu = contextMenu.isOpen() && !contextMenu.owns(e.target);
+});
+
 stage.addEventListener('click', (e) => {
+  if (pressClosedMenu) {
+    pressClosedMenu = false;
+    return;
+  }
   if (e.target === canvas) {
     togglePlay();
   }

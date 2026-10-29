@@ -694,13 +694,6 @@ document.addEventListener('contextmenu', (e) => {
   contextMenu.show(e.pageX, e.pageY, buildMenu(e.target as HTMLElement));
 });
 
-document.addEventListener('click', () => contextMenu.hide());
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    contextMenu.hide();
-  }
-});
-
 // One thing you can copy (a table, a diagram, the selection…) and every format
 // MarkCopy can put it on the clipboard in. `actions[0]` is the format the
 // top-level "Copy X" row uses; the rest live in the "Copy as" submenu.
