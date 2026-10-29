@@ -4,10 +4,15 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, XML, CSV, video notes and Markdown parsers. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
+
 ### Fixed
 
 - The right-click menu in the video and GIF previews stayed open until a row was picked. Every preview's menu now closes on a click outside it, on **Escape**, or when focus leaves the preview, and the click that closes it no longer also plays or pauses the video.
 - The review scrubber's bar ran the full width while the playhead and note markers stop 22px short of each end, so at 0:00 the playhead sat visibly past the start of the bar. The bar now spans exactly the playhead's travel.
+- A video notes file (`*.review.yaml`) with an alias that has no anchor, or more alias expansions than the YAML reader allows, threw while loading instead of opening read-only with a "Not valid YAML" message. Found by the new fuzzing.
 
 ### Planned
 

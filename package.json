@@ -688,6 +688,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fuzz": "node fuzz/run.js",
     "compile:tests": "tsc -p tsconfig.integration.json",
     "test:integration": "npm run compile && npm run compile:tests && vscode-test",
     "screenshot": "node scripts/make-screenshot.js",
@@ -736,6 +737,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@jazzer.js/core": "^4.0.0",
     "@types/katex": "^0.16.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.0",

@@ -1,0 +1,135 @@
+name: Fuzz
+
+# Coverage-guided fuzzing (Jazzer.js) of the parsers that read files the user did
+# not write. See docs/TESTING.md#fuzzing. Not part of CI: it is open-ended by
+# nature, so it runs nightly and reports through issues instead of failing PRs.
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Minutes to fuzz each target
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    # Expressions have no arithmetic, so this is a ceiling rather than the budget
+    # plus a margin. The budget itself is capped to fit under it in the Fuzz step.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [zip, xlsx, pptx, xml, csv, review, markdown]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The evolved corpus is the point of running nightly: each run starts from
+      # the last one's coverage. Every run saves under a fresh key, and restores
+      # the newest one for this target.
+      - name: Restore corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/.corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Fuzz
+        # Explicit, so the step runs with pipefail and a crash fails it through tee.
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          MINUTES: ${{ inputs.minutes || 10 }}
+        run: |
+          minutes=$(( MINUTES > 60 ? 60 : MINUTES ))
+          export FUZZ_SECONDS=$(( minutes * 60 ))
+          mkdir -p "fuzz/crashes/$TARGET"
+          npm run fuzz -- "$TARGET" 2>&1 | tee "fuzz/crashes/$TARGET/fuzz.log"
+
+      # Save even when the fuzzer found a crash, so the run's coverage is kept.
+      - name: Save corpus
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/.corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Upload crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/crashes/${{ matrix.target }}
+          if-no-files-found: ignore
+
+  # Kept apart from the job that runs the fuzzer so that job never holds a token
+  # that can write issues.
+  report:
+    name: Report crashes
+    needs: fuzz
+    if: always() && needs.fuzz.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Download crash artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fuzz-crash-*
+          path: crashes
+
+      - name: Open or update issues
+        run: |
+          shopt -s nullglob
+          for dir in crashes/fuzz-crash-*; do
+            target="${dir#crashes/fuzz-crash-}"
+            inputs=("$dir"/crash-* "$dir"/oom-* "$dir"/timeout-* "$dir"/slow-unit-*)
+            # No input file means the target failed some other way (build or
+            # install); the failed job in the run says why, so there is no issue.
+            [ ${#inputs[@]} -gt 0 ] || continue
+            title="Fuzz crash: $target"
+            first="${inputs[0]}"
+            {
+              echo "The nightly fuzz run found an input that makes the \`$target\` target fail."
+              echo
+              echo "Run: $RUN_URL (artifact \`fuzz-crash-$target\`, file \`$(basename "$first")\`)"
+              echo
+              echo "Input ($(wc -c < "$first") bytes, base64; large inputs are in the artifact only):"
+              echo '```'
+              if [ "$(wc -c < "$first")" -le 4000 ]; then base64 -w 76 "$first"; else echo "(see artifact)"; fi
+              echo '```'
+              echo
+              echo "End of the fuzzer log:"
+              echo '```'
+              tail -n 40 "$dir/fuzz.log"
+              echo '```'
+            } > body.md
+            number=$(gh issue list --state open --search "\"$title\" in:title" \
+              --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body-file body.md
+            else
+              gh issue create --title "$title" --body-file body.md
+            fi
+          done

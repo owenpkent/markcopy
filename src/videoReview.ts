@@ -268,7 +268,16 @@ export function loadSidecar(text: string): SidecarLoad {
   if (doc.errors.length > 0) {
     return { notes: [], readOnly: `Not valid YAML (${doc.errors[0].message.split('\n')[0]})` };
   }
-  const data: unknown = doc.toJS();
+  // Some faults only surface when the tree is resolved, not in doc.errors: an
+  // alias with no anchor, or more alias expansions than the yaml library's
+  // limit (its guard against an alias bomb). Both are bad YAML to the reader.
+  let data: unknown;
+  try {
+    data = doc.toJS();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { notes: [], readOnly: `Not valid YAML (${message.split('\n')[0]})` };
+  }
   const fps = isObject(data) && isNumber(data.fps) && data.fps > 0 ? data.fps : undefined;
   const error = reviewFileError(data);
   if (error) {
