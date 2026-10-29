@@ -3,6 +3,7 @@ import { revealInOs } from './revealInOs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
+import { parseTexMessage } from './messages/tex';
 import { applyMarkcopySetting } from './settingsScope';
 import { readComments, writeComments } from './pdfEditor';
 import {
@@ -82,17 +83,21 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
     const entry = { panel, session, document };
     active.add(entry);
 
-    webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === 'ready') {
+    webview.onDidReceiveMessage(async (raw) => {
+      const msg = parseTexMessage(raw);
+      if (!msg) {
+        return;
+      }
+      if (msg.type === 'ready') {
         await session.start();
-      } else if (msg?.type === 'revealInOS') {
+      } else if (msg.type === 'revealInOS') {
         // The .tex source, not the temp PDF it compiles to.
         revealInOs(document.uri);
-      } else if (msg?.type === 'texRecompile') {
+      } else if (msg.type === 'texRecompile') {
         await session.run();
-      } else if (msg?.type === 'saveComments') {
+      } else if (msg.type === 'saveComments') {
         await writeComments(session.commentsUri(), msg.comments);
-      } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
+      } else if (msg.type === 'updateSetting') {
         await applyMarkcopySetting(msg.key, msg.value, document.uri);
       }
     });

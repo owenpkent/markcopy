@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { revealInOs } from './revealInOs';
 import { applyMarkcopySetting } from './settingsScope';
 import { getNonce } from './previewShell';
+import { parsePdfMessage } from './messages/pdf';
 
 // A read-only custom editor that renders PDF files with pdf.js in a webview,
 // exposing MarkCopy's copy actions (page as PNG, page text, all text).
@@ -44,8 +45,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // stays untouched (this is a read-only editor).
     const commentsUri = document.uri.with({ path: document.uri.path + '.mccomments.json' });
 
-    webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === 'ready') {
+    webview.onDidReceiveMessage(async (raw) => {
+      const msg = parsePdfMessage(raw);
+      if (!msg) {
+        return;
+      }
+      if (msg.type === 'ready') {
         const bytes = await vscode.workspace.fs.readFile(document.uri);
         // Send as base64: webview.postMessage serialises a Uint8Array into a
         // plain {0:…,1:…} object (no length), which pdf.js rejects. A string
@@ -56,11 +61,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           workerSrc: workerUri.toString(),
           comments: await readComments(commentsUri),
         });
-      } else if (msg?.type === 'revealInOS') {
+      } else if (msg.type === 'revealInOS') {
         revealInOs(document.uri);
-      } else if (msg?.type === 'saveComments') {
+      } else if (msg.type === 'saveComments') {
         await writeComments(commentsUri, msg.comments);
-      } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
+      } else if (msg.type === 'updateSetting') {
         // Persist a setting changed from the PDF viewer's Theme menu, mirroring
         // the Markdown preview: write to the scope where the setting is defined
         // (folder/workspace override, else Global) so a workspace value isn't

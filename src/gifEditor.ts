@@ -2,7 +2,9 @@ import * as vscode from 'vscode';
 import { revealInOs } from './revealInOs';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
-import { basename, isViewerSetting, saveFrame } from './videoEditor';
+import { basename, saveFrame } from './videoEditor';
+import { parseGifMessage } from './messages/gif';
+import { isGifSetting } from './messages/settings';
 import { MAX_GIF_BYTES } from './webview/gifInfo';
 
 // A read-only custom editor that plays GIFs in a webview, with MarkCopy's copy
@@ -15,10 +17,9 @@ import { MAX_GIF_BYTES } from './webview/gifInfo';
 // to be served from a resource origin and the canvas it draws on stays clean
 // (a tainted canvas would make Copy Frame throw).
 
-/** True for the one setting the GIF viewer's menus write, with a valid value. */
-export function isGifSetting(key: string, value: unknown): boolean {
-  return key === 'theme' && isViewerSetting(key, value);
-}
+// The allow-list lives with the message parsers; re-exported for the callers
+// and tests that have always imported it from here.
+export { isGifSetting };
 
 export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'markcopy.gifPreview';
@@ -51,22 +52,28 @@ export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // preview.css carries the shared context menu and toast styles.
     webview.html = this.html(webview, asUri('gif.js'), asUri('preview.css'), nonce, theme);
 
-    webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === 'ready') {
-        await this.sendLoad(webview, document.uri);
-      } else if (msg?.type === 'revealInOS') {
-        revealInOs(document.uri);
-      } else if (msg?.type === 'saveFrame') {
-        await saveFrame(document.uri, msg.name, msg.data, webview);
-      } else if (msg?.type === 'openExternal') {
-        // Always the host's own document, never a URI the webview sent.
-        await vscode.env.openExternal(document.uri);
-      } else if (
-        msg?.type === 'updateSetting' &&
-        typeof msg.key === 'string' &&
-        isGifSetting(msg.key, msg.value)
-      ) {
-        await applyMarkcopySetting(msg.key, msg.value, document.uri);
+    webview.onDidReceiveMessage(async (raw) => {
+      const msg = parseGifMessage(raw);
+      if (!msg) {
+        return;
+      }
+      switch (msg.type) {
+        case 'ready':
+          await this.sendLoad(webview, document.uri);
+          break;
+        case 'revealInOS':
+          revealInOs(document.uri);
+          break;
+        case 'saveFrame':
+          await saveFrame(document.uri, msg.name, msg.data, webview);
+          break;
+        case 'openExternal':
+          // Always the host's own document, never a URI the webview sent.
+          await vscode.env.openExternal(document.uri);
+          break;
+        case 'updateSetting':
+          await applyMarkcopySetting(msg.key, msg.value, document.uri);
+          break;
       }
     });
 
