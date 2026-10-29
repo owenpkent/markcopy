@@ -4,9 +4,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Added
+### Planned
 
-- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, STL and video probe parsers, the paste and export converters, link handling, sanitized Markdown output, and the messages a preview webview posts to the host. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.19.2] - 2026-10-28
 
 ### Fixed
 
@@ -22,10 +25,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - A preview page can no longer change settings other than the ones its own menu offers. The Markdown, spreadsheet, deck, Word, PDF and LaTeX previews used to write any MarkCopy setting a page asked for, including the paths to ffmpeg, the PDF browser and the LaTeX engine, which MarkCopy later runs.
 
-### Planned
+### Maintenance
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, STL and video probe parsers, the paste and export converters, link handling, sanitized Markdown output, and the messages a preview webview posts to the host. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
 
 ## [0.19.1] - 2026-10-28
 
@@ -469,7 +471,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.2...HEAD
+[0.19.2]: https://github.com/owenpkent/markcopy/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/owenpkent/markcopy/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/owenpkent/markcopy/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/owenpkent/markcopy/compare/v0.18.0...v0.18.1
