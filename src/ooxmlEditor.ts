@@ -5,6 +5,7 @@ import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
 import { openExternalLink } from './externalLink';
 import { classifyLink } from './preview-utils';
+import { parseOoxmlMessage, type OoxmlMessage } from './messages/ooxml';
 
 const { basename } = posix;
 
@@ -28,12 +29,14 @@ export interface OoxmlSession {
   /** Read the file and produce the markup draw() should show for it. */
   render(): Promise<string>;
   /**
-   * Handle a message type this format adds on top of the shared router
-   * (xlsx's selectSheet, say). Called only for messages none of the shared
-   * branches matched; call `redraw` if the message changes what should be on
-   * screen.
+   * Handle a message this format adds on top of the shared router (xlsx's
+   * selectSheet, say). Called only for messages none of the shared cases
+   * matched; call `redraw` if the message changes what should be on screen.
    */
-  handleMessage?(msg: any, redraw: () => Promise<void>): Promise<void> | void;
+  handleMessage?(
+    msg: Extract<OoxmlMessage, { type: 'selectSheet' }>,
+    redraw: () => Promise<void>,
+  ): Promise<void> | void;
 }
 
 /**
@@ -157,33 +160,49 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
     // Registered before the HTML is assigned, so the webview's `ready` cannot
     // arrive before there is something listening for it.
     disposables.push(
-      webview.onDidReceiveMessage(async (msg) => {
-        if (msg?.type === 'ready') {
-          await draw();
-        } else if (msg?.type === 'revealInOS') {
-          revealInOs(document.uri);
-        } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
-          this.exportPdf(document.uri, msg.bodyHtml);
-        } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {
-          this.exportDocx(document.uri, msg.bodyXhtml);
-        } else if (msg?.type === 'pptxXhtml' && typeof msg.bodyXhtml === 'string') {
-          this.exportPptx(document.uri, msg.bodyXhtml);
-        } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
-          await applyMarkcopySetting(msg.key, msg.value, document.uri);
-        } else if (msg?.type === 'openSettings') {
-          void vscode.commands.executeCommand('markcopy.openSettings');
-        } else if (msg?.type === 'toast') {
-          vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
-        } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
-          // The menu's Search Google row, which the shared webview offers on every
-          // surface. Only web and mail links are followed here: nothing in a sheet
-          // or deck renders as a local link for the host to resolve.
-          const target = classifyLink(msg.href);
-          if (target?.kind === 'external') {
-            openExternalLink(target.href);
+      webview.onDidReceiveMessage(async (raw) => {
+        const msg = parseOoxmlMessage(raw);
+        if (!msg) {
+          return;
+        }
+        switch (msg.type) {
+          case 'ready':
+            await draw();
+            break;
+          case 'revealInOS':
+            revealInOs(document.uri);
+            break;
+          case 'pdfHtml':
+            this.exportPdf(document.uri, msg.body);
+            break;
+          case 'docxXhtml':
+            this.exportDocx(document.uri, msg.body);
+            break;
+          case 'pptxXhtml':
+            this.exportPptx(document.uri, msg.body);
+            break;
+          case 'updateSetting':
+            await applyMarkcopySetting(msg.key, msg.value, document.uri);
+            break;
+          case 'openSettings':
+            void vscode.commands.executeCommand('markcopy.openSettings');
+            break;
+          case 'toast':
+            vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
+            break;
+          case 'openLink': {
+            // The menu's Search Google row, which the shared webview offers on every
+            // surface. Only web and mail links are followed here: nothing in a sheet
+            // or deck renders as a local link for the host to resolve.
+            const target = classifyLink(msg.href);
+            if (target?.kind === 'external') {
+              openExternalLink(target.href);
+            }
+            break;
           }
-        } else if (session.handleMessage) {
-          await session.handleMessage(msg, draw);
+          case 'selectSheet':
+            await session.handleMessage?.(msg, draw);
+            break;
         }
       }),
     );

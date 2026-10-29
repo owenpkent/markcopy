@@ -230,6 +230,8 @@ The net effect is a much shorter top level: the Markdown preview's was up to 19 
 
 ## Message protocol
 
+Webview to host messages are untrusted input. Each surface has a vscode-free `parse<Surface>Message(raw: unknown)` in `src/messages/` (`markdown`, `ooxml`, `pdf`, `tex`, `stl`, `video`, `gif`) that returns a typed message for exactly the shapes its handler acts on, or `undefined`; every `onDidReceiveMessage` handler is a `switch` over that union. `src/messages/settings.ts` holds the per-surface allow-lists of `markcopy.*` keys a page may write (`isPreviewSetting`, `isPdfSetting`, `isViewerSetting`, `isGifSetting`), because a page that could write `video.ffmpegPath` or `pdf.browserPath` could make the host run a program of its choosing. The parsers are unit-tested in `tests/messages.test.ts`.
+
 Host to webview:
 
 | Type           | Payload                                                                                                                                                                        | Effect                                                                                                                                                                                                                            |

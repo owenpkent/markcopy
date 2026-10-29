@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getNonce } from './previewShell';
+import { parseStlMessage } from './messages/stl';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 
 // A read-only custom editor that renders STL files with Three.js in a webview.
@@ -39,8 +40,8 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       .get<string>('theme', 'auto');
     webview.html = this.html(webview, scriptUri, nonce, theme);
 
-    webview.onDidReceiveMessage(async (msg: { type?: string }) => {
-      if (msg?.type !== 'ready') {
+    webview.onDidReceiveMessage(async (raw) => {
+      if (!parseStlMessage(raw)) {
         return;
       }
       try {
