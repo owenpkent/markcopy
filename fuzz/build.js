@@ -5,9 +5,12 @@
 const esbuild = require('esbuild');
 const { globSync } = require('node:fs');
 
-// src/webview/ holds browser code that needs a DOM, so only its pure helpers
-// (the ones the host or a target imports) are built.
-const pureWebview = ['gifInfo', 'stlInfo', 'videoInfo'].map((n) => `src/webview/${n}.ts`);
+// src/webview/ holds browser code that needs a DOM, so only the modules a
+// target imports are built: pure helpers, and the paste converter, which the
+// target runs under jsdom.
+const pureWebview = ['gifInfo', 'stlInfo', 'videoInfo', 'links', 'markdownConvert'].map(
+  (n) => `src/webview/${n}.ts`,
+);
 
 const entryPoints = [
   ...globSync('src/**/*.ts', { exclude: (name) => name === 'webview' }),

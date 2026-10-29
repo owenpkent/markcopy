@@ -21,6 +21,8 @@ Parsers and converters that read data the user did not write are fuzzed with [Ja
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
 ```
 
+Two targets check a property rather than only looking for crashes. `links` throws when a href a browser reads as `javascript:`, `data:`, `file:` or any scheme other than `http`, `https` and `mailto` is both followed by the host (`hostFollowsLink`) and classified as an external link (`classifyLink`). `markdown-html` renders the input, runs it through DOMPurify in jsdom with the defaults the webview uses (`DOMPurify.sanitize` in `src/webview/main.ts`), and throws if a `<script>`, an `on*` attribute or a `javascript:` / `vbscript:` URL survives. It covers that one sanitize call, not the later KaTeX or Mermaid upgrades, and jsdom is not a browser, so a mutation-XSS difference between the two would not show. `paste-export` is the one async target; `fuzz/run.js` leaves out `--sync` for it.
+
 The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding.
 
 To turn a finding into a regression test, fix the bug, then copy the crash file into `tests/fixtures/` and add a Vitest case that feeds it to the same function and asserts it either returns or throws the documented error. Copy a small input into `fuzz/corpus/<name>/` too if it reaches code the seeds do not.
