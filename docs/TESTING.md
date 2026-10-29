@@ -133,8 +133,8 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
 - [ ] **Sync scroll**, **Auto-open preview**, **Math**, and **Footnotes** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
-- [ ] ☑ Every setting under **Preferences** still applies from the menu: **Theme** (all four), **Sync scroll**, **Auto-open preview**, **Math** and **Footnotes** each take effect and show in settings. The host accepts only these five keys from the page (`src/messages/settings.ts`), so a row that silently does nothing means the allow-list and the menu have drifted apart.
-- [ ] ☑ Right-click to open the menu, then dismiss it each way: click on empty page, press Escape, click into the text editor beside the preview, and switch to another window. Each closes every panel, submenus included. Repeat on a CSV grid, a sheet, a deck and a Word document.
+- [ ] Every setting under **Preferences** still applies from the menu: **Theme** (all four), **Sync scroll**, **Auto-open preview**, **Math** and **Footnotes** each take effect and show in settings. The host accepts only these five keys from the page (`src/messages/settings.ts`), so a row that silently does nothing means the allow-list and the menu have drifted apart.
+- [ ] Right-click to open the menu, then dismiss it each way: click on empty page, press Escape, click into the text editor beside the preview, and switch to another window. Each closes every panel, submenus included. Repeat on a CSV grid, a sheet, a deck and a Word document.
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
 - [ ] ☑ With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
 - [ ] ☑ Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
@@ -321,7 +321,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] ★ Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black re-tint the pages; Green on black renders green-on-black phosphor in pure `#00ff00`.
 - [ ] Right-click -> **Preferences**, the **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
 - [ ] Changing the theme from a Markdown preview (or settings.json) re-tints an already-open PDF.
-- [ ] ☑ Open the menu and dismiss it by clicking on the page, by Escape, and by clicking into the editor beside it: each closes the menu. After **Theme** is picked, the saved `markcopy.theme` is the one chosen (the PDF viewer may write only that setting).
+- [ ] Open the menu and dismiss it by clicking on the page, by Escape, and by clicking into the editor beside it: each closes the menu. After **Theme** is picked, the saved `markcopy.theme` is the one chosen (the PDF viewer may write only that setting).
 - [ ] Scrollbars are always visible and styled.
 
 ## STL viewer
@@ -401,8 +401,8 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 - [ ] With autoplay starting muted, clicking the player's own mute button does not get overridden: the sound stays as the button left it.
 - [ ] Right-click -> **Playback** -> **Autoplay** toggles with a checkmark, shows an **Autoplay on** / **Autoplay off** toast, persists to `markcopy.video.autoplay`, and affects the next opened video without starting or stopping the current one.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
-- [ ] ☑ Every video setting still applies from the menu: **Loop**, **Autoplay**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
-- [ ] ☑ While the video plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** paused. Do the same while paused: it does not start. Escape and clicking into the editor close the menu too. A plain click on the picture with no menu open still toggles playback.
+- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
+- [ ] While the video plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** paused. Do the same while paused: it does not start. Escape and clicking into the editor close the menu too. A plain click on the picture with no menu open still toggles playback.
 
 ### Bad input and codecs
 
@@ -472,7 +472,7 @@ Review mode. Make a clip whose frames are numbered so a step that lands on the w
 - [ ] ★ **Re-open in Marker**: close the video in MarkCopy and open the same video in Marker after adding, deleting and pinning notes in MarkCopy. Marker lists exactly those notes with the right times and pins in the same place, and loads without an error; saving from Marker changes nothing else in the file.
 - [ ] ★ **External edit**: reopen the video in MarkCopy and leave it open, then add a note to the sidecar in Marker (or a text editor, then save). The panel and markers update without reopening the tab. Delete the sidecar: the notes clear and **Copy as Markdown** greys out.
 - [ ] ★ **First note, no notes file**: with the sidecar deleted, add a note. The file is created beside the video with `version: 1`, a 12-character `id`, the video's name as `source`, `next_note_id: 2` and the note. With ffmpeg available and a 25 fps clip it says `fps: 25.0`; without ffmpeg a line above the composer reads "Frame rate unknown: notes will be saved at 30 fps" and the file says `fps: 30.0`. **Send** is not accepted until a rate is known.
-- [ ] ☑ **Scrubber alignment**: with review mode on, the grey scrubber bar spans only the playhead's travel, so no bar shows before the playhead at 0:00 or after it at the end. Seek to the start and to the end: the playhead line sits on the bar's end each time, and a marker at 0:00 sits on the bar, not outside it.
+- [ ] **Scrubber alignment**: with review mode on, the grey scrubber bar spans only the playhead's travel, so no bar shows before the playhead at 0:00 or after it at the end. Seek to the start and to the end: the playhead line sits on the bar's end each time, and a marker at 0:00 sits on the bar, not outside it.
 - [ ] ★ **Themes**: in Auto (both a light and a dark VS Code theme), Light, Dark and Green, the panel, cards, selected card, markers, range bands and caps, pin studs, banner and transport are all legible, including the focus ring on a button.
 
 ## GIF viewer
@@ -509,7 +509,7 @@ ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -frames:v 1 -loop 0 still.gif
 
 ### Theme, fallback and errors
 
-- [ ] ☑ While a GIF plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** toggled. Escape and clicking into the editor close the menu as well; a plain click with no menu open still toggles playback.
+- [ ] While a GIF plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** toggled. Escape and clicking into the editor close the menu as well; a plain click with no menu open still toggles playback.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround and the status line stays legible in Light, Dark, Green on black, and a high-contrast VS Code theme. Changing the theme from a Markdown or PDF preview re-tints an open GIF viewer.
 - [ ] The GIF viewer's **Theme** is the only setting its menu writes; each of the four values applies and persists.
 - [ ] A text file renamed `.gif` shows "is not a GIF MarkCopy can read" rather than a blank pane.
@@ -565,7 +565,7 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 ### Copy actions and theming
 
 - [ ] ☑ The right-click menu offers exactly what the PDF viewer's does (Copy Selection, Copy Page N as PNG, **Copy as** Page/All Text, Add Comment Here, the **Theme** submenu), plus the LaTeX-only **Recompile LaTeX** entry, since it is the same viewer; see the [Copy Matrix](COPY-MATRIX.md#a-page-in-the-latex-preview).
-- [ ] ☑ **Preferences** -> **Theme** applies all four values on a LaTeX preview, and the menu dismisses on a click outside, Escape and a click into the source editor, as on a PDF.
+- [ ] **Preferences** -> **Theme** applies all four values on a LaTeX preview, and the menu dismisses on a click outside, Escape and a click into the source editor, as on a PDF.
 - [ ] Comments added on the compiled PDF persist to `<filename>.tex.mccomments.json` beside the source and survive a recompile.
 
 ## Paste-target pass
