@@ -293,9 +293,10 @@ describe('createMenu', () => {
     expect(panels()).toHaveLength(1);
     expect(reachedHost).toBe(0);
 
-    // At the top level it falls through, so the host can close the menu.
+    // At the top level it falls through to the document, which closes the menu.
     press(anchor, 'Escape');
     expect(reachedHost).toBe(1);
+    expect(menu.isOpen()).toBe(false);
 
     document.removeEventListener('keydown', onKeydown);
   });
@@ -341,6 +342,45 @@ describe('createMenu', () => {
     expect(root.hidden).toBe(false);
 
     document.removeEventListener('click', onClick);
+  });
+
+  // The video and GIF viewers once shipped with no dismissal of their own, and
+  // the menu stayed on screen until a menu row was clicked.
+  describe('closes itself, with no help from the host', () => {
+    it('on a click outside every panel', () => {
+      const outside = document.createElement('div');
+      document.body.appendChild(outside);
+      const menu = createMenu(root);
+      menu.show(0, 0, nested());
+      hover(root.querySelector('.mc-menu-item') as HTMLElement);
+      expect(panels()).toHaveLength(2);
+
+      outside.click();
+      expect(menu.isOpen()).toBe(false);
+      expect(panels()).toHaveLength(1); // the hidden root
+      expect(root.hidden).toBe(true);
+    });
+
+    it('on Escape, without passing that press on to the host', () => {
+      const menu = createMenu(root);
+      let reachedHost = 0;
+      const onKeydown = (): void => void reachedHost++;
+      document.addEventListener('keydown', onKeydown);
+      menu.show(0, 0, nested());
+
+      press(document.body, 'Escape');
+      expect(menu.isOpen()).toBe(false);
+      expect(reachedHost).toBe(0);
+
+      document.removeEventListener('keydown', onKeydown);
+    });
+
+    it('when the webview loses focus', () => {
+      const menu = createMenu(root);
+      menu.show(0, 0, nested());
+      window.dispatchEvent(new FocusEvent('blur'));
+      expect(menu.isOpen()).toBe(false);
+    });
   });
 });
 

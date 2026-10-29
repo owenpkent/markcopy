@@ -1343,10 +1343,13 @@ body.mc-video .mc-rv-slider {
   appearance: none;
   cursor: pointer;
 }
+/* The thumb's line is its centre, so it travels from 22px in to 22px short of
+   the end. The track keeps its full width (the thumb's travel depends on it),
+   but draws only that span, so 0:00 sits on the start of the bar. */
 body.mc-video .mc-rv-slider::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 2px;
-  background: var(--rv-edge);
+  background: linear-gradient(var(--rv-edge), var(--rv-edge)) center / calc(100% - 44px) 100%
+    no-repeat;
 }
 body.mc-video .mc-rv-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
