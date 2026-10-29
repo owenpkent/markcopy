@@ -22,6 +22,12 @@ const collect = runInNewContext('gc') as () => void;
 const COLLECT_EVERY = 200;
 let sanitized = 0;
 
+// The collection above slows the growth but does not stop it: DOMPurify under
+// jsdom keeps about 30 KB per sanitize, even across a fresh window, while jsdom
+// parsing alone stays flat. So fuzz/run.js spends this target's budget in short
+// processes, each well under the fuzzer's 2 GB limit.
+export const SESSION_SECONDS = 90;
+
 const URL_ATTRS = ['href', 'src', 'xlink:href', 'action', 'formaction', 'data', 'poster'];
 const SCRIPT_URL = /^(?:javascript|vbscript):/i;
 
