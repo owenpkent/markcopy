@@ -41,7 +41,7 @@ npm run format        # prettier --write .
 npm run format:check  # prettier --check . (what CI runs)
 ```
 
-A separate nightly workflow fuzzes the file parsers (`npm run fuzz -- <target> [seconds]`; see [TESTING](../docs/TESTING.md#fuzzing)).
+A separate nightly workflow fuzzes the file parsers, link handling, sanitized Markdown output and the webview message parsers (`npm run fuzz -- <target> [seconds]`; 15 targets, listed in [TESTING](../docs/TESTING.md#fuzzing)).
 
 CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type-check, unit tests, build, package) and an integration-test job (VS Code under xvfb). Run `npm run format` before committing so `format:check` stays green.
 
@@ -135,6 +135,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `tests/`                         | Vitest unit tests.                                                                                                           |
 | `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                                                     |
 | `tests/e2e/`                     | Webview E2E: the menu, the copy flavors, the sheet grid, scroll sync.                                                        |
+| `src/messages/`                  | Pure parsers for webview-to-host messages and the per-surface allow-lists of writable settings (no `vscode` import).         |
 | `fuzz/`                          | Jazzer.js fuzz targets, seed corpus, and runner (`npm run fuzz`).                                                            |
 | `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                   |
 | `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                                                |
@@ -153,7 +154,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Adding a context-menu action
 
-1. Add a `MenuEntry` (see `src/webview/menu.ts` for the kinds: `item`, `submenu`, `label`, `divider`, `radio`, `checkbox`) in `buildMenu()` in `src/webview/main.ts` (or the equivalent in `src/webview/pdf.ts`), gated on the element type you detect with `target.closest(...)`. A new format for an existing element usually just adds another `item` to its `Copy as` submenu rather than a new top-level row.
+1. Add a `MenuEntry` (see `src/webview/menu.ts` for the kinds: `item`, `submenu`, `label`, `divider`, `radio`, `checkbox`) in `buildMenu()` in `src/webview/main.ts` (or the equivalent in `src/webview/pdf.ts`, `video.ts` or `gif.ts`), gated on the element type you detect with `target.closest(...)`. A new format for an existing element usually just adds another `item` to its `Copy as` submenu rather than a new top-level row.
 2. Implement the copy in a helper (`copyText`, `copyRichText`, `copyPng`, or a new one) and call `toast()` on success.
 3. Document it in the [Copy Matrix](../docs/COPY-MATRIX.md).
 

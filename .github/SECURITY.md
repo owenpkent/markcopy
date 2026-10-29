@@ -47,6 +47,14 @@ engine against the opened source and its included files. Video and GIF previews 
 media to Chromium and can optionally run ffprobe and ffmpeg. Word export parses
 webview-produced XHTML and writes an OOXML package, including external links.
 
+## Webview messages
+
+A webview is untrusted: it renders content from files you did not write, so the messages it posts to the extension host are treated as input, not as commands. Each preview has a `parse<Surface>Message` function in `src/messages/` (no `vscode` import) that accepts exactly the message shapes its handler acts on and returns `undefined` for anything else; the host handlers switch over the parsed result only. Messages that write a setting go through per-surface allow-lists in `src/messages/settings.ts`: the Markdown, CSV, spreadsheet, deck and Word previews may write `theme`, `syncScroll`, `autoPreview`, `math` and `footnotes`; the video viewer `theme`, `video.loop`, `video.autoplay` and `video.review`; the PDF, LaTeX and GIF viewers `theme` only. Each key is checked together with the type or enumerated value it takes. Settings that name an executable (`video.ffmpegPath`, `pdf.browserPath`, `tex.enginePath`) are not on any list, so a page cannot point the host at a program. A CSV cell edit is refused past column 500,000 rather than padding a row to that width, and a toast message must be a string.
+
+Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
+
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
+
 ## Content Security Policy
 
 The webview is served with a strict CSP and a fresh nonce per load:
