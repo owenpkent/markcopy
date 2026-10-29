@@ -5,8 +5,13 @@
 const esbuild = require('esbuild');
 const { globSync } = require('node:fs');
 
+// src/webview/ holds browser code that needs a DOM, so only its pure helpers
+// (the ones the host or a target imports) are built.
+const pureWebview = ['gifInfo', 'stlInfo', 'videoInfo'].map((n) => `src/webview/${n}.ts`);
+
 const entryPoints = [
   ...globSync('src/**/*.ts', { exclude: (name) => name === 'webview' }),
+  ...pureWebview,
   ...globSync('fuzz/targets/*.ts'),
 ].filter((f) => !f.endsWith('.d.ts'));
 
