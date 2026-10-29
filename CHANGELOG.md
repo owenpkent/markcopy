@@ -6,9 +6,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Added
 
-- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, XML, CSV, video notes and Markdown parsers. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
+- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, XML, CSV, video notes and Markdown parsers and of the messages a preview webview posts to the host. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
 
 ### Fixed
+
+- A preview page can no longer change settings other than the ones its own menu offers. The Markdown, spreadsheet, deck, Word, PDF and LaTeX previews used to write any MarkCopy setting a page asked for, including the paths to ffmpeg, the PDF browser and the LaTeX engine, which MarkCopy later runs.
+- Editing a CSV cell with a column number far beyond the grid no longer tries to pad the row to that width. Found by the new fuzzing.
 
 - The right-click menu in the video and GIF previews stayed open until a row was picked. Every preview's menu now closes on a click outside it, on **Escape**, or when focus leaves the preview, and the click that closes it no longer also plays or pauses the video.
 - The review scrubber's bar ran the full width while the playhead and note markers stop 22px short of each end, so at 0:00 the playhead sat visibly past the start of the bar. The bar now spans exactly the playhead's travel.
