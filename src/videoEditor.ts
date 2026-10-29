@@ -3,6 +3,8 @@ import { revealInOs } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
+import { parseVideoMessage } from './messages/video';
+import { isViewerSetting } from './messages/settings';
 import { ReviewSession, type ProbeInfo } from './videoReview';
 import {
   audioCodecLabel,
@@ -31,18 +33,9 @@ import {
 // the base64 round trip would cost several times the file's size in the
 // extension host, where running out of memory takes the whole window with it.
 // The theme values package.json allows for `markcopy.theme`.
-const THEMES = ['auto', 'light', 'dark', 'green'];
-
-/** True for the settings the video viewer's menus write, with a value of the right type. */
-export function isViewerSetting(key: string, value: unknown): boolean {
-  if (key === 'theme') {
-    return typeof value === 'string' && THEMES.includes(value);
-  }
-  return (
-    (key === 'video.loop' || key === 'video.autoplay' || key === 'video.review') &&
-    typeof value === 'boolean'
-  );
-}
+// The allow-list lives with the message parsers; re-exported for the callers
+// and tests that have always imported it from here.
+export { isViewerSetting };
 
 export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'markcopy.videoPreview';
@@ -90,63 +83,76 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
 
     const review = new ReviewSession(document.uri, webview, () => proxy.reviewProbe());
 
-    webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === 'ready') {
-        // A webview that reloads inside the same panel starts over from `ready`.
-        // A copy already built for this panel is what it was playing, and the
-        // sound copy in particular would not come back by itself: the original
-        // would report `playable` again into a session that has already made
-        // its one offer.
-        await this.sendLoad(webview, document.uri, proxy.current);
-        // Review mode follows the sidecar: one beside the video, or the setting.
-        await review.onReady();
-      } else if (msg?.type === 'revealInOS') {
-        revealInOs(document.uri);
-      } else if (msg?.type === 'saveFrame') {
-        await saveFrame(document.uri, msg.name, msg.data, webview);
-      } else if (msg?.type === 'openExternal') {
-        // The escape hatch for a codec VS Code's Chromium cannot decode
-        // (ProRes, DNxHD, most HEVC), which is a common shape for a .mov.
-        await vscode.env.openExternal(document.uri);
-      } else if (msg?.type === 'proxyRequest') {
-        // The element gave up on the file. Whether that is the end of the story
-        // depends on things only the host can see: the setting, and ffmpeg.
-        await proxy.offer();
-      } else if (msg?.type === 'playable') {
-        // The original file just loaded and plays. That is not the end of the
-        // story for its sound: the picture can be fine while the soundtrack is
-        // AAC, which this Chromium drops without an error. Only the host can
-        // probe for that.
-        await proxy.offerSound();
-      } else if (msg?.type === 'proxyStart') {
-        // Anything other than the explicit sound request is the picture path, so
-        // a malformed message cannot select a mode the host did not expect.
-        await proxy.build(msg.kind === 'sound' ? 'sound' : 'picture');
-      } else if (msg?.type === 'proxyCancel') {
-        proxy.cancel();
-      } else if (msg?.type === 'reviewEnable') {
-        await review.enable();
-      } else if (msg?.type === 'reviewCopy') {
-        await review.copy();
-      } else if (msg?.type === 'reviewAdd') {
-        // The edits carry data from the page, so the session checks each one with
-        // its exported validator before it touches the file.
-        await review.add(msg);
-      } else if (msg?.type === 'reviewDelete') {
-        await review.delete(msg);
-      } else if (msg?.type === 'reviewRestore') {
-        await review.restore(msg);
-      } else if (
-        msg?.type === 'updateSetting' &&
-        typeof msg.key === 'string' &&
-        isViewerSetting(msg.key, msg.value)
-      ) {
-        // Persist a setting changed from the viewer's menu (theme, loop,
-        // autoplay) at the scope where it is defined, matching the other
-        // previews. Only the keys the menu can send are written: the message
-        // comes from a webview, and an unchecked key would let it set
-        // `video.ffmpegPath`, which the host later executes.
-        await applyMarkcopySetting(msg.key, msg.value, document.uri);
+    webview.onDidReceiveMessage(async (raw) => {
+      const msg = parseVideoMessage(raw);
+      if (!msg) {
+        return;
+      }
+      switch (msg.type) {
+        case 'ready':
+          // A webview that reloads inside the same panel starts over from `ready`.
+          // A copy already built for this panel is what it was playing, and the
+          // sound copy in particular would not come back by itself: the original
+          // would report `playable` again into a session that has already made
+          // its one offer.
+          await this.sendLoad(webview, document.uri, proxy.current);
+          // Review mode follows the sidecar: one beside the video, or the setting.
+          await review.onReady();
+          break;
+        case 'revealInOS':
+          revealInOs(document.uri);
+          break;
+        case 'saveFrame':
+          await saveFrame(document.uri, msg.name, msg.data, webview);
+          break;
+        case 'openExternal':
+          // The escape hatch for a codec VS Code's Chromium cannot decode
+          // (ProRes, DNxHD, most HEVC), which is a common shape for a .mov.
+          await vscode.env.openExternal(document.uri);
+          break;
+        case 'proxyRequest':
+          // The element gave up on the file. Whether that is the end of the story
+          // depends on things only the host can see: the setting, and ffmpeg.
+          await proxy.offer();
+          break;
+        case 'playable':
+          // The original file just loaded and plays. That is not the end of the
+          // story for its sound: the picture can be fine while the soundtrack is
+          // AAC, which this Chromium drops without an error. Only the host can
+          // probe for that.
+          await proxy.offerSound();
+          break;
+        case 'proxyStart':
+          await proxy.build(msg.kind);
+          break;
+        case 'proxyCancel':
+          proxy.cancel();
+          break;
+        case 'reviewEnable':
+          await review.enable();
+          break;
+        case 'reviewCopy':
+          await review.copy();
+          break;
+        case 'reviewAdd':
+          // The edits carry data from the page, so the session checks each one with
+          // its exported validator before it touches the file.
+          await review.add(msg.raw);
+          break;
+        case 'reviewDelete':
+          await review.delete(msg.raw);
+          break;
+        case 'reviewRestore':
+          await review.restore(msg.raw);
+          break;
+        case 'updateSetting':
+          // Persist a setting changed from the viewer's menu (theme, loop,
+          // autoplay) at the scope where it is defined, matching the other
+          // previews. Only the keys the menu can send are written: the message
+          // comes from a webview, and an unchecked key would let it set
+          // `video.ffmpegPath`, which the host later executes.
+          await applyMarkcopySetting(msg.key, msg.value, document.uri);
+          break;
       }
     });
 

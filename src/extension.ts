@@ -25,11 +25,11 @@ import {
   cellEdit,
   delimiterHint,
   gridEdits,
-  isGridOp,
   renderCsvHtml,
   sniffDelimiter,
 } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
+import { parseMarkdownMessage, type MarkdownMessage } from './messages/markdown';
 import { htmlShell } from './previewShell';
 import { openExternalLink } from './externalLink';
 import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
@@ -830,31 +830,48 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
   panel.webview.html = htmlShell(context, panel.webview);
 
   const disposables: vscode.Disposable[] = [
-    panel.webview.onDidReceiveMessage((msg) => {
-      if (msg?.type === 'revealInOS') {
-        revealInOs(state.docUri);
-      } else if (msg?.type === 'revealLine') {
-        revealEditorLine(state.docUri, msg.line);
-      } else if (msg?.type === 'toast') {
-        vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
-      } else if (msg?.type === 'updateSetting' && typeof msg.key === 'string') {
-        void applyMarkcopySetting(msg.key, msg.value, state.docUri);
-      } else if (msg?.type === 'openSettings') {
-        vscode.commands.executeCommand('markcopy.openSettings');
-      } else if (msg?.type === 'openLink' && typeof msg.href === 'string') {
-        void openLink(context, state, msg.href);
-      } else if (msg?.type === 'pdfHtml' && typeof msg.bodyHtml === 'string') {
-        void exportPdf(context, state.docUri, msg.bodyHtml);
-      } else if (msg?.type === 'docxXhtml' && typeof msg.bodyXhtml === 'string') {
-        void exportDocx(state.docUri, msg.bodyXhtml);
-      } else if (msg?.type === 'pptxXhtml' && typeof msg.bodyXhtml === 'string') {
-        void exportPptx(state.docUri, msg.bodyXhtml);
-      } else if (msg?.type === 'editCell') {
-        void applyCellEdit(state, msg);
-      } else if (msg?.type === 'gridOp') {
-        void applyGridOp(state, msg);
-      } else if (msg?.type === 'editBlock') {
-        void applyBlockEdit(state, msg);
+    panel.webview.onDidReceiveMessage((raw) => {
+      const msg = parseMarkdownMessage(raw);
+      if (!msg) {
+        return;
+      }
+      switch (msg.type) {
+        case 'revealInOS':
+          revealInOs(state.docUri);
+          break;
+        case 'revealLine':
+          revealEditorLine(state.docUri, msg.line);
+          break;
+        case 'toast':
+          vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
+          break;
+        case 'updateSetting':
+          void applyMarkcopySetting(msg.key, msg.value, state.docUri);
+          break;
+        case 'openSettings':
+          vscode.commands.executeCommand('markcopy.openSettings');
+          break;
+        case 'openLink':
+          void openLink(context, state, msg.href);
+          break;
+        case 'pdfHtml':
+          void exportPdf(context, state.docUri, msg.body);
+          break;
+        case 'docxXhtml':
+          void exportDocx(state.docUri, msg.body);
+          break;
+        case 'pptxXhtml':
+          void exportPptx(state.docUri, msg.body);
+          break;
+        case 'editCell':
+          void applyCellEdit(state, msg);
+          break;
+        case 'gridOp':
+          void applyGridOp(state, msg);
+          break;
+        case 'editBlock':
+          void applyBlockEdit(state, msg);
+          break;
       }
     }),
   ];
@@ -1001,13 +1018,11 @@ function csvDelimiter(doc: vscode.TextDocument, text: string): string {
 // moved on since (the user typed in the editor, or an earlier edit is still
 // settling), the row the grid is pointing at may no longer be that row, so the
 // edit is dropped rather than applied to the wrong line.
-async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
-  const line = Number(msg.line);
-  const column = Number(msg.column);
-  const value = msg.value;
-  if (!Number.isInteger(line) || !Number.isInteger(column) || typeof value !== 'string') {
-    return;
-  }
+async function applyCellEdit(
+  state: PreviewState,
+  msg: Extract<MarkdownMessage, { type: 'editCell' }>,
+): Promise<void> {
+  const { line, column, value } = msg;
 
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
@@ -1015,7 +1030,7 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
   if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
     return;
   }
-  if (typeof msg.docVersion === 'number' && !addressable(state, doc, msg.docVersion)) {
+  if (msg.docVersion !== undefined && !addressable(state, doc, msg.docVersion)) {
     return; // stale grid; the re-render already on its way carries the truth
   }
 
@@ -1055,9 +1070,11 @@ async function applyCellEdit(state: PreviewState, msg: Record<string, unknown>):
 // in the newly shown file just because it holds the same text at those lines.
 // Whatever happens, the render that follows carries the edit's `editId`, which
 // tells the webview its line coordinates are current again.
-async function applyBlockEdit(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
-  const editId = Number.isSafeInteger(msg.editId) ? (msg.editId as number) : undefined;
-  const ack = (): void => update(state, editId);
+async function applyBlockEdit(
+  state: PreviewState,
+  msg: Extract<MarkdownMessage, { type: 'editBlock' }>,
+): Promise<void> {
+  const ack = (): void => update(state, msg.editId);
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
   );
@@ -1114,13 +1131,11 @@ const MAX_GRANULAR_EDITS = 2000;
 // operation lands in the editor's own undo stack. One WorkspaceEdit carries
 // every replacement, so a column that touches ten thousand rows is still a
 // single change and a single Ctrl+Z.
-async function applyGridOp(state: PreviewState, msg: Record<string, unknown>): Promise<void> {
-  const op = msg.op;
-  const line = Number(msg.line);
-  const column = Number(msg.column);
-  if (!isGridOp(op) || !Number.isInteger(line) || !Number.isInteger(column)) {
-    return;
-  }
+async function applyGridOp(
+  state: PreviewState,
+  msg: Extract<MarkdownMessage, { type: 'gridOp' }>,
+): Promise<void> {
+  const { op, line, column } = msg;
 
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
@@ -1128,7 +1143,7 @@ async function applyGridOp(state: PreviewState, msg: Record<string, unknown>): P
   if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
     return;
   }
-  if (typeof msg.docVersion === 'number' && !addressable(state, doc, msg.docVersion)) {
+  if (msg.docVersion !== undefined && !addressable(state, doc, msg.docVersion)) {
     return; // stale grid; the re-render already on its way carries the truth
   }
 
