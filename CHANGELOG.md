@@ -16,6 +16,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - A video notes file (`*.review.yaml`) with an alias that has no anchor, or more alias expansions than the YAML reader allows, threw while loading instead of opening read-only with a "Not valid YAML" message. Found by the new fuzzing.
 - Reading ffprobe's report on a video now copes with a report of the wrong shape (a `null` report or stream entry) instead of throwing. Real ffprobe output does not take that shape; found by the new fuzzing.
 - **Copy Selection as Markdown** failed on a selection containing an empty table (`<table></table>`, which pasted HTML can also carry) instead of copying the rest. The empty table is now left out. Found by the new fuzzing.
+- A Markdown preview could fail to render at all when an unreferenced footnote definition opened display math (`$$`) that ran on over a heading. Found by the new fuzzing.
 
 ### Security
 
