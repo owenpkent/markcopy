@@ -1,6 +1,7 @@
 import {
   asMessage,
   saveFrame,
+  settingMessage,
   type Dict,
   type SaveFrameMessage,
   type UpdateSettingMessage,
@@ -56,9 +57,7 @@ export function parseVideoMessage(raw: unknown): VideoMessage | undefined {
     case 'reviewRestore':
       return { type: msg.type, raw: msg };
     case 'updateSetting':
-      return typeof msg.key === 'string' && isViewerSetting(msg.key, msg.value)
-        ? { type: 'updateSetting', key: msg.key, value: msg.value }
-        : undefined;
+      return settingMessage(msg, isViewerSetting);
     default:
       return undefined;
   }

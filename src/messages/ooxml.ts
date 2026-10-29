@@ -1,10 +1,13 @@
 import {
   asMessage,
   exportMessage,
-  updateSetting,
+  settingMessage,
+  toastMessage,
   type ExportMessage,
+  type ToastMessage,
   type UpdateSettingMessage,
 } from './common';
+import { isPreviewSetting } from './settings';
 
 // Webview to host messages of the spreadsheet, deck and Word previews
 // (src/ooxmlEditor.ts and the sessions built on it).
@@ -14,7 +17,7 @@ export type OoxmlMessage =
   | ExportMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
-  | { type: 'toast'; text: unknown }
+  | ToastMessage
   | { type: 'openLink'; href: string }
   | { type: 'selectSheet'; index: number };
 
@@ -33,9 +36,9 @@ export function parseOoxmlMessage(raw: unknown): OoxmlMessage | undefined {
     case 'pptxXhtml':
       return exportMessage(msg);
     case 'updateSetting':
-      return updateSetting(msg);
+      return settingMessage(msg, isPreviewSetting);
     case 'toast':
-      return { type: 'toast', text: msg.text };
+      return toastMessage(msg);
     case 'openLink':
       return typeof msg.href === 'string' ? { type: 'openLink', href: msg.href } : undefined;
     case 'selectSheet': {

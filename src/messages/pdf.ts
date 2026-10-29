@@ -1,9 +1,10 @@
 import {
   asMessage,
-  updateSetting,
+  settingMessage,
   type SaveCommentsMessage,
   type UpdateSettingMessage,
 } from './common';
+import { isPdfSetting } from './settings';
 
 // Webview to host messages of the PDF viewer (src/pdfEditor.ts).
 export type PdfMessage =
@@ -21,7 +22,7 @@ export function parsePdfMessage(raw: unknown): PdfMessage | undefined {
     case 'saveComments':
       return { type: 'saveComments', comments: msg.comments };
     case 'updateSetting':
-      return updateSetting(msg);
+      return settingMessage(msg, isPdfSetting);
     default:
       return undefined;
   }

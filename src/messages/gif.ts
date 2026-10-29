@@ -1,4 +1,10 @@
-import { asMessage, saveFrame, type SaveFrameMessage, type UpdateSettingMessage } from './common';
+import {
+  asMessage,
+  saveFrame,
+  settingMessage,
+  type SaveFrameMessage,
+  type UpdateSettingMessage,
+} from './common';
 import { isGifSetting } from './settings';
 
 // Webview to host messages of the GIF viewer (src/gifEditor.ts).
@@ -22,9 +28,7 @@ export function parseGifMessage(raw: unknown): GifMessage | undefined {
     case 'saveFrame':
       return saveFrame(msg);
     case 'updateSetting':
-      return typeof msg.key === 'string' && isGifSetting(msg.key, msg.value)
-        ? { type: 'updateSetting', key: msg.key, value: msg.value }
-        : undefined;
+      return settingMessage(msg, isGifSetting);
     default:
       return undefined;
   }

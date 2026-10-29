@@ -2,16 +2,19 @@ import { isGridOp, type GridOp } from '../csv';
 import {
   asMessage,
   exportMessage,
-  updateSetting,
+  settingMessage,
+  toastMessage,
   type ExportMessage,
+  type ToastMessage,
   type UpdateSettingMessage,
 } from './common';
+import { isPreviewSetting } from './settings';
 
 // Webview to host messages of the Markdown and CSV preview (src/extension.ts).
 export type MarkdownMessage =
   | { type: 'revealInOS' }
   | { type: 'revealLine'; line: number }
-  | { type: 'toast'; text: unknown }
+  | ToastMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
   | { type: 'openLink'; href: string }
@@ -45,9 +48,9 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
         ? { type: 'revealLine', line: msg.line }
         : undefined;
     case 'toast':
-      return { type: 'toast', text: msg.text };
+      return toastMessage(msg);
     case 'updateSetting':
-      return updateSetting(msg);
+      return settingMessage(msg, isPreviewSetting);
     case 'openLink':
       return typeof msg.href === 'string' ? { type: 'openLink', href: msg.href } : undefined;
     case 'pdfHtml':

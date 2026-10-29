@@ -395,3 +395,89 @@ describe('parseVideoMessage', () => {
     }
   });
 });
+
+// Tightened checks: a preview's Preferences menu writes five settings and the PDF
+// viewer's Theme menu one, so a page cannot set a path the host later executes.
+describe('settings a page may write through updateSetting', () => {
+  const executable = [
+    'video.ffmpegPath',
+    'pdf.browserPath',
+    'tex.enginePath',
+    'tex.compile',
+    'tex.rootFile',
+    'video.transcode',
+    'mermaid',
+    'styleProfile',
+    'csv.delimiter',
+    '__proto__',
+    'constructor',
+    '',
+  ];
+
+  describe.each<[string, Parser]>([
+    ['markdown', parseMarkdownMessage],
+    ['ooxml', parseOoxmlMessage],
+  ])('%s preview', (_name, parse) => {
+    it('accepts the theme and the four toggles', () => {
+      for (const [key, value] of [
+        ['theme', 'auto'],
+        ['theme', 'green'],
+        ['syncScroll', false],
+        ['autoPreview', true],
+        ['math', true],
+        ['footnotes', false],
+      ] as const) {
+        expect(parse({ type: 'updateSetting', key, value })).toEqual({
+          type: 'updateSetting',
+          key,
+          value,
+        });
+      }
+    });
+
+    it('refuses any other key, and a value of the wrong type', () => {
+      for (const key of executable) {
+        expect(parse({ type: 'updateSetting', key, value: '/bin/sh' })).toBeUndefined();
+        expect(parse({ type: 'updateSetting', key, value: true })).toBeUndefined();
+      }
+      for (const [key, value] of [
+        ['theme', 'pink'],
+        ['theme', true],
+        ['theme', undefined],
+        ['syncScroll', 'false'],
+        ['math', 1],
+        ['footnotes', null],
+        // Video and GIF settings are not this surface's.
+        ['video.loop', true],
+      ] as const) {
+        expect(parse({ type: 'updateSetting', key, value })).toBeUndefined();
+      }
+    });
+
+    it('requires toast text to be a string', () => {
+      expect(parse({ type: 'toast', text: 'Copied' })).toEqual({ type: 'toast', text: 'Copied' });
+      for (const text of [undefined, null, 5, {}, ['x']]) {
+        expect(parse({ type: 'toast', text })).toBeUndefined();
+      }
+    });
+  });
+
+  describe.each<[string, Parser]>([
+    ['pdf', parsePdfMessage],
+    ['tex', parseTexMessage],
+  ])('%s viewer', (_name, parse) => {
+    it('accepts the theme and nothing else', () => {
+      expect(parse({ type: 'updateSetting', key: 'theme', value: 'light' })).toEqual({
+        type: 'updateSetting',
+        key: 'theme',
+        value: 'light',
+      });
+      expect(parse({ type: 'updateSetting', key: 'theme', value: 'pink' })).toBeUndefined();
+      expect(parse({ type: 'updateSetting', key: 'theme', value: 3 })).toBeUndefined();
+      for (const key of [...executable, 'syncScroll', 'math', 'video.loop']) {
+        expect(parse({ type: 'updateSetting', key, value: true })).toBeUndefined();
+        expect(parse({ type: 'updateSetting', key, value: '/bin/sh' })).toBeUndefined();
+      }
+    });
+  });
+});

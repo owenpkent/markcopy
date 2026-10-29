@@ -17,17 +17,31 @@ export function asMessage(raw: unknown): (Dict & { type: string }) | undefined {
   return typeof type === 'string' ? (raw as Dict & { type: string }) : undefined;
 }
 
-/** `{type: 'updateSetting', key, value}`: which keys and values are allowed is per surface. */
+/** `{type: 'updateSetting', key, value}`, for a key and value the surface allows. */
 export interface UpdateSettingMessage {
   type: 'updateSetting';
   key: string;
   value: unknown;
 }
 
-export function updateSetting(msg: Dict): UpdateSettingMessage | undefined {
-  return typeof msg.key === 'string'
+/** An `updateSetting` whose key and value pass the surface's allow-list (settings.ts). */
+export function settingMessage(
+  msg: Dict,
+  allowed: (key: string, value: unknown) => boolean,
+): UpdateSettingMessage | undefined {
+  return typeof msg.key === 'string' && allowed(msg.key, msg.value)
     ? { type: 'updateSetting', key: msg.key, value: msg.value }
     : undefined;
+}
+
+/** A status-bar toast: the text is shown as is, so it has to be a string. */
+export interface ToastMessage {
+  type: 'toast';
+  text: string;
+}
+
+export function toastMessage(msg: Dict): ToastMessage | undefined {
+  return typeof msg.text === 'string' ? { type: 'toast', text: msg.text } : undefined;
 }
 
 export interface ExportMessage {
