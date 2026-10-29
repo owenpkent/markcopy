@@ -14,8 +14,12 @@ if (!target || !existsSync(path.join(root, 'fuzz/targets', `${target}.fuzz.ts`))
   console.error('usage: node fuzz/run.js <target> [seconds]; targets are fuzz/targets/*.fuzz.ts');
   process.exit(2);
 }
-if (!Number.isFinite(seconds) || seconds <= 0) {
-  console.error(`invalid time budget: ${process.argv[3] ?? process.env.FUZZ_SECONDS}`);
+// Whole seconds, at least one: libFuzzer reads -max_total_time=0 as no limit
+// at all, so a fractional budget rounded down would run forever.
+if (!Number.isInteger(seconds) || seconds < 1) {
+  console.error(
+    `invalid time budget: ${process.argv[3] ?? process.env.FUZZ_SECONDS} (whole seconds, at least 1)`,
+  );
   process.exit(2);
 }
 
@@ -46,13 +50,15 @@ const result = spawnSync(
     targetFile,
     evolved,
     '--sync',
+    // Per-input timeout. Jazzer hands libFuzzer its own -timeout from this
+    // option (default 5 s), overriding one passed after `--`.
+    '--timeout=10000',
     '--includes',
     path.join('out', 'fuzz', 'src') + path.sep,
     '--includes',
     path.join('out', 'fuzz', 'fuzz') + path.sep,
     '--',
-    `-max_total_time=${Math.floor(seconds)}`,
-    '-timeout=10',
+    `-max_total_time=${seconds}`,
     '-rss_limit_mb=2048',
     `-artifact_prefix=${crashes}${path.sep}`,
   ],

@@ -18,7 +18,7 @@ The manual layer is smaller than it was. What keeps a row in it is needing a rea
 Seven parsers read files the user did not write, so they are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), XML (`xml`), CSV (`csv`), video notes files (`review`) and Markdown (`markdown`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue. It is not part of `npm test`.
 
 ```bash
-npm run fuzz -- xlsx 60    # target, then seconds (default 60, or set FUZZ_SECONDS)
+npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
 ```
 
 The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding.
