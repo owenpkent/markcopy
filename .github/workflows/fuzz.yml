@@ -27,7 +27,6 @@ jobs:
       fail-fast: false
       matrix:
         target:
-        target:
           [
             zip,
             xlsx,
