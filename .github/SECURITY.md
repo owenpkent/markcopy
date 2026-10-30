@@ -40,10 +40,10 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
-engine against the opened source and its included files. Video and GIF previews hand
+engine against the opened source and its included files. Video, GIF, and image previews hand
 media to Chromium and can optionally run ffprobe and ffmpeg. Word export parses
 webview-produced XHTML and writes an OOXML package, including external links.
 
@@ -53,7 +53,7 @@ A webview is untrusted: it renders content from files you did not write, so the 
 
 Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
 
-The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, image, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
 
 ## Content Security Policy
 
@@ -75,7 +75,7 @@ script-src 'nonce-${nonce}' 'strict-dynamic';
 
 The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the six webview surfaces (shared preview, PDF, LaTeX, video, GIF, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
+The STL preview is the most restrictive of the seven webview surfaces (shared preview, PDF, LaTeX, video, GIF, image, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 
@@ -284,3 +284,26 @@ document in the default app, reveal it, or write `markcopy.theme`; the host
 checks the setting key and value against an allowlist of that one setting. As
 with video, the browser's decoder still processes the file, so a malformed GIF
 could consume resources or trigger a vulnerability in the host's Chromium build.
+
+## Image preview
+
+The image viewer reads the file on the extension host (refusing anything above
+64 MiB before it is read) and posts it to the webview as base64. A small header
+parser in `src/webview/imageInfo.ts` reads the magic bytes and reports the
+type, and the webview builds a `Blob` from that sniffed type, never from the
+file extension; bytes it does not recognise are shown as an error rather than
+handed to the decoder. The parser reads only the header, bounds every read by
+the buffer's length, and never allocates in proportion to a size the file
+declares. An SVG is drawn only through an `<img>` element: it is never parsed
+into the page or inlined, so it runs no script and loads no external resource.
+The CSP is `default-src 'none'` with `img-src` limited to the webview origin,
+`blob:`, and `data:`, `style-src` and `font-src` limited to the webview origin
+(plus inline styles), and a bare nonced `script-src`; there is no
+`connect-src`, `media-src`, or `worker-src`. The webview may ask the host to
+save a PNG (through a save dialog), open the document in the default app,
+reveal it, or write `markcopy.theme` or `markcopy.image.background`; the host
+checks the key and value against an allowlist of those two settings. As with
+GIF, the browser's decoder still processes the file, so a malformed image could
+consume resources or trigger a vulnerability in the host's Chromium build. The
+parser and the message validator are unit-tested and fuzzed (see
+[Fuzzing](../docs/TESTING.md#fuzzing)).

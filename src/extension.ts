@@ -40,6 +40,7 @@ import { DocxEditorProvider } from './docxEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { GifEditorProvider } from './gifEditor';
+import { ImageEditorProvider } from './imageEditor';
 import { sweepProxyDir } from './videoProxy';
 import { TexEditorProvider, recompileActiveTex, texPanelFor } from './texEditor';
 import { sweepTexRoot } from './texCompile';
@@ -196,6 +197,18 @@ export function activate(context: vscode.ExtensionContext): void {
         supportsMultipleEditorsPerDocument: false,
         // Without this, switching tabs tears the webview down and the animation
         // restarts, with a fresh decode, on the way back.
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Images open in the MarkCopy image preview, ahead of the built-in one.
+    vscode.window.registerCustomEditorProvider(
+      ImageEditorProvider.viewType,
+      new ImageEditorProvider(context),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        // Without this, switching tabs tears the webview down and the file is
+        // read and decoded again on the way back.
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),

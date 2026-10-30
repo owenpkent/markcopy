@@ -28,7 +28,7 @@ npm run watch       # rebuild the extension host and webviews on change
 
 1. `check-types` (`tsc --noEmit`) type-checks the whole tree without emitting.
 2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js`.
-3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview and `media/stl.js` (Three.js bundled in) for the STL preview, `media/video.js` for the video player, and `media/gif.js` for the GIF viewer.
+3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview and `media/stl.js` (Three.js bundled in) for the STL preview, `media/video.js` for the video player, `media/gif.js` for the GIF viewer, and `media/image.js` for the image viewer.
 
 See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for why there are separate bundles.
 
@@ -58,7 +58,7 @@ npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
-Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), link and email-address detection (`src/webview/links.ts`), the shared context-menu engine (`src/webview/menu.ts`), what the PDF export and rich-text clipboard payload strip from the live preview DOM (`src/webview/main.ts`), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`), the Word export writer (`src/docxExport.ts`, `src/docx/`), LaTeX engine discovery, the per-engine command line, and compile-log parsing (`src/texCompile.ts`, `src/texInfo.ts`), the video preview's ffmpeg discovery, probing, and transcode command line (`src/videoProxy.ts`), and the GIF viewer's header parser and formatters (`src/webview/gifInfo.ts`).
+Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), link and email-address detection (`src/webview/links.ts`), the shared context-menu engine (`src/webview/menu.ts`), what the PDF export and rich-text clipboard payload strip from the live preview DOM (`src/webview/main.ts`), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`), the Word export writer (`src/docxExport.ts`, `src/docx/`), LaTeX engine discovery, the per-engine command line, and compile-log parsing (`src/texCompile.ts`, `src/texInfo.ts`), the video preview's ffmpeg discovery, probing, and transcode command line (`src/videoProxy.ts`), the GIF viewer's header parser and formatters (`src/webview/gifInfo.ts`), and the image viewer's format sniffer, header parser, and copy-text builders (`src/webview/imageInfo.ts`).
 
 Two kinds of logic are deliberately kept in files with no `vscode` import and no DOM dependency, so they can be tested like this: geometry and mapping arithmetic (`scrollSync.ts`), and anything describing a command line or generated document (`pdfExport.ts`). When you find yourself wanting to assert on a string the extension builds, that is the signal to move its construction into such a file.
 
@@ -92,7 +92,7 @@ On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, the video player, the GIF viewer, the LaTeX preview, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, `sample.docx`, `sample.pptx`, `sample.tex`, `sample.stl`, and `sample.mov` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, the video player, the GIF viewer, the image viewer, the LaTeX preview, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, `sample.docx`, `sample.pptx`, `sample.tex`, `sample.stl`, and `sample.mov` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
@@ -107,42 +107,42 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 
 ## Project layout
 
-| Path                             | What lives here                                                                                                              |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync, PDF export.                                                        |
-| `src/render.ts`                  | markdown-it setup and source-line mapping.                                                                                   |
-| `src/pdfExport.ts`               | Host: Save as PDF (browser discovery, `--print-to-pdf`, export page, print CSS).                                             |
-| `src/webview/main.ts`            | Markdown webview: rendering, context-menu entry tree, clipboard, PNG, Mermaid.                                               |
-| `src/webview/menu.ts`            | Shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by the Markdown, PDF, video, and GIF webviews. |
-| `src/webview/scrollSync.ts`      | Scroll-sync interpolation (pure, unit-tested).                                                                               |
-| `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                                                                              |
-| `src/webview/pdf.ts`             | PDF webview: pdf.js rendering, page/text copy actions, and its context-menu entry tree.                                      |
-| `src/csv.ts`                     | Host: CSV/TSV parsing (RFC 4180), delimiter sniffing, grid HTML, and cell edits.                                             |
-| `src/webview/csvTable.ts`        | CSV grid: drag-to-resize columns.                                                                                            |
-| `src/webview/csvEdit.ts`         | CSV grid: cell selection, navigation, and inline editing.                                                                    |
-| `src/webview/table.ts`           | CSV/TSV clipboard serialization and the Markdown-table reshaping (pure, unit-tested).                                        |
-| `src/previewShell.ts`            | Host: the HTML shell served to every webview that hosts the shared preview bundle.                                           |
-| `src/xlsxEditor.ts`              | Host: read-only custom editor for `.xlsx` / `.xlsm` files.                                                                   |
-| `src/xlsx/`                      | Host: the workbook reader (workbook, styles, sheet, grid HTML). Pure, unit-tested.                                           |
-| `src/ooxml/`                     | Host: the container code shared by the xlsx, docx, and pptx code (zip, XML, rels, XHTML).                                    |
-| `src/pptxEditor.ts`              | Host: read-only custom editor for `.pptx` / `.pptm` files.                                                                   |
-| `src/pptx/`                      | Host: the deck reader (`read/`) and the Save as PowerPoint writer (`write/`).                                                |
-| `src/docxExport.ts`, `src/docx/` | Host: Save as Word, the `.docx` writer.                                                                                      |
-| `src/stlEditor.ts`               | Host: read-only custom editor for `.stl` files.                                                                              |
-| `src/webview/stl.ts`             | STL webview: the Three.js scene, orbit controls, and the toolbar.                                                            |
-| `src/webview/stlInfo.ts`         | STL sniffing and the pre-allocation guards (pure, unit-tested).                                                              |
-| `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                                                           |
-| `tests/`                         | Vitest unit tests.                                                                                                           |
-| `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                                                     |
-| `tests/e2e/`                     | Webview E2E: the menu, the copy flavors, the sheet grid, scroll sync.                                                        |
-| `src/messages/`                  | Pure parsers for webview-to-host messages and the per-surface allow-lists of writable settings (no `vscode` import).         |
-| `fuzz/`                          | Jazzer.js fuzz targets, seed corpus, and runner (`npm run fuzz`).                                                            |
-| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                   |
-| `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                                                |
-| `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).                                                                   |
-| `scripts/make-sample-pdf.js`     | Generates `sample.pdf`, the manual-test fixture (docs/TESTING.md).                                                           |
-| `docs/`                          | Architecture and copy-matrix reference.                                                                                      |
-| `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                                                                                |
+| Path                             | What lives here                                                                                                                     |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extension.ts`               | Host: activation, commands, panel lifecycle, scroll sync, PDF export.                                                               |
+| `src/render.ts`                  | markdown-it setup and source-line mapping.                                                                                          |
+| `src/pdfExport.ts`               | Host: Save as PDF (browser discovery, `--print-to-pdf`, export page, print CSS).                                                    |
+| `src/webview/main.ts`            | Markdown webview: rendering, context-menu entry tree, clipboard, PNG, Mermaid.                                                      |
+| `src/webview/menu.ts`            | Shared context-menu engine (`MenuEntry`, `MenuController`, `createMenu`) used by the Markdown, PDF, video, GIF, and image webviews. |
+| `src/webview/scrollSync.ts`      | Scroll-sync interpolation (pure, unit-tested).                                                                                      |
+| `src/pdfEditor.ts`               | Host: read-only custom editor for `.pdf` files.                                                                                     |
+| `src/webview/pdf.ts`             | PDF webview: pdf.js rendering, page/text copy actions, and its context-menu entry tree.                                             |
+| `src/csv.ts`                     | Host: CSV/TSV parsing (RFC 4180), delimiter sniffing, grid HTML, and cell edits.                                                    |
+| `src/webview/csvTable.ts`        | CSV grid: drag-to-resize columns.                                                                                                   |
+| `src/webview/csvEdit.ts`         | CSV grid: cell selection, navigation, and inline editing.                                                                           |
+| `src/webview/table.ts`           | CSV/TSV clipboard serialization and the Markdown-table reshaping (pure, unit-tested).                                               |
+| `src/previewShell.ts`            | Host: the HTML shell served to every webview that hosts the shared preview bundle.                                                  |
+| `src/xlsxEditor.ts`              | Host: read-only custom editor for `.xlsx` / `.xlsm` files.                                                                          |
+| `src/xlsx/`                      | Host: the workbook reader (workbook, styles, sheet, grid HTML). Pure, unit-tested.                                                  |
+| `src/ooxml/`                     | Host: the container code shared by the xlsx, docx, and pptx code (zip, XML, rels, XHTML).                                           |
+| `src/pptxEditor.ts`              | Host: read-only custom editor for `.pptx` / `.pptm` files.                                                                          |
+| `src/pptx/`                      | Host: the deck reader (`read/`) and the Save as PowerPoint writer (`write/`).                                                       |
+| `src/docxExport.ts`, `src/docx/` | Host: Save as Word, the `.docx` writer.                                                                                             |
+| `src/stlEditor.ts`               | Host: read-only custom editor for `.stl` files.                                                                                     |
+| `src/webview/stl.ts`             | STL webview: the Three.js scene, orbit controls, and the toolbar.                                                                   |
+| `src/webview/stlInfo.ts`         | STL sniffing and the pre-allocation guards (pure, unit-tested).                                                                     |
+| `src/webview/markdownConvert.ts` | HTML-to-Markdown via Turndown (pure, unit-tested).                                                                                  |
+| `tests/`                         | Vitest unit tests.                                                                                                                  |
+| `tests/webview/harness.ts`       | Boots the real preview bundle in jsdom; the driver the E2E tests run on.                                                            |
+| `tests/e2e/`                     | Webview E2E: the menu, the copy flavors, the sheet grid, scroll sync.                                                               |
+| `src/messages/`                  | Pure parsers for webview-to-host messages and the per-surface allow-lists of writable settings (no `vscode` import).                |
+| `fuzz/`                          | Jazzer.js fuzz targets, seed corpus, and runner (`npm run fuzz`).                                                                   |
+| `test-integration/`              | VS Code integration tests (Mocha + @vscode/test-electron).                                                                          |
+| `media/preview.css`              | Style profiles (light/dark palette), PDF layout, menu, toast.                                                                       |
+| `scripts/make-screenshot.js`     | Regenerates the README screenshots (`npm run screenshot`).                                                                          |
+| `scripts/make-sample-pdf.js`     | Generates `sample.pdf`, the manual-test fixture (docs/TESTING.md).                                                                  |
+| `docs/`                          | Architecture and copy-matrix reference.                                                                                             |
+| `esbuild.js`, `esbuild.web.js`   | The bundlers.                                                                                                                       |
 
 ## Coding conventions
 

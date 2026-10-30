@@ -1,4 +1,4 @@
-# MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video & GIF Preview
+# MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video, GIF & Image Preview
 
 [![VS Code Marketplace](https://vsmarketplacebadges.dev/version-short/OwenPKent.markcopy.svg?label=VS%20Code%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=OwenPKent.markcopy)
 [![Open VSX](https://img.shields.io/open-vsx/v/OwenPKent/markcopy?label=Open%20VSX&color=a60ee5)](https://open-vsx.org/extension/OwenPKent/markcopy)
@@ -55,6 +55,8 @@ Flip the lock/pencil pill in the top-right corner to edit Markdown right in the 
 | Copy a video frame as PNG                |    No    |            No             | **Yes**  |
 | GIF preview with pause and frame step    |    No    |            No             | **Yes**  |
 | Copy a GIF frame as PNG                  |    No    |            No             | **Yes**  |
+| Copy an image as PNG, Markdown or HTML   |    No    |            No             | **Yes**  |
+| SVG shown as a picture, copy as PNG      |    No    |            No             | **Yes**  |
 | Word (.docx) preview                     |    No    |            No             | **Yes**  |
 | Export to Word (.docx)                   |    No    |        Via Pandoc         | **Yes**  |
 | PowerPoint (.pptx) preview               |    No    |            No             | **Yes**  |
@@ -113,6 +115,7 @@ When you copy Markdown you only get `text/plain`, the raw `# heading *asterisks*
 - **STL 3D preview.** Open an `.stl` and it opens in a Three.js viewer instead of a wall of binary: left-drag to orbit, right-drag to pan, scroll to zoom, with the camera fitted to the model on load. A small toolbar offers **Fit view**, **wireframe**, and **grid**, and an overlay reports the triangle count and the bounding-box dimensions. Both binary and ASCII STL are read. There are no copy actions here: a triangle soup has nothing meaningful to put on a clipboard, so it is a viewer only. See [STL preview](#stl-preview).
 - **Video preview with frame grabs.** Open a `.mov`, `.mp4`, `.m4v`, `.mkv`, `.webm`, `.avi`, `.wmv`, `.flv`, `.mpg`, `.mpeg`, or `.3gp` and it plays inline with full transport controls, rather than opening as binary or not at all: VS Code ships no preview for QuickTime files. Right-click for **Copy Frame as PNG** and **Save Frame as PNG…**, so a still from a screen recording goes straight into a bug report. A **Playback** submenu sets looping, speed, and autoplay, and `,` and `.` step a frame at a time to line the shot up. A file VS Code cannot decode (ProRes, DNxHD, most HEVC) plays anyway when you have ffmpeg: MarkCopy builds a throwaway H.264 copy in a temp folder, laying a clip with an alpha channel over a transparency checkerboard rather than flattening it onto black. Without ffmpeg it says what is wrong and offers your default player. **Review Notes** mode adds timecoded, pinnable notes in the okstudio-video-kit and Marker format, with a Markdown copy for a chat or an agent. See [Video preview](#video-preview).
 - **GIF preview with pause and frame step.** Open a `.gif` and it plays on a canvas you can control: click or press **space** to pause, **`,`** and **`.`** to step a frame, **Home** and **End** to jump to the ends, and right-click for **Copy Frame as PNG**, **Save Frame as PNG…**, and a **Playback** submenu for speed and looping.
+- **Image preview with real copy actions.** Open a `.png`, `.jpg`, `.webp`, `.bmp`, `.ico`, `.avif`, or `.svg` and it opens in a viewer with fit and zoom, a checkerboard behind transparency, and a right-click menu: **Copy Image as PNG**, **Save as PNG…**, and **Copy as** a Markdown image, an HTML `<img>`, or a data URI. An SVG shows as a picture instead of XML, and **Copy SVG Source** still gives you the text. See [Image preview](#image-preview).
 - **Settings without leaving the preview.** Right-click for the **Preferences** submenu (**Theme**, and **Sync scroll** / **Auto-open preview** / **Math** / **Footnotes** toggles), or use the gear icon in the preview's title bar. Both write straight to your VS Code settings.
 
 ![KaTeX equations and a Mermaid diagram rendered in the dark MarkCopy preview](docs/media/rendering-dark.png)
@@ -355,6 +358,27 @@ Right-click for the actions:
 - **Preferences → Theme** shares the setting with every other MarkCopy preview.
 
 The viewer uses the browser's WebCodecs `ImageDecoder`. Where that is missing, the GIF is shown in a plain image element: it still plays and the status line still reports its size, but the frame actions and playback controls are unavailable. The file is read whole and sent to the viewer, so a GIF above 64 MiB shows a message instead of loading.
+
+## Image preview
+
+MarkCopy registers as the editor for `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` (in upper or lower case), so a picture opens in a viewer with a copy menu instead of VS Code's built-in image preview, which can zoom and nothing else. For an SVG the difference is larger: the built-in route is a text editor full of XML, and here you see the drawing. **Reopen Editor With...** still reaches the built-in preview, and for an SVG it also reaches the text editor when you want to edit the markup by hand.
+
+The file is read whole and its kind is decided from its first bytes, not from its extension, so a `.png` that is really a JPEG still opens and the status line says what it is. A file that is not a recognised image shows "Not a recognised image" rather than a blank pane. The status line gives the file name, size, dimensions, and format (`photo.webp · 1.2 MB · 1920 x 1080 · WebP`); an SVG with a `viewBox` and no pixel width shows the `viewBox` instead. An SVG is only ever drawn through an image element: it is never parsed into the page, so a script inside it does not run.
+
+**Ctrl**+wheel zooms, as do **Ctrl**+**+** and **Ctrl**+**-**; **Ctrl**+**0** or **F** fits the picture to the pane, and **1** shows it at 100%. Zoom runs from 10% to 800% and is not saved. Above 200% pixels are drawn square rather than smoothed, so pixel art stays crisp.
+
+Right-click for the actions:
+
+- **Copy Image as PNG** puts the picture on the clipboard at its own size, whatever the zoom, whatever the source format.
+- **Save as PNG…** writes it to disk through a save dialog, defaulting to `<name>.png` beside the file.
+- **Copy as** gives the **File Name**, **Full Path**, a **Markdown Image** (`![name](path)`), an **HTML Image** (`<img src alt width height>`), or a **Data URI**. The Markdown and HTML paths are relative to the workspace folder, with spaces and reserved characters percent-encoded, so they resolve when pasted into a Markdown file in the same workspace; outside a workspace they are the bare file name. The data URI is greyed out above 4 MiB with the label "Too large for a data URI".
+- **SVG Scale** (SVG only, inside **Copy as**) picks 1x, 2x (the default), or 4x for **Copy Image as PNG** and **Save as PNG…**, since a vector drawing has no pixel size of its own. It lasts for the session, and a side is capped at 16384 px.
+- **Copy SVG Source** (SVG only) copies the file's text.
+- **View** has **Fit**, **100%**, **Zoom In**, and **Zoom Out**.
+- **Preferences** has **Theme**, shared with every other MarkCopy preview, and **Background**: **Checkerboard** (the default), **Light**, **Dark**, or **Theme**, stored as `markcopy.image.background`.
+- **Open in Default App** and **Reveal** hand the file to the operating system.
+
+A file above 64 MiB shows a message instead of loading. Copying the picture as PNG needs clipboard image support in VS Code, as every PNG copy in MarkCopy does.
 
 ## LaTeX preview
 

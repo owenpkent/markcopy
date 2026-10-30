@@ -2,6 +2,7 @@ import { FuzzedDataProvider } from '@jazzer.js/core';
 import { planBlockEdit } from '../../src/blockEdit';
 import { applyCsvEdits, cellEdit, gridEdits } from '../../src/csv';
 import { parseGifMessage } from '../../src/messages/gif';
+import { parseImageMessage } from '../../src/messages/image';
 import { parseMarkdownMessage } from '../../src/messages/markdown';
 import { parseOoxmlMessage } from '../../src/messages/ooxml';
 import { parsePdfMessage } from '../../src/messages/pdf';
@@ -32,6 +33,7 @@ type Parser = (raw: unknown) => unknown;
 
 const THEMES = ['auto', 'light', 'dark', 'green'];
 const PREVIEW_TOGGLES = ['syncScroll', 'autoPreview', 'math', 'footnotes'];
+const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
 const VIEWER_TOGGLES = ['video.loop', 'video.autoplay', 'video.review'];
 const GRID_OPS = [
   'insertRowAbove',
@@ -89,6 +91,7 @@ const TYPES = {
     'updateSetting',
   ],
   gif: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
+  image: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
 };
 const ALL_TYPES = [...new Set(Object.values(TYPES).flat()), 'toString', '__proto__', ''];
 
@@ -100,6 +103,7 @@ const PARSERS: [keyof typeof TYPES, Parser][] = [
   ['stl', parseStlMessage],
   ['video', parseVideoMessage],
   ['gif', parseGifMessage],
+  ['image', parseImageMessage],
 ];
 
 function fail(surface: string, why: string, msg: unknown): never {
@@ -118,6 +122,8 @@ function settingAllowed(surface: string, key: string, value: unknown): boolean {
       return theme || (PREVIEW_TOGGLES.includes(key) && bool);
     case 'video':
       return theme || (VIEWER_TOGGLES.includes(key) && bool);
+    case 'image':
+      return theme || (key === 'image.background' && IMAGE_BACKGROUNDS.includes(value as string));
     default:
       return theme; // pdf, tex, gif
   }
