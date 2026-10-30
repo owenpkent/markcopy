@@ -273,7 +273,21 @@ Copy actions only ever write to the clipboard, and only in response to a user ac
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.xlsx`, `.pdf`, or `.stl`), and the observed behavior. You will get an acknowledgement and a fix timeline.
+Please report suspected vulnerabilities privately rather than opening a public issue.
+
+- **Preferred:** GitHub private vulnerability reporting. Open the repository's Security tab and choose **Report a vulnerability**, or go straight to <https://github.com/owenpkent/markcopy/security/advisories/new>. The report stays private between you and the maintainer, and a fix can be developed in a private fork.
+- **Alternative:** the contact form at <https://www.owenpkent.com/>, if you do not want to use GitHub.
+
+Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.tsv`, `.xlsx`, `.pptx`, `.docx`, `.pdf`, `.tex`, `.stl`, a video such as `.mp4`, or `.gif`), and the observed behavior.
+
+### Response times
+
+- **Acknowledgement:** within 3 business days.
+- **Target fix:** within 30 days for anything exploitable by opening a file, and within 90 days for everything else. If a fix will slip past its target, the reporter is told why and given a new date.
+
+### Advisories
+
+Each fixed security issue gets a GitHub Security Advisory, and a CVE is requested from GitHub, which is a CVE Numbering Authority. The advisory is published once the fixed release is live on both the VS Code Marketplace and Open VSX, so the fix is available before the details are. The CHANGELOG's Security entry for that release links the advisory. The reporter is credited unless they ask not to be. See [RELEASING](../docs/RELEASING.md#phase-2-publish-to-the-registries) for the publishing step.
 
 ## GIF preview
 
