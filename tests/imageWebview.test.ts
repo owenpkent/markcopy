@@ -435,6 +435,17 @@ describe('image webview', () => {
       expect(scroller().classList.contains('mc-image-bg-dark')).toBe(false);
     });
 
+    it('uses quiet theme-mixed greys in 12px squares', async () => {
+      await boot();
+      fromHost(loadMsg());
+      const st = scroller().style;
+      expect(st.backgroundImage).toContain('--mc-bg');
+      expect(st.backgroundImage).toContain('--mc-fg');
+      expect(st.backgroundColor).toContain('--mc-fg');
+      expect(st.backgroundSize).toBe('12px 12px');
+      expect(st.backgroundImage).not.toMatch(/#|rgb\(|black|white/);
+    });
+
     it('persists a menu choice through updateSetting', async () => {
       await boot();
       fromHost(loadMsg());
@@ -627,8 +638,81 @@ describe('image webview', () => {
       (document.querySelector('[data-act="out"]') as HTMLElement).click();
       (document.querySelector('[data-act="out"]') as HTMLElement).click();
       expect(label()).toBe('75%');
-      $('mc-zoom-label').click();
+      $('mc-fit').click();
       expect(img().style.maxWidth).toBe('100%');
+    });
+
+    describe('typed zoom', () => {
+      const input = () => document.getElementById('mc-zoom-input') as HTMLInputElement | null;
+      const typeKey = (key: string) =>
+        input()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      const open = async (value?: string) => {
+        await boot();
+        fromHost(loadMsg());
+        $('mc-zoom-label').click();
+        if (value !== undefined) {
+          input()!.value = value;
+        }
+      };
+
+      it('swaps in a prefilled, focused input', async () => {
+        await open();
+        expect(input()).not.toBeNull();
+        expect(input()!.value).toBe('100');
+        expect(input()!.getAttribute('inputmode')).toBe('numeric');
+        expect(document.activeElement).toBe(input());
+        expect($('mc-zoom-label').hidden).toBe(true);
+        expect($('mc-zoom-label').getAttribute('aria-label')).toBe('Zoom level');
+        expect($('mc-zoom-label').title).toBe('Zoom level (click to type)');
+      });
+
+      it('applies " 150% " on Enter and restores the label', async () => {
+        await open(' 150% ');
+        typeKey('Enter');
+        expect(input()).toBeNull();
+        expect($('mc-zoom-label').hidden).toBe(false);
+        expect(label()).toBe('150%');
+        expect(document.activeElement).toBe($('mc-zoom-label'));
+        expect($('mc-fit').getAttribute('aria-pressed')).toBe('false');
+      });
+
+      it('accepts a bare number', async () => {
+        await open('150');
+        typeKey('Enter');
+        expect(label()).toBe('150%');
+      });
+
+      it('cancels on Escape', async () => {
+        await open('300');
+        typeKey('Escape');
+        expect(input()).toBeNull();
+        expect(label()).toBe('100%');
+        expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('clamps to 10..800', async () => {
+        await open('5000');
+        typeKey('Enter');
+        expect(label()).toBe('800%');
+        $('mc-zoom-label').click();
+        input()!.value = '1';
+        typeKey('Enter');
+        expect(label()).toBe('10%');
+      });
+
+      it('ignores junk', async () => {
+        await open('abc');
+        typeKey('Enter');
+        expect(input()).toBeNull();
+        expect(label()).toBe('100%');
+        expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('applies a changed value on blur', async () => {
+        await open('200');
+        input()!.dispatchEvent(new FocusEvent('blur'));
+        expect(label()).toBe('200%');
+      });
     });
 
     it('toggles fit with aria-pressed', async () => {

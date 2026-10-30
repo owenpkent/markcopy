@@ -887,7 +887,8 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   height: 16px;
   background: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.18));
 }
-#mc-page-input {
+#mc-page-input,
+#mc-zoom-input {
   font: inherit;
   font-size: 12px;
   width: 52px;
@@ -899,6 +900,9 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   border-radius: 5px;
   -moz-appearance: textfield;
   appearance: textfield;
+}
+#mc-zoom-input {
+  width: 44px; /* the label's min-width, so the toolbar does not jump */
 }
 #mc-page-input::-webkit-outer-spin-button,
 #mc-page-input::-webkit-inner-spin-button {

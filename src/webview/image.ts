@@ -90,6 +90,8 @@ const contextMenu = createMenu(menuEl);
 type Background = 'checkerboard' | 'light' | 'dark' | 'theme';
 const BACKGROUNDS: Background[] = ['checkerboard', 'light', 'dark', 'theme'];
 
+const CHECKER_LIGHT = 'color-mix(in srgb, var(--mc-bg) 92%, var(--mc-fg))';
+const CHECKER_DARK = 'color-mix(in srgb, var(--mc-bg) 84%, var(--mc-fg))';
 const ZOOM_STEPS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800];
 const SVG_SCALES = [1, 2, 4];
 
@@ -169,10 +171,10 @@ function applyBackground(value: unknown): void {
   s.backgroundSize = '';
   s.backgroundColor = '';
   if (background === 'checkerboard') {
-    s.backgroundColor = 'var(--mc-pre-bg)';
-    s.backgroundImage =
-      'conic-gradient(var(--mc-border) 25%, transparent 0 50%, var(--mc-border) 0 75%, transparent 0)';
-    s.backgroundSize = '16px 16px';
+    // Two close greys mixed from the theme tokens: a faint texture, not a grid.
+    s.backgroundColor = CHECKER_LIGHT;
+    s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
+    s.backgroundSize = '12px 12px';
   } else if (background === 'light') {
     s.backgroundColor = '#ffffff';
   } else if (background === 'dark') {
@@ -328,6 +330,61 @@ function stepZoom(direction: 1 | -1): void {
   }
   const limit = direction > 0 ? ZOOM_STEPS[ZOOM_STEPS.length - 1] : ZOOM_STEPS[0];
   setZoom(next ?? limit);
+}
+
+// Click the percentage to type a zoom, after the PDF viewer's go-to-page input.
+function parseZoomInput(text: string): number | undefined {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(text);
+  if (!m) {
+    return undefined;
+  }
+  return Math.min(800, Math.max(10, Math.round(Number(m[1]))));
+}
+
+function beginZoomInput(): void {
+  const label = document.getElementById('mc-zoom-label');
+  if (!label || label.hidden) {
+    return;
+  }
+  const start = String(Math.round(currentPercent()));
+  const input = document.createElement('input');
+  input.id = 'mc-zoom-input';
+  input.type = 'text';
+  input.setAttribute('inputmode', 'numeric');
+  input.value = start;
+  input.setAttribute('aria-label', 'Zoom percentage');
+  label.hidden = true;
+  label.insertAdjacentElement('afterend', input);
+
+  // Removing the input fires blur mid-removal; run the teardown once only.
+  let closed = false;
+  const done = (mode: 'enter' | 'blur' | 'cancel') => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    const n = parseZoomInput(input.value);
+    const changed = input.value !== start;
+    input.remove();
+    label.hidden = false;
+    if (mode !== 'blur') {
+      label.focus(); // hand focus back for keyboard users
+    }
+    if (n !== undefined && (mode === 'enter' || (mode === 'blur' && changed))) {
+      setZoom(n);
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // keep viewer shortcuts out of the input
+    if (e.key === 'Enter') {
+      done('enter');
+    } else if (e.key === 'Escape') {
+      done('cancel');
+    }
+  });
+  input.addEventListener('blur', () => done('blur'));
+  input.focus();
+  input.select();
 }
 
 document.addEventListener('keydown', (e) => {
@@ -507,7 +564,7 @@ const HAND_ICON =
 const ICON_BUTTON_CSS = 'display:inline-flex;align-items:center;justify-content:center;padding:0;';
 toolbarEl.innerHTML =
   '<button type="button" data-act="out" aria-label="Zoom out" title="Zoom out (Ctrl -)">\u2212</button>' +
-  '<button type="button" id="mc-zoom-label" aria-label="Reset zoom to fit" title="Fit (Ctrl 0)">100%</button>' +
+  '<button type="button" id="mc-zoom-label" aria-label="Zoom level" title="Zoom level (click to type)">100%</button>' +
   '<button type="button" data-act="in" aria-label="Zoom in" title="Zoom in (Ctrl +)">+</button>' +
   '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
   `<button type="button" id="mc-fit" data-act="fit" aria-pressed="true" aria-label="Fit to window" title="Fit to window" style="${ICON_BUTTON_CSS}">${FIT_ICON}</button>` +
@@ -520,7 +577,7 @@ toolbarEl.addEventListener('click', (e) => {
     return;
   }
   if (target.id === 'mc-zoom-label') {
-    setZoom('fit');
+    beginZoomInput();
     return;
   }
   const act = target.dataset.act;
