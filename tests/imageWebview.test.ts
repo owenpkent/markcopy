@@ -171,6 +171,9 @@ const key = (k: string, init: KeyboardEventInit = {}) =>
 
 const scroller = () => document.getElementById('mc-image-scroll') as HTMLDivElement;
 const img = () => document.getElementById('mc-image') as HTMLImageElement;
+const frame = () => document.getElementById('mc-image-frame') as HTMLDivElement;
+const grid = () => document.getElementById('mc-grid') as HTMLButtonElement;
+const JPEG_B64 = () => b64([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
 
 describe('image webview', () => {
   it('announces itself and shows a PNG from a sniffed-type blob', async () => {
@@ -438,12 +441,95 @@ describe('image webview', () => {
     it('uses quiet theme-mixed greys in 12px squares', async () => {
       await boot();
       fromHost(loadMsg());
-      const st = scroller().style;
+      const st = frame().style;
       expect(st.backgroundImage).toContain('--mc-bg');
       expect(st.backgroundImage).toContain('--mc-fg');
       expect(st.backgroundColor).toContain('--mc-fg');
       expect(st.backgroundSize).toBe('12px 12px');
       expect(st.backgroundImage).not.toMatch(/#|rgb\(|black|white/);
+    });
+
+    it('puts the checkerboard on the frame and never on the scroller', async () => {
+      await boot();
+      fromHost(loadMsg());
+      expect(frame().contains(img())).toBe(true);
+      expect(frame().style.backgroundImage).toContain('conic-gradient');
+      expect(scroller().style.backgroundImage).toBe('');
+      expect(scroller().style.backgroundColor).toBe('var(--mc-bg)');
+    });
+
+    for (const [value, colour] of [
+      ['checkerboard', 'var(--mc-bg)'],
+      ['theme', 'var(--mc-bg)'],
+      ['light', 'rgb(255, 255, 255)'],
+      ['dark', 'rgb(30, 30, 30)'],
+    ]) {
+      it(`gives the scroller the ${colour} backdrop for ${value}`, async () => {
+        await boot();
+        fromHost(loadMsg());
+        fromHost({ type: 'setBackground', value });
+        expect(scroller().style.backgroundColor).toBe(colour);
+        expect(scroller().style.backgroundImage).toBe('');
+        expect(frame().style.backgroundImage !== '').toBe(value === 'checkerboard');
+      });
+    }
+
+    it('sizes the frame with the zoom', async () => {
+      await boot();
+      fromHost(loadMsg({ data: headerPng(80, 40) }));
+      Object.defineProperty(img(), 'naturalWidth', { configurable: true, value: 80 });
+      Object.defineProperty(img(), 'naturalHeight', { configurable: true, value: 40 });
+      img().dispatchEvent(new Event('load'));
+      key('1');
+      expect(frame().style.width).toBe('80px');
+      expect(frame().style.height).toBe('40px');
+      key('+', { ctrlKey: true });
+      expect(frame().style.width).toBe('120px');
+      expect(frame().style.height).toBe('60px');
+      expect(img().style.width).toBe('120px');
+    });
+
+    it('draws no checkerboard for a JPEG and disables the toggle', async () => {
+      await boot();
+      fromHost(loadMsg({ data: JPEG_B64() }));
+      expect(frame().style.backgroundImage).toBe('');
+      expect(grid().disabled).toBe(true);
+      expect(grid().title).toBe('No transparency in a JPEG');
+      fromHost(loadMsg());
+      expect(frame().style.backgroundImage).toContain('conic-gradient');
+      expect(grid().disabled).toBe(false);
+    });
+
+    it('toggles the grid from the toolbar and persists the choice', async () => {
+      await boot();
+      fromHost(loadMsg());
+      expect(grid().getAttribute('aria-pressed')).toBe('true');
+      expect(grid().title).toBe('Transparency grid (click to hide)');
+      grid().click();
+      expect(posted).toHaveBeenCalledWith({
+        type: 'updateSetting',
+        key: 'image.background',
+        value: 'theme',
+      });
+      expect(grid().getAttribute('aria-pressed')).toBe('false');
+      expect(grid().title).toBe('Transparency grid (click to show)');
+      expect(frame().style.backgroundImage).toBe('');
+      grid().click();
+      expect(posted).toHaveBeenCalledWith({
+        type: 'updateSetting',
+        key: 'image.background',
+        value: 'checkerboard',
+      });
+      expect(grid().getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('keeps the grid button in step with host background changes', async () => {
+      await boot();
+      fromHost(loadMsg());
+      fromHost({ type: 'setBackground', value: 'dark' });
+      expect(grid().getAttribute('aria-pressed')).toBe('false');
+      fromHost({ type: 'setBackground', value: 'checkerboard' });
+      expect(grid().getAttribute('aria-pressed')).toBe('true');
     });
 
     it('persists a menu choice through updateSetting', async () => {
@@ -619,11 +705,11 @@ describe('image webview', () => {
         new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }),
       );
 
-    it('renders the five controls with labels', async () => {
+    it('renders the six controls with labels', async () => {
       await boot();
       fromHost(loadMsg());
       const buttons = Array.from($('mc-toolbar').querySelectorAll('button'));
-      expect(buttons).toHaveLength(5);
+      expect(buttons).toHaveLength(6);
       expect(buttons.every((b) => b.getAttribute('aria-label'))).toBe(true);
       expect($('mc-hand').title).toBe('Hand Tool (Drag to Pan)');
       expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');

@@ -52,11 +52,15 @@ const scroller = box(
   'mc-image-scroll',
   'position:fixed;inset:0 0 30px 0;overflow:auto;display:flex;box-sizing:border-box;padding:12px;',
 );
-const img = box('img', 'mc-image', 'margin:auto;flex:none;outline:none;');
+// The frame is exactly the picture's rendered size; the transparency checkerboard
+// lives on it, never on the scroller.
+const frame = box('div', 'mc-image-frame', 'margin:auto;flex:none;display:block;');
+const img = box('img', 'mc-image', 'display:block;outline:none;');
 img.alt = '';
 img.draggable = false;
 img.addEventListener('dragstart', (e) => e.preventDefault());
-scroller.append(img);
+frame.append(img);
+scroller.append(frame);
 const errorEl = box(
   'div',
   'mc-image-error',
@@ -90,8 +94,8 @@ const contextMenu = createMenu(menuEl);
 type Background = 'checkerboard' | 'light' | 'dark' | 'theme';
 const BACKGROUNDS: Background[] = ['checkerboard', 'light', 'dark', 'theme'];
 
-const CHECKER_LIGHT = 'color-mix(in srgb, var(--mc-bg) 92%, var(--mc-fg))';
-const CHECKER_DARK = 'color-mix(in srgb, var(--mc-bg) 84%, var(--mc-fg))';
+const CHECKER_LIGHT = 'color-mix(in srgb, var(--mc-bg) 94%, var(--mc-fg))';
+const CHECKER_DARK = 'color-mix(in srgb, var(--mc-bg) 88%, var(--mc-fg))';
 const ZOOM_STEPS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800];
 const SVG_SCALES = [1, 2, 4];
 
@@ -161,27 +165,50 @@ function showError(message: string): void {
   errorEl.textContent = message;
 }
 
+// JPEG never carries an alpha channel; BMP can, so it keeps the grid.
+function checkerAllowed(): boolean {
+  return info?.format !== 'jpeg';
+}
+
+function checkerVisible(): boolean {
+  return background === 'checkerboard' && checkerAllowed();
+}
+
+function paintFrame(): void {
+  const s = frame.style;
+  s.backgroundImage = '';
+  s.backgroundSize = '';
+  s.backgroundColor = '';
+  if (checkerVisible()) {
+    // Two close greys mixed from the theme tokens: a faint texture, not a grid.
+    s.backgroundColor = CHECKER_LIGHT;
+    s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
+    s.backgroundSize = '12px 12px';
+  }
+  const grid = document.getElementById('mc-grid') as HTMLButtonElement | null;
+  if (grid) {
+    const allowed = checkerAllowed();
+    grid.disabled = !allowed;
+    grid.setAttribute('aria-pressed', String(checkerVisible()));
+    grid.title = !allowed
+      ? 'No transparency in a JPEG'
+      : checkerVisible()
+        ? 'Transparency grid (click to hide)'
+        : 'Transparency grid (click to show)';
+  }
+}
+
 function applyBackground(value: unknown): void {
   background = BACKGROUNDS.includes(value as Background) ? (value as Background) : 'checkerboard';
   for (const b of BACKGROUNDS) {
     scroller.classList.toggle(`mc-image-bg-${b}`, b === background);
   }
-  const s = scroller.style;
-  s.backgroundImage = '';
-  s.backgroundSize = '';
-  s.backgroundColor = '';
-  if (background === 'checkerboard') {
-    // Two close greys mixed from the theme tokens: a faint texture, not a grid.
-    s.backgroundColor = CHECKER_LIGHT;
-    s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
-    s.backgroundSize = '12px 12px';
-  } else if (background === 'light') {
-    s.backgroundColor = '#ffffff';
-  } else if (background === 'dark') {
-    s.backgroundColor = '#1e1e1e';
-  } else {
-    s.backgroundColor = 'var(--mc-bg)';
-  }
+  // The scroller is always a plain backdrop; the checkerboard is only under the picture.
+  scroller.style.backgroundImage = '';
+  scroller.style.backgroundSize = '';
+  scroller.style.backgroundColor =
+    background === 'light' ? '#ffffff' : background === 'dark' ? '#1e1e1e' : 'var(--mc-bg)';
+  paintFrame();
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +265,7 @@ function load(msg: LoadMessage): void {
     blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: info.mime }));
     img.src = blobUrl;
   }
+  paintFrame();
   updateStatus();
   applyZoom();
 }
@@ -270,22 +298,35 @@ function naturalSize(): { w: number; h: number } {
   return { w: img.naturalWidth || width || 0, h: img.naturalHeight || height || 0 };
 }
 
+function sizeImage(width: string, height: string): void {
+  img.style.width = width;
+  img.style.height = height;
+  frame.style.width = width;
+  frame.style.height = height;
+}
+
 function applyZoom(): void {
+  const { w, h } = naturalSize();
+  img.style.imageRendering = '';
   if (zoom === 'fit') {
-    img.style.width = '';
-    img.style.height = '';
+    // Padding is 12px a side. Without a measurable pane or size the image keeps its own size.
+    const availW = scroller.clientWidth - 24;
+    const availH = scroller.clientHeight - 24;
     img.style.maxWidth = '100%';
     img.style.maxHeight = '100%';
-    img.style.imageRendering = '';
+    if (w && h && availW > 0 && availH > 0) {
+      const scale = Math.min(1, availW / w, availH / h);
+      sizeImage(`${w * scale}px`, `${h * scale}px`);
+    } else {
+      sizeImage('', '');
+    }
     updateToolbar();
     return;
   }
-  const { w, h } = naturalSize();
   img.style.maxWidth = 'none';
   img.style.maxHeight = 'none';
   if (w && h) {
-    img.style.width = `${(w * zoom) / 100}px`;
-    img.style.height = `${(h * zoom) / 100}px`;
+    sizeImage(`${(w * zoom) / 100}px`, `${(h * zoom) / 100}px`);
   }
   img.style.imageRendering = zoom > 200 ? 'pixelated' : '';
   updateToolbar();
@@ -310,7 +351,7 @@ function updateToolbar(): void {
 
 window.addEventListener('resize', () => {
   if (zoom === 'fit') {
-    updateToolbar();
+    applyZoom();
   }
 });
 
@@ -561,6 +602,11 @@ const HAND_ICON =
   'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
   'focusable="false"><path d="M12 3v18" /><path d="M3 12h18" /><path d="M9 6l3-3 3 3" />' +
   '<path d="M9 18l3 3 3-3" /><path d="M6 9l-3 3 3 3" /><path d="M18 9l3 3-3 3" /></svg>';
+const GRID_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+  '<rect x="3" y="3" width="18" height="18" rx="2" /><rect x="3" y="3" width="9" height="9" fill="currentColor" />' +
+  '<rect x="12" y="12" width="9" height="9" fill="currentColor" /></svg>';
 const ICON_BUTTON_CSS = 'display:inline-flex;align-items:center;justify-content:center;padding:0;';
 toolbarEl.innerHTML =
   '<button type="button" data-act="out" aria-label="Zoom out" title="Zoom out (Ctrl -)">\u2212</button>' +
@@ -569,7 +615,9 @@ toolbarEl.innerHTML =
   '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
   `<button type="button" id="mc-fit" data-act="fit" aria-pressed="true" aria-label="Fit to window" title="Fit to window" style="${ICON_BUTTON_CSS}">${FIT_ICON}</button>` +
   '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
-  `<button type="button" id="mc-hand" data-act="hand" aria-pressed="true" aria-label="Hand tool" title="Hand Tool (Drag to Pan)" style="${ICON_BUTTON_CSS}">${HAND_ICON}</button>`;
+  `<button type="button" id="mc-hand" data-act="hand" aria-pressed="true" aria-label="Hand tool" title="Hand Tool (Drag to Pan)" style="${ICON_BUTTON_CSS}">${HAND_ICON}</button>` +
+  '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
+  `<button type="button" id="mc-grid" data-act="grid" aria-pressed="true" aria-label="Transparency grid" title="Transparency grid (click to hide)" style="${ICON_BUTTON_CSS}">${GRID_ICON}</button>`;
 toolbarEl.addEventListener('pointerdown', (e) => e.stopPropagation());
 toolbarEl.addEventListener('click', (e) => {
   const target = (e.target as HTMLElement).closest<HTMLElement>('button');
@@ -589,6 +637,10 @@ toolbarEl.addEventListener('click', (e) => {
     setZoom(zoom === 'fit' ? 100 : 'fit');
   } else if (act === 'hand') {
     setHand(!hand);
+  } else if (act === 'grid' && checkerAllowed()) {
+    const value = checkerVisible() ? 'theme' : 'checkerboard';
+    applyBackground(value);
+    vscode.postMessage({ type: 'updateSetting', key: 'image.background', value });
   }
 });
 
