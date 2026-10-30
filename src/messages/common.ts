@@ -84,3 +84,11 @@ export interface SaveCommentsMessage {
   /** Anything but a non-empty array deletes the sidecar (see writeComments). */
   comments: unknown;
 }
+
+// Number() on an object with no prototype (or a throwing toString) throws
+// rather than returning NaN, so a hostile message could take the host down
+// in the validator. Only a real number passes; everything else is NaN, which
+// the callers' Number.isInteger checks reject.
+export function numberField(value: unknown): number {
+  return typeof value === 'number' ? value : Number.NaN;
+}
