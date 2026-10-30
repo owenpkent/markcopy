@@ -374,6 +374,32 @@ describe('image webview', () => {
       expect(img().style.maxWidth).toBe('100%');
     });
 
+    it('measures the pane for Fit without the zoomed picture scrollbars', async () => {
+      await boot();
+      fromHost(loadMsg());
+      // A 28px pane whose scrollbars take 17px whenever the picture is wider than it,
+      // which is what the real scroller does right after a zoom.
+      const pane = 28;
+      const el = scroller();
+      const taken = () => {
+        const w = parseFloat(img().style.width);
+        return Number.isFinite(w) && w > pane ? 17 : 0;
+      };
+      Object.defineProperty(el, 'clientWidth', { get: () => pane - taken(), configurable: true });
+      Object.defineProperty(el, 'clientHeight', { get: () => pane - taken(), configurable: true });
+      key('1');
+      for (let i = 0; i < 40; i++) key('=', { ctrlKey: true });
+      expect(img().style.width).toBe('64px');
+      key('f');
+      // 28px pane minus 24px padding leaves 4px for an 8px-wide picture: half size.
+      // Before the fix the measurement happened with the 64px picture still in place,
+      // its scrollbars left no room, and Fit fell back to no size at all.
+      expect(img().style.width).toBe('4px');
+      // Pressing Fit again changes nothing: the first measurement was already right.
+      key('f');
+      expect(img().style.width).toBe('4px');
+    });
+
     it('stops at 10% and 800%', async () => {
       await boot();
       fromHost(loadMsg());

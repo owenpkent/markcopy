@@ -310,10 +310,14 @@ function applyZoom(): void {
   img.style.imageRendering = '';
   if (zoom === 'fit') {
     // Padding is 12px a side. Without a measurable pane or size the image keeps its own size.
-    const availW = scroller.clientWidth - 24;
-    const availH = scroller.clientHeight - 24;
+    // Measure with the previous (possibly zoomed) size cleared first: otherwise the
+    // scrollbars that size put up still eat into clientWidth/Height and the first
+    // Fit after a zoom comes out a scrollbar short.
     img.style.maxWidth = '100%';
     img.style.maxHeight = '100%';
+    sizeImage('', '');
+    const availW = scroller.clientWidth - 24;
+    const availH = scroller.clientHeight - 24;
     if (w && h && availW > 0 && availH > 0) {
       const scale = Math.min(1, availW / w, availH / h);
       sizeImage(`${w * scale}px`, `${h * scale}px`);
