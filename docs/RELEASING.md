@@ -161,7 +161,7 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
     - With `gh`, which also works for publishing: `gh api -X PATCH repos/owenpkent/markcopy/security-advisories/<GHSA-id> -f state=published`. To ask for a CVE through the API, `gh api -X POST repos/owenpkent/markcopy/security-advisories/<GHSA-id>/cve`. List drafts with `gh api repos/owenpkent/markcopy/security-advisories?state=draft`.
     - Add the advisory link to that version's CHANGELOG Security entry, and the CVE once assigned, in a follow-up pull request.
 
-## Troubleshooting
+## Troubleshooting Phase 2
 
 Phase 2
 
