@@ -20,10 +20,26 @@ repos:
         stages: [pre-push]
 
   # SHA-pin GitHub Actions on commit (e.g. actions/checkout@v4 -> @<sha> # v4).
-  - repo: https://github.com/suzuki-shunsuke/pinact
-    rev: v3.0.0
+  #
+  # pinact ships no .pre-commit-hooks.yaml at any release, so a remote
+  # `repo:` entry fails to load and takes every other hook down with it.
+  # It runs as a local hook instead; pre-commit builds it with Go (and
+  # fetches a Go toolchain itself if none is installed). Bump the pinned
+  # version below on purpose, like the Action SHAs.
+  #
+  # `files` must cover every composite action pinact checks, not only
+  # .github/actions/: a root action.yml and one in any subdirectory are
+  # valid composites too. pre-commit passes only the matching filenames,
+  # so anything the filter misses is never pinned.
+  - repo: local
     hooks:
       - id: pinact
+        name: pinact (SHA-pin GitHub Actions)
+        language: golang
+        additional_dependencies:
+          - github.com/suzuki-shunsuke/pinact/v5/cmd/pinact@v5.0.2
+        entry: pinact run
+        files: ^(\.github/workflows/.*|(.*/)?action)\.ya?ml$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
