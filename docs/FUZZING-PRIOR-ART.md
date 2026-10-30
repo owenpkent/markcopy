@@ -164,26 +164,26 @@ already does with `-timeout` and `-rss_limit_mb`.
 
 Concrete, cheap improvements, in the order worth doing them:
 
-1. **Dictionaries per target.** Jazzer.js passes libFuzzer flags through, and
+1. **Dictionaries per target** ([#158](https://github.com/owenpkent/markcopy/issues/158)). Jazzer.js passes libFuzzer flags through, and
    `-dict=` with box names, chunk types, XML element names and CSV delimiters is the
    single biggest coverage win VLC's setup has and MarkCopy's lacks. The Trail of Bits
    finding that thin dictionaries hold OSS-Fuzz back applies in reverse here.
-2. **Real seeds, minimized.** The committed corpora are hand-built headers, which is
+2. **Real seeds, minimized** ([#159](https://github.com/owenpkent/markcopy/issues/159)). The committed corpora are hand-built headers, which is
    the "stub seeds" finding from the VLC audit. Add a few real small files per format
    (an actual camera JPEG with EXIF, a real AVIF, a real PSD-exported PNG) and run
    `-merge=1` occasionally so the cached corpus does not grow with redundant inputs.
-3. **Split `image` by format.** Like VLC's one binary per demuxer, a target per
+3. **Split `image` by format** ([#160](https://github.com/owenpkent/markcopy/issues/160)). Like VLC's one binary per demuxer, a target per
    sniffed format (or an environment variable the one target reads) lets the fuzzer
    spend its hour inside one parser instead of mostly failing the magic-byte check.
-4. **Request CVEs through GitHub.** GitHub is a CVE Numbering Authority; enabling
+4. **Request CVEs through GitHub** ([#161](https://github.com/owenpkent/markcopy/issues/161)). GitHub is a CVE Numbering Authority; enabling
    private vulnerability reporting and publishing a GitHub Security Advisory for each
    fixed issue costs nothing and gives distributors and users something to track, which
    is the gap both VLC (issue numbers instead of CVEs) and GIMP (no advisories) show.
    The changelog's Security subsection stays as the human-readable record.
-5. **CodeQL on the default branch.** It is free for public repositories, covers
+5. **CodeQL on the default branch** ([#162](https://github.com/owenpkent/markcopy/issues/162)). It is free for public repositories, covers
    JavaScript and TypeScript, and is the automated analysis gate the VLC audit asked for
    and GIMP added with Tartan.
-6. **Pin by digest, fetch over HTTPS.** The audit's supply-chain findings against VLC
+6. **Pin by digest, fetch over HTTPS** ([#163](https://github.com/owenpkent/markcopy/issues/163)). The audit's supply-chain findings against VLC
    prompted a check of MarkCopy's own workflows: every action in `ci.yml` and
    `fuzz.yml` is already pinned by commit SHA, so nothing to do here beyond keeping it
    that way when Dependabot bumps them.
