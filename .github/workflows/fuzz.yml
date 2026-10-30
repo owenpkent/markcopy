@@ -44,6 +44,13 @@ jobs:
             markdown-html,
             paste-export,
             image,
+            image-png,
+            image-jpeg,
+            image-webp,
+            image-bmp,
+            image-ico,
+            image-avif,
+            image-svg,
           ]
     steps:
       - name: Checkout

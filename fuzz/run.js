@@ -1,15 +1,30 @@
 // Runs one Jazzer.js target: node fuzz/run.js <target> [seconds]
 // Minimizes a corpus: node fuzz/run.js merge <target> [corpus-dir]  (npm run fuzz:merge)
+// `image-<format>` (png, jpeg, webp, bmp, ico, avif, svg) runs the image target with
+// FUZZ_IMAGE_FORMAT=<format>, so its inputs reach that format's header parser. Its
+// corpus is fuzz/.corpus/image-<format>/, seeded from the files in fuzz/corpus/image/
+// whose extension is that format's (.jpg and .jpeg for jpeg).
+// A dictionary at fuzz/dict/<target>.dict, when present, is passed with -dict.
 // The time budget also comes from FUZZ_SECONDS (default 60). The evolved corpus
 // lives in fuzz/.corpus/<target>/ (untracked) and is seeded from the committed
 // fuzz/corpus/<target>/; crashing inputs land in fuzz/crashes/<target>/.
 const { spawnSync } = require('node:child_process');
-const { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } = require('node:fs');
+const {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} = require('node:fs');
 const path = require('node:path');
 
 const merge = process.argv[2] === 'merge';
 const args = merge ? process.argv.slice(3) : process.argv.slice(2);
-const target = args[0];
+const requested = args[0];
+const variant = /^image-(png|jpeg|webp|bmp|ico|avif|svg)$/.exec(requested ?? '')?.[1];
+const target = variant ? 'image' : requested;
 const seconds = merge ? 1 : Number(args[1] ?? process.env.FUZZ_SECONDS ?? 60);
 const root = path.resolve(__dirname, '..');
 const targetFile = path.join(root, 'out/fuzz/fuzz/targets', `${target}.fuzz.js`);
@@ -36,7 +51,7 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
-const evolved = path.join(root, 'fuzz/.corpus', target);
+const evolved = path.join(root, 'fuzz/.corpus', requested);
 // An async target (paste-export awaits a lazy import) must not run in sync mode:
 // Jazzer.js would drop its promises unawaited and memory would grow without end.
 const targetSource = readFileSync(path.join(root, 'fuzz/targets', `${target}.fuzz.ts`), 'utf8');
@@ -84,12 +99,17 @@ if (merge) {
   }
   process.exit(mergeRun.status ?? 1);
 }
-const crashes = path.join(root, 'fuzz/crashes', target);
+const crashes = path.join(root, 'fuzz/crashes', requested);
 mkdirSync(evolved, { recursive: true });
 mkdirSync(crashes, { recursive: true });
 const seeds = path.join(root, 'fuzz/corpus', target);
 if (existsSync(seeds)) {
-  cpSync(seeds, evolved, { recursive: true, force: false });
+  const wanted = variant === 'jpeg' ? ['.jpg', '.jpeg'] : [`.${variant}`];
+  cpSync(seeds, evolved, {
+    recursive: true,
+    force: false,
+    filter: (src) => !variant || statSync(src).isDirectory() || wanted.includes(path.extname(src)),
+  });
 }
 
 // Run from the crash directory's parent so libFuzzer's crash-<hash> files land
@@ -126,7 +146,11 @@ const runSession = (budget) =>
       `-artifact_prefix=${crashes}${path.sep}`,
       ...(existsSync(dictFile) ? [`-dict=${dictFile}`] : []),
     ],
-    { cwd: root, stdio: 'inherit' },
+    {
+      cwd: root,
+      stdio: 'inherit',
+      env: variant ? { ...process.env, FUZZ_IMAGE_FORMAT: variant } : process.env,
+    },
   );
 
 for (let left = seconds; left > 0; left -= sessionSeconds) {
