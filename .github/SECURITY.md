@@ -307,7 +307,8 @@ The CSP, unchanged by this, is `default-src 'none'` with `img-src` limited to th
 save a PNG (through a save dialog), open the document in the default app,
 reveal it, or write `markcopy.theme` or `markcopy.image.background`; the host
 checks the key and value against an allowlist of those two settings. The host
-also watches the opened file (a `FileSystemWatcher` on its exact path) and
+also watches the opened file (a `FileSystemWatcher` on its folder and exact
+base name, with glob characters escaped so the name matches literally) and
 reloads it when it changes; the watcher reads that same URI and nothing the
 webview names. As with
 GIF, the browser's decoder still processes the file, so a malformed image could

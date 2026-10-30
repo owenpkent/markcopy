@@ -367,9 +367,9 @@ The file is read whole and its kind is decided from its first bytes, not from it
 
 **Ctrl**+wheel zooms, as do **Ctrl**+**+** and **Ctrl**+**-**; **Ctrl**+**0** or **F** fits the picture to the pane, and **1** shows it at 100%. Zoom runs from 10% to 800% and is not saved. Above 200% pixels are drawn square rather than smoothed, so pixel art stays crisp.
 
-A floating toolbar at the bottom right, above the status line and like the PDF viewer's, has zoom out, a percentage label (click it and type a zoom percentage), zoom in, **Fit to window** (lit while fit is on; click it while lit to go to 100%), and a **Hand Tool** toggle. The hand tool is on by default: drag the picture to pan when it is larger than the pane. **View** > **Hand Tool** in the right-click menu toggles the same thing, and neither choice is saved.
+A floating toolbar at the bottom right, above the status line and like the PDF viewer's, has zoom out, a percentage label (click it and type a percentage from 10 to 800; **Enter** applies and **Escape** cancels), zoom in, **Fit to window** (lit while fit is on; click it while lit to go to 100%), a **Hand Tool** toggle, and a **Transparency grid** toggle. The hand tool is on by default: drag the picture to pan when it is larger than the pane. **View** > **Hand Tool** in the right-click menu toggles the same thing, and neither choice is saved.
 
-The viewer watches the file, so saving it from an image editor reloads the picture without reopening the tab. If the file is deleted the pane says "name was deleted."
+The viewer watches the file, so saving it from an image editor reloads the picture without reopening the tab. If the file is deleted or can no longer be read, the pane says so and the picture is dropped, so the right-click menu offers only **File Name**, **Full Path**, **Open in Default App**, and **Reveal**; restoring the file brings the picture back.
 
 Right-click for the actions:
 
@@ -380,7 +380,7 @@ Right-click for the actions:
 - **Copy SVG Source** (SVG only) copies the file's text, in whichever encoding (UTF-8 or UTF-16) the file uses.
 - **View** has **Fit**, **100%**, **Zoom In**, **Zoom Out**, and a **Hand Tool** checkbox.
 - **Preferences** has **Theme**, shared with every other MarkCopy preview, and **Background**: **Checkerboard** (the default: the theme backdrop around the picture, with two faint theme-matched greys under the picture only, and never for a JPEG, which has no transparency), **Light**, **Dark**, or **Theme** (the MarkCopy theme's own background, not VS Code's editor background), stored as `markcopy.image.background`.
-- The toolbar has a transparency grid button after the hand tool. It toggles the checkerboard under the picture (it switches the setting between Checkerboard and Theme and persists like the menu) and is disabled for a JPEG.
+- The toolbar's **Transparency grid** button, after the hand tool, shows or hides the checkerboard under the picture. It switches the setting between Checkerboard and Theme, so it persists like the menu, and it is disabled (tooltip "No transparency in a JPEG") for a JPEG. The setting applies per resource, so a workspace or folder can have its own.
 - **Open in Default App** and **Reveal** hand the file to the operating system.
 
 On a file that fails to decode, **Copy Image as PNG** and **Save as PNG…** are greyed out. A file above 64 MiB shows a message instead of loading. Copying the picture as PNG needs clipboard image support in VS Code, as every PNG copy in MarkCopy does.

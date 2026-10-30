@@ -283,6 +283,7 @@ Notes:
 - **Data URI** is `data:<type>;base64,...` using the type detected from the file's bytes, not its extension. Above 4 MiB the row is greyed out under a "Too large for a data URI" label.
 - **The saved file** is `<name>.png`, beside the original, chosen in a save dialog.
 - **A file that fails to decode** (the header is recognised but the browser cannot draw it) shows "Could not decode <name>"; **Copy Image as PNG** and **Save as PNG…** are greyed out and the SVG Scale rows are hidden. The text copies still work.
+- **A host error** (the file was deleted, cannot be read, or is above 64 MiB) drops the picture, so the menu offers only **File Name**, **Full Path**, **Open in Default App**, and **Reveal**. The same four remain for bytes that are "Not a recognised image".
 - **Copy Image as PNG** needs clipboard image support, as elsewhere in this matrix.
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a picture.

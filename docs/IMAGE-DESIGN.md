@@ -13,7 +13,7 @@ XML declaration, comments or DOCTYPE. There is no separate `imageDimensions` fun
 `sniffImage` returns the header dimensions with the format. The host writes the saved
 background onto `<body>` and sends it again with `load`, so the first paint is right
 without a round trip. The webview styles itself inline with the shared `--mc-*` tokens
-rather than adding to `preview.css`. Everything else below shipped as written.
+rather than adding to `preview.css`. Review rounds added a floating toolbar with a hand tool and a percentage you can type, as in the PDF viewer, and a transparency grid toggle in it. The checkerboard moved from the pane onto a frame under the picture alone, and is never drawn for a JPEG. An SVG now loads through a `data:` URL rather than a Blob URL, since `<foreignObject>` taints the canvas from a Blob and breaks the PNG copy, and the host watches the file so an edit on disk reloads the picture. Everything else below shipped as written.
 
 MarkCopy previews ten kinds of document and the one thing it still handed to VS Code
 was a plain picture. The built-in image preview shows a PNG and zooms it, and that is all: there
