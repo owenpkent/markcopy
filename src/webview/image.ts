@@ -765,7 +765,16 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (msg.type === 'load') {
     load(msg);
   } else if (msg.type === 'error') {
+    // A host error (deleted, unreadable, over the cap) means the image on screen
+    // is no longer the file. Drop it, like the unknown-bytes path, so the menu
+    // and status line show nothing stale. The name and path stay for Copy as.
+    resetImage();
+    info = undefined;
+    bytes = new Uint8Array(0);
+    base64 = '';
+    fileBytes = 0;
     showError(msg.message);
+    statusEl.textContent = '';
   } else if (msg.type === 'setTheme') {
     applyTheme(msg.value);
   } else if (msg.type === 'setBackground') {

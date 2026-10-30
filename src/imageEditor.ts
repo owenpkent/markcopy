@@ -21,6 +21,15 @@ const RELOAD_DEBOUNCE_MS = 100;
 // The allow-list lives with the message parsers; re-exported for the tests.
 export { isImageSetting };
 
+/**
+ * Escape the glob metacharacters in a file name so a RelativePattern matches it
+ * literally. VS Code documents bracket escaping: [ becomes [[], * becomes
+ * [*], and so on. A ] on its own is literal, but is wrapped as well.
+ */
+export function escapeGlobName(name: string): string {
+  return name.replace(/[[\]{}*?]/g, (c) => `[${c}]`);
+}
+
 export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'markcopy.imagePreview';
 
@@ -112,7 +121,10 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       }, RELOAD_DEBOUNCE_MS);
     };
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.joinPath(document.uri, '..'), basename(document.uri)),
+      new vscode.RelativePattern(
+        vscode.Uri.joinPath(document.uri, '..'),
+        escapeGlobName(basename(document.uri)),
+      ),
     );
     const watchers = [
       watcher.onDidChange(reload),

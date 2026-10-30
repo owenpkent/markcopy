@@ -559,6 +559,39 @@ describe('image webview', () => {
       expect(written[0]).not.toContain('width=');
     });
 
+    it('drops the previous image on a host error and recovers on the next load', async () => {
+      await boot();
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"/>';
+      fromHost(loadMsg({ name: 'icon.svg', data: b64(svg) }));
+      loadEvt();
+      expect(status()).toContain('100 x 50');
+      fromHost({ type: 'error', message: 'icon.svg was deleted.' });
+      expect(document.getElementById('mc-image-error')?.textContent).toBe('icon.svg was deleted.');
+      expect(status()).toBe('');
+      expect(img().hasAttribute('src')).toBe(false);
+      openMenu();
+      const top = rowLabels();
+      expect(top).not.toContain('Copy SVG Source');
+      expect(top).toContain('Open in Default App');
+      const png = top.find((l) => l.startsWith('Copy Image as PNG'));
+      expect(
+        png === undefined || row('Copy Image as PNG').getAttribute('aria-disabled') === 'true',
+      ).toBe(true);
+      click('Copy as');
+      expect(rowLabels()).toEqual(expect.arrayContaining(['File Name', 'Full Path']));
+      expect(rowLabels()).not.toContain('Data URI');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+      fromHost(loadMsg({ name: 'icon.svg', data: b64(svg) }));
+      loadEvt();
+      expect(status()).toContain('100 x 50');
+      openMenu();
+      expect(rowLabels()).toContain('Copy SVG Source');
+      expect(row('Copy Image as PNG').getAttribute('aria-disabled')).not.toBe('true');
+      click('Copy as');
+      expect(rowLabels()).toContain('Data URI');
+    });
+
     it('makes the Theme background follow --mc-bg', async () => {
       await boot();
       fromHost({ type: 'setBackground', value: 'theme' });

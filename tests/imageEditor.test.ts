@@ -71,7 +71,7 @@ vi.mock('vscode', () => {
   };
 });
 
-import { ImageEditorProvider, isImageSetting } from '../src/imageEditor';
+import { ImageEditorProvider, escapeGlobName, isImageSetting } from '../src/imageEditor';
 import type * as vscode from 'vscode';
 
 function createPanel() {
@@ -237,6 +237,18 @@ describe('ImageEditorProvider', () => {
     it('watches exactly this file, by folder and base name', async () => {
       await open('/pics/shot.png');
       expect(watcherHooks.pattern).toMatchObject({ pattern: 'shot.png' });
+    });
+
+    it('escapes glob metacharacters in the watched base name', async () => {
+      await open('/pics/photo[1].png');
+      expect(watcherHooks.pattern).toMatchObject({ pattern: 'photo[[]1[]].png' });
+    });
+
+    it('escapes each metacharacter in brackets and leaves plain names alone', () => {
+      expect(escapeGlobName('a*b.png')).toBe('a[*]b.png');
+      expect(escapeGlobName('{x}.png')).toBe('[{]x[}].png');
+      expect(escapeGlobName('q?.png')).toBe('q[?].png');
+      expect(escapeGlobName('my photo-1_v2.png')).toBe('my photo-1_v2.png');
     });
 
     it('reloads once when the file changes, however many events arrive', async () => {
