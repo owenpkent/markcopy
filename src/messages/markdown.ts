@@ -7,6 +7,7 @@ import {
   type ExportMessage,
   type ToastMessage,
   type UpdateSettingMessage,
+  numberField,
 } from './common';
 import { isPreviewSetting } from './settings';
 
@@ -58,8 +59,8 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     case 'pptxXhtml':
       return exportMessage(msg);
     case 'editCell': {
-      const line = Number(msg.line);
-      const column = Number(msg.column);
+      const line = numberField(msg.line);
+      const column = numberField(msg.column);
       if (!Number.isInteger(line) || !Number.isInteger(column) || typeof msg.value !== 'string') {
         return undefined;
       }
@@ -72,8 +73,8 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
       };
     }
     case 'gridOp': {
-      const line = Number(msg.line);
-      const column = Number(msg.column);
+      const line = numberField(msg.line);
+      const column = numberField(msg.column);
       if (!isGridOp(msg.op) || !Number.isInteger(line) || !Number.isInteger(column)) {
         return undefined;
       }

@@ -6,12 +6,19 @@ Dependabot security alerts and automatic security update pull requests are enabl
 Weekly version updates are configured in `dependabot.yml`, with compatibility
 exclusions for dependencies tied to the project's Node and VS Code versions.
 
+CodeQL (`codeql.yml`) analyses the TypeScript sources with the `security-extended` suite on
+pushes to main, pull requests and weekly. Findings appear under the repository's Security
+tab (Code scanning). Generated bundles and vendored assets are excluded in
+`.github/codeql/codeql-config.yml`.
+
 `npm audit` is clean as of the move to `@vscode/vsce` 4 and `ovsx` 1.3 on Node 22.
 That removed the only advisory with no fixed release, `braces`
 (GHSA-vfj7-8cjw-p6xm), which vsce 3 reached through `secretlint`, `globby`,
 `fast-glob` and `micromatch` and which `ovsx` 1.2 pulled in again through its
 nested vsce 3. None of that chain was ever bundled into the extension. Check
 `npm audit` again after any dependency change.
+
+Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together.
 
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
@@ -266,7 +273,21 @@ Copy actions only ever write to the clipboard, and only in response to a user ac
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.xlsx`, `.pdf`, or `.stl`), and the observed behavior. You will get an acknowledgement and a fix timeline.
+Please report suspected vulnerabilities privately rather than opening a public issue.
+
+- **Preferred:** GitHub private vulnerability reporting. Open the repository's Security tab and choose **Report a vulnerability**, or go straight to <https://github.com/owenpkent/markcopy/security/advisories/new>. The report stays private between you and the maintainer, and a fix can be developed in a private fork.
+- **Alternative:** the contact form at <https://www.owenpkent.com/>, if you do not want to use GitHub.
+
+Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.tsv`, `.xlsx`, `.pptx`, `.docx`, `.pdf`, `.tex`, `.stl`, a video such as `.mp4`, or `.gif`), and the observed behavior.
+
+### Response times
+
+- **Acknowledgement:** within 3 business days.
+- **Target fix:** within 30 days for anything exploitable by opening a file, and within 90 days for everything else. If a fix will slip past its target, the reporter is told why and given a new date.
+
+### Advisories
+
+Each fixed security issue gets a GitHub Security Advisory, and a CVE is requested from GitHub, which is a CVE Numbering Authority. The advisory is published once the fixed release is live on both the VS Code Marketplace and Open VSX, so the fix is available before the details are. The CHANGELOG's Security entry for that release links the advisory. The reporter is credited unless they ask not to be. See [RELEASING](../docs/RELEASING.md#phase-2-publish-to-the-registries) for the publishing step.
 
 ## GIF preview
 
