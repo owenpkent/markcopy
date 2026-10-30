@@ -43,7 +43,7 @@ npm run format:check  # prettier --check . (what CI runs)
 
 A separate nightly workflow fuzzes the file parsers, link handling, sanitized Markdown output and the webview message parsers (`npm run fuzz -- <target> [seconds]`; 15 targets, listed in [TESTING](../docs/TESTING.md#fuzzing)).
 
-CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type-check, unit tests, build, package) and an integration-test job (VS Code under xvfb). Run `npm run format` before committing so `format:check` stays green.
+CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type-check, unit tests, build, package) and an integration-test job (VS Code under xvfb). Run `npm run format` before committing so `format:check` stays green. A separate CodeQL workflow analyses the sources with the `security-extended` suite on main, pull requests and weekly; its findings appear under the repository's Security tab.
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 
@@ -151,6 +151,15 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 - No em dashes in any text or comment; use commas, colons, or parentheses.
 - Do not bundle `vscode` (it is external and provided at runtime).
 - When adding a copy action, write both `text/html` and `text/plain` where formatting matters, and add a row to [docs/COPY-MATRIX.md](../docs/COPY-MATRIX.md).
+
+## Workflows
+
+New or changed steps in `.github/workflows/` must:
+
+- Pin every action by full 40-character commit SHA, with the version in a trailing comment on the same line (`# v7.0.1`), so Dependabot keeps both current.
+- Declare least-privilege `permissions:` (`contents: read` by default; widen per job, not per workflow).
+- Download anything only over HTTPS and verify a checksum before using it.
+- Never use `pull_request_target`.
 
 ## Adding a context-menu action
 

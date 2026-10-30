@@ -1,0 +1,10 @@
+name: MarkCopy CodeQL config
+
+# Generated bundles, build output, vendored assets and the fuzz corpus are not
+# source the project writes, so they are not analysed.
+paths-ignore:
+  - media/**
+  - dist/**
+  - out/**
+  - fuzz/.corpus/**
+  - node_modules

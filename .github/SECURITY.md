@@ -6,12 +6,19 @@ Dependabot security alerts and automatic security update pull requests are enabl
 Weekly version updates are configured in `dependabot.yml`, with compatibility
 exclusions for dependencies tied to the project's Node and VS Code versions.
 
+CodeQL (`codeql.yml`) analyses the TypeScript sources with the `security-extended` suite on
+pushes to main, pull requests and weekly. Findings appear under the repository's Security
+tab (Code scanning). Generated bundles and vendored assets are excluded in
+`.github/codeql/codeql-config.yml`.
+
 `npm audit` is clean as of the move to `@vscode/vsce` 4 and `ovsx` 1.3 on Node 22.
 That removed the only advisory with no fixed release, `braces`
 (GHSA-vfj7-8cjw-p6xm), which vsce 3 reached through `secretlint`, `globby`,
 `fast-glob` and `micromatch` and which `ovsx` 1.2 pulled in again through its
 nested vsce 3. None of that chain was ever bundled into the extension. Check
 `npm audit` again after any dependency change.
+
+Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together.
 
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
