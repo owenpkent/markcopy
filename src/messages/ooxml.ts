@@ -6,6 +6,7 @@ import {
   type ExportMessage,
   type ToastMessage,
   type UpdateSettingMessage,
+  numberField,
 } from './common';
 import { isPreviewSetting } from './settings';
 
@@ -42,7 +43,7 @@ export function parseOoxmlMessage(raw: unknown): OoxmlMessage | undefined {
     case 'openLink':
       return typeof msg.href === 'string' ? { type: 'openLink', href: msg.href } : undefined;
     case 'selectSheet': {
-      const index = Number(msg.index);
+      const index = numberField(msg.index);
       return Number.isInteger(index) && index >= 0 ? { type: 'selectSheet', index } : undefined;
     }
     default:
