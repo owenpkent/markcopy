@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { escapeGlobName } from './globEscape';
 import { revealInOs } from './revealInOs';
 import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
@@ -225,7 +226,7 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(
         vscode.Uri.joinPath(document.uri, '..'),
-        basename(document.uri.path),
+        escapeGlobName(basename(document.uri.path)),
       ),
     );
     disposables.push(
