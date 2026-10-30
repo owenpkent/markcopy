@@ -13,6 +13,8 @@ That removed the only advisory with no fixed release, `braces`
 nested vsce 3. None of that chain was ever bundled into the extension. Check
 `npm audit` again after any dependency change.
 
+Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together.
+
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
 these overrides when the CLI resolves patched versions without them. The direct Mocha
