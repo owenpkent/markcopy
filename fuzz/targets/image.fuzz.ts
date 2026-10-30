@@ -35,7 +35,23 @@ const startsWith = (data: Buffer, magic: number[]): boolean => magic.every((v, i
 const textAt = (data: Buffer, from: number, to: number): string =>
   data.subarray(from, to).toString('latin1');
 
-function withMagic(format: string, data: Buffer): Buffer {
+// True when the bytes already read as SVG: sniffImage accepts them, they are
+// UTF-16, or the decoded head opens with a declaration, comment, DOCTYPE or an
+// svg element (any prefix). Such an input is a seed or its mutation and keeps its
+// encoding, so the focused variant still reaches the UTF-16 and prolog code.
+function looksLikeSvg(data: Buffer): boolean {
+  if (sniffImage(data)?.format === 'svg' || svgEncoding(data) !== 'utf-8') {
+    return true;
+  }
+  const head = decodeSvgText(data.subarray(0, 4096)).trimStart();
+  return /^(?:<\?xml|<!--|<!DOCTYPE|<(?:[\w.-]+:)?svg)/i.test(head);
+}
+
+/** Puts the format's magic in front of the input unless it is already recognised as that format. */
+export function withMagic(format: string, data: Buffer): Buffer {
+  if (format === 'svg' ? looksLikeSvg(data) : sniffImage(data)?.format === format) {
+    return data;
+  }
   switch (format) {
     case 'png':
       return startsWith(data, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -57,13 +73,16 @@ function withMagic(format: string, data: Buffer): Buffer {
         ? data
         : bytes([0, 0, 0, 16], 'ftypavif', [0, 0, 0, 0], data);
     default:
-      return textAt(data, 0, 5) === '<svg ' ? data : bytes('<svg ', data);
+      return bytes('<svg ', data);
   }
 }
 
 export function fuzz(input: Buffer): void {
   const data = FORMAT ? withMagic(FORMAT, input) : input;
   if (FORMAT === 'svg') {
+    // The original bytes too, so UTF-16 detection and decoding run on them.
+    svgEncoding(input);
+    decodeSvgText(input);
     svgEncoding(data);
     decodeSvgText(data);
   }
