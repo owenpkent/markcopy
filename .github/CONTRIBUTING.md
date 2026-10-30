@@ -152,6 +152,15 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 - Do not bundle `vscode` (it is external and provided at runtime).
 - When adding a copy action, write both `text/html` and `text/plain` where formatting matters, and add a row to [docs/COPY-MATRIX.md](../docs/COPY-MATRIX.md).
 
+## Workflows
+
+New or changed steps in `.github/workflows/` must:
+
+- Pin every action by full 40-character commit SHA, with the version in a trailing comment on the same line (`# v7.0.1`), so Dependabot keeps both current.
+- Declare least-privilege `permissions:` (`contents: read` by default; widen per job, not per workflow).
+- Download anything only over HTTPS and verify a checksum before using it.
+- Never use `pull_request_target`.
+
 ## Adding a context-menu action
 
 1. Add a `MenuEntry` (see `src/webview/menu.ts` for the kinds: `item`, `submenu`, `label`, `divider`, `radio`, `checkbox`) in `buildMenu()` in `src/webview/main.ts` (or the equivalent in `src/webview/pdf.ts`, `video.ts` or `gif.ts`), gated on the element type you detect with `target.closest(...)`. A new format for an existing element usually just adds another `item` to its `Copy as` submenu rather than a new top-level row.
