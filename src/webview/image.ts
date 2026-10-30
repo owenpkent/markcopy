@@ -310,14 +310,17 @@ function applyZoom(): void {
   img.style.imageRendering = '';
   if (zoom === 'fit') {
     // Padding is 12px a side. Without a measurable pane or size the image keeps its own size.
-    // Measure with the previous (possibly zoomed) size cleared first: otherwise the
-    // scrollbars that size put up still eat into clientWidth/Height and the first
-    // Fit after a zoom comes out a scrollbar short.
+    // Measure with scrollbars out of the way: whatever is laid out right now (the
+    // zoomed size, or the natural size once that is cleared) can overflow the pane,
+    // and its scrollbars would eat into clientWidth/Height and leave Fit a scrollbar
+    // short. Forcing overflow hidden for the read gives the pane's true inner size.
     img.style.maxWidth = '100%';
     img.style.maxHeight = '100%';
-    sizeImage('', '');
+    const overflow = scroller.style.overflow;
+    scroller.style.overflow = 'hidden';
     const availW = scroller.clientWidth - 24;
     const availH = scroller.clientHeight - 24;
+    scroller.style.overflow = overflow;
     if (w && h && availW > 0 && availH > 0) {
       const scale = Math.min(1, availW / w, availH / h);
       sizeImage(`${w * scale}px`, `${h * scale}px`);

@@ -377,14 +377,13 @@ describe('image webview', () => {
     it('measures the pane for Fit without the zoomed picture scrollbars', async () => {
       await boot();
       fromHost(loadMsg());
-      // A 28px pane whose scrollbars take 17px whenever the picture is wider than it,
-      // which is what the real scroller does right after a zoom.
+      // A 28px pane whose scrollbars take 17px whenever content overflows it.
       const pane = 28;
       const el = scroller();
-      const taken = () => {
-        const w = parseFloat(img().style.width);
-        return Number.isFinite(w) && w > pane ? 17 : 0;
-      };
+      // Whatever is laid out (the zoomed size, or the natural size once that is
+      // cleared) overflows this pane, so scrollbars are present unless the
+      // measurement is taken with overflow hidden.
+      const taken = () => (el.style.overflow === 'hidden' ? 0 : 17);
       Object.defineProperty(el, 'clientWidth', { get: () => pane - taken(), configurable: true });
       Object.defineProperty(el, 'clientHeight', { get: () => pane - taken(), configurable: true });
       key('1');
