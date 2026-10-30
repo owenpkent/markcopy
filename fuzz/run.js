@@ -52,6 +52,10 @@ const isAsync = /export\s+async\s+function\s+fuzz\b/.test(targetSource);
 // evolved corpus, so coverage carries from one session to the next.
 const sessionMatch = /export\s+const\s+SESSION_SECONDS\s*=\s*(\d+)/.exec(targetSource);
 const sessionSeconds = sessionMatch ? Number(sessionMatch[1]) : seconds;
+// A dictionary of format tokens (fuzz/dict/<target>.dict, libFuzzer syntax) lets
+// the mutator splice in keywords and magic numbers it would take far longer to
+// invent byte by byte. Optional: a target without one runs as before.
+const dictFile = path.join(root, 'fuzz/dict', `${target}.dict`);
 const jazzer = require.resolve('@jazzer.js/core/dist/cli.js');
 const runSession = (budget) =>
   spawnSync(
@@ -72,6 +76,7 @@ const runSession = (budget) =>
       `-max_total_time=${budget}`,
       '-rss_limit_mb=2048',
       `-artifact_prefix=${crashes}${path.sep}`,
+      ...(existsSync(dictFile) ? [`-dict=${dictFile}`] : []),
     ],
     { cwd: root, stdio: 'inherit' },
   );
