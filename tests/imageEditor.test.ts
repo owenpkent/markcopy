@@ -9,6 +9,13 @@ const configUpdate = vi.hoisted(() => vi.fn(async () => undefined));
 const showSaveDialog = vi.hoisted(() => vi.fn());
 const writeFile = vi.hoisted(() => vi.fn(async () => undefined));
 const stat = vi.hoisted(() => vi.fn(async () => ({ size: 3 })));
+const watcherHooks = vi.hoisted(() => ({
+  change: undefined as undefined | (() => void),
+  create: undefined as undefined | (() => void),
+  remove: undefined as undefined | (() => void),
+  dispose: undefined as undefined | (() => void),
+  pattern: undefined as unknown,
+}));
 const readFile = vi.hoisted(() => vi.fn(async () => Uint8Array.from([0x47, 0x49, 0x46])));
 
 vi.mock('vscode', () => {
@@ -24,6 +31,12 @@ vi.mock('vscode', () => {
       joinPath: (base: { path: string }, ...segments: string[]) =>
         asUri(`${base.path}/${segments.join('/')}`),
     },
+    RelativePattern: class {
+      constructor(
+        public base: unknown,
+        public pattern: string,
+      ) {}
+    },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     env: { openExternal: vi.fn() },
     workspace: {
@@ -37,6 +50,21 @@ vi.mock('vscode', () => {
       ),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath.replace('/ws/', '')),
       fs: { stat, readFile, writeFile },
+      createFileSystemWatcher: vi.fn((pattern: unknown) => {
+        watcherHooks.pattern = pattern;
+        const dispose = vi.fn();
+        watcherHooks.dispose = dispose;
+        const hook = (key: 'change' | 'create' | 'remove') => (cb: () => void) => {
+          watcherHooks[key] = cb;
+          return { dispose: () => undefined };
+        };
+        return {
+          onDidChange: hook('change'),
+          onDidCreate: hook('create'),
+          onDidDelete: hook('remove'),
+          dispose,
+        };
+      }),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: () => undefined })),
     },
     window: { showSaveDialog, showErrorMessage: vi.fn() },
@@ -66,11 +94,19 @@ function createPanel() {
       return { dispose: () => undefined };
     },
   };
-  const panel = { webview, onDidDispose: () => ({ dispose: () => undefined }) };
+  let onDispose: (() => void) | undefined;
+  const panel = {
+    webview,
+    onDidDispose: (cb: () => void) => {
+      onDispose = cb;
+      return { dispose: () => undefined };
+    },
+  };
   return {
     panel: panel as unknown as vscode.WebviewPanel,
     webview,
     posted,
+    dispose: () => onDispose?.(),
     send: async (msg: unknown) => {
       await handler?.(msg);
     },
@@ -195,5 +231,53 @@ describe('ImageEditorProvider', () => {
   it('links preview.css, which styles the context menu and toast', async () => {
     const { webview } = await open();
     expect(webview.html).toMatch(/<link href="[^"]*preview\.css[^"]*" rel="stylesheet"/);
+  });
+
+  describe('file watching', () => {
+    it('watches exactly this file, by folder and base name', async () => {
+      await open('/pics/shot.png');
+      expect(watcherHooks.pattern).toMatchObject({ pattern: 'shot.png' });
+    });
+
+    it('reloads once when the file changes, however many events arrive', async () => {
+      vi.useFakeTimers();
+      try {
+        const { send, posted } = await open();
+        await send({ type: 'ready' });
+        expect(posted.filter((m) => m.type === 'load')).toHaveLength(1);
+
+        readFile.mockResolvedValueOnce(Uint8Array.from([1, 2, 3, 4]));
+        stat.mockResolvedValue({ size: 4 });
+        watcherHooks.change?.();
+        watcherHooks.change?.();
+        watcherHooks.create?.();
+        await vi.advanceTimersByTimeAsync(150);
+        const loads = posted.filter((m) => m.type === 'load');
+        expect(loads).toHaveLength(2);
+        expect(loads[1]).toMatchObject({ size: 4, data: 'AQIDBA==' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reports a deleted file', async () => {
+      const { posted } = await open('/pics/gone.png');
+      watcherHooks.remove?.();
+      expect(posted).toContainEqual({ type: 'error', message: 'gone.png was deleted.' });
+    });
+
+    it('disposes the watcher with the panel and drops a pending reload', async () => {
+      vi.useFakeTimers();
+      try {
+        const { posted, dispose } = await open();
+        watcherHooks.change?.();
+        dispose();
+        await vi.advanceTimersByTimeAsync(150);
+        expect(watcherHooks.dispose).toHaveBeenCalledTimes(1);
+        expect(posted.filter((m) => m.type === 'load')).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

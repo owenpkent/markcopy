@@ -43,6 +43,35 @@ function pngBase64(): string {
   ]);
 }
 
+// A PNG header declaring w x h.
+function headerPng(w: number, h: number): string {
+  const be = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const ihdr = Array.from('IHDR', (c) => c.charCodeAt(0));
+  return b64([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    ...be(13),
+    ...ihdr,
+    ...be(w),
+    ...be(h),
+    8,
+    6,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]);
+}
+
 const SVG_TEXT =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><script>alert(1)</script></svg>';
 
@@ -432,5 +461,197 @@ describe('image webview', () => {
     click('Theme');
     click('Light');
     expect(posted).toHaveBeenCalledWith({ type: 'updateSetting', key: 'theme', value: 'light' });
+  });
+
+  describe('review fixes', () => {
+    function setNatural(w: number, h: number): void {
+      Object.defineProperty(img(), 'naturalWidth', { configurable: true, value: w });
+      Object.defineProperty(img(), 'naturalHeight', { configurable: true, value: h });
+    }
+    const loadEvt = () => img().dispatchEvent(new Event('load'));
+    const status = () => document.getElementById('mc-image-status')?.textContent ?? '';
+
+    it('loads an SVG through a data URL and never a blob', async () => {
+      await boot();
+      fromHost(loadMsg({ name: 'icon.svg', data: b64(SVG_TEXT) }));
+      expect(img().getAttribute('src')).toBe(`data:image/svg+xml;base64,${b64(SVG_TEXT)}`);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it('prefers the decoded size for rasters (EXIF orientation)', async () => {
+      await boot();
+      fromHost(loadMsg({ data: headerPng(80, 40) }));
+      expect(status()).toContain('80 x 40');
+      setNatural(40, 80);
+      loadEvt();
+      expect(status()).toContain('40 x 80');
+      openMenu();
+      click('Copy as');
+      click('HTML Image');
+      expect(written[0]).toContain('width="40" height="80"');
+    });
+
+    describe('SVG export size', () => {
+      async function exportSize(svg: string, natural: [number, number]): Promise<number[]> {
+        const sizes: number[] = [];
+        const canvas = {
+          width: 0,
+          height: 0,
+          getContext: () => ({ drawImage: () => undefined }),
+          toBlob: (cb: (b: Blob | null) => void) => {
+            sizes.push(canvas.width, canvas.height);
+            cb(new Blob(['x']));
+          },
+        };
+        const create = document.createElement.bind(document);
+        vi.spyOn(document, 'createElement').mockImplementation(((tag: string) =>
+          tag === 'canvas' ? canvas : create(tag)) as typeof document.createElement);
+        Object.defineProperty(navigator.clipboard, 'write', {
+          configurable: true,
+          value: vi.fn(() => Promise.resolve()),
+        });
+        vi.stubGlobal('ClipboardItem', class {});
+        await boot();
+        fromHost(loadMsg({ name: 'a.svg', data: b64(svg) }));
+        setNatural(...natural);
+        loadEvt();
+        openMenu();
+        click('Copy Image as PNG');
+        await new Promise((r) => setTimeout(r, 0));
+        return sizes;
+      }
+
+      it('uses the resolved size for a width-only SVG', async () => {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="50"/>';
+        expect(await exportSize(svg, [50, 150])).toEqual([100, 300]);
+      });
+
+      it('uses the resolved size for a 10cm SVG', async () => {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10cm" height="5cm"/>';
+        expect(await exportSize(svg, [378, 189])).toEqual([756, 378]);
+      });
+
+      it('uses the viewBox when there is no width or height', async () => {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 12"/>';
+        expect(await exportSize(svg, [300, 150])).toEqual([48, 24]);
+      });
+
+      it('caps the longest side at 16384', async () => {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20000 100"/>';
+        expect(await exportSize(svg, [300, 150])).toEqual([16384, 82]);
+      });
+    });
+
+    it('reports a decode failure and disables the copy rows', async () => {
+      await boot();
+      fromHost(loadMsg({ name: 'icon.svg', data: b64(SVG_TEXT) }));
+      img().dispatchEvent(new Event('error'));
+      expect(document.getElementById('mc-image-error')?.textContent).toBe(
+        'Could not decode icon.svg',
+      );
+      expect(status()).toMatch(/^icon\.svg · [^·]+ · SVG$/);
+      openMenu();
+      expect(row('Copy Image as PNG').getAttribute('aria-disabled')).toBe('true');
+      expect(row('Save as PNG…').getAttribute('aria-disabled')).toBe('true');
+      click('Copy as');
+      expect(rowLabels().some((l) => l.endsWith('2x'))).toBe(false);
+      click('HTML Image');
+      expect(written[0]).not.toContain('width=');
+    });
+
+    it('makes the Theme background follow --mc-bg', async () => {
+      await boot();
+      fromHost({ type: 'setBackground', value: 'theme' });
+      expect(scroller().style.backgroundColor).toContain('--mc-bg');
+      expect(scroller().style.backgroundColor).not.toContain('--vscode-editor-background');
+    });
+  });
+
+  describe('toolbar and hand tool', () => {
+    const $ = (id: string) => document.getElementById(id) as HTMLElement;
+    const label = () => $('mc-zoom-label').textContent;
+    const ptr = (type: string, target: EventTarget, init: MouseEventInit = {}) =>
+      target.dispatchEvent(
+        new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }),
+      );
+
+    it('renders the five controls with labels', async () => {
+      await boot();
+      fromHost(loadMsg());
+      const buttons = Array.from($('mc-toolbar').querySelectorAll('button'));
+      expect(buttons).toHaveLength(5);
+      expect(buttons.every((b) => b.getAttribute('aria-label'))).toBe(true);
+      expect($('mc-hand').title).toBe('Hand Tool (Drag to Pan)');
+      expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('zooms with the buttons and updates the label', async () => {
+      await boot();
+      fromHost(loadMsg());
+      expect(label()).toBe('100%');
+      (document.querySelector('[data-act="in"]') as HTMLElement).click();
+      expect(label()).toBe('150%');
+      (document.querySelector('[data-act="out"]') as HTMLElement).click();
+      (document.querySelector('[data-act="out"]') as HTMLElement).click();
+      expect(label()).toBe('75%');
+      $('mc-zoom-label').click();
+      expect(img().style.maxWidth).toBe('100%');
+    });
+
+    it('toggles fit with aria-pressed', async () => {
+      await boot();
+      fromHost(loadMsg());
+      $('mc-fit').click();
+      expect($('mc-fit').getAttribute('aria-pressed')).toBe('false');
+      expect(label()).toBe('100%');
+      $('mc-fit').click();
+      expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('toggles the hand tool from the bar and the menu', async () => {
+      await boot();
+      fromHost(loadMsg());
+      expect(document.body.classList.contains('mc-mode-hand')).toBe(true);
+      $('mc-hand').click();
+      expect(document.body.classList.contains('mc-mode-hand')).toBe(false);
+      expect($('mc-hand').getAttribute('aria-pressed')).toBe('false');
+      openMenu();
+      click('View');
+      expect(row('Hand Tool').getAttribute('aria-checked')).toBe('false');
+      click('Hand Tool');
+      expect(document.body.classList.contains('mc-mode-hand')).toBe(true);
+    });
+
+    it('drags to scroll in hand mode', async () => {
+      await boot();
+      fromHost(loadMsg());
+      scroller().scrollLeft = 50;
+      scroller().scrollTop = 40;
+      ptr('pointerdown', img(), { clientX: 100, clientY: 100 });
+      expect(document.body.classList.contains('mc-grabbing')).toBe(true);
+      ptr('pointermove', document, { clientX: 90, clientY: 70 });
+      expect(scroller().scrollLeft).toBe(60);
+      expect(scroller().scrollTop).toBe(70);
+      ptr('pointerup', document);
+      expect(document.body.classList.contains('mc-grabbing')).toBe(false);
+      ptr('pointermove', document, { clientX: 0, clientY: 0 });
+      expect(scroller().scrollLeft).toBe(60);
+    });
+
+    it('does not drag with the right button, from the toolbar, or outside hand mode', async () => {
+      await boot();
+      fromHost(loadMsg());
+      ptr('pointerdown', img(), { button: 2, clientX: 100, clientY: 100 });
+      ptr('pointermove', document, { clientX: 50, clientY: 50 });
+      expect(scroller().scrollLeft).toBe(0);
+      ptr('pointerdown', $('mc-zoom-label'), { clientX: 100, clientY: 100 });
+      ptr('pointermove', document, { clientX: 50, clientY: 50 });
+      expect(scroller().scrollLeft).toBe(0);
+      expect(document.body.classList.contains('mc-grabbing')).toBe(false);
+      $('mc-hand').click();
+      ptr('pointerdown', img(), { clientX: 100, clientY: 100 });
+      ptr('pointermove', document, { clientX: 50, clientY: 50 });
+      expect(scroller().scrollLeft).toBe(0);
+    });
   });
 });

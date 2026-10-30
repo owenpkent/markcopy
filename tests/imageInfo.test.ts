@@ -1,8 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
+import MarkdownIt from 'markdown-it';
 import {
   base64ToBytes,
   dataUri,
+  decodeSvgText,
   encodePathForLink,
   htmlImage,
   markdownImage,
@@ -10,6 +12,7 @@ import {
   sniffImage,
   statusLine,
   stemOf,
+  svgEncoding,
   type ImageInfo,
 } from '../src/webview/imageInfo';
 
@@ -154,6 +157,15 @@ describe('sniffImage', () => {
       expect(info?.width).toBeUndefined();
     });
 
+    it('accepts avif among the compatible brands of an mif1 file', () => {
+      const ftyp = box('ftyp', text('mif1'), be32(0), text('heic'), text('avif'));
+      expect(sniffImage(ftyp)?.format).toBe('avif');
+      expect(sniffImage(box('ftyp', text('mif1'), be32(0), text('heic')))).toBeUndefined();
+      // A brand past the box's declared end does not count.
+      const outside = bytes([...box('ftyp', text('mif1'), be32(0))], text('avif'));
+      expect(sniffImage(outside)).toBeUndefined();
+    });
+
     it('gives no dimensions for a box that overruns or a size that goes nowhere', () => {
       const good = avif(ispe(8, 8));
       for (const n of [good.length - 1, good.length - 5, 30, 20]) {
@@ -181,11 +193,93 @@ describe('sniffImage', () => {
         width: 24,
         height: 12,
         viewBox: '0 0 24 12',
+        intrinsicSize: true,
       });
       const units = sniffImage(text('<svg width="10cm" height="5em" viewBox="0 0 1 1"/>'));
       expect(units).toMatchObject({ format: 'svg', viewBox: '0 0 1 1' });
       expect(units?.width).toBeUndefined();
       expect(sniffImage(text('<svg width="100%" height="100%">'))?.width).toBeUndefined();
+    });
+
+    describe('intrinsicSize', () => {
+      const size = (src: string) => sniffImage(text(src))?.intrinsicSize;
+      it('is true for a width or height that is a CSS length', () => {
+        expect(size('<svg width="24"/>')).toBe(true);
+        expect(size('<svg height="2in"/>')).toBe(true);
+        expect(size('<svg width="10cm" viewBox="0 0 1 1"/>')).toBe(true);
+        expect(size('<svg width="50%"/>')).toBe(true);
+      });
+
+      it('is false with no length, or a value that is not one, and unset elsewhere', () => {
+        expect(size('<svg viewBox="0 0 1 1"/>')).toBe(false);
+        expect(size('<svg width="auto" height="wide"/>')).toBe(false);
+        expect(sniffImage(png(1, 1))?.intrinsicSize).toBeUndefined();
+      });
+    });
+
+    describe('encodings', () => {
+      const src = '<?xml version="1.0"?>\n<svg width="24" height="12" viewBox="0 0 24 12"></svg>';
+      const utf16 = (s: string, be = false, bom = false) => {
+        const out: number[] = bom ? (be ? [0xfe, 0xff] : [0xff, 0xfe]) : [];
+        for (const c of s) {
+          const u = c.charCodeAt(0);
+          out.push(...(be ? [u >> 8, u & 255] : [u & 255, u >> 8]));
+        }
+        return Uint8Array.from(out);
+      };
+
+      it('detects the byte encoding', () => {
+        expect(svgEncoding(utf16(src, false, true))).toBe('utf-16le');
+        expect(svgEncoding(utf16(src, true, true))).toBe('utf-16be');
+        expect(svgEncoding(utf16(src))).toBe('utf-16le');
+        expect(svgEncoding(utf16(src, true))).toBe('utf-16be');
+        expect(svgEncoding(utf16('<svg/>'))).toBe('utf-16le');
+        expect(svgEncoding(bytes([0xef, 0xbb, 0xbf], src))).toBe('utf-8');
+        expect(svgEncoding(text(src))).toBe('utf-8');
+        expect(svgEncoding(new Uint8Array(0))).toBe('utf-8');
+      });
+
+      it('reads UTF-16 files, with and without a BOM', () => {
+        for (const data of [
+          utf16(src, false, true),
+          utf16(src),
+          utf16(src, true, true),
+          utf16(src, true),
+        ]) {
+          expect(sniffImage(data)).toMatchObject({
+            format: 'svg',
+            width: 24,
+            height: 12,
+            viewBox: '0 0 24 12',
+          });
+        }
+      });
+
+      it('decodes the whole file for Copy SVG Source, BOM stripped', () => {
+        expect(decodeSvgText(utf16(src, false, true))).toBe(src);
+        expect(decodeSvgText(utf16(src, true, true))).toBe(src);
+        expect(decodeSvgText(bytes([0xef, 0xbb, 0xbf], src))).toBe(src);
+        expect(decodeSvgText(text(`${src}é`))).toBe(`${src}é`);
+      });
+    });
+
+    describe('namespaces', () => {
+      const NS = 'http://www.w3.org/2000/svg';
+      it('accepts a prefixed root bound to the SVG namespace', () => {
+        const info = sniffImage(text(`<s:svg xmlns:s="${NS}" width="5" height="6"><s:g/></s:svg>`));
+        expect(info).toMatchObject({ format: 'svg', width: 5, height: 6 });
+      });
+
+      it('accepts a plain root with or without a default xmlns', () => {
+        expect(sniffImage(text(`<svg xmlns="${NS}" width="1" height="1">`))?.format).toBe('svg');
+        expect(sniffImage(text('<svg width="1" height="1">'))?.format).toBe('svg');
+      });
+
+      it('rejects a prefix bound elsewhere or not at all, and a foreign default xmlns', () => {
+        expect(sniffImage(text('<s:svg xmlns:s="urn:other" width="1">'))).toBeUndefined();
+        expect(sniffImage(text('<s:svg width="1">'))).toBeUndefined();
+        expect(sniffImage(text('<svg xmlns="urn:other" width="1">'))).toBeUndefined();
+      });
     });
 
     it('sees through a BOM, an XML declaration, comments and a DOCTYPE', () => {
@@ -306,6 +400,16 @@ describe('link helpers', () => {
   it('percent-encodes spaces and characters a link cannot take, keeping slashes', () => {
     expect(encodePathForLink('my pics/a b#1 (2).png')).toBe('my%20pics/a%20b%231%20%282%29.png');
     expect(encodePathForLink('a%b?.png')).toBe('a%25b%3F.png');
+  });
+
+  it('encodes & so a name like a&copy;.png is not read as an entity', () => {
+    expect(encodePathForLink('a&copy;.png')).toBe('a%26copy;.png');
+    const md = new MarkdownIt();
+    for (const name of ['a&copy;.png', 'x&amp;y&#35;z.png', 'dir/a&b.png']) {
+      const html = md.render(markdownImage('alt', name));
+      const src = /src="([^"]*)"/.exec(html)?.[1] ?? '';
+      expect(decodeURIComponent(src.replace(/&amp;/g, '&'))).toBe(name);
+    }
   });
 
   it('turns backslashes into slashes and leaves non-ASCII names alone', () => {

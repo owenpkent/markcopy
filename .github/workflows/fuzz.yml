@@ -43,6 +43,7 @@ jobs:
             links,
             markdown-html,
             paste-export,
+            image,
           ]
     steps:
       - name: Checkout

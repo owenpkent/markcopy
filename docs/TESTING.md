@@ -517,7 +517,7 @@ ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -frames:v 1 -loop 0 still.gif
 
 ## Image viewer
 
-There is no committed image fixture. Use a PNG with transparency (a screenshot of a window with rounded corners will do), a photo saved as `.jpg`, a `.webp`, and an SVG with a `viewBox` and no width (an icon, for example). Make two extra files: a copy of the JPEG renamed `.png`, and a text file renamed `.png`. Keep the SVG in a workspace folder whose path contains a space (`my icons/logo.svg`) for the Markdown check.
+There is no committed image fixture. Use a PNG with transparency (a screenshot of a window with rounded corners will do), a photo saved as `.jpg`, a `.webp`, and an SVG with a `viewBox` and no width (an icon, for example). Make two extra files: a copy of the JPEG renamed `.png`, and a text file renamed `.png`. Keep the SVG in a workspace folder whose path contains a space (`my icons/logo.svg`) for the Markdown check. For the later checks also make: an SVG that contains a `<foreignObject>`, an SVG saved as UTF-16 (for example from PowerShell with `Out-File -Encoding unicode`), a JPEG with an EXIF orientation of 6 or 8 (a phone photo taken sideways), and a PNG truncated to its first few hundred bytes.
 
 ### Opening and status line
 
@@ -527,18 +527,25 @@ There is no committed image fixture. Use a PNG with transparency (a screenshot o
 - [ ] The text file renamed `.png` shows "Not a recognised image" rather than a blank pane.
 - [ ] A file above 64 MiB (pad one with `fsutil file createnew big.png 70000000` on Windows) shows a message naming its size and the 64 MiB limit instead of loading, and VS Code stays responsive.
 - [ ] An SVG that contains a `<script>` element or an `onload` attribute shows its drawing and runs nothing.
+- [ ] The UTF-16 SVG opens as a drawing, not an error, and **Copy SVG Source** pastes readable text (not NUL-separated characters).
+- [ ] The EXIF-rotated JPEG shows upright and portrait, and the status line reports the portrait dimensions.
+- [ ] The truncated PNG shows "Could not decode <name>"; right-click shows **Copy Image as PNG** and **Save as PNG…** greyed out, **HTML Image** pastes with no `width` or `height`, and the file's other copy rows still work.
+- [ ] Edit the open picture on disk (save it from an image editor, or overwrite it with another file of the same name): the viewer reloads it within a moment. Delete the file: the pane says "<name> was deleted." Restore it: the picture comes back.
 
 ### View
 
 - [ ] Ctrl+wheel, Ctrl+plus, and Ctrl+minus zoom in steps between 10% and 800%; Ctrl+0 and **F** fit the picture to the pane, and **1** shows it at 100%. Right-click -> **View** does the same.
+- [ ] ★ The floating toolbar sits at the bottom right above the status line. Its zoom out (title "Zoom out (Ctrl -)"), percentage label (title "Fit (Ctrl 0)", click fits), zoom in ("Zoom in (Ctrl +)"), and **Fit to window** buttons work, the percentage tracks the zoom, and **Fit to window** is lit while fit is on and goes to 100% when clicked while lit.
+- [ ] ★ With the picture zoomed larger than the pane, the **Hand Tool** ("Hand Tool (Drag to Pan)") is on by default, the cursor is a grab hand, and dragging pans the picture. Turn it off from the toolbar and from right-click -> **View** -> **Hand Tool** in turn: the checkbox and the toolbar button agree, and dragging no longer pans. It is on again after reopening the file.
 - [ ] Zoomed past 200%, a small icon shows hard square pixels rather than a blur.
-- [ ] ★ Right-click -> **Preferences** -> **Background** -> **Checkerboard**, **Light**, **Dark**, and **Theme** each repaint the area behind the transparent PNG, and the status line stays legible against each in the Light, Dark, Green on black, and a high-contrast VS Code theme. The choice persists after closing and reopening the file, and it matches `markcopy.image.background` in Settings.
+- [ ] ★ Right-click -> **Preferences** -> **Background** -> **Checkerboard**, **Light**, **Dark**, and **Theme** each repaint the area behind the transparent PNG, and the status line stays legible against each in the Light, Dark, Green on black, and a high-contrast VS Code theme. **Theme** follows the MarkCopy theme: set **Preferences** -> **Theme** to one that differs from VS Code's (Light in a dark VS Code, say) and the backdrop matches MarkCopy's theme, not the editor. The choice persists after closing and reopening the file, and it matches `markcopy.image.background` in Settings.
 - [ ] **Preferences** -> **Theme** re-tints the surround in the four themes.
 
 ### Copy and save
 
 - [ ] ★ Right-click -> **Copy Image as PNG** on the transparent PNG and paste into Word and Slack: the picture arrives at its own size with the transparency intact, not at the zoom it was viewed at. Do the same for the JPEG and the WebP.
 - [ ] ★ On the SVG, set **Copy as** -> **SVG Scale** to 1x, 2x, and 4x in turn, copying and pasting into Paint each time: the pasted bitmap is the SVG's size times the scale, and the default is 2x. The scale resets when the file is reopened.
+- [ ] ★ The `<foreignObject>` SVG exports: **Copy Image as PNG** pastes a bitmap rather than failing with "Could not read the image".
 - [ ] **Save as PNG…** offers `<name>.png` in the picture's own folder, and the saved file matches what was copied. On the SVG it honours the scale.
 - [ ] ★ **Copy as** -> **Markdown Image**, pasted into a Markdown file in the same workspace, gives `![logo](my%20icons/logo.svg)` (the path relative to the workspace folder, spaces encoded), and the MarkCopy preview of that file shows the picture. The same copy from a file opened outside any workspace gives just `![name](name.ext)`.
 - [ ] **Copy as** -> **HTML Image** pastes `<img src="..." alt="..." width="..." height="...">` with the same path and the picture's pixel size.

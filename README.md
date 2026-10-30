@@ -363,9 +363,13 @@ The viewer uses the browser's WebCodecs `ImageDecoder`. Where that is missing, t
 
 MarkCopy registers as the editor for `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` (in upper or lower case), so a picture opens in a viewer with a copy menu instead of VS Code's built-in image preview, which can zoom and nothing else. For an SVG the difference is larger: the built-in route is a text editor full of XML, and here you see the drawing. **Reopen Editor With...** still reaches the built-in preview, and for an SVG it also reaches the text editor when you want to edit the markup by hand.
 
-The file is read whole and its kind is decided from its first bytes, not from its extension, so a `.png` that is really a JPEG still opens and the status line says what it is. A file that is not a recognised image shows "Not a recognised image" rather than a blank pane. The status line gives the file name, size, dimensions, and format (`photo.webp · 1.2 MB · 1920 x 1080 · WebP`); an SVG with a `viewBox` and no pixel width shows the `viewBox` instead. An SVG is only ever drawn through an image element: it is never parsed into the page, so a script inside it does not run.
+The file is read whole and its kind is decided from its first bytes, not from its extension, so a `.png` that is really a JPEG still opens and the status line says what it is. A file that is not a recognised image shows "Not a recognised image" rather than a blank pane. The status line gives the file name, size, dimensions, and format (`photo.webp · 1.2 MB · 1920 x 1080 · WebP`); an SVG with a `viewBox` and no pixel width shows the `viewBox` instead. An SVG is only ever drawn through an image element: it is never parsed into the page, so a script inside it does not run. An SVG saved as UTF-16 opens too, and an SVG that uses `<foreignObject>` still exports to PNG. A JPEG that carries an EXIF rotation shows, and copies, the way it is meant to be seen (the status line reports the decoded size). A file whose header is recognised but which will not decode shows "Could not decode name".
 
 **Ctrl**+wheel zooms, as do **Ctrl**+**+** and **Ctrl**+**-**; **Ctrl**+**0** or **F** fits the picture to the pane, and **1** shows it at 100%. Zoom runs from 10% to 800% and is not saved. Above 200% pixels are drawn square rather than smoothed, so pixel art stays crisp.
+
+A floating toolbar at the bottom right, above the status line and like the PDF viewer's, has zoom out, a percentage label (click it to fit), zoom in, **Fit to window** (lit while fit is on; click it while lit to go to 100%), and a **Hand Tool** toggle. The hand tool is on by default: drag the picture to pan when it is larger than the pane. **View** > **Hand Tool** in the right-click menu toggles the same thing, and neither choice is saved.
+
+The viewer watches the file, so saving it from an image editor reloads the picture without reopening the tab. If the file is deleted the pane says "name was deleted."
 
 Right-click for the actions:
 
@@ -373,12 +377,12 @@ Right-click for the actions:
 - **Save as PNG…** writes it to disk through a save dialog, defaulting to `<name>.png` beside the file.
 - **Copy as** gives the **File Name**, **Full Path**, a **Markdown Image** (`![name](path)`), an **HTML Image** (`<img src alt width height>`), or a **Data URI**. The Markdown and HTML paths are relative to the workspace folder, with spaces and reserved characters percent-encoded, so they resolve when pasted into a Markdown file in the same workspace; outside a workspace they are the bare file name. The data URI is greyed out above 4 MiB with the label "Too large for a data URI".
 - **SVG Scale** (SVG only, inside **Copy as**) picks 1x, 2x (the default), or 4x for **Copy Image as PNG** and **Save as PNG…**, since a vector drawing has no pixel size of its own. It lasts for the session, and a side is capped at 16384 px.
-- **Copy SVG Source** (SVG only) copies the file's text.
-- **View** has **Fit**, **100%**, **Zoom In**, and **Zoom Out**.
-- **Preferences** has **Theme**, shared with every other MarkCopy preview, and **Background**: **Checkerboard** (the default), **Light**, **Dark**, or **Theme**, stored as `markcopy.image.background`.
+- **Copy SVG Source** (SVG only) copies the file's text, in whichever encoding (UTF-8 or UTF-16) the file uses.
+- **View** has **Fit**, **100%**, **Zoom In**, **Zoom Out**, and a **Hand Tool** checkbox.
+- **Preferences** has **Theme**, shared with every other MarkCopy preview, and **Background**: **Checkerboard** (the default), **Light**, **Dark**, or **Theme** (the MarkCopy theme's own background, not VS Code's editor background), stored as `markcopy.image.background`.
 - **Open in Default App** and **Reveal** hand the file to the operating system.
 
-A file above 64 MiB shows a message instead of loading. Copying the picture as PNG needs clipboard image support in VS Code, as every PNG copy in MarkCopy does.
+On a file that fails to decode, **Copy Image as PNG** and **Save as PNG…** are greyed out. A file above 64 MiB shows a message instead of loading. Copying the picture as PNG needs clipboard image support in VS Code, as every PNG copy in MarkCopy does.
 
 ## LaTeX preview
 

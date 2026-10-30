@@ -296,13 +296,20 @@ handed to the decoder. The parser reads only the header, bounds every read by
 the buffer's length, and never allocates in proportion to a size the file
 declares. An SVG is drawn only through an `<img>` element: it is never parsed
 into the page or inlined, so it runs no script and loads no external resource.
-The CSP is `default-src 'none'` with `img-src` limited to the webview origin,
+It reaches the `<img>` as a `data:image/svg+xml;base64,` URL rather than a Blob
+URL (so an SVG with `<foreignObject>` can still be exported to PNG); that is
+still an image load under the same restrictions. A UTF-16 SVG is decoded with
+`TextDecoder` only, for sniffing and for **Copy SVG Source**.
+The CSP, unchanged by this, is `default-src 'none'` with `img-src` limited to the webview origin,
 `blob:`, and `data:`, `style-src` and `font-src` limited to the webview origin
 (plus inline styles), and a bare nonced `script-src`; there is no
 `connect-src`, `media-src`, or `worker-src`. The webview may ask the host to
 save a PNG (through a save dialog), open the document in the default app,
 reveal it, or write `markcopy.theme` or `markcopy.image.background`; the host
-checks the key and value against an allowlist of those two settings. As with
+checks the key and value against an allowlist of those two settings. The host
+also watches the opened file (a `FileSystemWatcher` on its exact path) and
+reloads it when it changes; the watcher reads that same URI and nothing the
+webview names. As with
 GIF, the browser's decoder still processes the file, so a malformed image could
 consume resources or trigger a vulnerability in the host's Chromium build. The
 parser and the message validator are unit-tested and fuzzed (see

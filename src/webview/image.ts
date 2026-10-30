@@ -11,6 +11,7 @@ import {
   MAX_SVG_RASTER_SIDE,
   base64ToBytes,
   dataUri,
+  decodeSvgText,
   htmlImage,
   markdownImage,
   pngFileName,
@@ -53,6 +54,8 @@ const scroller = box(
 );
 const img = box('img', 'mc-image', 'margin:auto;flex:none;outline:none;');
 img.alt = '';
+img.draggable = false;
+img.addEventListener('dragstart', (e) => e.preventDefault());
 scroller.append(img);
 const errorEl = box(
   'div',
@@ -64,6 +67,8 @@ const statusEl = box(
   'mc-image-status',
   'position:fixed;left:0;right:0;bottom:0;height:30px;display:flex;align-items:center;padding:0 12px;box-sizing:border-box;font-size:11px;opacity:0.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
 );
+// The bar sits above the 30px status line so it never covers the status text.
+const toolbarEl = box('div', 'mc-toolbar', 'bottom:42px;');
 const menuEl = box('div', 'mc-menu', '');
 menuEl.className = 'mc-menu';
 menuEl.setAttribute('role', 'menu');
@@ -75,7 +80,7 @@ toastEl.hidden = true;
 document.documentElement.style.height = '100%';
 document.body.style.cssText +=
   ';height:100%;margin:0;overflow:hidden;background:var(--mc-bg);color:var(--mc-fg);';
-app.append(scroller, errorEl, statusEl, menuEl, toastEl);
+app.append(scroller, errorEl, statusEl, toolbarEl, menuEl, toastEl);
 
 const contextMenu = createMenu(menuEl);
 
@@ -97,9 +102,13 @@ let bytes: Uint8Array = new Uint8Array(0);
 let info: ImageInfo | undefined;
 let blobUrl = '';
 let loaded = false;
+// True once the <img> reported a decode error for the current file.
+let failed = false;
 // 'fit' or a percentage. Session-only.
 let zoom: 'fit' | number = 'fit';
 let svgScale = 2;
+// Hand tool (drag to pan). Session-only, on by default like the PDF viewer.
+let hand = true;
 let background: Background = 'checkerboard';
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
 
@@ -115,6 +124,11 @@ function toast(text: string, ms = 1600): void {
 }
 
 function dims(): { width?: number; height?: number } {
+  // A raster's decoded size wins once loaded: it honours EXIF orientation, which
+  // the header dimensions do not. The header is the pre-load fallback.
+  if (loaded && info && info.format !== 'svg' && img.naturalWidth && img.naturalHeight) {
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  }
   const width = info?.width ?? (img.naturalWidth || undefined);
   const height = info?.height ?? (img.naturalHeight || undefined);
   return { width, height };
@@ -125,12 +139,22 @@ function updateStatus(): void {
     statusEl.textContent = fileName;
     return;
   }
+  if (failed) {
+    statusEl.textContent = statusLine(fileName, fileBytes, {
+      ...info,
+      width: undefined,
+      height: undefined,
+      viewBox: undefined,
+    });
+    return;
+  }
   const { width, height } = dims();
   statusEl.textContent = statusLine(fileName, fileBytes, info, width, height);
 }
 
 function showError(message: string): void {
   scroller.style.display = 'none';
+  toolbarEl.style.display = 'none';
   errorEl.style.display = 'flex';
   errorEl.textContent = message;
 }
@@ -154,7 +178,7 @@ function applyBackground(value: unknown): void {
   } else if (background === 'dark') {
     s.backgroundColor = '#1e1e1e';
   } else {
-    s.backgroundColor = 'var(--vscode-editor-background, var(--mc-bg))';
+    s.backgroundColor = 'var(--mc-bg)';
   }
 }
 
@@ -173,6 +197,7 @@ interface LoadMessage {
 
 function resetImage(): void {
   loaded = false;
+  failed = false;
   img.removeAttribute('src');
   if (blobUrl) {
     URL.revokeObjectURL(blobUrl);
@@ -200,21 +225,40 @@ function load(msg: LoadMessage): void {
     return;
   }
   scroller.style.display = 'flex';
-  img.addEventListener(
-    'load',
-    () => {
-      loaded = true;
-      updateStatus();
-      applyZoom();
-    },
-    { once: true },
-  );
-  // The sniffed type, never the extension.
-  blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: info.mime }));
-  img.src = blobUrl;
+  toolbarEl.style.display = '';
+  if (info.format === 'svg') {
+    // A data URL, not a Blob URL: an SVG with <foreignObject> taints the canvas
+    // when loaded from a Blob URL, which would break PNG export. It still only
+    // ever enters an <img>.
+    img.src = `data:image/svg+xml;base64,${base64}`;
+  } else {
+    // The sniffed type, never the extension.
+    blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: info.mime }));
+    img.src = blobUrl;
+  }
   updateStatus();
   applyZoom();
 }
+
+img.addEventListener('load', () => {
+  failed = false;
+  loaded = true;
+  errorEl.style.display = 'none';
+  scroller.style.display = 'flex';
+  toolbarEl.style.display = '';
+  updateStatus();
+  applyZoom();
+});
+
+img.addEventListener('error', () => {
+  if (!info || !img.hasAttribute('src')) {
+    return;
+  }
+  loaded = false;
+  failed = true;
+  showError(`Could not decode ${fileName}`);
+  updateStatus();
+});
 
 // ---------------------------------------------------------------------------
 // Zoom
@@ -231,6 +275,7 @@ function applyZoom(): void {
     img.style.maxWidth = '100%';
     img.style.maxHeight = '100%';
     img.style.imageRendering = '';
+    updateToolbar();
     return;
   }
   const { w, h } = naturalSize();
@@ -241,6 +286,7 @@ function applyZoom(): void {
     img.style.height = `${(h * zoom) / 100}px`;
   }
   img.style.imageRendering = zoom > 200 ? 'pixelated' : '';
+  updateToolbar();
 }
 
 function currentPercent(): number {
@@ -251,6 +297,20 @@ function currentPercent(): number {
   const shown = img.clientWidth;
   return w && shown ? (shown / w) * 100 : 100;
 }
+
+function updateToolbar(): void {
+  const label = document.getElementById('mc-zoom-label');
+  if (label) {
+    label.textContent = `${Math.round(currentPercent())}%`;
+  }
+  document.getElementById('mc-fit')?.setAttribute('aria-pressed', String(zoom === 'fit'));
+}
+
+window.addEventListener('resize', () => {
+  if (zoom === 'fit') {
+    updateToolbar();
+  }
+});
 
 function setZoom(value: 'fit' | number): void {
   zoom = value;
@@ -330,9 +390,21 @@ function rasterSize(): { w: number; h: number } | undefined {
   if (!isSvg()) {
     return nat.w && nat.h ? nat : undefined;
   }
+  // An intrinsic size (any CSS length, resolved by the browser) wins, then the
+  // viewBox, then whatever the <img> reports.
   const vb = viewBoxSize();
-  let w = info?.width ?? vb?.w ?? nat.w;
-  let h = info?.height ?? vb?.h ?? nat.h;
+  let w: number;
+  let h: number;
+  if (info?.intrinsicSize && nat.w && nat.h) {
+    w = nat.w;
+    h = nat.h;
+  } else if (vb) {
+    w = vb.w;
+    h = vb.h;
+  } else {
+    w = nat.w;
+    h = nat.h;
+  }
   if (!w || !h) {
     return undefined;
   }
@@ -416,8 +488,111 @@ function copyText(text: string, label: string): void {
 }
 
 function copySvgSource(): void {
-  copyText(new TextDecoder('utf-8').decode(bytes), 'Copied SVG source');
+  copyText(decodeSvgText(bytes), 'Copied SVG source');
 }
+
+// ---------------------------------------------------------------------------
+// Toolbar (same ids and classes as the PDF viewer's, so media/preview.css styles it)
+// ---------------------------------------------------------------------------
+const FIT_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+  'focusable="false"><rect x="3" y="5" width="18" height="14" rx="2" />' +
+  '<path d="M8 12h8" /><path d="M10 9l-3 3 3 3" /><path d="M14 9l3 3-3 3" /></svg>';
+const HAND_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+  'focusable="false"><path d="M12 3v18" /><path d="M3 12h18" /><path d="M9 6l3-3 3 3" />' +
+  '<path d="M9 18l3 3 3-3" /><path d="M6 9l-3 3 3 3" /><path d="M18 9l3 3-3 3" /></svg>';
+const ICON_BUTTON_CSS = 'display:inline-flex;align-items:center;justify-content:center;padding:0;';
+toolbarEl.innerHTML =
+  '<button type="button" data-act="out" aria-label="Zoom out" title="Zoom out (Ctrl -)">\u2212</button>' +
+  '<button type="button" id="mc-zoom-label" aria-label="Reset zoom to fit" title="Fit (Ctrl 0)">100%</button>' +
+  '<button type="button" data-act="in" aria-label="Zoom in" title="Zoom in (Ctrl +)">+</button>' +
+  '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
+  `<button type="button" id="mc-fit" data-act="fit" aria-pressed="true" aria-label="Fit to window" title="Fit to window" style="${ICON_BUTTON_CSS}">${FIT_ICON}</button>` +
+  '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
+  `<button type="button" id="mc-hand" data-act="hand" aria-pressed="true" aria-label="Hand tool" title="Hand Tool (Drag to Pan)" style="${ICON_BUTTON_CSS}">${HAND_ICON}</button>`;
+toolbarEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+toolbarEl.addEventListener('click', (e) => {
+  const target = (e.target as HTMLElement).closest<HTMLElement>('button');
+  if (!target) {
+    return;
+  }
+  if (target.id === 'mc-zoom-label') {
+    setZoom('fit');
+    return;
+  }
+  const act = target.dataset.act;
+  if (act === 'in') {
+    stepZoom(1);
+  } else if (act === 'out') {
+    stepZoom(-1);
+  } else if (act === 'fit') {
+    setZoom(zoom === 'fit' ? 100 : 'fit');
+  } else if (act === 'hand') {
+    setHand(!hand);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Hand tool (drag to pan), after the PDF viewer's
+// ---------------------------------------------------------------------------
+function setHand(next: boolean): void {
+  hand = next;
+  document.body.classList.toggle('mc-mode-hand', hand);
+  document.body.classList.toggle('mc-mode-pointer', !hand);
+  document.getElementById('mc-hand')?.setAttribute('aria-pressed', String(hand));
+}
+setHand(true);
+
+let panning = false;
+let panPointer = -1;
+let startX = 0;
+let startY = 0;
+let startScrollX = 0;
+let startScrollY = 0;
+
+document.addEventListener('pointerdown', (e) => {
+  const target = e.target as HTMLElement | null;
+  if (
+    e.button !== 0 ||
+    !hand ||
+    !target ||
+    !scroller.contains(target) ||
+    target.closest('.mc-menu, #mc-toolbar')
+  ) {
+    return;
+  }
+  panning = true;
+  panPointer = e.pointerId;
+  startX = e.clientX;
+  startY = e.clientY;
+  startScrollX = scroller.scrollLeft;
+  startScrollY = scroller.scrollTop;
+  document.body.classList.add('mc-grabbing');
+  try {
+    scroller.setPointerCapture(e.pointerId);
+  } catch {
+    /* best-effort */
+  }
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!panning || e.pointerId !== panPointer) {
+    return;
+  }
+  scroller.scrollLeft = startScrollX - (e.clientX - startX);
+  scroller.scrollTop = startScrollY - (e.clientY - startY);
+});
+
+function endPan(): void {
+  panning = false;
+  panPointer = -1;
+  document.body.classList.remove('mc-grabbing');
+}
+document.addEventListener('pointerup', endPan);
+document.addEventListener('pointercancel', endPan);
 
 // ---------------------------------------------------------------------------
 // Context menu
@@ -448,7 +623,7 @@ document.addEventListener('contextmenu', (e) => {
     entries = [{ kind: 'submenu', label: 'Copy as', entries: nameRows }, ...tail];
   } else {
     const alt = stemOf(fileName);
-    const { width, height } = dims();
+    const { width, height } = failed ? { width: undefined, height: undefined } : dims();
     const tooBig = fileBytes > MAX_DATA_URI_BYTES;
     const mime = info.mime;
     const copyAs: MenuEntry[] = [
@@ -470,7 +645,7 @@ document.addEventListener('contextmenu', (e) => {
         run: () => copyText(dataUri(mime, base64), 'Copied data URI'),
       },
     ];
-    if (isSvg()) {
+    if (isSvg() && !failed) {
       copyAs.push(
         { kind: 'divider' },
         { kind: 'label', label: 'SVG Scale' },
@@ -485,8 +660,13 @@ document.addEventListener('contextmenu', (e) => {
       );
     }
     entries = [
-      { kind: 'item', label: 'Copy Image as PNG', run: () => void copyImagePng() },
-      { kind: 'item', label: 'Save as PNG…', run: () => void savePng() },
+      {
+        kind: 'item',
+        label: 'Copy Image as PNG',
+        disabled: failed,
+        run: () => void copyImagePng(),
+      },
+      { kind: 'item', label: 'Save as PNG…', disabled: failed, run: () => void savePng() },
       { kind: 'divider' },
       { kind: 'submenu', label: 'Copy as', entries: copyAs },
       ...(isSvg()
@@ -501,6 +681,8 @@ document.addEventListener('contextmenu', (e) => {
           { kind: 'item', label: '100%', run: () => setZoom(100) },
           { kind: 'item', label: 'Zoom In', run: () => stepZoom(1) },
           { kind: 'item', label: 'Zoom Out', run: () => stepZoom(-1) },
+          { kind: 'divider' },
+          { kind: 'checkbox', label: 'Hand Tool', checked: hand, run: () => setHand(!hand) },
         ],
       },
       {

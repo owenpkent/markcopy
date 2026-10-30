@@ -277,11 +277,12 @@ The image viewer's menu is about getting the picture, or a reference to it, some
 
 Notes:
 
-- **The picture is copied at its own size**, not the size it is zoomed to, from any source format: the viewer draws it onto a canvas and exports a PNG.
-- **An SVG has no pixel size**, so **Copy as > SVG Scale** sets one: 1x, 2x (the default), or 4x of its width and height, or of its `viewBox` when it gives no width. The choice lasts for the session and a side is capped at 16384 px. **Copy SVG Source** is unaffected: it is the file's text, uninterpreted.
-- **Markdown Image** is `![name](path)`, where `name` is the file name without its extension and `path` is relative to the workspace folder containing the file, with forward slashes and spaces and reserved characters percent-encoded. Outside a workspace the path is the bare file name. **HTML Image** is `<img src alt width height>` with the same path and the picture's dimensions when known.
+- **The picture is copied at its own size**, not the size it is zoomed to, from any source format: the viewer draws it onto a canvas and exports a PNG. For a raster the size is the decoded one, so an EXIF-rotated JPEG copies as portrait, matching how it is shown; the header size is used only before the picture has loaded.
+- **An SVG has no pixel size**, so **Copy as > SVG Scale** sets one: 1x, 2x (the default), or 4x of its size. That size is the browser-resolved one when the root has a `width` or `height` (any CSS length), else the `viewBox`, else the decoded size. An SVG with `<foreignObject>` still exports, because it is loaded from a `data:` URL rather than a Blob URL. The choice lasts for the session and a side is capped at 16384 px. **Copy SVG Source** is unaffected by it: it is the file's text, uninterpreted, in the encoding the file uses (UTF-8, or UTF-16 LE or BE) and decoded to plain text.
+- **Markdown Image** is `![name](path)`, where `name` is the file name without its extension and `path` is relative to the workspace folder containing the file, with forward slashes and spaces and reserved characters (including `&`) percent-encoded. Outside a workspace the path is the bare file name. **HTML Image** is `<img src alt width height>` with the same path and the picture's dimensions when known (the decoded size once loaded); it omits `width` and `height` when the file failed to decode.
 - **Data URI** is `data:<type>;base64,...` using the type detected from the file's bytes, not its extension. Above 4 MiB the row is greyed out under a "Too large for a data URI" label.
 - **The saved file** is `<name>.png`, beside the original, chosen in a save dialog.
+- **A file that fails to decode** (the header is recognised but the browser cannot draw it) shows "Could not decode <name>"; **Copy Image as PNG** and **Save as PNG…** are greyed out and the SVG Scale rows are hidden. The text copies still work.
 - **Copy Image as PNG** needs clipboard image support, as elsewhere in this matrix.
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a picture.

@@ -585,11 +585,14 @@ body.mc-pdf {
 }
 /* Hand tool: grab cursor while idle, grabbing while dragging. The pointer tool
    uses default cursors so text is selectable. */
-body.mc-pdf.mc-mode-hand {
+body.mc-pdf.mc-mode-hand,
+body.mc-image.mc-mode-hand {
   cursor: grab;
 }
 body.mc-pdf.mc-grabbing,
-body.mc-pdf.mc-grabbing * {
+body.mc-pdf.mc-grabbing *,
+body.mc-image.mc-grabbing,
+body.mc-image.mc-grabbing * {
   cursor: grabbing !important;
 }
 /* In hand mode the text layer must not swallow the drag; in pointer mode it is

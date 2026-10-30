@@ -24,6 +24,13 @@ export interface ImageInfo {
   height?: number;
   /** SVG only, e.g. "0 0 24 24". */
   viewBox?: string;
+  /**
+   * SVG only: the opening tag has a `width` or `height` with a valid CSS length
+   * (a number with an optional unit, or a percentage), even when `width` and
+   * `height` above stay unset because the length is not in pixels. Undefined for
+   * every other format.
+   */
+  intrinsicSize?: boolean;
 }
 
 const META: Record<ImageFormat, { mime: string; label: string }> = {
@@ -41,7 +48,12 @@ const MAX_DIMENSION = 0x7fffffff;
 
 type Dims = { width: number; height: number } | undefined;
 
-function make(format: ImageFormat, dims?: Dims, viewBox?: string): ImageInfo {
+function make(
+  format: ImageFormat,
+  dims?: Dims,
+  viewBox?: string,
+  intrinsicSize?: boolean,
+): ImageInfo {
   const info: ImageInfo = { format, ...META[format] };
   if (
     dims &&
@@ -55,6 +67,9 @@ function make(format: ImageFormat, dims?: Dims, viewBox?: string): ImageInfo {
   }
   if (viewBox !== undefined) {
     info.viewBox = viewBox;
+  }
+  if (intrinsicSize !== undefined) {
+    info.intrinsicSize = intrinsicSize;
   }
   return info;
 }
@@ -253,22 +268,56 @@ function avifDims(b: Uint8Array): Dims {
   return best;
 }
 
-// Latin-1 view of the leading bytes: enough for markup, and total on any input.
-function headText(bytes: Uint8Array, n: number): string {
-  let s = '';
-  const end = Math.min(bytes.length, n);
-  for (let i = 0; i < end; i += 1024) {
-    s += String.fromCharCode(...bytes.subarray(i, Math.min(i + 1024, end)));
+export type SvgEncoding = 'utf-8' | 'utf-16le' | 'utf-16be';
+
+/**
+ * The XML byte encoding: a byte order mark wins, else the zero-interleaved ASCII
+ * that "<?" or "<s" takes in UTF-16 without one, else UTF-8.
+ */
+export function svgEncoding(bytes: Uint8Array): SvgEncoding {
+  const b = bytes;
+  if (b.length >= 2 && b[0] === 0xff && b[1] === 0xfe) {
+    return 'utf-16le';
   }
-  return s;
+  if (b.length >= 2 && b[0] === 0xfe && b[1] === 0xff) {
+    return 'utf-16be';
+  }
+  if (b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) {
+    return 'utf-8';
+  }
+  const text = (x: number) => x > 0 && x < 0x80;
+  if (b.length >= 4) {
+    if (b[0] === 0x3c && b[1] === 0 && b[3] === 0 && text(b[2])) {
+      return 'utf-16le';
+    }
+    if (b[0] === 0 && b[1] === 0x3c && b[2] === 0 && text(b[3])) {
+      return 'utf-16be';
+    }
+  }
+  return 'utf-8';
 }
 
+/** Decodes the whole file as text with the detected encoding, BOM stripped. Used by Copy SVG Source. */
+export function decodeSvgText(bytes: Uint8Array): string {
+  const text = new TextDecoder(svgEncoding(bytes)).decode(bytes);
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+// The leading characters, decoded with the file's own encoding: enough for
+// markup, and total on any input (TextDecoder replaces what it cannot read).
+function headText(bytes: Uint8Array): string {
+  const enc = svgEncoding(bytes);
+  const n = enc === 'utf-8' ? SVG_WINDOW : SVG_WINDOW * 2;
+  const text = new TextDecoder(enc).decode(bytes.subarray(0, n));
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const CSS_LENGTH =
+  /^\s*(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:px|cm|mm|in|pt|pc|em|rem|ex|ch|Q|%)?\s*$/;
+
 function parseSvg(bytes: Uint8Array): ImageInfo | undefined {
-  let text = headText(bytes, SVG_WINDOW);
-  // A UTF-8 byte order mark (EF BB BF) seen through the Latin-1 view.
-  if (text.startsWith('ï»¿')) {
-    text = text.slice(3);
-  }
+  const text = headText(bytes);
   // Skip what may precede the root element: whitespace, an XML declaration,
   // comments, a DOCTYPE (with a bounded internal subset).
   let pos = 0;
@@ -302,13 +351,16 @@ function parseSvg(bytes: Uint8Array): ImageInfo | undefined {
     }
   }
   const rest = text.slice(pos);
-  if (!/^<svg[\s/>]/.test(rest)) {
+  const root = /^<(?:([A-Za-z_][\w.-]*):)?svg[\s/>]/.exec(rest);
+  if (!root) {
     return undefined;
   }
+  const prefix = root[1];
+  const nameLength = root[0].length - 1;
   // The opening tag, up to its closing '>' outside quotes (or the window's end).
   let quote = '';
   let end = rest.length;
-  for (let i = 4; i < rest.length; i++) {
+  for (let i = nameLength; i < rest.length; i++) {
     const c = rest[i];
     if (quote) {
       if (c === quote) {
@@ -321,13 +373,22 @@ function parseSvg(bytes: Uint8Array): ImageInfo | undefined {
       break;
     }
   }
-  const tag = rest.slice(4, end);
+  const tag = rest.slice(nameLength, end);
   const attrs = new Map<string, string>();
   const re = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
   for (let m = re.exec(tag); m; m = re.exec(tag)) {
     if (!attrs.has(m[1])) {
       attrs.set(m[1], m[2] ?? m[3] ?? '');
     }
+  }
+  // The root must be in the SVG namespace: a prefix has to be bound to it, and a
+  // default xmlns, when given, has to be it.
+  if (prefix !== undefined) {
+    if (attrs.get(`xmlns:${prefix}`) !== SVG_NS) {
+      return undefined;
+    }
+  } else if (attrs.has('xmlns') && attrs.get('xmlns') !== SVG_NS) {
+    return undefined;
   }
   const px = (v: string | undefined): number | undefined => {
     const m = v === undefined ? null : /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/.exec(v);
@@ -338,7 +399,11 @@ function parseSvg(bytes: Uint8Array): ImageInfo | undefined {
   const height = px(attrs.get('height'));
   const vb = attrs.get('viewBox')?.trim().replace(/\s+/g, ' ');
   const viewBox = vb && /^[-+\d.eE ,]+$/.test(vb) ? vb : undefined;
-  return make('svg', width && height ? { width, height } : undefined, viewBox);
+  const intrinsicSize = ['width', 'height'].some((k) => {
+    const v = attrs.get(k);
+    return v !== undefined && CSS_LENGTH.test(v);
+  });
+  return make('svg', width && height ? { width, height } : undefined, viewBox, intrinsicSize);
 }
 
 /**
@@ -370,10 +435,30 @@ export function sniffImage(bytes: Uint8Array): ImageInfo | undefined {
   ) {
     return make('ico', icoDims(b));
   }
-  if (b.length >= 12 && ascii(b, 4, 'ftyp') && (ascii(b, 8, 'avif') || ascii(b, 8, 'avis'))) {
+  if (isAvif(b)) {
     return make('avif', avifDims(b));
   }
   return parseSvg(b);
+}
+
+const AVIF_BRANDS = ['avif', 'avis'];
+
+// The major brand, or one of the compatible brands inside the ftyp box's own
+// declared bounds (a file may be mif1 or heic-compatible with avif listed second).
+function isAvif(b: Uint8Array): boolean {
+  if (b.length < 12 || !ascii(b, 4, 'ftyp')) {
+    return false;
+  }
+  if (AVIF_BRANDS.some((x) => ascii(b, 8, x))) {
+    return true;
+  }
+  const end = Math.min(u32be(b, 0), b.length);
+  for (let p = 16, n = 0; p + 4 <= end && n < 64; p += 4, n++) {
+    if (AVIF_BRANDS.some((x) => ascii(b, p, x))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Decode base64 to bytes; anything invalid gives an empty array. */
@@ -428,7 +513,7 @@ export function encodePathForLink(relativePath: string): string {
     relativePath
       .replace(/\\/g, '/')
       // eslint-disable-next-line no-control-regex -- control characters are exactly what is escaped
-      .replace(/[\s%#?()<>"'`[\]{}|^\u0000-\u001f\u007f]/g, (ch) =>
+      .replace(/[\s%#&?()<>"'`[\]{}|^\u0000-\u001f\u007f]/g, (ch) =>
         ch.charCodeAt(0) < 128
           ? `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`
           : encodeURIComponent(ch),

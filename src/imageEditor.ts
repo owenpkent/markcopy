@@ -15,6 +15,9 @@ import { MAX_IMAGE_BYTES } from './webview/imageInfo';
 // postMessage as base64. The webview builds a Blob from it, so the canvas it
 // copies from stays untainted and localResourceRoots stays at media/ alone.
 
+/** A tool that writes in several chunks reloads once, not once per chunk. */
+const RELOAD_DEBOUNCE_MS = 100;
+
 // The allow-list lives with the message parsers; re-exported for the tests.
 export { isImageSetting };
 
@@ -92,7 +95,44 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
         void webview.postMessage({ type: 'setBackground', value });
       }
     });
-    panel.onDidDispose(() => themeListener.dispose());
+
+    // Reload when the file changes on disk, so an edit in an image tool shows up
+    // without reopening. A RelativePattern on the folder and base name is exact;
+    // a bare path is not a glob. Some tools save by writing a temp file and
+    // renaming it over the original (a delete then a create), and others write in
+    // several chunks, so every event funnels into one debounced reload.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    const reload = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!disposed) {
+          void this.sendLoad(webview, document.uri);
+        }
+      }, RELOAD_DEBOUNCE_MS);
+    };
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.joinPath(document.uri, '..'), basename(document.uri)),
+    );
+    const watchers = [
+      watcher.onDidChange(reload),
+      watcher.onDidCreate(reload),
+      watcher.onDidDelete(() => {
+        clearTimeout(timer);
+        void webview.postMessage({
+          type: 'error',
+          message: `${basename(document.uri)} was deleted.`,
+        });
+      }),
+    ];
+
+    panel.onDidDispose(() => {
+      disposed = true;
+      clearTimeout(timer);
+      themeListener.dispose();
+      watchers.forEach((w) => w.dispose());
+      watcher.dispose();
+    });
   }
 
   // Only a known value reaches the page (it is written into an attribute).
