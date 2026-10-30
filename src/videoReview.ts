@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { escapeGlobName } from './globEscape';
 import { isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap, type YAMLSeq } from 'yaml';
 import type {
   FpsSource,
@@ -967,7 +968,7 @@ export class ReviewSession {
       // A RelativePattern on the video's folder, not the workspace, so a video
       // opened from outside the workspace is watched as well.
       const watcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(this.dir, sidecarName(this.videoName)),
+        new vscode.RelativePattern(this.dir, escapeGlobName(sidecarName(this.videoName))),
       );
       const reload = () => void this.reload();
       watcher.onDidChange(reload);

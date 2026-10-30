@@ -172,3 +172,24 @@ describe('OoxmlEditorProvider message router: openLink', () => {
     expect(provider.sessionHandleMessage).not.toHaveBeenCalled();
   });
 });
+
+describe('OoxmlEditorProvider file watcher', () => {
+  it('escapes glob metacharacters so a bracketed file name watches itself', async () => {
+    const vs = await import('vscode');
+    const watch = vi.mocked(vs.workspace.createFileSystemWatcher);
+    watch.mockClear();
+    const provider = new TestEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    const { panel } = createPanel();
+    const bracketed = {
+      uri: {
+        path: '/workspace/deck [1].pptx',
+        fsPath: '/workspace/deck [1].pptx',
+        toString: () => 'file:///workspace/deck%20%5B1%5D.pptx',
+      },
+      dispose: () => undefined,
+    } as unknown as vscode.CustomDocument;
+    await provider.resolveCustomEditor(bracketed, panel);
+    const pattern = watch.mock.calls[0]?.[0] as { pattern: string } | undefined;
+    expect(pattern?.pattern).toBe('deck [[]1[]].pptx');
+  });
+});
