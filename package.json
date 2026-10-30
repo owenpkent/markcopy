@@ -542,6 +542,7 @@
             "A flat dark background.",
             "The preview's own background, from the color theme."
           ],
+          "scope": "resource",
           "default": "checkerboard",
           "markdownDescription": "What sits behind a picture in the MarkCopy image preview. 'checkerboard' shows transparent areas as grey squares; 'light', 'dark', and 'theme' use a flat color. Also changed from the preview's right-click menu under **Preferences**."
         },
