@@ -156,8 +156,14 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
     npx vsce show OwenPKent.markcopy
     curl -s https://open-vsx.org/api/OwenPKent/markcopy
     ```
+13. Publish the security advisory, only if the release fixes a security issue (see [Advisories](../.github/SECURITY.md#advisories)). Do this after step 12, so the fix is live on both registries before the details are public. The advisory starts as a draft, normally created from a private report under the repository's Security tab, or opened there with **New draft security advisory** for an issue found internally. Fill in the affected versions (`< x.y.z`), the patched version (`x.y.z`), the severity, and credit for the reporter unless they declined. Then:
+    - In the UI: Security tab -> Advisories -> the draft -> **Request CVE ID** (leave the CVE field to GitHub) -> **Publish advisory**. GitHub assigns the CVE after publication, normally within a few days.
+    - With `gh`, which also works for publishing: `gh api -X PATCH repos/owenpkent/markcopy/security-advisories/<GHSA-id> -f state=published`. To ask for a CVE through the API, `gh api -X POST repos/owenpkent/markcopy/security-advisories/<GHSA-id>/cve`. List drafts with `gh api repos/owenpkent/markcopy/security-advisories?state=draft`.
+    - Add the advisory link to that version's CHANGELOG Security entry, and the CVE once assigned, in a follow-up pull request.
 
 ## Troubleshooting Phase 2
+
+Phase 2
 
 The first three came out of the 0.11.0 release, the fourth out of 0.12.0, the fifth out of 0.13.0, the sixth out of 0.14.0, the seventh out of 0.15.0, and the last out of 0.16.0. None of them says what it means.
 
