@@ -644,12 +644,22 @@ toolbarEl.addEventListener('click', (e) => {
     setZoom(zoom === 'fit' ? 100 : 'fit');
   } else if (act === 'hand') {
     setHand(!hand);
-  } else if (act === 'grid' && checkerAllowed()) {
-    const value = checkerVisible() ? 'theme' : 'checkerboard';
-    applyBackground(value);
-    vscode.postMessage({ type: 'updateSetting', key: 'image.background', value });
+  } else if (act === 'grid') {
+    toggleGrid();
   }
 });
+
+// The grid toggle changes the saved default (markcopy.image.background), so the
+// toolbar button, the View menu row and Preferences > Background all agree and
+// the choice holds for the next image.
+function toggleGrid(): void {
+  if (!checkerAllowed()) {
+    return;
+  }
+  const value = checkerVisible() ? 'theme' : 'checkerboard';
+  applyBackground(value);
+  vscode.postMessage({ type: 'updateSetting', key: 'image.background', value });
+}
 
 // ---------------------------------------------------------------------------
 // Hand tool (drag to pan), after the PDF viewer's
@@ -799,6 +809,17 @@ document.addEventListener('contextmenu', (e) => {
           { kind: 'item', label: 'Zoom Out', run: () => stepZoom(-1) },
           { kind: 'divider' },
           { kind: 'checkbox', label: 'Hand Tool', checked: hand, run: () => setHand(!hand) },
+          // No row at all for a JPEG: it has no transparency to show a grid under.
+          ...(checkerAllowed()
+            ? [
+                {
+                  kind: 'checkbox' as const,
+                  label: 'Transparency Grid',
+                  checked: checkerVisible(),
+                  run: toggleGrid,
+                },
+              ]
+            : []),
         ],
       },
       {

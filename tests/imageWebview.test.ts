@@ -357,6 +357,38 @@ describe('image webview', () => {
     expect(posted).toHaveBeenCalledWith({ type: 'revealInOS' });
   });
 
+  describe('Transparency Grid menu row', () => {
+    // A checked row renders with a leading tick, so match anywhere in the label.
+    const gridRow = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('.mc-menu-item')).find((r) =>
+        (r.textContent ?? '').includes('Transparency Grid'),
+      );
+
+    it('toggles the saved background like the toolbar button, and is absent for a JPEG', async () => {
+      await boot();
+      fromHost(loadMsg());
+      posted.mockClear();
+      openMenu();
+      click('View');
+      expect(gridRow()?.getAttribute('aria-checked')).toBe('true');
+      gridRow()?.click();
+      expect(posted).toHaveBeenCalledWith({
+        type: 'updateSetting',
+        key: 'image.background',
+        value: 'theme',
+      });
+      expect(grid().getAttribute('aria-pressed')).toBe('false');
+      openMenu();
+      click('View');
+      expect(gridRow()?.getAttribute('aria-checked')).toBe('false');
+      key('Escape');
+      fromHost(loadMsg({ name: 'photo.jpg', data: JPEG_B64() }));
+      openMenu();
+      click('View');
+      expect(gridRow()).toBeUndefined();
+    });
+  });
+
   describe('message origin', () => {
     it('ignores a message that is not from the host frame', async () => {
       await boot();
