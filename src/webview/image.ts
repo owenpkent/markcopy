@@ -869,7 +869,18 @@ function applyTheme(value: string): void {
 // ---------------------------------------------------------------------------
 // Host messages
 // ---------------------------------------------------------------------------
+// Only the extension host talks to this frame. VS Code delivers its messages from
+// the webview's outer frame, which is the parent of this one and shares its origin
+// (the inner document is written into a blank frame, so it inherits the origin).
+// Either test identifies that sender; anything else is ignored.
+function fromHost(event: MessageEvent): boolean {
+  return event.origin === window.origin || event.source === window.parent;
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
+  if (!fromHost(event)) {
+    return;
+  }
   const msg = event.data as
     | LoadMessage
     | { type: 'error'; message: string }

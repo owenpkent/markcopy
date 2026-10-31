@@ -125,7 +125,15 @@ afterEach(() => {
 });
 
 function fromHost(data: unknown): void {
-  window.dispatchEvent(new MessageEvent('message', { data }));
+  // The real host posts from the webview's own origin; jsdom's is what window.origin says.
+  window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
+}
+
+/** A message from somewhere that is not the host: a foreign origin and no parent source. */
+function fromStranger(data: unknown): void {
+  window.dispatchEvent(
+    new MessageEvent('message', { data, origin: 'https://evil.example', source: null }),
+  );
 }
 
 async function boot(): Promise<void> {
@@ -347,6 +355,16 @@ describe('image webview', () => {
     openMenu();
     click(revealLabel());
     expect(posted).toHaveBeenCalledWith({ type: 'revealInOS' });
+  });
+
+  describe('message origin', () => {
+    it('ignores a message that is not from the host frame', async () => {
+      await boot();
+      fromStranger(loadMsg());
+      expect(document.querySelector('img')?.getAttribute('src') ?? '').toBe('');
+      fromHost(loadMsg());
+      expect(img().getAttribute('src') ?? '').not.toBe('');
+    });
   });
 
   describe('zoom', () => {
