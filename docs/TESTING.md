@@ -25,6 +25,16 @@ Two targets check a property rather than only looking for crashes. `links` throw
 
 The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding.
 
+Each target can carry a libFuzzer dictionary, `fuzz/dict/<name>.dict`, which `fuzz/run.js` passes as `-dict=`. A dictionary is a list of tokens (one `name="token"` per line, `\xNN` for binary bytes, `#` for comments) that the mutator splices into inputs: format keywords, magic numbers, element and message names it would otherwise take a long time to find by chance. To add one, read the parser the target calls, list the strings and byte sequences it branches on, and save them under the target's name; a target with no file runs without. Measured on 2026-10-30, one 60 s run per cell on a Windows dev machine from an empty evolved corpus (`cov` is libFuzzer's edge count, `ft` its feature count; one run each, so differences of a few percent are noise):
+
+| Target   | cov without | cov with | ft without | ft with |
+| -------- | ----------- | -------- | ---------- | ------- |
+| xlsx     | 419         | 419      | 1273       | 1251    |
+| markdown | 74          | 74       | 449        | 451     |
+| messages | 518         | 518      | 747        | 762     |
+
+The dictionaries did not move coverage in 60 s, which is expected for xlsx (the input is deflated zip data, so tokens rarely land where the XML parser sees them) and for markdown (the seed corpus already reaches most of the parser). The first `messages` run without a dictionary crashed after 15,856 executions (a `Number()` call on a hostile `gridOp` field in `src/messages/markdown.ts`, reported in the pull request); the run in the table is a second one.
+
 To turn a finding into a regression test, fix the bug, then copy the crash file into `tests/fixtures/` and add a Vitest case that feeds it to the same function and asserts it either returns or throws the documented error. Copy a small input into `fuzz/corpus/<name>/` too if it reaches code the seeds do not.
 
 ### The webview E2E layer
