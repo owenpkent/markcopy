@@ -15,7 +15,7 @@ The manual layer is smaller than it was. What keeps a row in it is needing a rea
 
 ### Fuzzing
 
-Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), video notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), STL headers (`stl`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
+Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), video notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
 
 ```bash
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
@@ -554,6 +554,49 @@ ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -frames:v 1 -loop 0 still.gif
 - [ ] The GIF viewer's **Theme** is the only setting its menu writes; each of the four values applies and persists.
 - [ ] A text file renamed `.gif` shows "is not a GIF MarkCopy can read" rather than a blank pane.
 - [ ] Automation cannot exercise `ImageDecoder` playback (jsdom has none); the fallback is covered by `tests/gifWebview.test.ts`. To see it for real, check the viewer in a VS Code build whose Chromium lacks WebCodecs image decoding, if one is available: the GIF still plays, and the frame rows are greyed under "Frames unavailable in this viewer".
+
+## Image viewer
+
+There is no committed image fixture. Use a PNG with transparency (a screenshot of a window with rounded corners will do), a photo saved as `.jpg`, a `.webp`, and an SVG with a `viewBox` and no width (an icon, for example). Make two extra files: a copy of the JPEG renamed `.png`, and a text file renamed `.png`. Keep the SVG in a workspace folder whose path contains a space (`my icons/logo.svg`) for the Markdown check. For the later checks also make: an SVG that contains a `<foreignObject>`, an SVG saved as UTF-16 (for example from PowerShell with `Out-File -Encoding unicode`), a JPEG with an EXIF orientation of 6 or 8 (a phone photo taken sideways), and a PNG truncated to its first few hundred bytes.
+
+### Opening and status line
+
+- [ ] ★ Each of `.png`, `.jpg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` opens in MarkCopy's viewer, not VS Code's built-in image preview, and an upper-case extension (`PHOTO.PNG`) does the same. **Reopen Editor With...** reaches the built-in preview, and for the SVG it also offers the text editor.
+- [ ] The status line reads like `photo.webp · 1.2 MB · 1920 x 1080 · WebP`. The SVG with no width shows `viewBox 0 0 24 24` in place of pixels and `SVG` as its format.
+- [ ] ★ The JPEG renamed `.png` still displays, and the status line says JPEG, not PNG.
+- [ ] The text file renamed `.png` shows "Not a recognised image" rather than a blank pane.
+- [ ] A file above 64 MiB (pad one with `fsutil file createnew big.png 70000000` on Windows) shows a message naming its size and the 64 MiB limit instead of loading, and VS Code stays responsive.
+- [ ] An SVG that contains a `<script>` element or an `onload` attribute shows its drawing and runs nothing.
+- [ ] The UTF-16 SVG opens as a drawing, not an error, and **Copy SVG Source** pastes readable text (not NUL-separated characters).
+- [ ] The EXIF-rotated JPEG shows upright and portrait, and the status line reports the portrait dimensions.
+- [ ] The truncated PNG shows "Could not decode <name>"; right-click shows **Copy Image as PNG** and **Save as PNG…** greyed out, **HTML Image** pastes with no `width` or `height`, and the file's other copy rows still work.
+- [ ] Edit the open picture on disk (save it from an image editor, or overwrite it with another file of the same name): the viewer reloads it within a moment. Delete the file: the pane says "<name> was deleted.", the status line is empty, and right-click offers only **File Name**, **Full Path**, **Open in Default App**, and **Reveal** (no stale picture or copy rows). Restore it: the picture comes back. Do the same with a file whose name contains brackets or an asterisk (`logo[1].png`, `a*b.svg`): it still reloads on change.
+
+### View
+
+- [ ] Ctrl+wheel, Ctrl+plus, and Ctrl+minus zoom in steps between 10% and 800%; Ctrl+0 and **F** fit the picture to the pane, and **1** shows it at 100%. Right-click -> **View** does the same.
+- [ ] ★ The floating toolbar sits at the bottom right above the status line. It has six controls: zoom out (title "Zoom out (Ctrl -)"), percentage label (title "Zoom level (click to type)"), zoom in ("Zoom in (Ctrl +)"), **Fit to window**, **Hand Tool**, and **Transparency grid**. The percentage tracks the zoom, and **Fit to window** is lit while fit is on and goes to 100% when clicked while lit.
+- [ ] ★ Click the percentage label: it becomes a text box with the number selected. Type 150 or 150% and press Enter, and the picture zooms to 150%; type 5000 and it clamps to 800, type 1 and it clamps to 10; Escape cancels and leaves the zoom alone; text that is not a number changes nothing. The shortcuts (`1`, `F`) do not fire while you type.
+- [ ] ★ Fit after zoom: zoom to 400% so the pane scrolls, then click **Fit to window** (and again after pressing **F**, and after resizing the window while fit is on). The whole picture is visible with its 12 px margin, with no scrollbar and no picture a scrollbar's width too large.
+- [ ] ★ With the picture zoomed larger than the pane, the **Hand Tool** ("Hand Tool (Drag to Pan)") is on by default, the cursor is a grab hand, and dragging pans the picture. Turn it off from the toolbar and from right-click -> **View** -> **Hand Tool** in turn: the checkbox and the toolbar button agree, and dragging no longer pans. It is on again after reopening the file.
+- [ ] ★ Right-click -> **View** -> **Transparency Grid** unticks the grid on alpha.png, the toolbar button goes unlit, and the choice survives opening another PNG (it is the saved `markcopy.image.background`). Tick it again and it returns. On gradient.jpg the row is absent.
+- [ ] Zoomed past 200%, a small icon shows hard square pixels rather than a blur.
+- [ ] ★ Right-click -> **Preferences** -> **Background** -> **Checkerboard**, **Light**, **Dark**, and **Theme** each repaint the backdrop (Checkerboard and Theme share the theme backdrop; only Checkerboard puts faint squares under the picture itself, never covering the pane around it), and the status line stays legible against each in the Light, Dark, Green on black, and a high-contrast VS Code theme. **Theme** follows the MarkCopy theme: set **Preferences** -> **Theme** to one that differs from VS Code's (Light in a dark VS Code, say) and the backdrop matches MarkCopy's theme, not the editor. The choice persists after closing and reopening the file, and it matches `markcopy.image.background` in Settings.
+- [ ] The checkerboard sits only under the picture and follows it through zoom, fit, and a window resize. A `.jpg` never shows one, whatever the Background setting, and the toolbar's **Transparency grid** button (the last of the six) is disabled with the tooltip "No transparency in a JPEG". On a transparent PNG the button toggles the squares, its tooltip flips between "Transparency grid (click to hide)" and "(click to show)", and it stays in step with the Background radios and the setting.
+- [ ] **Preferences** -> **Theme** re-tints the surround in the four themes.
+
+### Copy and save
+
+- [ ] ★ Right-click -> **Copy Image as PNG** on the transparent PNG and paste into Word and Slack: the picture arrives at its own size with the transparency intact, not at the zoom it was viewed at. Do the same for the JPEG and the WebP.
+- [ ] ★ On the SVG, set **Copy as** -> **SVG Scale** to 1x, 2x, and 4x in turn, copying and pasting into Paint each time: the pasted bitmap is the SVG's size times the scale, and the default is 2x. The scale resets when the file is reopened.
+- [ ] ★ The `<foreignObject>` SVG exports: **Copy Image as PNG** pastes a bitmap rather than failing with "Could not read the image".
+- [ ] **Save as PNG…** offers `<name>.png` in the picture's own folder, and the saved file matches what was copied. On the SVG it honours the scale.
+- [ ] ★ **Copy as** -> **Markdown Image**, pasted into a Markdown file in the same workspace, gives `![logo](my%20icons/logo.svg)` (the path relative to the workspace folder, spaces encoded), and the MarkCopy preview of that file shows the picture. The same copy from a file opened outside any workspace gives just `![name](name.ext)`.
+- [ ] **Copy as** -> **HTML Image** pastes `<img src="..." alt="..." width="..." height="...">` with the same path and the picture's pixel size.
+- [ ] **Copy as** -> **Data URI** pastes a `data:image/...;base64,` string that opens the picture when put in a browser's address bar. On a picture above 4 MiB the row is greyed out and reads "Too large for a data URI".
+- [ ] **Copy as** -> **File Name** and **Full Path** paste the right text. **Copy SVG Source** (SVG only; it is absent for a raster file) pastes the file's XML.
+- [ ] **Open in Default App** and **Reveal** act on the file.
+- [ ] Automation cannot exercise the PNG copy (jsdom decodes no images, so `tests/imageWebview.test.ts` stops at the menu and the text copies); the checks above are the only coverage of the pixels.
 
 ## LaTeX preview
 

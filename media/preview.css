@@ -585,11 +585,14 @@ body.mc-pdf {
 }
 /* Hand tool: grab cursor while idle, grabbing while dragging. The pointer tool
    uses default cursors so text is selectable. */
-body.mc-pdf.mc-mode-hand {
+body.mc-pdf.mc-mode-hand,
+body.mc-image.mc-mode-hand {
   cursor: grab;
 }
 body.mc-pdf.mc-grabbing,
-body.mc-pdf.mc-grabbing * {
+body.mc-pdf.mc-grabbing *,
+body.mc-image.mc-grabbing,
+body.mc-image.mc-grabbing * {
   cursor: grabbing !important;
 }
 /* In hand mode the text layer must not swallow the drag; in pointer mode it is
@@ -884,7 +887,8 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   height: 16px;
   background: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.18));
 }
-#mc-page-input {
+#mc-page-input,
+#mc-zoom-input {
   font: inherit;
   font-size: 12px;
   width: 52px;
@@ -896,6 +900,9 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   border-radius: 5px;
   -moz-appearance: textfield;
   appearance: textfield;
+}
+#mc-zoom-input {
+  width: 44px; /* the label's min-width, so the toolbar does not jump */
 }
 #mc-page-input::-webkit-outer-spin-button,
 #mc-page-input::-webkit-inner-spin-button {

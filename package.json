@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
-  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video & GIF Preview",
-  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, and GIF preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
+  "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video, GIF & Image Preview",
+  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, GIF, and image (PNG, JPEG, WebP, SVG) preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
   "version": "0.19.2",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -59,6 +59,10 @@
     "video player",
     "gif",
     "gif viewer",
+    "image",
+    "image viewer",
+    "png",
+    "svg",
     "preview",
     "copy",
     "rich text",
@@ -388,6 +392,61 @@
           }
         ],
         "priority": "default"
+      },
+      {
+        "viewType": "markcopy.imagePreview",
+        "displayName": "MarkCopy Image Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.png"
+          },
+          {
+            "filenamePattern": "*.PNG"
+          },
+          {
+            "filenamePattern": "*.jpg"
+          },
+          {
+            "filenamePattern": "*.JPG"
+          },
+          {
+            "filenamePattern": "*.jpeg"
+          },
+          {
+            "filenamePattern": "*.JPEG"
+          },
+          {
+            "filenamePattern": "*.webp"
+          },
+          {
+            "filenamePattern": "*.WEBP"
+          },
+          {
+            "filenamePattern": "*.bmp"
+          },
+          {
+            "filenamePattern": "*.BMP"
+          },
+          {
+            "filenamePattern": "*.ico"
+          },
+          {
+            "filenamePattern": "*.ICO"
+          },
+          {
+            "filenamePattern": "*.avif"
+          },
+          {
+            "filenamePattern": "*.AVIF"
+          },
+          {
+            "filenamePattern": "*.svg"
+          },
+          {
+            "filenamePattern": "*.SVG"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "menus": {
@@ -468,6 +527,24 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the MarkCopy preview automatically when you open a Markdown, CSV, or TSV file, in that file's own tab rather than as a split beside it. A tab you have pinned, or one with unsaved changes, is left in the text editor. Turn off to reach the preview only from the **Show Preview** button, **Reopen Editor With...**, or **MarkCopy: Open Rich Preview to the Side**, which still opens the side-by-side layout on request. A `.tex` file previews beside its source instead: its preview is a compiled PDF, so putting it over the source would leave nothing to edit."
+        },
+        "markcopy.image.background": {
+          "type": "string",
+          "enum": [
+            "checkerboard",
+            "light",
+            "dark",
+            "theme"
+          ],
+          "enumDescriptions": [
+            "Grey squares, so transparent areas show.",
+            "A flat light background.",
+            "A flat dark background.",
+            "The preview's own background, from the color theme."
+          ],
+          "scope": "resource",
+          "default": "checkerboard",
+          "markdownDescription": "What sits behind a picture in the MarkCopy image preview. The backdrop around the picture follows the theme ('checkerboard', 'theme'), or is flat 'light' or 'dark'. 'checkerboard' also draws faint grey squares under the picture itself, for formats that can be transparent (never a JPEG). Also changed from the preview's right-click menu under **Preferences**."
         },
         "markcopy.theme": {
           "type": "string",

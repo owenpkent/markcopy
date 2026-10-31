@@ -39,3 +39,5 @@ media/gif.js.map
 fuzz/.corpus/
 fuzz/.corpus-min/
 fuzz/crashes/
+media/image.js
+media/image.js.map

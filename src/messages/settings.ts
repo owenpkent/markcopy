@@ -23,6 +23,16 @@ export function isGifSetting(key: string, value: unknown): boolean {
   return key === 'theme' && isViewerSetting(key, value);
 }
 
+export const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
+
+/** The settings the image viewer's menus write: the theme and the picture's backdrop. */
+export function isImageSetting(key: string, value: unknown): boolean {
+  if (key === 'image.background') {
+    return typeof value === 'string' && IMAGE_BACKGROUNDS.includes(value);
+  }
+  return key === 'theme' && isTheme(value);
+}
+
 /**
  * The settings the Markdown, CSV, spreadsheet, deck and Word previews' Preferences
  * menu writes (src/webview/main.ts, buildSettingsEntries): the theme and four toggles.

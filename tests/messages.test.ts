@@ -4,6 +4,7 @@
 // without vscode. Each accepts the shapes its handler acts on and nothing else.
 import { describe, it, expect } from 'vitest';
 import { parseGifMessage } from '../src/messages/gif';
+import { parseImageMessage } from '../src/messages/image';
 import { parseMarkdownMessage } from '../src/messages/markdown';
 import { parseOoxmlMessage } from '../src/messages/ooxml';
 import { parsePdfMessage } from '../src/messages/pdf';
@@ -41,6 +42,7 @@ describe.each<[string, Parser]>([
   ['stl', parseStlMessage],
   ['video', parseVideoMessage],
   ['gif', parseGifMessage],
+  ['image', parseImageMessage],
 ])('%s parser', (_name, parse) => {
   it('rejects anything that is not a message with a known type', () => {
     for (const raw of NOT_MESSAGES) {
@@ -254,6 +256,48 @@ describe('parseStlMessage', () => {
     expect(parseStlMessage({ type: 'ready' })).toEqual({ type: 'ready' });
     expect(parseStlMessage({ type: 'revealInOS' })).toBeUndefined();
     expect(parseStlMessage({ type: 'updateSetting', key: 'theme', value: 'dark' })).toBeUndefined();
+  });
+});
+
+describe('parseImageMessage', () => {
+  it('accepts the image messages', () => {
+    for (const type of ['ready', 'revealInOS', 'openExternal']) {
+      expect(parseImageMessage({ type })).toEqual({ type });
+    }
+    expect(parseImageMessage({ type: 'saveFrame', data: 'AAAA', name: 'f.png' })).toEqual({
+      type: 'saveFrame',
+      data: 'AAAA',
+      name: 'f.png',
+    });
+    expect(parseImageMessage({ type: 'saveFrame', data: '' })).toBeUndefined();
+    expect(parseImageMessage({ type: 'copyText', text: 'x' })).toBeUndefined();
+  });
+
+  it('writes the theme and the background, with valid values only', () => {
+    for (const [key, value] of [
+      ['theme', 'green'],
+      ['image.background', 'checkerboard'],
+      ['image.background', 'light'],
+      ['image.background', 'dark'],
+      ['image.background', 'theme'],
+    ] as const) {
+      expect(parseImageMessage({ type: 'updateSetting', key, value })).toEqual({
+        type: 'updateSetting',
+        key,
+        value,
+      });
+    }
+    for (const [key, value] of [
+      ['theme', 'pink'],
+      ['image.background', 'pink'],
+      ['image.background', 5],
+      ['image.background', undefined],
+      ['image.other', 'dark'],
+      ['video.loop', true],
+      ['video.ffmpegPath', 'calc'],
+    ] as const) {
+      expect(parseImageMessage({ type: 'updateSetting', key, value })).toBeUndefined();
+    }
   });
 });
 

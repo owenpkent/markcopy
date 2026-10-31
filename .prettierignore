@@ -18,3 +18,4 @@ tests/fixtures/review
 
 # Fuzz seeds are binary and arbitrary text, left exactly as found
 fuzz/corpus
+media/image.js
