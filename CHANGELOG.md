@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [0.20.0] - 2026-10-30
+
 ### Added
 
 - **Image preview with copy actions.** `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` files now open in a MarkCopy viewer ahead of VS Code's built-in image preview, which can zoom and nothing else and shows an SVG as XML text. **Reopen Editor With...** still reaches the built-in preview, and for an SVG the text editor.
@@ -16,10 +23,15 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
   - A file that is recognised but will not decode shows "Could not decode", with the PNG copy and save greyed out.
   - The format is read from the file's bytes, not its extension, so a mislabelled file still opens and an unrecognised one shows a message. An SVG is only ever drawn as a picture, never parsed into the page, so its scripts do not run. A file above 64 MiB shows a message instead of loading.
 
-### Planned
+### Fixed
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- The Office preview and video review watched their file with a glob built from the bare file name, so a name such as `deck [1].pptx` watched `deck 1.pptx` instead and never reloaded. Glob characters in the name are now escaped, and the image preview uses the same rule.
+
+### Security
+
+- A webview message whose numeric field could not be converted to a number (an object with no prototype) made the validator throw on the host instead of rejecting the message. The Markdown grid and workbook sheet messages now accept a real number only. Found by the nightly fuzzer; the input is a seed.
+- Reporting now prefers [GitHub private vulnerability reporting](https://github.com/owenpkent/markcopy/security/advisories/new), with an acknowledgement window of three business days and target fix windows, and each fixed issue gets a GitHub Security Advisory with a CVE. See [SECURITY](.github/SECURITY.md).
+- CodeQL (security-extended) runs on `main`, on pull requests, and weekly. Nightly fuzzing gains a dictionary per target, real seed files, an `image` target with one variant per format, and all workflow actions stay pinned by commit SHA. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
 
 ## [0.19.2] - 2026-10-28
 
@@ -483,7 +495,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.2...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/owenpkent/markcopy/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/owenpkent/markcopy/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/owenpkent/markcopy/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/owenpkent/markcopy/compare/v0.18.1...v0.19.0
