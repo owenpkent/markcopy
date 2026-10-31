@@ -25,7 +25,47 @@ Two targets check a property rather than only looking for crashes. `links` throw
 
 The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding.
 
+Each target can carry a libFuzzer dictionary, `fuzz/dict/<name>.dict`, which `fuzz/run.js` passes as `-dict=`. A dictionary is a list of tokens (one `name="token"` per line, `\xNN` for binary bytes, `#` for comments) that the mutator splices into inputs: format keywords, magic numbers, element and message names it would otherwise take a long time to find by chance. To add one, read the parser the target calls, list the strings and byte sequences it branches on, and save them under the target's name; a target with no file runs without. Measured on 2026-10-30, one 60 s run per cell on a Windows dev machine from an empty evolved corpus (`cov` is libFuzzer's edge count, `ft` its feature count; one run each, so differences of a few percent are noise):
+
+| Target   | cov without | cov with | ft without | ft with |
+| -------- | ----------- | -------- | ---------- | ------- |
+| xlsx     | 419         | 419      | 1273       | 1251    |
+| markdown | 74          | 74       | 449        | 451     |
+| messages | 518         | 518      | 747        | 762     |
+
+The dictionaries did not move coverage in 60 s, which is expected for xlsx (the input is deflated zip data, so tokens rarely land where the XML parser sees them) and for markdown (the seed corpus already reaches most of the parser). The first `messages` run without a dictionary crashed after 15,856 executions (a `Number()` call on a hostile `gridOp` field in `src/messages/markdown.ts`, reported in the pull request); the run in the table is a second one.
+
 To turn a finding into a regression test, fix the bug, then copy the crash file into `tests/fixtures/` and add a Vitest case that feeds it to the same function and asserts it either returns or throws the documented error. Copy a small input into `fuzz/corpus/<name>/` too if it reaches code the seeds do not.
+
+#### Seed corpus
+
+Seeds are small real files, not hand-typed headers: a stub seed gives the fuzzer nothing to mutate, and an oversized one slows every run. The caps are 2 KB for `gif`, 4 KB for `video-probe`, 8 KB for `zip`/`xlsx`/`pptx`/`docx`, and a few KB for text targets. A few older Word and PowerPoint seeds (`docx/pandoc.docx`, `docx/comments.docx`, `docx/equations-lo.docx`, `pptx/sample.pptx`, and their copies in `zip/`) predate the caps and exceed them; shrink them with the merge below when they are next touched. Name a seed by what it contains.
+
+How the added seeds were made (PIL, ffmpeg and LibreOffice 26.2 were available; ImageMagick was not; the image target is not on `main`, so it has none):
+
+| Target                      | Seed                                                                                                     | Made with                                                                                                                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gif`                       | `animated-loop-forever.gif` (3 frames, NETSCAPE 2.0 loop block, 253 B), `still.gif` (91 B)               | Pillow: `Image.save(..., save_all=True, loop=0, duration=[100, 100, 200])`, and a plain `save('still.gif')`                                                                                                                                 |
+| `docx`, `zip`               | `heading-table-list-image.docx`                                                                          | The repo's own writer: `htmlToDocx` from `src/docxExport.ts` on a heading, table with a colspan, nested list, ordered list and a PNG data URI                                                                                               |
+| `pptx`, `zip`               | `two-slides-table-image.pptx`                                                                            | `htmlToPptx` from `src/pptxExport.ts` on an h1 slide with a list and an h2 slide with a table and an image                                                                                                                                  |
+| `xlsx`, `zip`               | `libreoffice-two-sheets-merged-formula-date.xlsx`                                                        | A flat ODS (two sheets, a merged A5:C5, `=SUM(B2:B3)`, ISO dates) converted with `soffice --headless --convert-to xlsx`                                                                                                                     |
+| `xml`                       | worksheet, workbook, slide and document parts                                                            | Unzipped from the three files above (`sheet1.xml`, `workbook.xml`, `slide2.xml`, `document.xml`)                                                                                                                                            |
+| `csv`                       | `csv-quoted-embedded-newline-crlf.csv`, `csv-bom-semicolon-crlf.csv`, `libreoffice-semicolon-export.csv` | Python `csv.writer` with CRLF (embedded quotes, comma and newline in a field; UTF-8 BOM, `;` delimiter), and `soffice --convert-to csv:"Text - txt - csv (StarCalc)":59,34,76,1`. The first byte is the delimiter selector the target reads |
+| `stl`                       | `tetrahedron-binary.stl`, `tetrahedron-ascii.stl`                                                        | Python `struct` (80-byte header, count, 4 triangles with computed normals) and the same mesh as ASCII                                                                                                                                       |
+| `video-probe`               | `ffprobe-*.seed` (H.264/AAC mp4, ProRes 4444 mov, VP9 webm)                                              | `ffmpeg -f lavfi -i testsrc=size=64x48:rate=10:duration=1 ...` clips, then the exact ffprobe call from `probeArgs` in `src/videoProxy.ts`, a NUL, and `ffmpeg -progress pipe:1` output                                                      |
+| `review`                    | `add-*.review.yaml`                                                                                      | Copied from `tests/fixtures/review/edit/*.after.review.yaml` (generated by `tests/fixtures/review/generate.py`)                                                                                                                             |
+| `markdown`, `markdown-html` | `kitchen-sink.md`, `html-blocks-and-refs.md`, `equations.md`                                             | Written as documents exercising tables, math, mermaid, footnotes, task lists, nested lists and HTML blocks; `equations.md` is `tests/fixtures/docx/equations.md`                                                                            |
+
+Treat any downloaded or generated binary seed as untrusted data: write it into `fuzz/corpus/<name>/` and never run it.
+
+To minimize a corpus, run libFuzzer's merge mode through Jazzer.js:
+
+```bash
+npm run fuzz:merge -- xlsx                  # committed seeds + fuzz/.corpus/xlsx -> fuzz/.corpus-min/xlsx
+npm run fuzz:merge -- xlsx path/to/corpus   # or merge an unpacked nightly corpus instead
+```
+
+It runs `-merge=1`, which keeps only the inputs that add coverage over the others, and writes them to a fresh `fuzz/.corpus-min/<name>/` (untracked, recreated each time). To start from the nightly cache, download the `fuzz-corpus-<name>-*` cache from the Actions page, unpack it, and pass its directory. On Windows with Jazzer.js 4 the merge runs but libFuzzer records no coverage for any input (tested on `gif`: 89 files in, 0 features), so the output is empty and the script exits 3; run the merge on Linux (a container or the CI runner). Then look at what survived: keep inputs under the caps above, copy the small, well-named ones back into `fuzz/corpus/<name>/`, and record in the PR which target was minimized and the file counts before and after. Do not commit a whole evolved corpus.
 
 ### The webview E2E layer
 

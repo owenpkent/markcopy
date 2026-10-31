@@ -525,3 +525,50 @@ describe('settings a page may write through updateSetting', () => {
     });
   });
 });
+
+// Found by the nightly fuzzer: Number() throws on a value that cannot become a
+// primitive, which would have let one hostile message take the host down inside
+// the validator. A null-prototype object and a throwing toString are the two
+// shapes that reach that path.
+describe('numeric fields that cannot be coerced', () => {
+  const hostile: unknown[] = [
+    Object.create(null),
+    {
+      toString: () => {
+        throw new Error('nope');
+      },
+      valueOf: undefined,
+    },
+    [Object.create(null)],
+  ];
+
+  it('are rejected by the Markdown grid messages without throwing', () => {
+    for (const value of hostile) {
+      expect(
+        parseMarkdownMessage({ type: 'editCell', line: value, column: 0, value: 'x' }),
+      ).toBeUndefined();
+      expect(
+        parseMarkdownMessage({ type: 'editCell', line: 0, column: value, value: 'x' }),
+      ).toBeUndefined();
+      expect(
+        parseMarkdownMessage({ type: 'gridOp', op: 'insertRowBelow', line: value, column: 0 }),
+      ).toBeUndefined();
+      expect(
+        parseMarkdownMessage({ type: 'gridOp', op: 'insertRowBelow', line: 0, column: value }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('are rejected by selectSheet without throwing', () => {
+    for (const value of hostile) {
+      expect(parseOoxmlMessage({ type: 'selectSheet', index: value })).toBeUndefined();
+    }
+  });
+
+  it('no longer accept numeric strings', () => {
+    expect(
+      parseMarkdownMessage({ type: 'editCell', line: '1', column: 0, value: 'x' }),
+    ).toBeUndefined();
+    expect(parseOoxmlMessage({ type: 'selectSheet', index: '2' })).toBeUndefined();
+  });
+});

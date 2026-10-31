@@ -1,0 +1,5 @@
+﻿id;name;comment;price
+1;"Ann ""the Rock"" Lee";"line one
+line two";1,234.50
+2;Bob;;7
+3;Café, Müller;"""quoted""";0.99

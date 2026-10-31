@@ -37,6 +37,7 @@ media/gif.js.map
 
 # Jazzer.js fuzzing: evolved corpus and crashing inputs (seeds in fuzz/corpus are tracked)
 fuzz/.corpus/
+fuzz/.corpus-min/
 fuzz/crashes/
 media/image.js
 media/image.js.map

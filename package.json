@@ -766,6 +766,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "fuzz": "node fuzz/run.js",
+    "fuzz:merge": "node fuzz/run.js merge",
     "compile:tests": "tsc -p tsconfig.integration.json",
     "test:integration": "npm run compile && npm run compile:tests && vscode-test",
     "screenshot": "node scripts/make-screenshot.js",
