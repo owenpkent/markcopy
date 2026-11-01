@@ -147,6 +147,10 @@ Each page has a real pdf.js text layer (transparent, selectable spans over the c
 
 Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that PDF in this exact same viewer, so every action and clipboard flavor above under [A page in the PDF preview](#a-page-in-the-pdf-preview) applies unchanged: **Copy Selection**, **Copy Page N as PNG**, **Copy as** for page or all text, and **Add Comment Here**. The one addition is **Recompile LaTeX**, which reruns the compile rather than copying anything, and is offered only here, never on a plain `.pdf`.
 
+### Open in Default App
+
+Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
+
 ### Always available
 
 | Action              | Output                     | Goes to                           |

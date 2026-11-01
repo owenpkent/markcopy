@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
@@ -108,7 +108,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
         case 'openExternal':
           // The escape hatch for a codec VS Code's Chromium cannot decode
           // (ProRes, DNxHD, most HEVC), which is a common shape for a .mov.
-          await vscode.env.openExternal(document.uri);
+          await openInDefaultApp(document.uri);
           break;
         case 'proxyRequest':
           // The element gave up on the file. Whether that is the end of the story

@@ -998,6 +998,11 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'divider' });
   entries.push({
     kind: 'item',
+    label: 'Open in Default App',
+    run: () => vscode.postMessage({ type: 'openExternal' }),
+  });
+  entries.push({
+    kind: 'item',
     label: revealLabel(),
     run: () => vscode.postMessage({ type: 'revealInOS' }),
   });

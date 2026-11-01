@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Open in Default App on every preview's right-click menu.** The Markdown, CSV, Excel, PowerPoint, Word, and PDF previews now have the row the image, GIF, and video viewers already had, above the Reveal row, and it opens the file in the operating system's default app. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, greyed out until the first compile succeeds. The webview sends no path: the host opens its own document, and a file that is not on disk shows a status bar note instead.
+
 ### Planned
 
 - PlantUML support.

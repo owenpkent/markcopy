@@ -24,3 +24,13 @@ describe('reveal in OS row', () => {
     expect(h.posted.at(-1)).toEqual({ type: 'revealInOS' });
   });
 });
+
+describe('open in default app row', () => {
+  it('is offered above Reveal and posts a payload-free message', async () => {
+    const menu = h.rightClick(h.find('p'));
+    const labels = menu.labels();
+    expect(labels.indexOf('Open in Default App')).toBe(labels.indexOf(revealLabel()) - 1);
+    await menu.click('Open in Default App');
+    expect(h.posted.at(-1)).toEqual({ type: 'openExternal' });
+  });
+});

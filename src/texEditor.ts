@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
@@ -90,6 +90,12 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
       }
       if (msg.type === 'ready') {
         await session.start();
+      } else if (msg.type === 'openExternal') {
+        // The compiled PDF the preview shows, never a path from the webview.
+        const pdf = session.pdfUri();
+        if (pdf) {
+          await openInDefaultApp(pdf);
+        }
       } else if (msg.type === 'revealInOS') {
         // The .tex source, not the temp PDF it compiles to.
         revealInOs(document.uri);
@@ -252,12 +258,19 @@ class CompileSession {
   // for one compile, then again on every save.
   private tools: TexTools | undefined;
   private outDir: string | undefined;
+  // The last successfully compiled PDF, which is what the preview shows.
+  private pdfPath: string | undefined;
 
   constructor(
     private readonly document: vscode.TextDocument,
     private readonly webview: vscode.Webview,
     private readonly workerSrc: string,
   ) {}
+
+  /** The compiled PDF on screen, or undefined before the first good compile. */
+  pdfUri(): vscode.Uri | undefined {
+    return this.pdfPath ? vscode.Uri.file(this.pdfPath) : undefined;
+  }
 
   /** The file actually handed to the engine, which is not always this document. */
   rootFile(): string {
@@ -353,6 +366,7 @@ class CompileSession {
         return;
       }
       const bytes = await readFile(result.pdf);
+      this.pdfPath = result.pdf;
       // Base64 for the same reason the PDF preview uses it: postMessage turns a
       // Uint8Array into a plain indexed object with no length, which pdf.js
       // rejects. A string round-trips cleanly.

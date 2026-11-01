@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { applyMarkcopySetting } from './settingsScope';
 import { getNonce } from './previewShell';
 import { parsePdfMessage } from './messages/pdf';
@@ -61,6 +61,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           workerSrc: workerUri.toString(),
           comments: await readComments(commentsUri),
         });
+      } else if (msg.type === 'openExternal') {
+        await openInDefaultApp(document.uri);
       } else if (msg.type === 'revealInOS') {
         revealInOs(document.uri);
       } else if (msg.type === 'saveComments') {

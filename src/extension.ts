@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
 import { EOL_CRLF, EOL_LF, editTargetsDocument, planBlockEdit } from './blockEdit';
@@ -849,6 +849,9 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         return;
       }
       switch (msg.type) {
+        case 'openExternal':
+          void openInDefaultApp(state.docUri);
+          break;
         case 'revealInOS':
           revealInOs(state.docUri);
           break;

@@ -54,6 +54,7 @@ describe.each<[string, Parser]>([
 describe('parseMarkdownMessage', () => {
   it('accepts the bare messages', () => {
     expect(parseMarkdownMessage({ type: 'revealInOS' })).toEqual({ type: 'revealInOS' });
+    expect(parseMarkdownMessage({ type: 'openExternal' })).toEqual({ type: 'openExternal' });
     expect(parseMarkdownMessage({ type: 'openSettings' })).toEqual({ type: 'openSettings' });
   });
 
@@ -172,7 +173,7 @@ describe('parseMarkdownMessage', () => {
 
 describe('parseOoxmlMessage', () => {
   it('accepts the shared messages', () => {
-    for (const type of ['ready', 'revealInOS', 'openSettings']) {
+    for (const type of ['ready', 'revealInOS', 'openExternal', 'openSettings']) {
       expect(parseOoxmlMessage({ type })).toEqual({ type });
     }
     expect(parseOoxmlMessage({ type: 'toast', text: 'hi' })).toEqual({ type: 'toast', text: 'hi' });
@@ -232,6 +233,11 @@ describe('parsePdfMessage and parseTexMessage', () => {
     for (const parse of [parsePdfMessage, parseTexMessage]) {
       expect(parse({ type: 'ready' })).toEqual({ type: 'ready' });
       expect(parse({ type: 'revealInOS' })).toEqual({ type: 'revealInOS' });
+      expect(parse({ type: 'openExternal' })).toEqual({ type: 'openExternal' });
+      // A path from the webview is dropped: the host opens its own document.
+      expect(parse({ type: 'openExternal', path: '/etc/passwd' })).toEqual({
+        type: 'openExternal',
+      });
       expect(parse({ type: 'saveComments', comments: [{ page: 1 }] })).toEqual({
         type: 'saveComments',
         comments: [{ page: 1 }],

@@ -14,3 +14,17 @@ export function revealInOs(uri: vscode.Uri): void {
     );
   }
 }
+
+// Open a document in the OS default application for its type, as double-clicking
+// it in a file manager would. Like revealInOs, the URI is always the host's own
+// document. A document that is not a file on disk has no app to hand it to.
+export async function openInDefaultApp(uri: vscode.Uri): Promise<void> {
+  if (uri.scheme === 'file') {
+    await vscode.env.openExternal(uri);
+  } else {
+    vscode.window.setStatusBarMessage(
+      'MarkCopy: This file is not on disk, so there is no app to open it in.',
+      2500,
+    );
+  }
+}

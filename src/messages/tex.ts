@@ -11,6 +11,7 @@ import { isPdfSetting } from './settings';
 export type TexMessage =
   | { type: 'ready' }
   | { type: 'revealInOS' }
+  | { type: 'openExternal' }
   | { type: 'texRecompile' }
   | SaveCommentsMessage
   | UpdateSettingMessage;
@@ -23,6 +24,7 @@ export function parseTexMessage(raw: unknown): TexMessage | undefined {
   switch (msg.type) {
     case 'ready':
     case 'revealInOS':
+    case 'openExternal':
     case 'texRecompile':
       return { type: msg.type };
     case 'saveComments':
