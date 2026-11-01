@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { checkStl, MAX_STL_BYTES, MAX_TRIANGLES, sniffStl, toBytes } from '../src/webview/stlInfo';
+import {
+  checkStl,
+  createRightClickGate,
+  MAX_STL_BYTES,
+  MAX_TRIANGLES,
+  sniffStl,
+  toBytes,
+  viewFileName,
+  VIEW_PRESETS,
+} from '../src/webview/stlInfo';
 
 // Build a minimal binary STL buffer: 80-byte header + uint32 LE triangle count
 // + `count` triangles of 50 bytes each (12 floats + a uint16 attribute count).
@@ -338,5 +347,100 @@ describe('checkStl', () => {
     // surfaces to the user as MarkCopy failing to read a file it just accepted.
     const NODE_MAX_STRING_LENGTH = 536_870_888;
     expect(4 * Math.ceil(MAX_STL_BYTES / 3)).toBeLessThan(NODE_MAX_STRING_LENGTH);
+  });
+});
+
+describe('createRightClickGate', () => {
+  it('opens on a Windows-style click: down, up, then contextmenu', () => {
+    const gate = createRightClickGate();
+    gate.down(100, 100);
+    expect(gate.up(101, 102, 10)).toBe('none');
+    expect(gate.contextmenu(11)).toBe('open');
+  });
+
+  it('ignores a Windows-style right-drag', () => {
+    const gate = createRightClickGate();
+    gate.down(100, 100);
+    gate.move(140, 100);
+    expect(gate.up(140, 100, 10)).toBe('none');
+    expect(gate.contextmenu(11)).toBe('ignore');
+  });
+
+  it('defers a macOS-style contextmenu until the button comes up, then opens', () => {
+    const gate = createRightClickGate();
+    gate.down(100, 100);
+    expect(gate.contextmenu(1)).toBe('defer');
+    gate.move(102, 101);
+    expect(gate.up(102, 101, 50)).toBe('open');
+  });
+
+  it('defers and then ignores a macOS-style right-drag', () => {
+    const gate = createRightClickGate();
+    gate.down(100, 100);
+    expect(gate.contextmenu(1)).toBe('defer');
+    gate.move(120, 130);
+    expect(gate.up(120, 130, 50)).toBe('ignore');
+  });
+
+  it('counts a move that returns to the start as a drag', () => {
+    const gate = createRightClickGate();
+    gate.down(100, 100);
+    gate.move(150, 100);
+    gate.move(100, 100);
+    gate.up(100, 100, 5);
+    expect(gate.contextmenu(6)).toBe('ignore');
+  });
+
+  it('allows movement within the slop', () => {
+    const gate = createRightClickGate(4);
+    gate.down(10, 10);
+    gate.move(13, 10);
+    gate.up(13, 10, 5);
+    expect(gate.contextmenu(6)).toBe('open');
+  });
+
+  it('opens at once for a contextmenu with no preceding press (keyboard)', () => {
+    const gate = createRightClickGate();
+    expect(gate.contextmenu(5)).toBe('open');
+  });
+
+  it('treats a contextmenu long after the last release as a fresh one', () => {
+    const gate = createRightClickGate();
+    gate.down(0, 0);
+    gate.up(0, 0, 10);
+    expect(gate.contextmenu(5000)).toBe('open');
+  });
+
+  it('forgets a cancelled gesture', () => {
+    const gate = createRightClickGate();
+    gate.down(0, 0);
+    gate.move(50, 50);
+    gate.cancel();
+    expect(gate.contextmenu(1)).toBe('open');
+  });
+});
+
+describe('view presets', () => {
+  it('has the seven presets, none of them zero-length', () => {
+    expect(Object.keys(VIEW_PRESETS).sort()).toEqual(
+      ['back', 'bottom', 'front', 'isometric', 'left', 'right', 'top'].sort(),
+    );
+    for (const [x, y, z] of Object.values(VIEW_PRESETS)) {
+      expect(Math.hypot(x, y, z)).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps top and bottom off the up axis so OrbitControls has a defined up', () => {
+    expect(VIEW_PRESETS.top[2]).not.toBe(0);
+    expect(VIEW_PRESETS.bottom[2]).not.toBe(0);
+  });
+});
+
+describe('viewFileName', () => {
+  it('swaps the extension for png', () => {
+    expect(viewFileName('part.stl')).toBe('part.png');
+    expect(viewFileName('my.part.v2.STL')).toBe('my.part.v2.png');
+    expect(viewFileName('noext')).toBe('noext.png');
+    expect(viewFileName('')).toBe('view.png');
   });
 });

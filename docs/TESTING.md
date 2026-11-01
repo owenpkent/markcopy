@@ -407,6 +407,21 @@ The guards here are what stop a crafted file hanging the window, so these are wo
 - [ ] An empty `.stl` reports that it received no data, rather than blaming the file's format.
 - [ ] Right-click the tab -> **Reopen Editor With...** -> a text or hex editor still opens the raw bytes.
 
+### Context menu
+
+- [ ] ★ Right-click (no movement) on the model opens the menu at the pointer. Right-click on empty viewport opens it too.
+- [ ] ★ Right-**drag** pans the model and does **not** open a menu on release. A right click that wobbles a pixel or two still opens it. (Check on Windows, where the menu opens on release, and on macOS or Linux, where it opens on press.)
+- [ ] With the menu open, a left-press on the model closes it and does not start an orbit.
+- [ ] Shift+F10 (or the menu key) with the viewer focused opens the menu.
+- [ ] ★ **Copy View as PNG**, then paste into an image editor or chat: the picture is the model at the angle you left it, on the viewport background, not blank or black. Orbit and repeat to confirm it follows the camera.
+- [ ] **Save View as PNG…** offers `sample.png` beside the file and the saved image matches.
+- [ ] **Copy as** pastes the name, the full path, `1.00 × 1.00 × 1.00` and `12`.
+- [ ] **View** > Front, Back, Left, Right, Top, Bottom each look at the cube from that side with the model framed, and Isometric returns to the opening angle. Top and Bottom are not flipped or spinning.
+- [ ] ★ **View** > Wireframe and Grid checkboxes toggle the model and grid, and the toolbar buttons light and dim to match; toggling from the toolbar updates the checkmarks the next time the menu opens.
+- [ ] **Preferences** > **Theme** changes the viewport background at once and persists (reopen the file). Changing `markcopy.theme` from another preview retints this one.
+- [ ] On a file that is refused (for example a truncated binary STL), Copy View, Save View, Dimensions and Triangle Count are greyed, while File Name and Full Path still copy.
+- [ ] **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
+
 ## Video player
 
 Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with a tone, so a frozen frame, a silent track, and a wrong grab are all visible or audible at once.
