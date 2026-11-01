@@ -504,6 +504,18 @@ export async function ensureTexDir(dir: string): Promise<void> {
   await ensureDirStrict(dir);
 }
 
+/**
+ * Make `texOutRoot()` itself and return it, for a caller that creates its own
+ * child with `mkdtemp`. Checks only the directory MarkCopy owns: passing the
+ * root to `ensureTexDir` would also check its parent, the shared tmpdir, which
+ * on Linux belongs to root.
+ */
+export async function ensureTexRoot(): Promise<string> {
+  const root = texOutRoot();
+  await ensureDirStrict(root);
+  return root;
+}
+
 /** Best-effort delete; a stranded output directory is not worth failing over. */
 export async function removeQuietly(p: string): Promise<void> {
   try {

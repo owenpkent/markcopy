@@ -1,6 +1,15 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, writeFile } from 'node:fs/promises';
 import { join, parse } from 'node:path';
-import { ensureTexDir, removeQuietly, texOutRoot } from './texCompile';
+import { ensureTexRoot, removeQuietly } from './texCompile';
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The last successfully compiled PDF, kept apart from the compiler's output.
@@ -30,12 +39,15 @@ export class PdfSnapshot {
       return undefined;
     }
     if (this.written && this.written.bytes.equals(bytes)) {
-      return this.written.path; // unchanged since the last write: reuse it
+      if (await exists(this.written.path)) {
+        return this.written.path; // unchanged since the last write: reuse it
+      }
+      this.written = undefined;
     }
-    if (!this.dir) {
-      const root = texOutRoot();
-      await ensureTexDir(root);
-      this.dir = await mkdtemp(join(root, 'open-'));
+    // Another window's sweepTexRoot can remove a directory that sat untouched
+    // long enough, so check it is still there rather than writing into nothing.
+    if (!this.dir || !(await exists(this.dir))) {
+      this.dir = await mkdtemp(join(await ensureTexRoot(), 'open-'));
     }
     const base = parse(stem).name || 'document';
     // A Windows PDF reader locks the file it has open, so rewriting the same

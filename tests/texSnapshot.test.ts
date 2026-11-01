@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PdfSnapshot } from '../src/texSnapshot';
 
@@ -41,6 +41,14 @@ describe('PdfSnapshot', () => {
     snap.set(Buffer.from('two'));
     const b = await snap.materialize('main.tex');
     expect((await readFile(b!)).toString()).toBe('two');
+  });
+
+  it('writes a fresh copy when its directory was swept away', async () => {
+    snap.set(Buffer.from('kept'));
+    const first = (await snap.materialize('main.tex'))!;
+    await rm(dirname(first), { recursive: true, force: true });
+    const second = (await snap.materialize('main.tex'))!;
+    expect((await readFile(second)).toString()).toBe('kept');
   });
 
   it('removes its directory on dispose', async () => {
