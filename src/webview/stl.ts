@@ -46,7 +46,13 @@ interface ErrorMessage {
   path?: string;
 }
 
-type HostMessage = LoadMessage | ThemeMessage | ErrorMessage;
+// The host's confirmation after Save View as PNG writes the file.
+interface ToastMessage {
+  type: 'toast';
+  message: string;
+}
+
+type HostMessage = LoadMessage | ThemeMessage | ErrorMessage | ToastMessage;
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
@@ -61,6 +67,17 @@ const menuEl = document.getElementById('mc-menu') as HTMLDivElement;
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 
 const contextMenu = createMenu(menuEl);
+
+// Set by anything that changes what a frame would look like. The render loop
+// otherwise repaints an unchanging scene forever, which on a laptop is a GPU
+// spinning on a tab nobody is looking at. Declared before the first
+// syncBackground() call below, which invalidates; only the bundler's rewrite
+// of top-level `let` to `var` hid that ordering before.
+let needsRender = true;
+
+function invalidate(): void {
+  needsRender = true;
+}
 
 const scene = new THREE.Scene();
 
@@ -103,15 +120,6 @@ function toast(text: string, ms = 1600): void {
   toastEl.hidden = false;
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (toastEl.hidden = true), ms);
-}
-
-// Set by anything that changes what a frame would look like. The render loop
-// otherwise repaints an unchanging scene forever, which on a laptop is a GPU
-// spinning on a tab nobody is looking at.
-let needsRender = true;
-
-function invalidate(): void {
-  needsRender = true;
 }
 
 function aspect(): number {
@@ -533,6 +541,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     fileName = msg.name ?? fileName;
     filePath = msg.path ?? filePath;
     showError(msg.message);
+  } else if (msg?.type === 'toast') {
+    toast(msg.message);
   }
 });
 
