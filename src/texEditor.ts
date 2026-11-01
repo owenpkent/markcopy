@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
@@ -19,6 +19,7 @@ import {
   type TexEngine,
   type TexTools,
 } from './texCompile';
+import { PdfSnapshot } from './texSnapshot';
 import { compileFailed, compileOffer, compileUnavailable, compiling } from './texInfo';
 
 // Source files whose saving should rebuild the preview. A document's own save is
@@ -90,6 +91,12 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
       }
       if (msg.type === 'ready') {
         await session.start();
+      } else if (msg.type === 'openExternal') {
+        // The compiled PDF the preview shows, never a path from the webview.
+        const pdf = await session.snapshotUri();
+        if (pdf) {
+          await openInDefaultApp(pdf);
+        }
       } else if (msg.type === 'revealInOS') {
         // The .tex source, not the temp PDF it compiles to.
         revealInOs(document.uri);
@@ -252,12 +259,21 @@ class CompileSession {
   // for one compile, then again on every save.
   private tools: TexTools | undefined;
   private outDir: string | undefined;
+  // The last successfully compiled PDF, which is what the preview shows. Held
+  // apart from outDir because a failed rebuild can delete the engine's output.
+  private readonly snapshot = new PdfSnapshot();
 
   constructor(
     private readonly document: vscode.TextDocument,
     private readonly webview: vscode.Webview,
     private readonly workerSrc: string,
   ) {}
+
+  /** A file holding the PDF on screen, or undefined before the first good compile. */
+  async snapshotUri(): Promise<vscode.Uri | undefined> {
+    const path = await this.snapshot.materialize(basename(this.rootFile()));
+    return path ? vscode.Uri.file(path) : undefined;
+  }
 
   /** The file actually handed to the engine, which is not always this document. */
   rootFile(): string {
@@ -353,6 +369,7 @@ class CompileSession {
         return;
       }
       const bytes = await readFile(result.pdf);
+      this.snapshot.set(bytes);
       // Base64 for the same reason the PDF preview uses it: postMessage turns a
       // Uint8Array into a plain indexed object with no length, which pdf.js
       // rejects. A string round-trips cleanly.
@@ -399,6 +416,7 @@ class CompileSession {
     this.disposed = true;
     this.rerunRequested = false; // nothing left to honour a rerun for
     this.abort?.abort();
+    await this.snapshot.dispose();
     const dir = this.outDir;
     this.outDir = undefined;
     if (!dir) {

@@ -165,6 +165,7 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] ☑ Right-click a link, **Copy Link** (top-level): the target arrives, not the words that stand in for it. **Copy as** -> **Markdown** gives `[text](target)`.
 - [ ] ★ **Copy Whole Document** (top-level menu, or the command palette's **Copy Whole Document as Rich Text**), paste into an email draft: formatting intact.
 - [ ] Every successful copy shows a toast.
+- [ ] **Open in Default App** (above the Reveal row) opens the `.md` file in the operating system's default app for Markdown. Repeat on a CSV, an Excel sheet, a PowerPoint deck, and a Word document: each opens its own file in its default app. In an untitled Markdown document it shows "This file is not on disk" in the status bar and opens nothing.
 - [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
 - [ ] Select `AT&T C++` in the prose, right-click -> **Search Google for "AT&T C++"**: the browser opens a Google search for exactly `AT&T C++`, not for `AT`. Selecting a long passage shows only its first 30 characters in the row, and the search still opens.
 - [ ] Select a sentence containing an inline equation, then search it: the query has the equation once, not its hidden MathML twin as well. In a CSV grid, a selection across rows searches the cell text without the row numbers.
@@ -352,6 +353,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Select text with the Pointer tool; right-click, top-level **Copy Selection** pastes the selection.
 - [ ] Right-click -> **Copy as** -> **Page N Text** and **Copy as** -> **All Text** paste the expected plain text.
 - [ ] ★ Right-click a page, top-level **Copy Page N as PNG** yields a true-color page image even when the viewer shows dark or green pages.
+- [ ] Right-click -> **Open in Default App** opens the `.pdf` in the default PDF reader.
 
 ### Comments
 
@@ -666,6 +668,7 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 
 - [ ] ☑ The right-click menu offers exactly what the PDF viewer's does (Copy Selection, Copy Page N as PNG, **Copy as** Page/All Text, Add Comment Here, the **Theme** submenu), plus the LaTeX-only **Recompile LaTeX** entry, since it is the same viewer; see the [Copy Matrix](COPY-MATRIX.md#a-page-in-the-latex-preview).
 - [ ] **Preferences** -> **Theme** applies all four values on a LaTeX preview, and the menu dismisses on a click outside, Escape and a click into the source editor, as on a PDF.
+- [ ] ★ Right-click -> **Open PDF in Default App** opens the compiled PDF (the temporary build output, not the `.tex` source) in the default PDF reader. While the first compile is still running, or after it failed with no earlier result, the row is greyed out.
 - [ ] Comments added on the compiled PDF persist to `<filename>.tex.mccomments.json` beside the source and survive a recompile.
 
 ## Paste-target pass

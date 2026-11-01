@@ -47,6 +47,7 @@ const GRID_OPS = [
 const TYPES = {
   markdown: [
     'revealInOS',
+    'openExternal',
     'revealLine',
     'toast',
     'updateSetting',
@@ -62,6 +63,7 @@ const TYPES = {
   ooxml: [
     'ready',
     'revealInOS',
+    'openExternal',
     'pdfHtml',
     'docxXhtml',
     'pptxXhtml',
@@ -71,8 +73,8 @@ const TYPES = {
     'openLink',
     'selectSheet',
   ],
-  pdf: ['ready', 'revealInOS', 'saveComments', 'updateSetting'],
-  tex: ['ready', 'revealInOS', 'texRecompile', 'saveComments', 'updateSetting'],
+  pdf: ['ready', 'revealInOS', 'openExternal', 'saveComments', 'updateSetting'],
+  tex: ['ready', 'revealInOS', 'openExternal', 'texRecompile', 'saveComments', 'updateSetting'],
   stl: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
   video: [
     'ready',

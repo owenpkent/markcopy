@@ -724,6 +724,9 @@ function closeNote(): void {
 // never sends one, so this stays false and the "Recompile LaTeX" menu entry
 // never appears there.
 let texMode = false;
+// True once a compile has finished and its PDF is on screen, so there is a file
+// for "Open PDF in Default App" to open.
+let texHasPdf = false;
 
 /**
  * Compile status pushed by the host's tex editor provider (src/texEditor.ts,
@@ -796,6 +799,9 @@ function ensureTexOverlay(): TexOverlay {
 
 function handleTexState(msg: TexStateMessage): void {
   texMode = true; // gates the "Recompile LaTeX" context-menu entry, from here on
+  if (msg.state === 'ok') {
+    texHasPdf = true;
+  }
   const overlay = ensureTexOverlay();
 
   if (msg.state === 'ok') {
@@ -880,6 +886,12 @@ document.addEventListener('contextmenu', (e) => {
   }
 
   entries.push({ kind: 'divider' });
+  entries.push({
+    kind: 'item',
+    label: texMode ? 'Open PDF in Default App' : 'Open in Default App',
+    disabled: texMode && !texHasPdf,
+    run: () => vscode.postMessage({ type: 'openExternal' }),
+  });
   entries.push({
     kind: 'item',
     label: revealLabel(),

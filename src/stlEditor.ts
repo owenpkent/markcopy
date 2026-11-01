@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { revealInOs } from './revealInOs';
+import { openInDefaultApp, revealInOs } from './revealInOs';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import { basename, saveFrame } from './videoEditor';
@@ -67,7 +67,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'openExternal':
           // Always the host's own document, never a URI the webview sent.
-          await vscode.env.openExternal(document.uri);
+          await openInDefaultApp(document.uri);
           break;
         case 'updateSetting':
           await applyMarkcopySetting(msg.key, msg.value, document.uri);

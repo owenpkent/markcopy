@@ -8,6 +8,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **STL viewer right-click menu.** **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle; **Copy as** gives the file name, full path, dimensions (`X × Y × Z`) or triangle count; **View** adds Fit View, Front, Back, Left, Right, Top, Bottom and Isometric presets with Wireframe and Grid checkboxes that stay in step with the toolbar; **Preferences > Theme**, **Open in Default App** and **Reveal in File Explorer** complete it. A right-drag still pans and does not open the menu; only a right click without movement does.
   - The host sends the file's name and path with the load and error messages, so File Name and Full Path work even for a file that was refused. The new STL webview messages are validated by `parseStlMessage` and the webview may write only `markcopy.theme`.
+- **Open in Default App on every preview's right-click menu.** The Markdown, CSV, Excel, PowerPoint, Word, and PDF previews now have the row the image, GIF, and video viewers already had, above the Reveal row, and it opens the file in the operating system's default app. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, greyed out until the first compile succeeds. The webview sends no path: the host opens its own document, and a file that is not on disk shows a status bar note instead.
 
 ### Planned
 

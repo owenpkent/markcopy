@@ -15,6 +15,7 @@ import { isPreviewSetting } from './settings';
 export type OoxmlMessage =
   | { type: 'ready' }
   | { type: 'revealInOS' }
+  | { type: 'openExternal' }
   | ExportMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
@@ -30,6 +31,7 @@ export function parseOoxmlMessage(raw: unknown): OoxmlMessage | undefined {
   switch (msg.type) {
     case 'ready':
     case 'revealInOS':
+    case 'openExternal':
     case 'openSettings':
       return { type: msg.type };
     case 'pdfHtml':

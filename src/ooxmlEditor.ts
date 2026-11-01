@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { escapeGlobName } from './globEscape';
-import { revealInOs } from './revealInOs';
+import { revealInOs, openInDefaultApp } from './revealInOs';
 import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
 import { htmlShell } from './previewShell';
@@ -169,6 +169,9 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
         switch (msg.type) {
           case 'ready':
             await draw();
+            break;
+          case 'openExternal':
+            await openInDefaultApp(document.uri);
             break;
           case 'revealInOS':
             revealInOs(document.uri);
