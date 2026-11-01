@@ -256,3 +256,117 @@ export function checkStl(
   }
   return { ok: true, format, triangles };
 }
+
+// ---------------------------------------------------------------------------
+// Context menu: right-click versus right-drag
+// ---------------------------------------------------------------------------
+
+/** How far (px) the pointer may travel with the right button down and still count as a click. */
+export const RIGHT_CLICK_SLOP = 4;
+
+/** A contextmenu this long (ms) after the last right-button release was not caused by it. */
+const STALE_MS = 1000;
+
+export type RightClickVerdict = 'open' | 'defer' | 'ignore';
+
+/**
+ * Tells a right click (open the menu) from a right-drag (OrbitControls pans).
+ *
+ * `contextmenu` fires at mouseup on Windows and at mousedown on macOS and Linux,
+ * so it cannot be trusted to mean "no drag happened". Feed it the right-button
+ * pointerdown, every pointermove, the pointerup and the contextmenu, and it says
+ * what to do with the menu:
+ *
+ * - `contextmenu()` returns 'open' or 'ignore' when the button is already up
+ *   (Windows), 'defer' when it is still down (macOS, Linux), and 'open' when no
+ *   right-button press preceded it (the keyboard's menu key, Shift+F10).
+ * - After a 'defer', `up()` returns 'open' or 'ignore' once the button comes up.
+ *
+ * Pure and clock-injected so it can be tested without a DOM.
+ */
+export function createRightClickGate(slop = RIGHT_CLICK_SLOP) {
+  let tracking = false;
+  let down = false;
+  let moved = false;
+  let deferred = false;
+  let startX = 0;
+  let startY = 0;
+  let upAt = 0;
+
+  const reset = () => {
+    tracking = down = moved = deferred = false;
+  };
+  const travel = (x: number, y: number) => {
+    if (Math.hypot(x - startX, y - startY) > slop) {
+      moved = true;
+    }
+  };
+
+  return {
+    down(x: number, y: number): void {
+      tracking = down = true;
+      moved = deferred = false;
+      startX = x;
+      startY = y;
+    },
+    move(x: number, y: number): void {
+      if (tracking && down) {
+        travel(x, y);
+      }
+    },
+    /** The right button came up (or the gesture was cancelled with `cancel`). */
+    up(x: number, y: number, now = 0): 'open' | 'ignore' | 'none' {
+      if (!tracking || !down) {
+        return 'none';
+      }
+      travel(x, y);
+      down = false;
+      upAt = now;
+      if (!deferred) {
+        return 'none'; // Windows: contextmenu comes next and reads the verdict.
+      }
+      const verdict = moved ? 'ignore' : 'open';
+      reset();
+      return verdict;
+    },
+    cancel(): void {
+      reset();
+    },
+    contextmenu(now = 0): RightClickVerdict {
+      if (!tracking || (!down && now - upAt > STALE_MS)) {
+        reset();
+        return 'open';
+      }
+      if (down) {
+        deferred = true;
+        return 'defer';
+      }
+      const verdict = moved ? 'ignore' : 'open';
+      reset();
+      return verdict;
+    },
+  };
+}
+
+/** Camera directions for the menu's View submenu, as the camera's offset from the model. */
+export const VIEW_PRESETS = {
+  isometric: [1, 0.75, 1],
+  front: [0, 0, 1],
+  back: [0, 0, -1],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+  // Not exactly on the Y axis: OrbitControls keeps the camera's up at +Y and
+  // would otherwise look straight along it. The tilt is far below a pixel at any
+  // distance and fixes which way is up on screen (Top: -Z, Bottom: +Z).
+  top: [0, 1, 0.0001],
+  bottom: [0, -1, 0.0001],
+} as const satisfies Record<string, readonly [number, number, number]>;
+
+export type ViewPreset = keyof typeof VIEW_PRESETS;
+
+/** The save-as name for a view snapshot: `part.stl` becomes `part.png`. */
+export function viewFileName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  return `${stem || 'view'}.png`;
+}

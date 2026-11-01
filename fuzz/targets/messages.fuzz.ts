@@ -73,7 +73,7 @@ const TYPES = {
   ],
   pdf: ['ready', 'revealInOS', 'saveComments', 'updateSetting'],
   tex: ['ready', 'revealInOS', 'texRecompile', 'saveComments', 'updateSetting'],
-  stl: ['ready'],
+  stl: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
   video: [
     'ready',
     'revealInOS',
@@ -125,7 +125,7 @@ function settingAllowed(surface: string, key: string, value: unknown): boolean {
     case 'image':
       return theme || (key === 'image.background' && IMAGE_BACKGROUNDS.includes(value as string));
     default:
-      return theme; // pdf, tex, gif
+      return theme; // pdf, tex, gif, stl
   }
 }
 

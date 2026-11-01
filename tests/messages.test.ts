@@ -252,10 +252,34 @@ describe('parsePdfMessage and parseTexMessage', () => {
 });
 
 describe('parseStlMessage', () => {
-  it('accepts only ready', () => {
-    expect(parseStlMessage({ type: 'ready' })).toEqual({ type: 'ready' });
-    expect(parseStlMessage({ type: 'revealInOS' })).toBeUndefined();
-    expect(parseStlMessage({ type: 'updateSetting', key: 'theme', value: 'dark' })).toBeUndefined();
+  it('accepts the STL messages', () => {
+    for (const type of ['ready', 'revealInOS', 'openExternal']) {
+      expect(parseStlMessage({ type })).toEqual({ type });
+    }
+    expect(parseStlMessage({ type: 'saveFrame', data: 'AAAA', name: 'part.png' })).toEqual({
+      type: 'saveFrame',
+      data: 'AAAA',
+      name: 'part.png',
+    });
+    expect(parseStlMessage({ type: 'saveFrame', data: 'AAAA' })).toMatchObject({ name: undefined });
+    for (const data of ['', 5, null, undefined]) {
+      expect(parseStlMessage({ type: 'saveFrame', data, name: 'f.png' })).toBeUndefined();
+    }
+    expect(parseStlMessage({ type: 'copyText', text: 'x' })).toBeUndefined();
+  });
+
+  it('lets the menu write only a valid theme', () => {
+    expect(parseStlMessage({ type: 'updateSetting', key: 'theme', value: 'green' })).toEqual({
+      type: 'updateSetting',
+      key: 'theme',
+      value: 'green',
+    });
+    expect(parseStlMessage({ type: 'updateSetting', key: 'theme', value: 'pink' })).toBeUndefined();
+    expect(parseStlMessage({ type: 'updateSetting', key: 'theme', value: 5 })).toBeUndefined();
+    for (const key of ['stl.meshColor', 'stl.showGrid', 'video.ffmpegPath', 'video.loop']) {
+      expect(parseStlMessage({ type: 'updateSetting', key, value: 'x' })).toBeUndefined();
+      expect(parseStlMessage({ type: 'updateSetting', key, value: true })).toBeUndefined();
+    }
   });
 });
 

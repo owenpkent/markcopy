@@ -4,6 +4,11 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **STL viewer right-click menu.** **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle; **Copy as** gives the file name, full path, dimensions (`X × Y × Z`) or triangle count; **View** adds Fit View, Front, Back, Left, Right, Top, Bottom and Isometric presets with Wireframe and Grid checkboxes that stay in step with the toolbar; **Preferences > Theme**, **Open in Default App** and **Reveal in File Explorer** complete it. A right-drag still pans and does not open the menu; only a right click without movement does.
+  - The host sends the file's name and path with the load and error messages, so File Name and Full Path work even for a file that was refused. The new STL webview messages are validated by `parseStlMessage` and the webview may write only `markcopy.theme`.
+
 ### Planned
 
 - PlantUML support.

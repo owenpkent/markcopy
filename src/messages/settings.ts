@@ -23,6 +23,11 @@ export function isGifSetting(key: string, value: unknown): boolean {
   return key === 'theme' && isViewerSetting(key, value);
 }
 
+/** The one setting the STL viewer's menus write (src/webview/stl.ts): the theme. */
+export function isStlSetting(key: string, value: unknown): boolean {
+  return key === 'theme' && isTheme(value);
+}
+
 export const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
 
 /** The settings the image viewer's menus write: the theme and the picture's backdrop. */
