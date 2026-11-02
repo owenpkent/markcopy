@@ -187,8 +187,8 @@ Land first, with `npm test`, the integration suite, and a manual F5 pass on `sam
 ### PR 2: the v1 feature (about 7 to 9 days). This is the v1 cut line.
 
 6. `src/xlsx/zip.ts`: fflate `unzipSync` with hard caps enforced **before** any XML is touched
-   (max entries, max per-entry uncompressed, max total, plus a raw file-size refusal around
-   25 MB with a readable message). Never write to disk. Refuse every `TargetMode="External"`
+   (max entries, max per-entry uncompressed, max total, plus a raw file-size refusal with a
+   readable message; 25 MB at first, raised to 256 MB in 0.22.0 once photo-heavy decks hit it). Never write to disk. Refuse every `TargetMode="External"`
    relationship: `externalLinks`, DDE/OLE links, and remote images are SSRF and NTLM-leak
    vectors.
 7. `src/xlsx/opc.ts` and `workbook.ts`: resolve `[Content_Types].xml` and `_rels/.rels` to the

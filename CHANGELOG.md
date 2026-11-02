@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Office file size limit raised from 25 MB to 256 MB.** A `.pptx`, `.xlsx`, or `.docx` full of photographs is routinely over 25 MB, and the preview refused it with "larger than the 25 MB preview limit". The cap now matches the 256 MB inflate budget; the entry count, per-part, and total inflated size guards are unchanged.
+
 ### Planned
 
 - PlantUML support.
