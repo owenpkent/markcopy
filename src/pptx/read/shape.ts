@@ -9,7 +9,7 @@
 // does that, so a change to the markup never has to touch how a shape is found.
 import { attr, boolAttr, intAttr, relAttr } from '../../ooxml/xml';
 import { type Rels } from '../../ooxml/rels';
-import { imageDataUri, type MediaBudget } from '../../ooxml/media';
+import { mediaRef, type MediaSink } from '../../ooxml/media';
 import { partText, type Parts } from '../../ooxml/zip';
 import { child, children, findDeep, parseXml, type XNode } from '../../ooxml/xnode';
 import {
@@ -52,7 +52,7 @@ export interface TableModel {
 
 export type ShapeContent =
   | { kind: 'text'; paragraphs: Paragraph[] }
-  | { kind: 'picture'; alt: string; dataUri: string }
+  | { kind: 'picture'; alt: string; mediaId: string }
   | { kind: 'table'; table: TableModel }
   // Chart / SmartArt / OLE / video / an image that did not fit the media
   // budget: a labelled box rather than a blank one.
@@ -65,7 +65,7 @@ export interface RenderShape {
   content: ShapeContent;
 }
 
-export type { MediaBudget };
+export type { MediaSink };
 
 export interface ShapeReadContext {
   parts: Parts;
@@ -76,18 +76,15 @@ export interface ShapeReadContext {
   masterStyles: MasterTextStyles;
   /** The presentation's <p:defaultTextStyle>, the last fallback below the master's txStyles. */
   defaultTextStyle?: XNode;
-  media: MediaBudget;
   /**
-   * Target path -> already-encoded data URI, shared across every slide in the
-   * deck (the caller creates one and reuses it for the whole
-   * renderDeckHtml call, not one per slide). A media part reused across
-   * slides -- a logo on every slide, a repeated header image -- would
-   * otherwise be base64-encoded again, and charged against `media` again, on
-   * every single use: a 400 KB logo on 8 slides under a 1 MiB budget would
-   * render on the first couple of slides and then silently fall back to a
-   * placeholder on the rest, for no reason visible in the file itself.
+   * One sink for the whole deck (the caller creates it and reuses it for the
+   * whole renderDeckHtml call, not one per slide). A media part reused across
+   * slides -- a logo on every slide, a repeated header image -- is encoded and
+   * charged once, keyed by its target path; before the sink deduplicated, a
+   * 400 KB logo on 8 slides under a 1 MiB budget rendered on the first couple
+   * of slides and then silently fell back to a placeholder on the rest.
    */
-  imageCache: Map<string, string>;
+  media: MediaSink;
 }
 
 /**
@@ -329,24 +326,22 @@ function buildPicShape(pic: XNode, frame: GroupFrame, ctx: ShapeReadContext): Re
 
   const blip = child(child(pic, 'blipFill') ?? pic, 'blip');
   const embedId = blip === undefined ? undefined : relAttr(blip.attrs, 'embed');
-  const dataUri = embedId === undefined ? undefined : resolveImageDataUri(embedId, ctx);
+  const mediaId = embedId === undefined ? undefined : resolveMedia(embedId, ctx);
 
-  return dataUri === undefined
+  return mediaId === undefined
     ? {
         geom,
         isTitle: false,
         isPlaceholder: false,
         content: { kind: 'unsupported', label: 'Image' },
       }
-    : { geom, isTitle: false, isPlaceholder: false, content: { kind: 'picture', alt, dataUri } };
+    : { geom, isTitle: false, isPlaceholder: false, content: { kind: 'picture', alt, mediaId } };
 }
 
-/** `r:embed` -> a `data:` URI, or undefined when it is unreadable, unsupported, or past the media budget. */
-function resolveImageDataUri(embedId: string, ctx: ShapeReadContext): string | undefined {
+/** `r:embed` -> a media id, or undefined when it is unreadable, unsupported, or past the media cap. */
+function resolveMedia(embedId: string, ctx: ShapeReadContext): string | undefined {
   const target = ctx.slideRels.get(embedId);
-  return target === undefined
-    ? undefined
-    : imageDataUri(ctx.parts, target, ctx.media, ctx.imageCache);
+  return target === undefined ? undefined : mediaRef(ctx.parts, target, ctx.media);
 }
 
 function buildGraphicFrameShape(

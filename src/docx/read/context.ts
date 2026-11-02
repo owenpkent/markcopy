@@ -5,7 +5,7 @@
 // span the whole document: which bookmark ids have been handed out, how far
 // each list has counted, and which footnotes the body referenced.
 import { type Rels } from '../../ooxml/rels';
-import { type MediaBudget } from '../../ooxml/media';
+import { type MediaSink } from '../../ooxml/media';
 import { type Parts } from '../../ooxml/zip';
 import { type XNode } from '../../ooxml/xnode';
 import { type ChartParts } from './extras';
@@ -48,8 +48,7 @@ export interface ReadCtx {
   parts: Parts;
   styles: Styles;
   numbering: Numbering;
-  media: MediaBudget;
-  imageCache: Map<string, string>;
+  media: MediaSink;
   /** Chart parts already read, by part path; null for one with nothing to show. */
   chartCache: Map<string, ChartParts | null>;
   rels: PartRels;

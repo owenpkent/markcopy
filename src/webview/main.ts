@@ -2,6 +2,7 @@ import type MermaidApi from 'mermaid';
 import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
+import { addMedia, applyMedia, beginMediaSet, materializeMedia, snapshotMedia } from './ooxmlMedia';
 import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
@@ -181,6 +182,9 @@ window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   switch (msg?.type) {
     case 'render':
+      // The images for this render follow in `media` messages; start their
+      // set now, even if the render itself waits for an editor to close.
+      beginMediaSet(msg.mediaSet);
       if (editMode.isEditing()) {
         if (((msg.docKey as string) ?? '') === currentDocKey) {
           pendingRender = msg;
@@ -191,6 +195,9 @@ window.addEventListener('message', (e: MessageEvent) => {
         pendingRender = undefined;
       }
       applyRenderMessage(msg);
+      break;
+    case 'media':
+      addMedia(msg.mediaSet, msg.items, content);
       break;
     case 'notice':
       if (typeof msg.text === 'string') {
@@ -275,6 +282,9 @@ async function render(
   // they still render; to also close the preview-open beacon vector, forbid
   // external image loads here (FORBID_ATTR / a uponSanitizeAttribute hook).
   content.innerHTML = DOMPurify.sanitize(html);
+  // A Word or PowerPoint picture is a reference until its bytes arrive; any
+  // that already have (a redraw after a settings change, say) show at once.
+  applyMedia(content);
   // Upgrade the math and diagram placeholders. KaTeX and Mermaid are now loaded
   // lazily on first use, so the very first math/diagram document may briefly show
   // its raw `$...$` / source text before the library finishes importing.
@@ -1185,6 +1195,7 @@ async function selectionMarkdown(): Promise<string> {
   // Rendered diagrams and raw SVG do not serialize to Markdown; drop them.
   wrapper.querySelectorAll('svg, .mc-mermaid').forEach((n) => n.remove());
   stripViewerChrome(wrapper);
+  await materializeMedia(wrapper);
   const md = (await htmlToMarkdown(wrapper.innerHTML)).trim();
   return md || sel.toString();
 }
@@ -1203,7 +1214,12 @@ async function copyTableMarkdown(table: HTMLElement): Promise<void> {
   // the clipboard, so it can be unit-tested against real grid markup. It also
   // owns the round trip for pipes in the data, which have to survive Turndown as
   // a placeholder, so the conversion is handed to it rather than called here.
-  const md = (await tableToMarkdown(table, htmlToMarkdown)).trim();
+  // A Word table can hold a picture, which is a blob: URL on screen and has to
+  // leave as a data: URI like everywhere else; the clone keeps that off the
+  // live table.
+  const clone = table.cloneNode(true) as HTMLElement;
+  await materializeMedia(clone);
+  const md = (await tableToMarkdown(clone, htmlToMarkdown)).trim();
   if (md && md.includes('|')) {
     copyText(md);
   } else {
@@ -1219,9 +1235,12 @@ function copyText(text: string): void {
   toast('Copied');
 }
 
-function copyRichText(el: HTMLElement): void {
-  const html = inlineStyledHtml(el);
-  writeClipboard(html, visibleText(el));
+async function copyRichText(el: HTMLElement): Promise<void> {
+  const clone = inlineStyledClone(el);
+  // Async, but writeClipboard's execCommand still runs inside the click's
+  // transient activation window (seconds), which a few image decodes fit in.
+  await materializeMedia(clone);
+  writeClipboard(`<div>${clone.outerHTML}</div>`, visibleText(el));
   toast('Copied as rich text');
 }
 
@@ -1310,7 +1329,7 @@ function blockText(root: Node): string {
   return out.trimEnd();
 }
 
-function copyRichFromSelection(): void {
+async function copyRichFromSelection(): Promise<void> {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) {
     return;
@@ -1318,7 +1337,9 @@ function copyRichFromSelection(): void {
   const wrapper = document.createElement('div');
   wrapper.appendChild(sel.getRangeAt(0).cloneContents());
   content.appendChild(wrapper); // attach so computed styles resolve
-  const html = inlineStyledHtml(wrapper);
+  const clone = inlineStyledClone(wrapper);
+  await materializeMedia(clone);
+  const html = `<div>${clone.outerHTML}</div>`;
   // The plain flavor must leave out the same chrome the HTML does. A selection
   // with none keeps the browser's own text, so other previews are unchanged.
   const hasChrome = wrapper.querySelector('[data-mc-ignore], mark[data-mc-comment]') !== null;
@@ -1388,6 +1409,9 @@ async function copyPng(el: HTMLElement): Promise<void> {
 async function exportPdf(): Promise<void> {
   try {
     const clone = content.cloneNode(true) as HTMLElement;
+    // Pinned with the clone: a redraw during the awaits below must not swap
+    // the pictures under it.
+    const media = snapshotMedia(clone);
     clone
       .querySelectorAll('[data-source-line]')
       .forEach((el) => el.removeAttribute('data-source-line'));
@@ -1395,6 +1419,7 @@ async function exportPdf(): Promise<void> {
     // belong in a printed copy of it. Same rule the copy paths follow.
     stripViewerChrome(clone);
     await relightMermaid(clone);
+    await materializeMedia(clone, media);
     await inlineImages(clone);
     vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
     toast('Exporting PDF…');
@@ -1500,6 +1525,9 @@ async function exportPptx(): Promise<void> {
 
 async function exportStructured(target: ExportTarget): Promise<void> {
   const clone = content.cloneNode(true) as HTMLElement;
+  // Pinned with the clone: rasterizing a diagram below can take long enough
+  // for a re-saved file to redraw and reuse these ids for other pictures.
+  const media = snapshotMedia(clone);
   clone.removeAttribute('id');
   clone.classList.add('mc-force-light', 'mc-copy-clean');
   clone
@@ -1520,6 +1548,7 @@ async function exportStructured(target: ExportTarget): Promise<void> {
   try {
     await relightMermaid(clone);
     await rasterizeFigures(clone);
+    await materializeMedia(clone, media);
     await inlineImages(clone);
     await toEmbeddableImages(clone);
     inlineCodeColors(clone);
@@ -1721,7 +1750,7 @@ const INLINE_PROPS = [
   'white-space',
 ];
 
-function inlineStyledHtml(source: HTMLElement): string {
+function inlineStyledClone(source: HTMLElement): HTMLElement {
   // Force a light palette while reading computed styles, so the clipboard HTML
   // is dark-on-light regardless of the preview's display theme. This is applied
   // and removed synchronously here, so the on-screen preview never repaints.
@@ -1738,7 +1767,7 @@ function inlineStyledHtml(source: HTMLElement): string {
   // After the style walk, which pairs source and clone by index: dropping these
   // earlier would shear the two lists apart.
   stripViewerChrome(clone);
-  return `<div>${clone.outerHTML}</div>`;
+  return clone;
 }
 
 /**

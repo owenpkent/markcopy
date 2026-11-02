@@ -96,7 +96,7 @@ describe('headers and footers', () => {
     expect(head.getAttribute('data-mc-ignore')).toBe('1');
     expect(head.getAttribute('aria-label')).toBe('Page header');
     expect(text(head)).toBe('Acme Corp');
-    expect(head.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    expect(head.querySelector('img')?.getAttribute('data-mc-media')).toMatch(/^m\d+$/);
     expect(d.querySelectorAll('header')).toHaveLength(1);
 
     const foot = d.querySelector('footer.mc-docx-pagefoot')!;
@@ -654,7 +654,7 @@ describe('charts', () => {
     );
     const many = Array.from({ length: 100 }, () => chartDrawing('Sales')).join('');
     const spec = withChart(chart, many);
-    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 1_000_000 });
+    const out = renderDocxHtml(buildDocx(spec), { maxOutputBytes: 1_000_000 });
     // One expansion is about 70 KB, so only a few fit; the rest are placeholders.
     const figures = out.html.match(/<figure/g)?.length ?? 0;
     expect(figures).toBeGreaterThan(0);

@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { escapeAttr } from './escape';
 import { renderWorkbookHtml, WorkbookError } from './xlsx';
-import { OoxmlEditorProvider, describeReadError, type OoxmlSession } from './ooxmlEditor';
+import {
+  OoxmlEditorProvider,
+  describeReadError,
+  type OoxmlSession,
+  type RenderResult,
+} from './ooxmlEditor';
 export type { ExportPdf, ExportXhtml } from './ooxmlEditor';
 
 // The settings a sheet is drawn from. Anything outside this list cannot change
@@ -48,14 +53,15 @@ export class XlsxEditorProvider extends OoxmlEditorProvider {
     };
   }
 
-  private async renderWorkbook(uri: vscode.Uri, sheetIndex: number): Promise<string> {
+  private async renderWorkbook(uri: vscode.Uri, sheetIndex: number): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     const bytes = await vscode.workspace.fs.readFile(uri);
-    return renderWorkbookHtml(bytes, {
+    const html = renderWorkbookHtml(bytes, {
       sheetIndex,
       maxRows: cfg.get<number>('xlsx.maxRows', 5000),
       maxColumns: cfg.get<number>('xlsx.maxColumns', 200),
     }).html;
+    return { html };
   }
 
   protected errorHtml(err: unknown): string {
