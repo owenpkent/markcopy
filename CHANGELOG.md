@@ -4,15 +4,17 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Changed
-
-- **Word and PowerPoint pictures no longer live inside the preview's HTML.** Each picture is sent to the preview once, beside the markup rather than base64-inlined into it, and shown from a `blob:` URL. The text of a photo-heavy deck is on screen before the first picture has crossed, a picture repeated on every slide costs one copy, and the 16 MB image budget that turned such decks into "Image" placeholders is replaced by a 128 MB per-file and 32 MB per-picture cap. Copy as Rich Text, Copy as Markdown, Save as PDF, Save as Word and Save as PowerPoint still receive each picture as a `data:` URI, now downscaled so no side exceeds 2048 px (a JPEG stays a JPEG; SVG and GIF are untouched), so an export of a deck of 6000 px photographs is a fraction of its old size. The preview's `connect-src` now also allows `blob:`, which is the page's own object URLs and nothing remote.
-- **Office file size limit raised from 25 MB to 256 MB.** A `.pptx`, `.xlsx`, or `.docx` full of photographs is routinely over 25 MB, and the preview refused it with "larger than the 25 MB preview limit". The cap now matches the 256 MB inflate budget; the entry count, per-part, and total inflated size guards are unchanged.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [0.22.0] - 2026-11-02
+
+### Changed
+
+- **Word and PowerPoint pictures no longer live inside the preview's HTML.** Each picture is sent to the preview once, beside the markup rather than base64-inlined into it, and shown from a `blob:` URL. The text of a photo-heavy deck is on screen before the first picture has crossed, a picture repeated on every slide costs one copy, and the 16 MB image budget that turned such decks into "Image" placeholders is replaced by a 128 MB per-file and 32 MB per-picture cap. Copy as Rich Text, Copy as Markdown, Save as PDF, Save as Word and Save as PowerPoint still receive each picture as a `data:` URI, now downscaled so no side exceeds 2048 px (a JPEG stays a JPEG; SVG and GIF are untouched), so an export of a deck of 6000 px photographs is a fraction of its old size. The preview's `connect-src` now also allows `blob:`, which is the page's own object URLs and nothing remote.
+- **Office file size limit raised from 25 MB to 256 MB.** A `.pptx`, `.xlsx`, or `.docx` full of photographs is routinely over 25 MB, and the preview refused it with "larger than the 25 MB preview limit". The cap now matches the 256 MB inflate budget; the entry count, per-part, and total inflated size guards are unchanged.
 
 ## [0.21.0] - 2026-11-01
 
@@ -508,7 +510,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/owenpkent/markcopy/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/owenpkent/markcopy/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/owenpkent/markcopy/compare/v0.19.1...v0.19.2
