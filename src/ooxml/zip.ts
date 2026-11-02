@@ -27,9 +27,12 @@ export interface ZipLimits {
 }
 
 export const DEFAULT_LIMITS: ZipLimits = {
-  // A 25 MB workbook is already an unusual thing to preview, and the inflated XML
-  // behind it is several times larger again.
-  maxFileBytes: 25 * 1024 * 1024,
+  // Decks and documents full of photographs run to tens of megabytes without
+  // being unusual, so the file cap matches maxTotalBytes: a package whose parts
+  // all fit the inflate budget is one worth reading, whatever it weighs on disk.
+  // This is also the only bound on an entry whose header understates its size
+  // (see openZip), so it stays finite.
+  maxFileBytes: 256 * 1024 * 1024,
   // Real workbooks run to a few dozen parts, plus one per sheet, drawing, and
   // image. A thousand is far past anything legitimate.
   maxEntries: 1000,

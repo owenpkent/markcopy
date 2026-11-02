@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
 import { renderWorkbookHtml, WorkbookError } from '../../src/xlsx';
+import { DEFAULT_LIMITS } from '../../src/ooxml/zip';
 import { columnName } from '../../src/xlsx/render';
 import { columnOf, columnRange } from '../../src/xlsx/sheet';
 import { buildXlsx, row, sheetData } from './fixture';
@@ -365,10 +366,13 @@ describe('hostile and malformed input', () => {
   });
 
   it('refuses a workbook larger than the preview limit before unzipping it', () => {
-    const big = new Uint8Array(30 * 1024 * 1024);
+    // The default cap is 256 MB, too much to allocate in a test, so the limit is
+    // lowered to prove the check runs before anything is inflated.
+    const big = new Uint8Array(2 * 1024 * 1024);
     big[0] = 0x50;
     big[1] = 0x4b;
-    expect(() => renderWorkbookHtml(big)).toThrow(/larger than/);
+    const limits = { ...DEFAULT_LIMITS, maxFileBytes: 1024 * 1024 };
+    expect(() => renderWorkbookHtml(big, { zipLimits: limits })).toThrow(/larger than/);
   });
 
   it('refuses an entry on its declared size, before it is inflated', () => {
