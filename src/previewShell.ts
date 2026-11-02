@@ -32,8 +32,10 @@ export function htmlShell(
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
     // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
-    // copying an equation as an image (see .github/SECURITY.md).
-    `connect-src ${webview.cspSource}`,
+    // copying an equation as an image (see .github/SECURITY.md). `blob:` is
+    // the page's own object URLs, which a Word or PowerPoint preview's pictures
+    // are (src/webview/ooxmlMedia.ts); html-to-image fetches those too.
+    `connect-src ${webview.cspSource} blob:`,
     // 'strict-dynamic' lets the nonce'd entry module import its code-split
     // sibling chunks (media/chunk-*.js) without each needing its own nonce. A
     // bare-nonce CSP (what src/pdfEditor.ts uses, because its bundle is not split)

@@ -770,15 +770,16 @@ describe('hyperlinks', () => {
 describe('images', () => {
   const rels = imageRel('rIdImg', 'media/image1.png');
   const media = { 'word/media/image1.png': PNG_1x1 };
-  const dataUri = `data:image/png;base64,${Buffer.from(PNG_1x1).toString('base64')}`;
-
-  it('inlines an embedded image as a data URI with its alt text and declared size', () => {
-    const out = body({
+  it('references an embedded image by media id, with its alt text and declared size', () => {
+    const spec = {
       rels,
       media,
       body: para(drawing({ descr: 'A cat', cx: 952500, cy: 476250 })),
-    });
-    expect(out).toBe(`<p><img src="${dataUri}" alt="A cat" width="100" height="50"></p>`);
+    };
+    expect(body(spec)).toBe('<p><img data-mc-media="m1" alt="A cat" width="100" height="50"></p>');
+    expect(renderDocxHtml(buildDocx(spec)).media).toEqual([
+      { id: 'm1', mime: 'image/png', base64: Buffer.from(PNG_1x1).toString('base64') },
+    ]);
   });
 
   it('falls back to the title for alt text, then to an empty alt', () => {
@@ -830,24 +831,25 @@ describe('images', () => {
     expect(body({ rels, body: para(drawing({})) })).toContain('mc-docx-placeholder');
   });
 
-  it('stops inlining once the media budget is spent, but reuses an encoded image', () => {
+  it('stops sending images once the media cap is spent, but reuses an encoded image', () => {
     const twice = para(drawing({ descr: 'one' }) + drawing({ descr: 'two' }));
     expect(body({ rels, media, body: twice }).match(/<img/g)).toHaveLength(2);
     expect(body({ rels, media, body: twice }, { maxMediaBytes: 4 })).not.toContain('<img');
   });
 
-  it('charges every reference to a shared image against the output budget', () => {
+  it('sends a shared image once however many times it is referenced', () => {
     const part = new Uint8Array(1024);
     part.set(PNG_1x1);
     const many = para(Array.from({ length: 100 }, () => drawing({ descr: 'dup' })).join(''));
     const spec = { rels, media: { 'word/media/image1.png': part }, body: many };
-    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 4096 });
-    // Four references fit the 4096-byte budget; the rest become placeholders.
-    expect(out.html.match(/<img/g)).toHaveLength(4);
-    expect(out.html.match(/mc-docx-placeholder/g)).toHaveLength(96);
+    // A cap with room for one copy of the part and not two: every reference is
+    // a short attribute, so the hundredth costs no more than the first.
+    const out = renderDocxHtml(buildDocx(spec), { maxMediaBytes: 2000 });
+    expect(out.html.match(/<img data-mc-media="m1"/g)).toHaveLength(100);
+    expect(out.html).not.toContain('mc-docx-placeholder');
+    expect(out.media).toHaveLength(1);
     expect(out.html.length).toBeLessThan(20_000);
-    expect(out.truncated).toBe(true);
-    expect(out.html).toContain('Some repeated images or charts are not shown');
+    expect(out.truncated).toBe(false);
     // Within the budget nothing is cut.
     const fits = renderDocxHtml(buildDocx(spec));
     expect(fits.html.match(/<img/g)).toHaveLength(100);
@@ -1153,9 +1155,10 @@ describe('whitespace and the preview sanitizer', () => {
     const dom = new DOMParser().parseFromString(clean, 'text/html');
     expect(dom.querySelector('span#mc-bm-top')).not.toBeNull();
     expect(dom.querySelector('ol[type="i"][start="3"] > li')).not.toBeNull();
-    expect(dom.querySelector('p.mc-docx-center img[width][height]')?.getAttribute('src')).toMatch(
-      /^data:image\/png;base64,/,
-    );
+    // DOMPurify keeps data-* attributes by default; the media reference depends on it.
+    expect(
+      dom.querySelector('p.mc-docx-center img[width][height]')?.getAttribute('data-mc-media'),
+    ).toBe('m1');
     expect(dom.querySelector('a[href="https://example.com/"]')).not.toBeNull();
     expect(dom.querySelector('a[href="#mc-bm-top"]')).not.toBeNull();
     expect(dom.querySelector('th[colspan="2"][scope="col"]')).not.toBeNull();

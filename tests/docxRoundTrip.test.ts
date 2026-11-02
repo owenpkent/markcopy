@@ -49,11 +49,15 @@ if (a < 2) {
 
 /** Markdown -> HTML -> the XHTML the webview would serialize -> .docx -> the preview's HTML. */
 function roundTrip(markdown: string): string {
+  return readBack(markdown).html;
+}
+
+function readBack(markdown: string): ReturnType<typeof renderDocxHtml> {
   const rendered = createMarkdownIt().render(markdown);
   const doc = new DOMParser().parseFromString(`<div>${rendered}</div>`, 'text/html');
   const xhtml = new XMLSerializer().serializeToString(doc.body.firstElementChild!);
   const written = htmlToDocx(xhtml, { title: 'Round trip', now: new Date('2026-01-01T00:00:00Z') });
-  return renderDocxHtml(written.bytes).html;
+  return renderDocxHtml(written.bytes);
 }
 
 /** Each heading's tag and text, markup stripped. */
@@ -108,8 +112,11 @@ describe('docx round trip', () => {
     expect(out).toContain('<blockquote><p>A quoted remark.</p></blockquote>');
   });
 
-  it('keeps an image with its alt text', () => {
-    expect(out).toMatch(/<img src="data:image\/png;base64,[^"]+" alt="A tiny pixel"/);
+  it('keeps an image with its alt text, and its bytes unchanged', () => {
+    expect(out).toMatch(/<img data-mc-media="m1" alt="A tiny pixel"/);
+    expect(readBack(SAMPLE).media).toEqual([
+      { id: 'm1', mime: 'image/png', base64: PNG.slice(PNG.indexOf(',') + 1) },
+    ]);
   });
 
   it('is stable: reading what it wrote back out and in again changes nothing structural', () => {

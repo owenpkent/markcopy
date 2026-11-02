@@ -7,6 +7,7 @@ import { htmlShell } from './previewShell';
 import { openExternalLink } from './externalLink';
 import { classifyLink } from './preview-utils';
 import { parseOoxmlMessage, type OoxmlMessage } from './messages/ooxml';
+import { type MediaItem } from './ooxml/media';
 
 const { basename } = posix;
 
@@ -26,9 +27,15 @@ export type ExportXhtml = (docUri: vscode.Uri, bodyXhtml: string) => void;
  * current sheet index would leak one document's selection into another's the
  * moment two were open side by side.
  */
+/** What one read of the file produced: the markup, and the images it references. */
+export interface RenderResult {
+  html: string;
+  media?: MediaItem[];
+}
+
 export interface OoxmlSession {
   /** Read the file and produce the markup draw() should show for it. */
-  render(): Promise<string>;
+  render(): Promise<RenderResult>;
   /**
    * Handle a message this format adds on top of the shared router (xlsx's
    * selectSheet, say). Called only for messages none of the shared cases
@@ -38,6 +45,26 @@ export interface OoxmlSession {
     msg: Extract<OoxmlMessage, { type: 'selectSheet' }>,
     redraw: () => Promise<void>,
   ): Promise<void> | void;
+}
+
+/** Group media items into messages of about `maxBytes` of base64 text each; an oversized item travels alone. */
+export function batchMedia(items: MediaItem[], maxBytes = 4 * 1024 * 1024): MediaItem[][] {
+  const batches: MediaItem[][] = [];
+  let batch: MediaItem[] = [];
+  let size = 0;
+  for (const item of items) {
+    if (batch.length > 0 && size + item.base64.length > maxBytes) {
+      batches.push(batch);
+      batch = [];
+      size = 0;
+    }
+    batch.push(item);
+    size += item.base64.length;
+  }
+  if (batch.length > 0) {
+    batches.push(batch);
+  }
+  return batches;
 }
 
 /**
@@ -122,18 +149,23 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
 
     const session = this.createSession(document);
 
+    // Each draw gets its own media set id, so the webview can tell the images
+    // for this render from those of one it has already replaced.
+    let mediaSets = 0;
     const draw = async (): Promise<void> => {
-      let html: string;
+      let result: RenderResult;
       try {
-        html = await session.render();
+        result = await session.render();
       } catch (err) {
-        html = this.errorHtml(err);
+        result = { html: this.errorHtml(err) };
       }
+      const mediaSet = `${document.uri.toString()}#${++mediaSets}`;
       const cfg = vscode.workspace.getConfiguration('markcopy', document.uri);
       void webview.postMessage({
         type: 'render',
         kind: this.kind,
-        html,
+        html: result.html,
+        mediaSet,
         // No source text and no document version: there is no TextDocument
         // behind this format, so nothing addresses it by line.
         source: '',
@@ -156,6 +188,19 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
         styleProfile: cfg.get<string>('styleProfile', 'github'),
         mermaidConfig: {},
       });
+      // The images follow the markup in their own messages, a few MB each, so
+      // the text is on screen before the first picture has crossed and no one
+      // message carries a whole photo album. The webview matches them to the
+      // render by mediaSet and drops any that arrive for a render it has
+      // already replaced.
+      for (const items of batchMedia(result.media ?? [])) {
+        void webview.postMessage({
+          type: 'media',
+          docKey: document.uri.toString(),
+          mediaSet,
+          items,
+        });
+      }
     };
 
     // Registered before the HTML is assigned, so the webview's `ready` cannot

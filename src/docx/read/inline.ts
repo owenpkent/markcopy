@@ -14,17 +14,10 @@
 // text boxes and charts are handed to the block reader (see extras.ts) because
 // block markup cannot live inside a paragraph. Anything else not named is skipped.
 import { escapeAttr, escapeHtml } from '../../escape';
-import { imageDataUri } from '../../ooxml/media';
+import { mediaAttr, mediaRef } from '../../ooxml/media';
 import { attr, relAttr } from '../../ooxml/xml';
 import { child, findAll, findDeep, type XNode } from '../../ooxml/xnode';
-import {
-  bookmarkId,
-  commentRefHtml,
-  noteRefHtml,
-  safeHref,
-  spendOutput,
-  type ReadCtx,
-} from './context';
+import { bookmarkId, commentRefHtml, noteRefHtml, safeHref, type ReadCtx } from './context';
 import { drawingExtras, inTextBox, textBoxes } from './extras';
 import { mathParaMembers, ommlToLatex } from './omml';
 import { mergeRunProps, readRunProps, type RunProps } from './styles';
@@ -503,29 +496,19 @@ class InlineWalker {
     link: Link | undefined,
   ): void {
     const target = embed === undefined ? undefined : this.ctx.rels.embed.get(embed);
-    let uri =
-      target === undefined
-        ? undefined
-        : imageDataUri(this.ctx.parts, target, this.ctx.media, this.ctx.imageCache);
-    // The cache makes the encoding free, but every reference writes the whole
-    // URI into the output again, so each one is charged (at the part's size,
-    // the unit the media budget uses).
-    if (
-      uri !== undefined &&
-      target !== undefined &&
-      !spendOutput(this.ctx, this.ctx.parts.get(target)?.length ?? 0)
-    ) {
-      uri = undefined;
-    }
+    // Each distinct part is encoded and charged once, and a reference is a
+    // short attribute rather than the whole image again, so repeating a
+    // picture costs the output budget nothing worth counting.
+    const id = target === undefined ? undefined : mediaRef(this.ctx.parts, target, this.ctx.media);
     let html: string;
-    if (uri === undefined) {
+    if (id === undefined) {
       // A linked image is never fetched; EMF/WMF and anything over the media
-      // or output budget cannot be shown. Name the gap instead of leaving a hole.
+      // cap cannot be shown. Name the gap instead of leaving a hole.
       const label = linkedOnly ? 'Linked image (not loaded)' : alt ? `Image: ${alt}` : 'Image';
       html = `<span class="mc-docx-placeholder">${escapeHtml(label)}</span>`;
     } else {
       const dims = size === undefined ? '' : ` width="${size.w}" height="${size.h}"`;
-      html = `<img src="${uri}" alt="${escapeAttr(alt)}"${dims}>`;
+      html = `<img ${mediaAttr(id)} alt="${escapeAttr(alt)}"${dims}>`;
     }
     this.atoms.push({ kind: 'html', html, content: true, link: this.link(link) });
   }
