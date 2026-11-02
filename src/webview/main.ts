@@ -2,7 +2,7 @@ import type MermaidApi from 'mermaid';
 import type KatexApi from 'katex';
 import DOMPurify from 'dompurify';
 import { htmlToMarkdown } from './markdownConvert';
-import { addMedia, applyMedia, beginMediaSet, materializeMedia } from './ooxmlMedia';
+import { addMedia, applyMedia, beginMediaSet, materializeMedia, snapshotMedia } from './ooxmlMedia';
 import { tableToDelimited, tableToMarkdown } from './table';
 import { enhanceCsvTables, resetColumnWidths } from './csvTable';
 import { enableCsvEditing, editorIn, gridRefFrom, parkFocus } from './csvEdit';
@@ -1214,7 +1214,12 @@ async function copyTableMarkdown(table: HTMLElement): Promise<void> {
   // the clipboard, so it can be unit-tested against real grid markup. It also
   // owns the round trip for pipes in the data, which have to survive Turndown as
   // a placeholder, so the conversion is handed to it rather than called here.
-  const md = (await tableToMarkdown(table, htmlToMarkdown)).trim();
+  // A Word table can hold a picture, which is a blob: URL on screen and has to
+  // leave as a data: URI like everywhere else; the clone keeps that off the
+  // live table.
+  const clone = table.cloneNode(true) as HTMLElement;
+  await materializeMedia(clone);
+  const md = (await tableToMarkdown(clone, htmlToMarkdown)).trim();
   if (md && md.includes('|')) {
     copyText(md);
   } else {
@@ -1404,6 +1409,9 @@ async function copyPng(el: HTMLElement): Promise<void> {
 async function exportPdf(): Promise<void> {
   try {
     const clone = content.cloneNode(true) as HTMLElement;
+    // Pinned with the clone: a redraw during the awaits below must not swap
+    // the pictures under it.
+    const media = snapshotMedia(clone);
     clone
       .querySelectorAll('[data-source-line]')
       .forEach((el) => el.removeAttribute('data-source-line'));
@@ -1411,7 +1419,7 @@ async function exportPdf(): Promise<void> {
     // belong in a printed copy of it. Same rule the copy paths follow.
     stripViewerChrome(clone);
     await relightMermaid(clone);
-    await materializeMedia(clone);
+    await materializeMedia(clone, media);
     await inlineImages(clone);
     vscode.postMessage({ type: 'pdfHtml', bodyHtml: clone.innerHTML });
     toast('Exporting PDF…');
@@ -1517,6 +1525,9 @@ async function exportPptx(): Promise<void> {
 
 async function exportStructured(target: ExportTarget): Promise<void> {
   const clone = content.cloneNode(true) as HTMLElement;
+  // Pinned with the clone: rasterizing a diagram below can take long enough
+  // for a re-saved file to redraw and reuse these ids for other pictures.
+  const media = snapshotMedia(clone);
   clone.removeAttribute('id');
   clone.classList.add('mc-force-light', 'mc-copy-clean');
   clone
@@ -1537,7 +1548,7 @@ async function exportStructured(target: ExportTarget): Promise<void> {
   try {
     await relightMermaid(clone);
     await rasterizeFigures(clone);
-    await materializeMedia(clone);
+    await materializeMedia(clone, media);
     await inlineImages(clone);
     await toEmbeddableImages(clone);
     inlineCodeColors(clone);

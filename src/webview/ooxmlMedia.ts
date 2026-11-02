@@ -114,25 +114,63 @@ export function mediaIds(): string[] {
   return Array.from(urls.keys());
 }
 
+/** The pictures a clone referenced at the moment it was taken, by media id. */
+export type MediaSnapshot = Map<string, Blob>;
+
+/**
+ * Pin down the pictures `root` references right now.
+ *
+ * Take it in the same tick as the clone, before anything is awaited. A copy
+ * or export that waits (on a diagram rasterizing, say) while the file is
+ * re-saved would otherwise look the ids up again after a new render had
+ * reused them for different pictures, and ship the new picture under the old
+ * caption, or none at all.
+ */
+export function snapshotMedia(root: ParentNode): MediaSnapshot {
+  const snapshot: MediaSnapshot = new Map();
+  root.querySelectorAll<HTMLImageElement>(`img[${MEDIA_ATTR}]`).forEach((img) => {
+    const id = img.getAttribute(MEDIA_ATTR) ?? '';
+    const blob = blobs.get(id);
+    if (blob !== undefined) {
+      snapshot.set(id, blob);
+    }
+  });
+  return snapshot;
+}
+
 /**
  * Replace each media reference in a detached clone with a `data:` URI that
  * survives outside the webview, downscaled so no side exceeds `maxSide`.
  *
+ * `media` is the snapshot taken with the clone; without one, the pictures are
+ * read now, which is only right when nothing has been awaited since cloning.
  * An image that never arrived loses its `src` and keeps its alt text: the
  * export then shows what the preview showed, a gap, rather than failing.
  */
-export async function materializeMedia(root: ParentNode, maxSide = EXPORT_MAX_SIDE): Promise<void> {
+export async function materializeMedia(
+  root: ParentNode,
+  media: MediaSnapshot = snapshotMedia(root),
+  maxSide = EXPORT_MAX_SIDE,
+): Promise<void> {
   const imgs = Array.from(root.querySelectorAll<HTMLImageElement>(`img[${MEDIA_ATTR}]`));
+  // One decode per picture, however many places reference it.
+  const encoded = new Map<string, Promise<string>>();
   await Promise.all(
     imgs.map(async (img) => {
-      const blob = blobs.get(img.getAttribute(MEDIA_ATTR) ?? '');
+      const id = img.getAttribute(MEDIA_ATTR) ?? '';
+      const blob = media.get(id);
       img.removeAttribute(MEDIA_ATTR);
       if (blob === undefined) {
         img.removeAttribute('src');
         return;
       }
+      let pending = encoded.get(id);
+      if (pending === undefined) {
+        pending = toDataUri(blob, maxSide);
+        encoded.set(id, pending);
+      }
       try {
-        img.setAttribute('src', await toDataUri(blob, maxSide));
+        img.setAttribute('src', await pending);
       } catch {
         img.removeAttribute('src');
       }

@@ -92,6 +92,8 @@ export interface RenderOptions {
   ackEdit?: number;
   math?: boolean;
   footnotes?: boolean;
+  /** The id a Word or PowerPoint render's `media` messages carry to match it. */
+  mediaSet?: string;
 }
 
 /** A menu panel stack, driven the way a pointer drives it. */
