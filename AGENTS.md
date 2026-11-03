@@ -48,8 +48,8 @@ CI before merging them.
 
 - Use `rg` for searches and never use em dashes in text or comments.
 - Update [COPY-MATRIX](docs/COPY-MATRIX.md) when copy actions or formats change.
-  Keep the README, architecture, testing guide, and changelog aligned with
-  substantive behavior changes. Record measured results, not assumed coverage.
+  Keep the README, user guide (`docs/guide/`), architecture, testing guide,
+  and changelog aligned with substantive behavior changes. Record measured results, not assumed coverage.
 - Follow [RELEASING](docs/RELEASING.md) for releases. Tag the complete release
   commit after updating the changelog, and publish the smoke-tested VSIX to
   both registries. A push or tag alone does not publish the extension.
