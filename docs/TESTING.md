@@ -364,7 +364,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 ### Theming
 
 - [ ] ★ Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black re-tint the pages; Green on black renders green-on-black phosphor in pure `#00ff00`.
-- [ ] In Dark and Green on black, a PDF with photographs, a transparent logo, and a rotated picture inverts its text and background while every picture keeps its true colours, with no white box around the logo. A scanned PDF (one full-page image) still inverts as a whole. **Copy Page N as PNG** copies the page in true colours.
+- [ ] In Dark and Green on black, a PDF with photographs, a transparent logo, and a rotated picture inverts its text and background while every picture keeps its true colours, with no white box around the logo or around a picture clipped to a shape or to text. A scanned PDF (one full-page image) still inverts as a whole. **Copy Page N as PNG** copies the page in true colours.
 - [ ] Right-click -> **Preferences**, the **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
 - [ ] Changing the theme from a Markdown preview (or settings.json) re-tints an already-open PDF.
 - [ ] Open the menu and dismiss it by clicking on the page, by Escape, and by clicking into the editor beside it: each closes the menu. After **Theme** is picked, the saved `markcopy.theme` is the one chosen (the PDF viewer may write only that setting).

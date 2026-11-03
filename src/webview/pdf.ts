@@ -1043,22 +1043,48 @@ async function tintKeepingImages(
   transform: number[] | undefined,
   opList: PageOps,
 ): Promise<void> {
-  const cover = document.createElement('canvas');
-  cover.width = canvas.width;
-  cover.height = canvas.height;
-  // Create the context here, with alpha, before pdf.js sees the canvas: given a
-  // `canvas`, pdf.js asks for an opaque one (`alpha: false`), but a canvas hands
-  // back the context it already has whatever options a later call passes, so
-  // this one stays transparent where no image lands.
-  const cctx = cover.getContext('2d', { alpha: true, willReadFrequently: true });
-  if (!cctx) {
+  const plan = imageCoverageOps(opList.fnArray, opList.argsArray);
+  const coverage = await renderOps(n, plan.coverage, canvas, viewport, transform);
+  const paints = plan.paints
+    ? await renderOps(n, plan.paints, canvas, viewport, transform)
+    : undefined;
+  if (!coverage || (plan.paints && !paints)) {
     tintCanvas(ctx, canvas, appearance);
     return;
   }
-  const keep = imageCoverageOps(opList.fnArray, opList.argsArray);
+  const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (
+    recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB, paints ?? undefined)
+  ) {
+    ctx.putImageData(page, 0, 0);
+  } else {
+    tintCanvas(ctx, canvas, appearance);
+  }
+}
+
+// Render the operations `keep` selects onto a transparent scratch canvas the size
+// of `like`, and return its pixels.
+async function renderOps(
+  n: number,
+  keep: boolean[],
+  like: HTMLCanvasElement,
+  viewport: PageViewport,
+  transform: number[] | undefined,
+): Promise<Uint8ClampedArray | null> {
+  const scratch = document.createElement('canvas');
+  scratch.width = like.width;
+  scratch.height = like.height;
+  // Create the context here, with alpha, before pdf.js sees the canvas: given a
+  // `canvas`, pdf.js asks for an opaque one (`alpha: false`), but a canvas hands
+  // back the context it already has whatever options a later call passes, so
+  // this one stays transparent where nothing lands.
+  const sctx = scratch.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!sctx) {
+    return null;
+  }
   const task = pages[n - 1].render({
-    canvas: cover,
-    canvasContext: cctx,
+    canvas: scratch,
+    canvasContext: sctx,
     viewport,
     transform,
     background: 'rgba(0,0,0,0)',
@@ -1066,16 +1092,10 @@ async function tintKeepingImages(
   });
   renderTasks.set(n, task);
   await task.promise;
-
-  const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const coverage = cctx.getImageData(0, 0, cover.width, cover.height).data;
-  cover.width = 0;
-  cover.height = 0;
-  if (recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB)) {
-    ctx.putImageData(page, 0, 0);
-  } else {
-    tintCanvas(ctx, canvas, appearance);
-  }
+  const data = sctx.getImageData(0, 0, scratch.width, scratch.height).data;
+  scratch.width = 0;
+  scratch.height = 0;
+  return data;
 }
 
 // Session-only quick invert (does not touch the persisted theme): flips between
