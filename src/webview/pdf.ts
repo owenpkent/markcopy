@@ -7,7 +7,7 @@ import type {
   RenderTask,
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
-import { IMAGE_OPS, hasImageOps, recolourKeepingImages } from './pdfRecolour';
+import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -70,6 +70,12 @@ const MAX_CANVAS_PIXELS = 16_777_216;
 // preview's `--mc-fg` in the green palette (media/preview.css).
 const PHOSPHOR_GREEN = '#00ff00';
 const PHOSPHOR_GREEN_RGB = [0, 255, 0] as const;
+
+// The parts of a page's pdf.js operator list the dark-page recolour reads.
+interface PageOps {
+  fnArray: number[];
+  argsArray: unknown[];
+}
 
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
@@ -341,7 +347,7 @@ async function renderPage(n: number): Promise<void> {
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
   // The filter keeps every operation; it is only there to hand back the page's
   // operator list, which tells us whether the page paints any images.
-  let opList: { fnArray: number[] } | undefined;
+  let opList: PageOps | undefined;
   const task = page.render({
     canvas,
     canvasContext: ctx,
@@ -362,7 +368,7 @@ async function renderPage(n: number): Promise<void> {
   if (appearance === 'normal' || !opList || !hasImageOps(opList.fnArray)) {
     tintCanvas(ctx, canvas, appearance);
   } else {
-    await tintKeepingImages(n, ctx, canvas, appearance, viewport, transform);
+    await tintKeepingImages(n, ctx, canvas, appearance, viewport, transform, opList);
   }
 
   // Text layer: transparent, selectable spans over the canvas.
@@ -1025,9 +1031,9 @@ function tintCanvas(
 }
 
 // Recolour a page that paints images without turning them into negatives: render
-// it again without the image paints and invert only the pixels both renders
-// agree on (see pdfRecolour). A scan, where one image covers the page, falls back
-// to plain inversion.
+// its images alone onto a transparent canvas (see pdfRecolour) and keep true
+// colours wherever that coverage lands. A scan, where an image covers nearly the
+// whole page, falls back to plain inversion.
 async function tintKeepingImages(
   n: number,
   ctx: CanvasRenderingContext2D,
@@ -1035,31 +1041,38 @@ async function tintKeepingImages(
   appearance: 'inverted' | 'green',
   viewport: PageViewport,
   transform: number[] | undefined,
+  opList: PageOps,
 ): Promise<void> {
-  const bare = document.createElement('canvas');
-  bare.width = canvas.width;
-  bare.height = canvas.height;
-  const bctx = bare.getContext('2d', { willReadFrequently: true });
-  if (!bctx) {
+  const cover = document.createElement('canvas');
+  cover.width = canvas.width;
+  cover.height = canvas.height;
+  // Create the context here, with alpha, before pdf.js sees the canvas: given a
+  // `canvas`, pdf.js asks for an opaque one (`alpha: false`), but a canvas hands
+  // back the context it already has whatever options a later call passes, so
+  // this one stays transparent where no image lands.
+  const cctx = cover.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!cctx) {
     tintCanvas(ctx, canvas, appearance);
     return;
   }
+  const keep = imageCoverageOps(opList.fnArray, opList.argsArray);
   const task = pages[n - 1].render({
-    canvas: bare,
-    canvasContext: bctx,
+    canvas: cover,
+    canvasContext: cctx,
     viewport,
     transform,
-    operationsFilter: (i, list) => !IMAGE_OPS.has(list.fnArray[i]),
+    background: 'rgba(0,0,0,0)',
+    operationsFilter: (i) => keep[i] ?? true,
   });
   renderTasks.set(n, task);
   await task.promise;
 
-  const full = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const noImages = bctx.getImageData(0, 0, bare.width, bare.height).data;
-  bare.width = 0;
-  bare.height = 0;
-  if (recolourKeepingImages(full.data, noImages, appearance, PHOSPHOR_GREEN_RGB)) {
-    ctx.putImageData(full, 0, 0);
+  const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const coverage = cctx.getImageData(0, 0, cover.width, cover.height).data;
+  cover.width = 0;
+  cover.height = 0;
+  if (recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB)) {
+    ctx.putImageData(page, 0, 0);
   } else {
     tintCanvas(ctx, canvas, appearance);
   }
