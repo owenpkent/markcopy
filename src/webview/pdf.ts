@@ -3,9 +3,11 @@ import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
+  PageViewport,
   RenderTask,
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { IMAGE_OPS, hasImageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -67,6 +69,7 @@ const MAX_CANVAS_PIXELS = 16_777_216;
 // value as GNOME Terminal's "Green on black" profile. Matches the Markdown
 // preview's `--mc-fg` in the green palette (media/preview.css).
 const PHOSPHOR_GREEN = '#00ff00';
+const PHOSPHOR_GREEN_RGB = [0, 255, 0] as const;
 
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
@@ -336,14 +339,31 @@ async function renderPage(n: number): Promise<void> {
 
   renderTasks.get(n)?.cancel();
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
-  const task = page.render({ canvas, canvasContext: ctx, viewport, transform });
+  // The filter keeps every operation; it is only there to hand back the page's
+  // operator list, which tells us whether the page paints any images.
+  let opList: { fnArray: number[] } | undefined;
+  const task = page.render({
+    canvas,
+    canvasContext: ctx,
+    viewport,
+    transform,
+    operationsFilter: (_i, list) => {
+      opList = list;
+      return true;
+    },
+  });
   renderTasks.set(n, task);
   await task.promise;
 
   // Dark/green pages: recolour the rasterised pixels here rather than with a CSS
   // filter. A CSS filter forces the browser to re-rasterise the layer at CSS
   // resolution (blurry on HiDPI); baking it into the bitmap keeps it crisp.
-  tintCanvas(ctx, canvas, pageAppearance());
+  const appearance = pageAppearance();
+  if (appearance === 'normal' || !opList || !hasImageOps(opList.fnArray)) {
+    tintCanvas(ctx, canvas, appearance);
+  } else {
+    await tintKeepingImages(n, ctx, canvas, appearance, viewport, transform);
+  }
 
   // Text layer: transparent, selectable spans over the canvas.
   const textContent = await page.getTextContent();
@@ -1004,6 +1024,47 @@ function tintCanvas(
   ctx.restore();
 }
 
+// Recolour a page that paints images without turning them into negatives: render
+// it again without the image paints and invert only the pixels both renders
+// agree on (see pdfRecolour). A scan, where one image covers the page, falls back
+// to plain inversion.
+async function tintKeepingImages(
+  n: number,
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  appearance: 'inverted' | 'green',
+  viewport: PageViewport,
+  transform: number[] | undefined,
+): Promise<void> {
+  const bare = document.createElement('canvas');
+  bare.width = canvas.width;
+  bare.height = canvas.height;
+  const bctx = bare.getContext('2d', { willReadFrequently: true });
+  if (!bctx) {
+    tintCanvas(ctx, canvas, appearance);
+    return;
+  }
+  const task = pages[n - 1].render({
+    canvas: bare,
+    canvasContext: bctx,
+    viewport,
+    transform,
+    operationsFilter: (i, list) => !IMAGE_OPS.has(list.fnArray[i]),
+  });
+  renderTasks.set(n, task);
+  await task.promise;
+
+  const full = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const noImages = bctx.getImageData(0, 0, bare.width, bare.height).data;
+  bare.width = 0;
+  bare.height = 0;
+  if (recolourKeepingImages(full.data, noImages, appearance, PHOSPHOR_GREEN_RGB)) {
+    ctx.putImageData(full, 0, 0);
+  } else {
+    tintCanvas(ctx, canvas, appearance);
+  }
+}
+
 // Session-only quick invert (does not touch the persisted theme): flips between
 // true colours and dark inversion for the current view. The Theme menu is the
 // persistent, cross-surface control; this stays for a one-off "invert this PDF".
@@ -1341,15 +1402,14 @@ async function copyPagePng(n: number): Promise<void> {
   }
 }
 
-// A canvas holding the page in its original colours. For `inverted` the on-screen
-// bitmap is an exact inversion, so we invert a throwaway copy back (fast). For
-// `green` the phosphor multiply is not exactly reversible, so re-rasterise the
-// page clean from pdf.js instead.
+// A canvas holding the page in its original colours. The on-screen bitmap of a
+// dark or green page is not reversible (green's multiply loses information, and
+// images keep their true colours under either), so re-rasterise it clean.
 async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
   const appearance = pageAppearance();
   const onscreen = wrappers[n - 1].querySelector('canvas') as HTMLCanvasElement;
 
-  if (appearance === 'green') {
+  if (appearance !== 'normal') {
     const page = pages[n - 1];
     const viewport = page.getViewport({ scale });
     const outputScale = outputScaleFor(viewport);
@@ -1365,19 +1425,6 @@ async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
     return onscreen;
   }
 
-  if (appearance === 'inverted') {
-    const off = document.createElement('canvas');
-    off.width = onscreen.width;
-    off.height = onscreen.height;
-    const octx = off.getContext('2d');
-    if (octx) {
-      octx.drawImage(onscreen, 0, 0);
-      octx.globalCompositeOperation = 'difference';
-      octx.fillStyle = '#fff';
-      octx.fillRect(0, 0, off.width, off.height);
-      return off;
-    }
-  }
   return onscreen;
 }
 
