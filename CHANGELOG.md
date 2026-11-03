@@ -4,17 +4,27 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Fixed
-
-- **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark, as does a page that clips a picture with a filled or stroked shape or with text, where the pictures cannot be separated safely.
-
-- Development and test tooling moved to `minimatch` 11 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)), a denial-of-service fix (globparts amplification), through a root override that covers `@vscode/vsce`, ESLint, Mocha, and the VS Code test CLI. None of it is bundled into the extension, and the packaged VSIX contains the same files as before. The override is recorded in [SECURITY](.github/SECURITY.md).
-- The VS Code test CLI moved to `glob` 14.0.3 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)), which fixes an AbortSignal cancellation bypass, through a root override. It is test tooling only and the packaged VSIX is unchanged.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [1.0.0] - 2026-11-03
+
+MarkCopy 1.0. The extension's purpose is now stated plainly: read any document in VS Code, edit it lightly, and hand it off in the format the next person needs (rich text, PDF, Word, or PowerPoint). Settings, commands, and file associations are unchanged from 0.22.0, so updating needs no action.
+
+### Changed
+
+- **Documentation rewritten around what MarkCopy is for.** The README, which is also the Marketplace page, is now a short introduction with a one-table overview of every format, in place of a 478-line feature inventory. The per-format detail moved into a [user guide](docs/guide/README.md) with pages for getting started, Markdown, copying, exporting, spreadsheets, documents, media, and settings, and a [documentation index](docs/README.md) separates user docs from contributor docs.
+
+### Fixed
+
+- **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark, as does a page that clips a picture with a filled or stroked shape or with text, where the pictures cannot be separated safely.
+
+### Security
+
+- Development and test tooling moved to `minimatch` 11 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)), a denial-of-service fix (globparts amplification), through a root override that covers `@vscode/vsce`, ESLint, Mocha, and the VS Code test CLI. None of it is bundled into the extension, and the packaged VSIX contains the same files as before. The override is recorded in [SECURITY](.github/SECURITY.md).
+- The VS Code test CLI moved to `glob` 14.0.3 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)), which fixes an AbortSignal cancellation bypass, through a root override. It is test tooling only and the packaged VSIX is unchanged.
 
 ## [0.22.0] - 2026-11-02
 
@@ -517,7 +527,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
 [0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/owenpkent/markcopy/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/owenpkent/markcopy/compare/v0.19.2...v0.20.0
