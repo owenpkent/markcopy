@@ -3,9 +3,11 @@ import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
+  PageViewport,
   RenderTask,
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -67,6 +69,13 @@ const MAX_CANVAS_PIXELS = 16_777_216;
 // value as GNOME Terminal's "Green on black" profile. Matches the Markdown
 // preview's `--mc-fg` in the green palette (media/preview.css).
 const PHOSPHOR_GREEN = '#00ff00';
+const PHOSPHOR_GREEN_RGB = [0, 255, 0] as const;
+
+// The parts of a page's pdf.js operator list the dark-page recolour reads.
+interface PageOps {
+  fnArray: number[];
+  argsArray: unknown[];
+}
 
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
@@ -336,14 +345,31 @@ async function renderPage(n: number): Promise<void> {
 
   renderTasks.get(n)?.cancel();
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
-  const task = page.render({ canvas, canvasContext: ctx, viewport, transform });
+  // The filter keeps every operation; it is only there to hand back the page's
+  // operator list, which tells us whether the page paints any images.
+  let opList: PageOps | undefined;
+  const task = page.render({
+    canvas,
+    canvasContext: ctx,
+    viewport,
+    transform,
+    operationsFilter: (_i, list) => {
+      opList = list;
+      return true;
+    },
+  });
   renderTasks.set(n, task);
   await task.promise;
 
   // Dark/green pages: recolour the rasterised pixels here rather than with a CSS
   // filter. A CSS filter forces the browser to re-rasterise the layer at CSS
   // resolution (blurry on HiDPI); baking it into the bitmap keeps it crisp.
-  tintCanvas(ctx, canvas, pageAppearance());
+  const appearance = pageAppearance();
+  if (appearance === 'normal' || !opList || !hasImageOps(opList.fnArray)) {
+    tintCanvas(ctx, canvas, appearance);
+  } else {
+    await tintKeepingImages(n, ctx, canvas, appearance, viewport, transform, opList);
+  }
 
   // Text layer: transparent, selectable spans over the canvas.
   const textContent = await page.getTextContent();
@@ -1004,6 +1030,70 @@ function tintCanvas(
   ctx.restore();
 }
 
+// Recolour a page that paints images without turning them into negatives: render
+// its images alone onto a transparent canvas (see pdfRecolour) and keep true
+// colours wherever that coverage lands. A scan, where an image covers nearly the
+// whole page, and a page whose clips the coverage render cannot reproduce fall
+// back to plain inversion.
+async function tintKeepingImages(
+  n: number,
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  appearance: 'inverted' | 'green',
+  viewport: PageViewport,
+  transform: number[] | undefined,
+  opList: PageOps,
+): Promise<void> {
+  const keep = imageCoverageOps(opList.fnArray, opList.argsArray);
+  const coverage = keep && (await renderOps(n, keep, canvas, viewport, transform));
+  if (!coverage) {
+    tintCanvas(ctx, canvas, appearance);
+    return;
+  }
+  const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB)) {
+    ctx.putImageData(page, 0, 0);
+  } else {
+    tintCanvas(ctx, canvas, appearance);
+  }
+}
+
+// Render the operations `keep` selects onto a transparent scratch canvas the size
+// of `like`, and return its pixels.
+async function renderOps(
+  n: number,
+  keep: boolean[],
+  like: HTMLCanvasElement,
+  viewport: PageViewport,
+  transform: number[] | undefined,
+): Promise<Uint8ClampedArray | null> {
+  const scratch = document.createElement('canvas');
+  scratch.width = like.width;
+  scratch.height = like.height;
+  // Create the context here, with alpha, before pdf.js sees the canvas: given a
+  // `canvas`, pdf.js asks for an opaque one (`alpha: false`), but a canvas hands
+  // back the context it already has whatever options a later call passes, so
+  // this one stays transparent where nothing lands.
+  const sctx = scratch.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!sctx) {
+    return null;
+  }
+  const task = pages[n - 1].render({
+    canvas: scratch,
+    canvasContext: sctx,
+    viewport,
+    transform,
+    background: 'rgba(0,0,0,0)',
+    operationsFilter: (i) => keep[i] ?? true,
+  });
+  renderTasks.set(n, task);
+  await task.promise;
+  const data = sctx.getImageData(0, 0, scratch.width, scratch.height).data;
+  scratch.width = 0;
+  scratch.height = 0;
+  return data;
+}
+
 // Session-only quick invert (does not touch the persisted theme): flips between
 // true colours and dark inversion for the current view. The Theme menu is the
 // persistent, cross-surface control; this stays for a one-off "invert this PDF".
@@ -1341,15 +1431,14 @@ async function copyPagePng(n: number): Promise<void> {
   }
 }
 
-// A canvas holding the page in its original colours. For `inverted` the on-screen
-// bitmap is an exact inversion, so we invert a throwaway copy back (fast). For
-// `green` the phosphor multiply is not exactly reversible, so re-rasterise the
-// page clean from pdf.js instead.
+// A canvas holding the page in its original colours. The on-screen bitmap of a
+// dark or green page is not reversible (green's multiply loses information, and
+// images keep their true colours under either), so re-rasterise it clean.
 async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
   const appearance = pageAppearance();
   const onscreen = wrappers[n - 1].querySelector('canvas') as HTMLCanvasElement;
 
-  if (appearance === 'green') {
+  if (appearance !== 'normal') {
     const page = pages[n - 1];
     const viewport = page.getViewport({ scale });
     const outputScale = outputScaleFor(viewport);
@@ -1365,19 +1454,6 @@ async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
     return onscreen;
   }
 
-  if (appearance === 'inverted') {
-    const off = document.createElement('canvas');
-    off.width = onscreen.width;
-    off.height = onscreen.height;
-    const octx = off.getContext('2d');
-    if (octx) {
-      octx.drawImage(onscreen, 0, 0);
-      octx.globalCompositeOperation = 'difference';
-      octx.fillStyle = '#fff';
-      octx.fillRect(0, 0, off.width, off.height);
-      return off;
-    }
-  }
   return onscreen;
 }
 
