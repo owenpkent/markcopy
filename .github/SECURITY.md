@@ -38,6 +38,15 @@ It is a root override rather than one scoped under `@vscode/vsce` because npm 10
 which CI uses, rejects the scoped form during `npm ci` as out of sync with the
 lockfile. Remove this override when `@azure/identity` accepts a patched `msal-node`.
 
+The root `package.json` override for `minimatch` moves every copy in the
+development tree (under `@vscode/vsce`, ESLint, Mocha, and `@vscode/test-cli`)
+from 9 and 10 to 11 to fix
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), a
+denial of service through globparts amplification. It is checked by the full
+unit and integration suites and by confirming that `vsce ls` packages the same file
+list, since `vsce` uses `minimatch` to apply `.vscodeignore`. Remove this override
+once those packages depend on `minimatch` 11 themselves.
+
 The `package.json` override for `mermaid` makes it use the project's own `katex`
 (`"$katex"` resolves to the direct dependency's version) instead of a nested copy
 from its `^0.16` range. This keeps one KaTeX version in the lockfile, so Mermaid's
