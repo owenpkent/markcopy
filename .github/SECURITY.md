@@ -47,6 +47,15 @@ unit and integration suites and by confirming that `vsce ls` packages the same f
 list, since `vsce` uses `minimatch` to apply `.vscodeignore`. Remove this override
 once those packages depend on `minimatch` 11 themselves.
 
+The root `package.json` override for `glob` moves the 10 and 13 copies under
+`@vscode/test-cli` (its own, its nested Mocha 11, and `c8` through `test-exclude`)
+to 14.0.3 to fix
+[GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4), an
+AbortSignal cancellation bypass. glob 14 requires `minimatch` 11, which the override
+above already supplies. The integration suite still discovers and runs every test
+file through the CLI. Remove this override when `@vscode/test-cli` resolves a
+patched `glob` on its own.
+
 The `package.json` override for `mermaid` makes it use the project's own `katex`
 (`"$katex"` resolves to the direct dependency's version) instead of a nested copy
 from its `^0.16` range. This keeps one KaTeX version in the lockfile, so Mermaid's
