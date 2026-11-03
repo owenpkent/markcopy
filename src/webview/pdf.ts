@@ -1033,7 +1033,8 @@ function tintCanvas(
 // Recolour a page that paints images without turning them into negatives: render
 // its images alone onto a transparent canvas (see pdfRecolour) and keep true
 // colours wherever that coverage lands. A scan, where an image covers nearly the
-// whole page, falls back to plain inversion.
+// whole page, and a page whose clips the coverage render cannot reproduce fall
+// back to plain inversion.
 async function tintKeepingImages(
   n: number,
   ctx: CanvasRenderingContext2D,
@@ -1043,19 +1044,14 @@ async function tintKeepingImages(
   transform: number[] | undefined,
   opList: PageOps,
 ): Promise<void> {
-  const plan = imageCoverageOps(opList.fnArray, opList.argsArray);
-  const coverage = await renderOps(n, plan.coverage, canvas, viewport, transform);
-  const paints = plan.paints
-    ? await renderOps(n, plan.paints, canvas, viewport, transform)
-    : undefined;
-  if (!coverage || (plan.paints && !paints)) {
+  const keep = imageCoverageOps(opList.fnArray, opList.argsArray);
+  const coverage = keep && (await renderOps(n, keep, canvas, viewport, transform));
+  if (!coverage) {
     tintCanvas(ctx, canvas, appearance);
     return;
   }
   const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  if (
-    recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB, paints ?? undefined)
-  ) {
+  if (recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB)) {
     ctx.putImageData(page, 0, 0);
   } else {
     tintCanvas(ctx, canvas, appearance);

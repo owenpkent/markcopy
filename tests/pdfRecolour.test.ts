@@ -139,10 +139,10 @@ async function darkRender(pdf: Uint8Array, tint: Tint): Promise<DarkPage> {
     const out = orig.slice();
     let keptImages = false;
     if (hasImageOps(list.fnArray)) {
-      const plan = imageCoverageOps(list.fnArray, list.argsArray);
-      const coverage = await render(plan.coverage);
-      const paints = plan.paints ? await render(plan.paints) : undefined;
-      keptImages = recolourKeepingImages(out, coverage, tint, [0, 255, 0], paints);
+      const keep = imageCoverageOps(list.fnArray, list.argsArray);
+      if (keep) {
+        keptImages = recolourKeepingImages(out, await render(keep), tint, [0, 255, 0]);
+      }
     }
     if (!keptImages) {
       const green = tint === 'green' ? [0, 255, 0] : [255, 255, 255];
@@ -219,37 +219,34 @@ describe('imageCoverageOps', () => {
     const argsArray: unknown[] = fnArray.map(() => []);
     argsArray[2] = [OPS.fill, [], null];
     argsArray[7] = [OPS.endPath, [], null];
-    const plan = imageCoverageOps(fnArray, argsArray);
-    expect(plan.coverage).toEqual([true, true, false, true, false, true, true, true, true, true]);
-    expect(plan.paints).toBeNull();
+    expect(imageCoverageOps(fnArray, argsArray)).toEqual([
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 
-  it('runs a painting path that carries a clip, and replays it without images', () => {
-    const fnArray = [OPS.clip, OPS.constructPath, OPS.constructPath, OPS.paintImageXObject];
-    const argsArray = [[], [OPS.fill, [], null], [OPS.fill, [], null], []];
-    const plan = imageCoverageOps(fnArray, argsArray);
-    expect(plan.coverage).toEqual([true, true, false, true]);
-    expect(plan.paints).toEqual([true, true, false, false]);
+  it('gives up on a painting path that carries a clip', () => {
+    const fnArray = [OPS.clip, OPS.constructPath, OPS.paintImageXObject];
+    expect(imageCoverageOps(fnArray, [[], [OPS.fill, [], null], []])).toBeNull();
+    expect(imageCoverageOps(fnArray, [[], [OPS.stroke, [], null], []])).toBeNull();
   });
 
-  it('runs text in clipping render modes, tracking the mode through save and restore', () => {
-    const fnArray = [
-      OPS.save,
-      OPS.setTextRenderingMode,
-      OPS.showText, // mode 7: clip only
-      OPS.restore,
-      OPS.showText, // mode 0 again
-      OPS.setTextRenderingMode,
-      OPS.showText, // mode 5: stroke and clip
-    ];
-    const argsArray: unknown[] = [[], [7], [], [], [], [5], []];
-    const plan = imageCoverageOps(fnArray, argsArray);
-    expect(plan.coverage).toEqual([true, true, true, true, false, true, true]);
-    expect(plan.paints).not.toBeNull();
-
-    const clipOnly = imageCoverageOps([OPS.setTextRenderingMode, OPS.showText], [[7], []]);
-    expect(clipOnly.coverage).toEqual([true, true]);
-    expect(clipOnly.paints).toBeNull();
+  it('gives up on text in any clipping render mode, but not on invisible text', () => {
+    for (const mode of [4, 5, 6, 7]) {
+      expect(imageCoverageOps([OPS.setTextRenderingMode, OPS.showText], [[mode], []])).toBeNull();
+    }
+    expect(imageCoverageOps([OPS.setTextRenderingMode, OPS.showText], [[3], []])).toEqual([
+      true,
+      false,
+    ]);
   });
 
   it('keeps everything inside a soft-mask group, nested groups included', () => {
@@ -258,6 +255,7 @@ describe('imageCoverageOps', () => {
       OPS.beginGroup,
       OPS.constructPath,
       OPS.paintImageXObject,
+      OPS.setTextRenderingMode,
       OPS.endGroup,
       OPS.showText,
       OPS.endGroup,
@@ -268,12 +266,14 @@ describe('imageCoverageOps', () => {
       [{ isolated: true }],
       [OPS.fill, [], null],
       [],
+      [7],
       [],
       [],
       [],
       [],
     ];
-    expect(imageCoverageOps(fnArray, argsArray).coverage).toEqual([
+    expect(imageCoverageOps(fnArray, argsArray)).toEqual([
+      true,
       true,
       true,
       true,
@@ -310,17 +310,6 @@ describe('recolourKeepingImages', () => {
     const coverage = px([0, 0, 0, 51], CLEAR, CLEAR, CLEAR);
     recolourKeepingImages(page, coverage, 'inverted');
     expect(Array.from(page.slice(0, 3))).toEqual([51, 51, 51]);
-  });
-
-  it('discounts coverage the image-free paints render painted the same', () => {
-    // A clip-carrying black fill (in both renders) and an image over part of it.
-    const page = px([0, 0, 0], [200, 30, 40], [255, 255, 255], [255, 255, 255]);
-    const coverage = px([0, 0, 0, 255], [200, 30, 40, 255], CLEAR, CLEAR);
-    const paints = px([0, 0, 0, 255], [0, 0, 0, 255], CLEAR, CLEAR);
-    expect(recolourKeepingImages(page, coverage, 'inverted', undefined, paints)).toBe(true);
-    expect(Array.from(page)).toEqual(
-      Array.from(px([255, 255, 255], [200, 30, 40], [0, 0, 0], [0, 0, 0])),
-    );
   });
 
   it('declines a white-paper scan with black ink, however few pixels differ in colour', () => {
@@ -386,42 +375,65 @@ describe.skipIf(!napi)('dark and green PDF pages, rasterised', () => {
     },
   );
 
+  // Pages whose clips the coverage render cannot reproduce invert whole: the
+  // picture shows as a negative, but every pixel is the exact inversion, so no
+  // content can vanish.
+  const everyPixelInverted = () => 'page' as const;
+
   it.each([
-    ['W f', '0 g 20 45 60 10 re W f'],
-    ['W S', '0 G 4 w 20 45 60 10 re W S'],
-    ['W B', '0 g 0 G 4 w 20 45 60 10 re W B'],
-  ])('a filled or stroked clipping path (%s) inverts in both appearances', async (_name, path) => {
+    ['W f beside the image', `q 0 g 20 45 60 10 re W f Q q 10 0 0 10 5 5 cm ${inlineImage(RED)} Q`],
+    [
+      'W S beside the image',
+      `q 0 G 4 w 20 45 60 10 re W S Q q 10 0 0 10 5 5 cm ${inlineImage(RED)} Q`,
+    ],
+    [
+      'W B beside the image',
+      `q 0 g 0 G 4 w 20 45 60 10 re W B Q q 10 0 0 10 5 5 cm ${inlineImage(RED)} Q`,
+    ],
+    [
+      'a white scan over a white W f clip',
+      `q 1 g 0 0 100 100 re W f 100 0 0 100 0 0 cm ${scanImage()} Q`,
+    ],
+  ])('a painting clip path (%s) inverts the page whole', async (_name, content) => {
     for (const tint of tints) {
-      const result = await darkRender(
-        makePdf(`q ${path} Q q 10 0 0 10 5 5 cm ${inlineImage(RED)} Q`),
-        tint,
-      );
-      expect(result.keptImages).toBe(true);
-      const counts = expectRecoloured(result, tint);
-      expect(counts.image).toBe(20 * 20);
+      const result = await darkRender(makePdf(content), tint);
+      expect(result.keptImages).toBe(false);
+      expectRecoloured(result, tint, everyPixelInverted);
     }
   });
 
   it.each([
-    ['7 (clip only)', 7],
-    ['4 (fill and clip)', 4],
-  ])(
-    'an image clipped to text in render mode %s keeps only the glyph area',
-    async (_name, mode) => {
-      for (const tint of tints) {
-        const result = await darkRender(
-          makePdf(
-            `BT /F1 50 Tf 10 30 Td ${mode} Tr (I) Tj ET q 50 0 0 50 0 25 cm ${inlineImage(RED)} Q`,
-            HELVETICA,
-          ),
-          tint,
-        );
-        expect(result.keptImages).toBe(true);
-        const counts = expectRecoloured(result, tint);
-        // The glyph is a thin bar: the image shows through it and nowhere else.
-        expect(counts.image).toBeGreaterThan(100);
-        expect(counts.image).toBeLessThan(2000);
-      }
+    ['mode 7', '7 Tr (I) Tj'],
+    ['mode 4', '4 Tr (I) Tj'],
+    ['mode 7 after ordinary text in the same text object', '0 Tr (I) Tj 7 Tr (I) Tj'],
+  ])('an image clipped to text (%s) inverts the page whole', async (_name, show) => {
+    for (const tint of tints) {
+      const result = await darkRender(
+        makePdf(
+          `q BT /F1 50 Tf 10 30 Td ${show} ET 50 0 0 50 0 25 cm ${inlineImage(RED)} Q`,
+          HELVETICA,
+        ),
+        tint,
+      );
+      expect(result.keptImages).toBe(false);
+      expectRecoloured(result, tint, everyPixelInverted);
+    }
+  });
+
+  it.each(tints)(
+    '%s: ordinary text before a picture still inverts while the picture keeps its colours',
+    async (tint) => {
+      const result = await darkRender(
+        makePdf(
+          `BT /F1 20 Tf 5 80 Td (Text) Tj ET q 30 0 0 30 50 10 cm ${inlineImage(RED)} Q`,
+          HELVETICA,
+        ),
+        tint,
+      );
+      expect(result.keptImages).toBe(true);
+      const counts = expectRecoloured(result, tint);
+      expect(counts.image).toBe(60 * 60);
+      expect(counts.page).toBeGreaterThan(30000);
     },
   );
 });

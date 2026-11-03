@@ -6,7 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
-- **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark.
+- **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark, as does a page that clips a picture with a filled or stroked shape or with text, where the pictures cannot be separated safely.
 
 ### Planned
 
