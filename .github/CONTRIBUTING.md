@@ -47,7 +47,7 @@ CI runs two jobs on every push and PR: a build job (`lint`, `format:check`, type
 
 Optional local secret scanning (matches folio): `pip install pre-commit && pre-commit install` wires gitleaks and Action SHA-pinning into your git hooks (see `.pre-commit-config.yaml`).
 
-`npm run screenshot` regenerates the README images into `docs/media/` (the context menu, the rendered Markdown/math/diagram shot, the green terminal palette, the CSV grid in light and dark, and the PDF viewer) by rendering the real preview bundles with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`). Because it drives the real bundles, it doubles as a way to eyeball a layout change that unit tests cannot see.
+`npm run screenshot` regenerates the README and user guide images into `docs/media/` (the context menu, the rendered Markdown/math/diagram shot, the green terminal palette, the CSV grid in light and dark, and the PDF viewer) by rendering the real preview bundles with `media/preview.css` in headless Chrome or Edge (see `scripts/make-screenshot.js`). Because it drives the real bundles, it doubles as a way to eyeball a layout change that unit tests cannot see.
 
 ## Tests
 
