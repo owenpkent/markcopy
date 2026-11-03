@@ -8,6 +8,8 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark, as does a page that clips a picture with a filled or stroked shape or with text, where the pictures cannot be separated safely.
 
+- Development and test tooling moved to `minimatch` 11 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)), a denial-of-service fix (globparts amplification), through a root override that covers `@vscode/vsce`, ESLint, Mocha, and the VS Code test CLI. None of it is bundled into the extension, and the packaged VSIX contains the same files as before. The override is recorded in [SECURITY](.github/SECURITY.md).
+
 ### Planned
 
 - PlantUML support.

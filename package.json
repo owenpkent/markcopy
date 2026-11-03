@@ -811,7 +811,8 @@
     "mermaid": {
       "katex": "$katex"
     },
-    "@azure/msal-node": "^7.1.2"
+    "@azure/msal-node": "^7.1.2",
+    "minimatch": "^11.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
