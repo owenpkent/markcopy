@@ -510,6 +510,32 @@ describe('composer', () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps playing when the context menu hands focus back to the field', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    field().focus();
+    field().value = 'first';
+    key('Enter', field());
+    ack();
+    expect(document.activeElement).toBe(field());
+
+    pause.mockClear();
+    play.mockClear();
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(document.querySelector('#mc-menu')?.hasAttribute('hidden')).toBe(false);
+    // Every earlier test's bundle import still listens on the document and opened
+    // its own (detached) menu for the same right-click; each swallows one Escape.
+    for (let i = 0; i < 100 && !document.querySelector<HTMLElement>('#mc-menu')!.hidden; i++) {
+      key('Escape');
+    }
+    expect(document.querySelector<HTMLElement>('#mc-menu')!.hidden).toBe(true);
+    expect(document.activeElement).toBe(field());
+    expect(pause).not.toHaveBeenCalled();
+  });
+
   it('leaves a paused video paused after a send', async () => {
     const video = await open();
     Object.defineProperty(video, 'paused', { value: true, configurable: true });

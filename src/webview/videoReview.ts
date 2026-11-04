@@ -31,7 +31,7 @@ import {
   stepTarget,
   type DotRow,
 } from '../review/timeline';
-import type { MenuEntry } from './menu';
+import { isRestoringFocus, type MenuEntry } from './menu';
 
 export interface ReviewDeps {
   video: HTMLVideoElement;
@@ -441,6 +441,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
       b.addEventListener('mousedown', (e) => e.preventDefault());
     }
     field.addEventListener('focus', () => {
+      // The context menu handing focus back is not the start of a note.
+      if (isRestoringFocus()) {
+        return;
+      }
       resumeAfterNote = !video.paused;
       video.pause();
     });
