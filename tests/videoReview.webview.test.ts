@@ -383,14 +383,14 @@ describe('composer', () => {
     field().value = 'tighten this';
     byLabel('Add note')!.click();
     expect(byLabel('Add note')!.disabled).toBe(true);
-    expect(field().disabled).toBe(true);
+    expect(field().readOnly).toBe(true);
     key('Enter', field());
     byLabel('Add note')!.click();
     expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
 
     fromHost({ type: 'reviewError', message: 'Could not write clip.review.yaml', failed: 'add' });
     expect(field().value).toBe('tighten this');
-    expect(field().disabled).toBe(false);
+    expect(field().readOnly).toBe(false);
     expect(byLabel('Add note')!.disabled).toBe(false);
     expect(chip().textContent).toBe('00:00:31:00 to 00:00:36:00');
     expect(byLabel('Set In to this frame')!.getAttribute('aria-pressed')).toBe('true');
@@ -439,7 +439,7 @@ describe('composer', () => {
     field().value = 'keep me';
     byLabel('Add note')!.click();
     fromHost({ type: 'reviewError', message: 'Could not delete n1' });
-    expect(field().disabled).toBe(true);
+    expect(field().readOnly).toBe(true);
     expect(byLabel('Add note')!.disabled).toBe(true);
     expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
   });
@@ -481,6 +481,59 @@ describe('composer', () => {
     expect(play).not.toHaveBeenCalled();
     ack();
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps focus in the field after a send and pauses again on typing', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    field().focus();
+    field().value = 'first';
+    key('Enter', field());
+    expect(document.activeElement).toBe(field());
+    play.mockClear();
+    ack();
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(field());
+
+    // Playback resumed; the next keystroke stops it and the send picks it up again.
+    pause.mockClear();
+    play.mockClear();
+    field().value = 's';
+    field().dispatchEvent(new Event('input'));
+    expect(pause).toHaveBeenCalledTimes(1);
+    field().value = 'second';
+    key('Enter', field());
+    ack();
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps playing when the context menu hands focus back to the field', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    field().focus();
+    field().value = 'first';
+    key('Enter', field());
+    ack();
+    expect(document.activeElement).toBe(field());
+
+    pause.mockClear();
+    play.mockClear();
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(document.querySelector('#mc-menu')?.hasAttribute('hidden')).toBe(false);
+    // Every earlier test's bundle import still listens on the document and opened
+    // its own (detached) menu for the same right-click; each swallows one Escape.
+    for (let i = 0; i < 100 && !document.querySelector<HTMLElement>('#mc-menu')!.hidden; i++) {
+      key('Escape');
+    }
+    expect(document.querySelector<HTMLElement>('#mc-menu')!.hidden).toBe(true);
+    expect(document.activeElement).toBe(field());
+    expect(pause).not.toHaveBeenCalled();
   });
 
   it('leaves a paused video paused after a send', async () => {
@@ -675,7 +728,7 @@ describe('review toggle', () => {
     field().value = 'saved while hidden';
     byLabel('Add note')!.click();
     expect(posted.filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
-    expect(field().disabled).toBe(true);
+    expect(field().readOnly).toBe(true);
 
     pressMenu('Close Video Notes');
     fromHost(review({ added: 'n3', notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
@@ -684,7 +737,7 @@ describe('review toggle', () => {
     pressMenu('Open Video Notes');
     fromHost(review({ added: null, notes: [note('n1', 1), note('n3', 2, { text: 'saved' })] }));
     expect(cards().some((c) => c.textContent?.includes('saved'))).toBe(true);
-    expect(field().disabled).toBe(false);
+    expect(field().readOnly).toBe(false);
     expect(byLabel('Add note')!.disabled).toBe(false);
     expect(field().value).toBe('');
     expect(play).not.toHaveBeenCalled();

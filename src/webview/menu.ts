@@ -18,6 +18,18 @@ export type MenuEntry =
   | { kind: 'divider' }
   | { kind: 'radio' | 'checkbox'; label: string; checked: boolean; run: () => void };
 
+let restoringFocus = false;
+
+/**
+ * True only while a menu hands the keyboard back to the element that opened it.
+ * A focus handler uses this to tell that restoration from the reader choosing
+ * to focus the element (a focus event's relatedTarget is null for it, since the
+ * menu row that held focus is already gone).
+ */
+export function isRestoringFocus(): boolean {
+  return restoringFocus;
+}
+
 export interface MenuController {
   /** Open the menu with `entries` at a document-relative position. */
   show(pageX: number, pageY: number, entries: MenuEntry[]): void;
@@ -118,7 +130,12 @@ export function createMenu(root: HTMLDivElement): MenuController {
     const returnTo = invoker;
     invoker = undefined;
     if (heldFocus && returnTo?.isConnected) {
-      returnTo.focus();
+      restoringFocus = true;
+      try {
+        returnTo.focus();
+      } finally {
+        restoringFocus = false;
+      }
     }
     // Walked over a copy: a listener watching one interaction unsubscribes
     // itself as it runs, and must not disturb the walk doing so.
