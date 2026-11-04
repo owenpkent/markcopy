@@ -9,6 +9,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [1.0.2] - 2026-11-04
+
+One fix to the Video Notes timeline, with no new features or settings. Updating needs no action.
+
 ### Fixed
 
 - **Video Notes timeline shows where merged notes really are.** Notes close together still merge into one ×N badge placed at the first of them, which hid how far the group reached. Every note now also has a tick on the scrubber bar at its exact frame, and a merged badge has a faint bracket from its first note to its last.
@@ -543,7 +547,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
 [0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
