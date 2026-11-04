@@ -15,3 +15,15 @@ export function isExpectedXmlError(err: unknown): boolean {
 export function isExpectedOoxmlError(err: unknown): boolean {
   return err instanceof OpcError || isExpectedXmlError(err);
 }
+
+/**
+ * domino, the DOM turndown uses under Node, throws a TypeError from its HTML
+ * parser on some malformed input (an <input> in a table with a valueless
+ * `type`). It is a third-party bug in code the shipped webview never loads (the
+ * browser's DOMParser is used there), so it is not a finding. Only a TypeError
+ * whose stack is inside domino matches; one raised by MarkCopy's own code
+ * carries a different stack and still propagates.
+ */
+export function isDominoParserBug(err: unknown): boolean {
+  return err instanceof TypeError && /@mixmark-io.domino./.test(err.stack ?? '');
+}
