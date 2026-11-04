@@ -219,6 +219,14 @@ describe('review mode', () => {
     expect(markers()).toHaveLength(2);
     const cluster = markers()[0];
     expect(cluster.textContent).toBe('×3');
+    // Every note keeps a tick at its own time; the merged badge gets one bracket.
+    const ticks = [...root().querySelectorAll<HTMLElement>('.mc-rv-tick')];
+    expect(ticks.map((t) => t.dataset.id)).toEqual(['n1', 'n2', 'n3', 'n4']);
+    const lefts = ticks.map((t) => parseFloat(t.style.left));
+    expect(lefts[0]).toBeLessThan(lefts[1]);
+    expect(lefts[1]).toBeLessThan(lefts[2]);
+    expect(lefts[2]).toBeLessThan(lefts[3]);
+    expect(root().querySelectorAll('.mc-rv-span')).toHaveLength(1);
 
     cluster.click();
     expect(cards()[0].getAttribute('aria-pressed')).toBe('true');

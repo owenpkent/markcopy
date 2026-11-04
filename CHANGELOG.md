@@ -9,6 +9,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Fixed
+
+- **Video Notes timeline shows where merged notes really are.** Notes close together still merge into one ×N badge placed at the first of them, which hid how far the group reached. Every note now also has a tick on the scrubber bar at its exact frame, and a merged badge has a faint bracket from its first note to its last.
+
 ## [1.0.1] - 2026-11-04
 
 Five fixes from a code review, with no new features or settings. Updating needs no action.
