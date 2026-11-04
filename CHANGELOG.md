@@ -13,6 +13,26 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [1.0.2] - 2026-11-04
+
+One fix to the Video Notes timeline, with no new features or settings. Updating needs no action.
+
+### Fixed
+
+- **Video Notes timeline shows where merged notes really are.** Notes close together still merge into one ×N badge placed at the first of them, which hid how far the group reached. Every note now also has a tick on the scrubber bar at its exact frame, and a merged badge has a faint bracket from its first note to its last.
+
+## [1.0.1] - 2026-11-04
+
+Five fixes from a code review, with no new features or settings. Updating needs no action.
+
+### Fixed
+
+- **A CSV edit from the side preview can no longer land in the wrong file.** When the side preview moved to another CSV before a queued cell edit or row and column operation reached the extension host, the host applied it to the file now in the panel. Every grid edit message now names the document it was drawn from, and the host drops an edit whose document is not the one it is showing.
+- **PDF "All Text" copies every page, rendered or not.** It read only the text cached while pages were drawn, so a five-page file with one page scrolled into view copied one page. "All Text" and "Page N Text" now read each page from the PDF directly, using the cache only as a shortcut.
+- **A comment being edited survives a LaTeX recompile.** The reload replaced the comments under an open editor, whose Save then wrote the text from before the edit. The open editor is rebound to the refreshed comment, and a new comment the file does not yet hold is kept, so the draft is what gets saved.
+- **Merged cells across hidden spreadsheet columns copy with the right width.** An A:C merge with B hidden came out three fields wide in a two-column table. Merge spans are now counted in visible columns and rows, and a merge whose first cell is hidden shows its value in the first visible cell of the range, as Excel does.
+- **Video notes timed on the rendered output no longer seek the source video.** The host dropped the note's `target`, so a `render` note was treated as a source time, which selects the wrong moment after a trim or retime. The target is kept, a render note's card says "Output time" and selecting it does not seek, and it draws no marker, band, or pin on the source timeline.
+
 ## [1.0.0] - 2026-11-03
 
 MarkCopy 1.0. The extension's purpose is now stated plainly: read any document in VS Code, edit it lightly, and hand it off in the format the next person needs (rich text, PDF, Word, or PowerPoint). Settings, commands, and file associations are unchanged from 0.22.0, so updating needs no action.
@@ -531,7 +551,9 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
 [0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/owenpkent/markcopy/compare/v0.20.0...v0.21.0

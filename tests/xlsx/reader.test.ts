@@ -227,6 +227,44 @@ describe('structure', () => {
     expect(html).toContain('b3');
   });
 
+  it('counts a merge colspan in visible columns only', () => {
+    const html = render(
+      `<cols><col min="2" max="2" hidden="1"/></cols>` +
+        `<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>` +
+        sheetData([row(1, '<c r="A1" t="inlineStr"><is><t>wide</t></is></c>')]),
+    );
+    expect(html).toContain('colspan="2"');
+    expect(html).not.toContain('colspan="3"');
+    expect(cells(html)[0]).toEqual(['wide']);
+  });
+
+  it('keeps the value of a merge anchored in a hidden column', () => {
+    const html = render(
+      `<cols><col min="1" max="1" hidden="1"/></cols>` +
+        `<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>` +
+        sheetData([row(1, '<c r="A1" t="inlineStr"><is><t>wide</t></is></c>')]),
+    );
+    expect(html).toContain('colspan="2"');
+    expect(cells(html)[0]).toEqual(['wide']);
+  });
+
+  it('counts a merge rowspan past a hidden row and keeps a hidden-row anchor value', () => {
+    const body = (hide1: string) =>
+      `<mergeCells count="1"><mergeCell ref="A1:A3"/></mergeCells>` +
+      sheetData([
+        row(1, '<c r="A1" t="inlineStr"><is><t>tall</t></is></c>', hide1),
+        row(2, '<c r="B2"><v>2</v></c>', ' hidden="1"'),
+        row(3, '<c r="B3"><v>3</v></c>'),
+      ]);
+    const middle = render(body(''));
+    expect(middle).toContain('rowspan="2"');
+    expect(middle).not.toContain('rowspan="3"');
+
+    const anchorHidden = render(body(' hidden="1"'));
+    expect(cells(anchorHidden)).toEqual([['tall', '3']]);
+    expect(anchorHidden).not.toContain('rowspan');
+  });
+
   it('hides rows, columns, and sheets the author hid', () => {
     const hiddenRow = render(
       sheetData([

@@ -100,7 +100,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-crash-${{ matrix.target }}
-          path: fuzz/crashes/${{ matrix.target }}
+          # The directory above the target's, so the zip holds <target>/crash-*
+          # and the report job can read the target from the path.
+          path: fuzz/crashes
           if-no-files-found: ignore
 
   # Kept apart from the job that runs the fuzzer so that job never holds a token
@@ -123,12 +125,17 @@ jobs:
         with:
           pattern: fuzz-crash-*
           path: crashes
+          # With exactly one match the action extracts straight into path and
+          # adds no per-artifact folder, so the layout has to be the same for
+          # one crash or many: crashes/<target>/.
+          merge-multiple: true
 
       - name: Open or update issues
         run: |
           shopt -s nullglob
-          for dir in crashes/fuzz-crash-*; do
-            target="${dir#crashes/fuzz-crash-}"
+          for dir in crashes/*/; do
+            dir="${dir%/}"
+            target="${dir#crashes/}"
             inputs=("$dir"/crash-* "$dir"/oom-* "$dir"/timeout-* "$dir"/slow-unit-*)
             # No input file means the target failed some other way (build or
             # install); the failed job in the run says why, so there is no issue.

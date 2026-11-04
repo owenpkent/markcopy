@@ -1338,6 +1338,36 @@ body.mc-video .mc-rv-band--selected {
   --rv-band: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 30%, transparent);
 }
+/* A tick on the bar at each note's exact frame, so a merged badge does not hide
+   where its notes are. Centred on its x, like the thumb's line. */
+body.mc-video .mc-rv-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--mc-video-fg);
+  opacity: 0.75;
+}
+body.mc-video .mc-rv-tick--done {
+  opacity: 0.4;
+}
+body.mc-video .mc-rv-tick--selected {
+  background: var(--rv-accent);
+  opacity: 1;
+}
+/* Under a merged badge: a faint bracket from its first note to its last. */
+body.mc-video .mc-rv-span {
+  position: absolute;
+  bottom: 2px;
+  height: 4px;
+  box-sizing: border-box;
+  border: solid color-mix(in srgb, var(--mc-video-fg) 45%, transparent);
+  border-width: 0 1px 1px;
+  pointer-events: none;
+}
 /* The scrubber's thumb is the same 44px as a marker's target, so the two
    travel the same distance and a marker sits over the frame it names. */
 body.mc-video .mc-rv-slider {

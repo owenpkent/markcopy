@@ -5,8 +5,10 @@
 /** A sidecar note as the webview sees it: the fields it shows, nothing it may edit. */
 export interface ReviewNote {
   id: string;
-  /** Seconds in source time. */
+  /** Seconds in source time, or in output time when `target` is `render`. */
   at: number;
+  /** Which timeline `at` and `out` are on. Absent means source. */
+  target?: 'source' | 'render';
   /** Seconds, greater than `at`, for a range note. */
   out?: number;
   text: string;

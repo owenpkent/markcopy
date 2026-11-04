@@ -99,8 +99,20 @@ let commentSeq = 0;
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type === 'load') {
+    const editing = noteEl && noteComment ? noteComment : null;
     comments = Array.isArray(msg.comments) ? (msg.comments as Comment[]) : [];
     commentSeq = comments.length;
+    if (editing) {
+      // An open editor holds the user's draft in its textarea. Bind it to the
+      // refreshed comment so Save persists the draft; a comment the fresh data
+      // lacks (new, never saved) is kept so the draft is not lost.
+      const fresh = comments.find((x) => x.id === editing.id);
+      if (fresh) {
+        noteComment = fresh;
+      } else {
+        comments.push(editing);
+      }
+    }
     load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
   } else if (msg?.type === 'setTheme' && typeof msg.value === 'string') {
     // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
@@ -374,13 +386,7 @@ async function renderPage(n: number): Promise<void> {
   // Text layer: transparent, selectable spans over the canvas.
   const textContent = await page.getTextContent();
   if (!pageText.has(n)) {
-    pageText.set(
-      n,
-      textContent.items
-        .map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : ''))
-        .join('')
-        .trim(),
-    );
+    pageText.set(n, flattenText(textContent));
   }
   const textLayerDiv = wrap.querySelector('.textLayer') as HTMLElement;
   textLayerDiv.innerHTML = '';
@@ -702,20 +708,25 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
   el.style.left = `${Math.min(window.innerWidth - 280, Math.max(8, rect.left))}px`;
   el.style.top = `${Math.min(window.innerHeight - 170, rect.bottom + 6)}px`;
 
+  // A reload swaps in fresh comment objects; `noteComment` is rebound to the
+  // current one, so act on that rather than the object this editor opened with.
+  const current = () => noteComment ?? c;
   const save = () => {
-    c.text = textarea.value.trim();
-    if (!c.text) {
+    const target = current();
+    target.text = textarea.value.trim();
+    if (!target.text) {
       remove();
       return;
     }
     saveComments();
-    placePins(c.page);
+    placePins(target.page);
     closeNote();
   };
   const remove = () => {
-    comments = comments.filter((x) => x.id !== c.id);
+    const target = current();
+    comments = comments.filter((x) => x.id !== target.id);
     saveComments();
-    placePins(c.page);
+    placePins(target.page);
     closeNote();
   };
 
@@ -728,7 +739,7 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
     textarea.addEventListener(
       'blur',
       () => {
-        if (!textarea.value.trim() && noteComment === c) {
+        if (!textarea.value.trim() && noteComment?.id === c.id) {
           remove();
         }
       },
@@ -884,11 +895,11 @@ document.addEventListener('contextmenu', (e) => {
     variants.push({
       kind: 'item',
       label: `Page ${n} Text`,
-      run: () => copyText(pageText.get(n) ?? ''),
+      run: async () => copyText(await textOfPage(n)),
     });
   }
 
-  variants.push({ kind: 'item', label: 'All Text', run: () => copyText(allText()) });
+  variants.push({ kind: 'item', label: 'All Text', run: async () => copyText(await allText()) });
   entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
 
   if (pageEl) {
@@ -1391,12 +1402,36 @@ buildToolbar();
 // ---------------------------------------------------------------------------
 // Clipboard
 // ---------------------------------------------------------------------------
-function allText(): string {
-  return Array.from(pageText.keys())
-    .sort((a, b) => a - b)
-    .map((n) => pageText.get(n) ?? '')
-    .join('\n\n')
+function flattenText(textContent: { items: Array<unknown> }): string {
+  return textContent.items
+    .map((it) => {
+      const item = it as { str?: string; hasEOL?: boolean };
+      return typeof item.str === 'string' ? item.str + (item.hasEOL ? '\n' : ' ') : '';
+    })
+    .join('')
     .trim();
+}
+
+// `pageText` only fills as pages are rasterised, so it is an accelerator: a page
+// that has not been rendered yet is read straight from pdf.js.
+async function textOfPage(n: number): Promise<string> {
+  const cached = pageText.get(n);
+  if (cached !== undefined) return cached;
+  const source = doc;
+  if (!source) return '';
+  const page = pages[n - 1] ?? (await source.getPage(n));
+  const text = flattenText(await page.getTextContent());
+  if (doc === source) pageText.set(n, text);
+  return text;
+}
+
+async function allText(): Promise<string> {
+  const count = doc?.numPages ?? 0;
+  const parts: string[] = [];
+  for (let n = 1; n <= count; n++) {
+    parts.push(await textOfPage(n));
+  }
+  return parts.join('\n\n').trim();
 }
 
 function copyText(text: string): void {

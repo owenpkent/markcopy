@@ -112,19 +112,46 @@ describe('parseMarkdownMessage', () => {
 
   it('accepts editCell with integer coordinates and a string value', () => {
     expect(
-      parseMarkdownMessage({ type: 'editCell', line: 3, column: 1, value: 'x', docVersion: 7 }),
-    ).toEqual({ type: 'editCell', line: 3, column: 1, value: 'x', docVersion: 7 });
+      parseMarkdownMessage({
+        type: 'editCell',
+        line: 3,
+        column: 1,
+        value: 'x',
+        docVersion: 7,
+        docKey: 'file:///a.csv',
+      }),
+    ).toEqual({
+      type: 'editCell',
+      line: 3,
+      column: 1,
+      value: 'x',
+      docVersion: 7,
+      docKey: 'file:///a.csv',
+    });
     // No (or a non-numeric) docVersion is left out, not carried as garbage.
-    expect(parseMarkdownMessage({ type: 'editCell', line: 3, column: 1, value: '' })).toEqual({
+    expect(
+      parseMarkdownMessage({ type: 'editCell', line: 3, column: 1, value: '', docKey: 'k' }),
+    ).toEqual({
       type: 'editCell',
       line: 3,
       column: 1,
       value: '',
+      docKey: 'k',
     });
     expect(
-      parseMarkdownMessage({ type: 'editCell', line: 3, column: 1, value: '', docVersion: '7' }),
-    ).toEqual({ type: 'editCell', line: 3, column: 1, value: '' });
-    const base = { type: 'editCell', line: 3, column: 1, value: 'x' };
+      parseMarkdownMessage({
+        type: 'editCell',
+        line: 3,
+        column: 1,
+        value: '',
+        docVersion: '7',
+        docKey: 'k',
+      }),
+    ).toEqual({ type: 'editCell', line: 3, column: 1, value: '', docKey: 'k' });
+    const base = { type: 'editCell', line: 3, column: 1, value: 'x', docKey: 'k' };
+    // Without the document the grid came from, the edit cannot be placed.
+    expect(parseMarkdownMessage({ ...base, docKey: undefined })).toBeUndefined();
+    expect(parseMarkdownMessage({ ...base, docKey: 5 })).toBeUndefined();
     expect(parseMarkdownMessage({ ...base, line: 1.5 })).toBeUndefined();
     expect(parseMarkdownMessage({ ...base, column: NaN })).toBeUndefined();
     expect(parseMarkdownMessage({ ...base, line: undefined })).toBeUndefined();
@@ -135,9 +162,18 @@ describe('parseMarkdownMessage', () => {
 
   it('accepts gridOp for the known operations only', () => {
     expect(
-      parseMarkdownMessage({ type: 'gridOp', op: 'deleteRow', line: 2, column: 0, docVersion: 4 }),
-    ).toEqual({ type: 'gridOp', op: 'deleteRow', line: 2, column: 0, docVersion: 4 });
-    const base = { type: 'gridOp', op: 'insertColumnLeft', line: 0, column: 0 };
+      parseMarkdownMessage({
+        type: 'gridOp',
+        op: 'deleteRow',
+        line: 2,
+        column: 0,
+        docVersion: 4,
+        docKey: 'k',
+      }),
+    ).toEqual({ type: 'gridOp', op: 'deleteRow', line: 2, column: 0, docVersion: 4, docKey: 'k' });
+    const base = { type: 'gridOp', op: 'insertColumnLeft', line: 0, column: 0, docKey: 'k' };
+    expect(parseMarkdownMessage({ ...base, docKey: undefined })).toBeUndefined();
+    expect(parseMarkdownMessage({ ...base, docKey: 5 })).toBeUndefined();
     expect(parseMarkdownMessage(base)).toEqual(base);
     expect(parseMarkdownMessage({ ...base, op: 'dropTable' })).toBeUndefined();
     expect(parseMarkdownMessage({ ...base, op: 5 })).toBeUndefined();
@@ -575,16 +611,28 @@ describe('numeric fields that cannot be coerced', () => {
   it('are rejected by the Markdown grid messages without throwing', () => {
     for (const value of hostile) {
       expect(
-        parseMarkdownMessage({ type: 'editCell', line: value, column: 0, value: 'x' }),
+        parseMarkdownMessage({ type: 'editCell', line: value, column: 0, value: 'x', docKey: 'k' }),
       ).toBeUndefined();
       expect(
-        parseMarkdownMessage({ type: 'editCell', line: 0, column: value, value: 'x' }),
+        parseMarkdownMessage({ type: 'editCell', line: 0, column: value, value: 'x', docKey: 'k' }),
       ).toBeUndefined();
       expect(
-        parseMarkdownMessage({ type: 'gridOp', op: 'insertRowBelow', line: value, column: 0 }),
+        parseMarkdownMessage({
+          type: 'gridOp',
+          op: 'insertRowBelow',
+          line: value,
+          column: 0,
+          docKey: 'k',
+        }),
       ).toBeUndefined();
       expect(
-        parseMarkdownMessage({ type: 'gridOp', op: 'insertRowBelow', line: 0, column: value }),
+        parseMarkdownMessage({
+          type: 'gridOp',
+          op: 'insertRowBelow',
+          line: 0,
+          column: value,
+          docKey: 'k',
+        }),
       ).toBeUndefined();
     }
   });
