@@ -9,6 +9,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [1.0.1] - 2026-11-04
+
+Five fixes from a code review, with no new features or settings. Updating needs no action.
+
 ### Fixed
 
 - **A CSV edit from the side preview can no longer land in the wrong file.** When the side preview moved to another CSV before a queued cell edit or row and column operation reached the extension host, the host applied it to the file now in the panel. Every grid edit message now names the document it was drawn from, and the host drops an edit whose document is not the one it is showing.
@@ -535,7 +539,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
 [0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/owenpkent/markcopy/compare/v0.20.0...v0.21.0
