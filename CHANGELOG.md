@@ -4,14 +4,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Changed
-
-- **Video Notes keeps the note field focused after a send.** Pressing Enter saves the note and resumes playback as before, but the cursor stays in the field; typing the next note pauses the video again. Escape still hands the keyboard back to the player shortcuts.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+### Changed
+
+- **Video Notes keeps the note field focused after a send.** Pressing Enter saves the note and resumes playback as before, but the cursor stays in the field; typing the next note pauses the video again. Escape still hands the keyboard back to the player shortcuts.
 
 ## [1.0.2] - 2026-11-04
 
