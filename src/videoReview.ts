@@ -255,6 +255,9 @@ function toReviewNote(n: Record<string, unknown>): ReviewNote {
     done: n.done === true,
     created: isString(n.created) ? n.created : '',
   };
+  if (n.target === 'source' || n.target === 'render') {
+    note.target = n.target;
+  }
   if (isNumber(n.out) && n.out > note.at) {
     note.out = n.out;
   }

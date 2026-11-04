@@ -298,11 +298,12 @@ async function render(
   // global: it pins the edit to the version *this* grid was drawn from. Reading
   // a global here would stamp a grid that a later render had already replaced
   // with that later version, which is exactly what the host's staleness check
-  // exists to catch.
+  // exists to catch. `docKey` is pinned the same way, so the host can tell which
+  // document the grid came from if the panel has been retargeted since.
   enableCsvEditing(
     content,
     (line, column, value) =>
-      vscode.postMessage({ type: 'editCell', line, column, value, docVersion }),
+      vscode.postMessage({ type: 'editCell', line, column, value, docVersion, docKey }),
     contextMenu,
   );
   content
@@ -906,6 +907,7 @@ function buildGridEntries(target: HTMLElement): MenuEntry[] {
   // in between, the host should refuse the edit rather than apply it to a grid
   // the reader never saw.
   const docVersion = currentDocVersion;
+  const docKey = currentDocKey;
   // Every one of these moves the grid under the reader rather than moving the
   // reader: after an insert above, the blank row is the square they were on;
   // after a delete, the row below has slid up into it. So they all park focus on
@@ -913,7 +915,14 @@ function buildGridEntries(target: HTMLElement): MenuEntry[] {
   const focus = { line: ref.line, column: Math.max(ref.column, 0) };
   const run = (op: GridOp) => (): void => {
     parkFocus(focus);
-    vscode.postMessage({ type: 'gridOp', op, line: ref.line, column: ref.column, docVersion });
+    vscode.postMessage({
+      type: 'gridOp',
+      op,
+      line: ref.line,
+      column: ref.column,
+      docVersion,
+      docKey,
+    });
   };
 
   const insert: MenuEntry[] = [

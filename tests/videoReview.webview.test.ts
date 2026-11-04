@@ -127,6 +127,40 @@ function pressMenu(label: string): HTMLElement {
   return row!;
 }
 
+describe('render-targeted notes', () => {
+  it('do not seek to their raw timestamp and say why', async () => {
+    const video = await open();
+    fromHost(
+      review({
+        notes: [note('n1', 8, { target: 'render' }), note('n2', 20, { target: 'source' })],
+      }),
+    );
+    at(video, 3);
+    const before = video.currentTime;
+    cards()[0].click();
+    expect(video.currentTime).toBe(before);
+    expect(cards()[0].title).toContain('output');
+    cards()[1].click();
+    expect(video.currentTime).toBeCloseTo(20, 1);
+  });
+
+  it('stay off the source scrubber and the frame pins', async () => {
+    await open();
+    fromHost(
+      review({
+        notes: [
+          note('n1', 8, { target: 'render', out: 12, point: [0.5, 0.5] }),
+          note('n2', 20, { target: 'source', out: 24 }),
+        ],
+      }),
+    );
+    expect(markers()).toHaveLength(1);
+    expect(markers()[0].textContent).toContain('2');
+    expect(root().querySelectorAll('.mc-rv-band')).toHaveLength(1);
+    expect(root().querySelectorAll('.mc-rv-pin')).toHaveLength(0);
+  });
+});
+
 describe('review mode', () => {
   it('builds cards and markers and turns the native controls off', async () => {
     const video = await open();
