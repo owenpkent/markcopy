@@ -447,6 +447,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
     field.addEventListener('blur', () => {
       resumeAfterNote = false;
     });
+    // The field keeps focus after a send while playback resumes, so typing the next
+    // note pauses it again, the same as a fresh click into the field.
+    field.addEventListener('input', () => {
+      if (!video.paused) {
+        resumeAfterNote = true;
+        video.pause();
+      }
+    });
     field.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
@@ -923,8 +931,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     };
     resumeAfterNote = false;
     post(msg);
-    // Hand the keyboard back to the player.
-    ui.field.blur();
+    // The field keeps focus so the next note can follow; Escape hands the keyboard
+    // back to the player.
     renderComposer();
   }
 
@@ -993,9 +1001,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (locked) {
       pinMode = false;
     }
-    for (const c of [ui.inBtn, ui.outBtn, ui.pinBtn, ui.clearBtn, ui.field]) {
+    for (const c of [ui.inBtn, ui.outBtn, ui.pinBtn, ui.clearBtn]) {
       c.disabled = locked || sending !== null;
     }
+    // Read-only rather than disabled while sending, so the field keeps its focus.
+    ui.field.disabled = locked;
+    ui.field.readOnly = sending !== null;
     ui.composer.classList.toggle('mc-rv-composer--busy', sending !== null);
     // Until the host knows the rate, a note would be saved at the wrong one.
     ui.send.disabled = locked || state.fpsSource === 'pending' || sending !== null;
