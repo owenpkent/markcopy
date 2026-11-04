@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { escapeAttr } from './escape';
 import { renderDocxHtml, DocxError } from './docx/read';
-import { OoxmlEditorProvider, describeReadError, type OoxmlSession } from './ooxmlEditor';
+import {
+  OoxmlEditorProvider,
+  describeReadError,
+  type OoxmlSession,
+  type RenderResult,
+} from './ooxmlEditor';
 
 // The settings a document is drawn from. Anything outside this list cannot
 // change what the page looks like, so it must not cost a re-read and a
@@ -24,10 +29,11 @@ export class DocxEditorProvider extends OoxmlEditorProvider {
     return { render: () => this.renderDocument(document.uri) };
   }
 
-  private async renderDocument(uri: vscode.Uri): Promise<string> {
+  private async renderDocument(uri: vscode.Uri): Promise<RenderResult> {
     const bytes = await vscode.workspace.fs.readFile(uri);
     const math = vscode.workspace.getConfiguration('markcopy', uri).get<boolean>('math', true);
-    return renderDocxHtml(bytes, { math }).html;
+    const doc = renderDocxHtml(bytes, { math });
+    return { html: doc.html, media: doc.media };
   }
 
   protected errorHtml(err: unknown): string {

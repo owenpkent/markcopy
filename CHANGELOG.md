@@ -4,20 +4,106 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Added
-
-- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, XML, CSV, video notes and Markdown parsers. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
-
-### Fixed
-
-- The right-click menu in the video and GIF previews stayed open until a row was picked. Every preview's menu now closes on a click outside it, on **Escape**, or when focus leaves the preview, and the click that closes it no longer also plays or pauses the video.
-- The review scrubber's bar ran the full width while the playhead and note markers stop 22px short of each end, so at 0:00 the playhead sat visibly past the start of the bar. The bar now spans exactly the playhead's travel.
-- A video notes file (`*.review.yaml`) with an alias that has no anchor, or more alias expansions than the YAML reader allows, threw while loading instead of opening read-only with a "Not valid YAML" message. Found by the new fuzzing.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [1.0.2] - 2026-11-04
+
+One fix to the Video Notes timeline, with no new features or settings. Updating needs no action.
+
+### Fixed
+
+- **Video Notes timeline shows where merged notes really are.** Notes close together still merge into one ×N badge placed at the first of them, which hid how far the group reached. Every note now also has a tick on the scrubber bar at its exact frame, and a merged badge has a faint bracket from its first note to its last.
+
+## [1.0.1] - 2026-11-04
+
+Five fixes from a code review, with no new features or settings. Updating needs no action.
+
+### Fixed
+
+- **A CSV edit from the side preview can no longer land in the wrong file.** When the side preview moved to another CSV before a queued cell edit or row and column operation reached the extension host, the host applied it to the file now in the panel. Every grid edit message now names the document it was drawn from, and the host drops an edit whose document is not the one it is showing.
+- **PDF "All Text" copies every page, rendered or not.** It read only the text cached while pages were drawn, so a five-page file with one page scrolled into view copied one page. "All Text" and "Page N Text" now read each page from the PDF directly, using the cache only as a shortcut.
+- **A comment being edited survives a LaTeX recompile.** The reload replaced the comments under an open editor, whose Save then wrote the text from before the edit. The open editor is rebound to the refreshed comment, and a new comment the file does not yet hold is kept, so the draft is what gets saved.
+- **Merged cells across hidden spreadsheet columns copy with the right width.** An A:C merge with B hidden came out three fields wide in a two-column table. Merge spans are now counted in visible columns and rows, and a merge whose first cell is hidden shows its value in the first visible cell of the range, as Excel does.
+- **Video notes timed on the rendered output no longer seek the source video.** The host dropped the note's `target`, so a `render` note was treated as a source time, which selects the wrong moment after a trim or retime. The target is kept, a render note's card says "Output time" and selecting it does not seek, and it draws no marker, band, or pin on the source timeline.
+
+## [1.0.0] - 2026-11-03
+
+MarkCopy 1.0. The extension's purpose is now stated plainly: read any document in VS Code, edit it lightly, and hand it off in the format the next person needs (rich text, PDF, Word, or PowerPoint). Settings, commands, and file associations are unchanged from 0.22.0, so updating needs no action.
+
+### Changed
+
+- **Documentation rewritten around what MarkCopy is for.** The README, which is also the Marketplace page, is now a short introduction with a one-table overview of every format, in place of a 478-line feature inventory. The per-format detail moved into a [user guide](docs/guide/README.md) with pages for getting started, Markdown, copying, exporting, spreadsheets, documents, media, and settings, and a [documentation index](docs/README.md) separates user docs from contributor docs.
+
+### Fixed
+
+- **Pictures in a PDF no longer turn into negatives in dark mode.** Dark and Green on black pages still invert their text and background, but photographs, figures, and logos keep their true colours. A scanned page, where one image covers the page, still inverts as a whole so it stays readable in the dark, as does a page that clips a picture with a filled or stroked shape or with text, where the pictures cannot be separated safely.
+
+### Security
+
+- Development and test tooling moved to `minimatch` 11 ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)), a denial-of-service fix (globparts amplification), through a root override that covers `@vscode/vsce`, ESLint, Mocha, and the VS Code test CLI. None of it is bundled into the extension, and the packaged VSIX contains the same files as before. The override is recorded in [SECURITY](.github/SECURITY.md).
+- The VS Code test CLI moved to `glob` 14.0.3 ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)), which fixes an AbortSignal cancellation bypass, through a root override. It is test tooling only and the packaged VSIX is unchanged.
+
+## [0.22.0] - 2026-11-02
+
+### Changed
+
+- **Word and PowerPoint pictures no longer live inside the preview's HTML.** Each picture is sent to the preview once, beside the markup rather than base64-inlined into it, and shown from a `blob:` URL. The text of a photo-heavy deck is on screen before the first picture has crossed, a picture repeated on every slide costs one copy, and the 16 MB image budget that turned such decks into "Image" placeholders is replaced by a 128 MB per-file and 32 MB per-picture cap. Copy as Rich Text, Copy as Markdown, Save as PDF, Save as Word and Save as PowerPoint still receive each picture as a `data:` URI, now downscaled so no side exceeds 2048 px (a JPEG stays a JPEG; SVG and GIF are untouched), so an export of a deck of 6000 px photographs is a fraction of its old size. The preview's `connect-src` now also allows `blob:`, which is the page's own object URLs and nothing remote.
+- **Office file size limit raised from 25 MB to 256 MB.** A `.pptx`, `.xlsx`, or `.docx` full of photographs is routinely over 25 MB, and the preview refused it with "larger than the 25 MB preview limit". The cap now matches the 256 MB inflate budget; the entry count, per-part, and total inflated size guards are unchanged.
+
+## [0.21.0] - 2026-11-01
+
+### Added
+
+- **STL viewer right-click menu.** **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle; **Copy as** gives the file name, full path, dimensions (`X × Y × Z`) or triangle count; **View** adds Fit View, Front, Back, Left, Right, Top, Bottom and Isometric presets with Wireframe and Grid checkboxes that stay in step with the toolbar; **Preferences > Theme**, **Open in Default App** and **Reveal in File Explorer** complete it. A right-drag still pans and does not open the menu; only a right click without movement does.
+  - The host sends the file's name and path with the load and error messages, so File Name and Full Path work even for a file that was refused. The new STL webview messages are validated by `parseStlMessage` and the webview may write only `markcopy.theme`.
+- **Open in Default App on every preview's right-click menu.** The Markdown, CSV, Excel, PowerPoint, Word, and PDF previews now have the row the image, GIF, and video viewers already had, above the Reveal row, and it opens the file in the operating system's default app. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, greyed out until the first compile succeeds. The webview sends no path: the host opens its own document, and a file that is not on disk shows a status bar note instead.
+
+## [0.20.0] - 2026-10-30
+
+### Added
+
+- **Image preview with copy actions.** `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` files now open in a MarkCopy viewer ahead of VS Code's built-in image preview, which can zoom and nothing else and shows an SVG as XML text. **Reopen Editor With...** still reaches the built-in preview, and for an SVG the text editor.
+  - **Copy Image as PNG** and **Save as PNG…** use the picture at its own size, from any of the formats. An SVG is drawn at 1x, 2x (the default), or 4x of its size, set in **Copy as** -> **SVG Scale** for the session, with a side capped at 16384 px.
+  - **Copy as** gives the file name, the full path, a **Markdown Image** (`![name](path)`, with the path relative to the workspace folder and percent-encoded), an **HTML Image**, or a **Data URI** (greyed out above 4 MiB). **Copy SVG Source** copies an SVG's text.
+  - Fit and zoom from 10% to 800% (**Ctrl**+wheel, **Ctrl**+**+**, **Ctrl**+**-**, **Ctrl**+**0**, `1`, `F`), square pixels above 200%, and a status line with the size, dimensions, and format. A new setting, `markcopy.image.background` (per resource), picks a checkerboard, light, dark, or theme backdrop (theme follows the MarkCopy theme). The checkerboard is two faint greys under the picture only, never on the pane around it and never for a JPEG, which has no transparency.
+  - A floating toolbar like the PDF viewer's with six controls: zoom out, a percentage label (click it and type a percentage from 10 to 800; **Enter** applies, **Escape** cancels), zoom in, **Fit to window** (lit while fit is on; click it while lit to go to 100%), a **Hand Tool** toggle (also in **View**), and a **Transparency grid** toggle that shows or hides the checkerboard (disabled for a JPEG). The hand tool is on by default and drags the picture to pan when it is larger than the pane.
+  - The picture reloads when the file changes on disk, and a deleted or unreadable file says so, leaving only **File Name**, **Full Path**, **Open in Default App**, and **Reveal** in the menu.
+  - SVG may be UTF-8 or UTF-16 (**Copy SVG Source** copies the text in its own encoding), may use a namespace-prefixed root, and exports to PNG even with `<foreignObject>`. AVIF is recognised by its compatible brands as well as its major brand. Rasters report the decoded size, so an EXIF-rotated JPEG shows and copies as portrait.
+  - A file that is recognised but will not decode shows "Could not decode", with the PNG copy and save greyed out.
+  - The format is read from the file's bytes, not its extension, so a mislabelled file still opens and an unrecognised one shows a message. An SVG is only ever drawn as a picture, never parsed into the page, so its scripts do not run. A file above 64 MiB shows a message instead of loading.
+
+### Fixed
+
+- The Office preview and video review watched their file with a glob built from the bare file name, so a name such as `deck [1].pptx` watched `deck 1.pptx` instead and never reloaded. Glob characters in the name are now escaped, and the image preview uses the same rule.
+
+### Security
+
+- A webview message whose numeric field could not be converted to a number (an object with no prototype) made the validator throw on the host instead of rejecting the message. The Markdown grid and workbook sheet messages now accept a real number only. Found by the nightly fuzzer; the input is a seed.
+- Reporting now prefers [GitHub private vulnerability reporting](https://github.com/owenpkent/markcopy/security/advisories/new), with an acknowledgement window of three business days and target fix windows, and each fixed issue gets a GitHub Security Advisory with a CVE. See [SECURITY](.github/SECURITY.md).
+- CodeQL (security-extended) runs on `main`, on pull requests, and weekly. Nightly fuzzing gains a dictionary per target, real seed files, an `image` target with one variant per format, and all workflow actions stay pinned by commit SHA. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
+
+## [0.19.2] - 2026-10-28
+
+### Fixed
+
+- Editing a CSV cell with a column number far beyond the grid no longer tries to pad the row to that width. Found by the new fuzzing.
+- The right-click menu in the video and GIF previews stayed open until a row was picked. Every preview's menu now closes on a click outside it, on **Escape**, or when focus leaves the preview, and the click that closes it no longer also plays or pauses the video.
+- The review scrubber's bar ran the full width while the playhead and note markers stop 22px short of each end, so at 0:00 the playhead sat visibly past the start of the bar. The bar now spans exactly the playhead's travel.
+- A video notes file (`*.review.yaml`) with an alias that has no anchor, or more alias expansions than the YAML reader allows, threw while loading instead of opening read-only with a "Not valid YAML" message. Found by the new fuzzing.
+- Reading ffprobe's report on a video now copes with a report of the wrong shape (a `null` report or stream entry) instead of throwing. Real ffprobe output does not take that shape; found by the new fuzzing.
+- **Copy Selection as Markdown** failed on a selection containing an empty table (`<table></table>`, which pasted HTML can also carry) instead of copying the rest. The empty table is now left out. Found by the new fuzzing.
+- A Markdown preview could fail to render at all when an unreferenced footnote definition opened display math (`$$`) that ran on over a heading. Found by the new fuzzing.
+
+### Security
+
+- A preview page can no longer change settings other than the ones its own menu offers. The Markdown, spreadsheet, deck, Word, PDF and LaTeX previews used to write any MarkCopy setting a page asked for, including the paths to ffmpeg, the PDF browser and the LaTeX engine, which MarkCopy later runs.
+
+### Maintenance
+
+- Nightly coverage-guided fuzzing (Jazzer.js) of the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, STL and video probe parsers, the paste and export converters, link handling, sanitized Markdown output, and the messages a preview webview posts to the host. Development tooling only; see [TESTING](docs/TESTING.md#fuzzing).
 
 ## [0.19.1] - 2026-10-28
 
@@ -461,7 +547,14 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
+[0.22.0]: https://github.com/owenpkent/markcopy/compare/v0.21.0...v0.22.0
+[0.21.0]: https://github.com/owenpkent/markcopy/compare/v0.20.0...v0.21.0
+[0.20.0]: https://github.com/owenpkent/markcopy/compare/v0.19.2...v0.20.0
+[0.19.2]: https://github.com/owenpkent/markcopy/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/owenpkent/markcopy/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/owenpkent/markcopy/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/owenpkent/markcopy/compare/v0.18.0...v0.18.1

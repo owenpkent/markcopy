@@ -1,6 +1,6 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document actions. (The STL viewer is the one surface with no copy actions at all; see [STL models](#stl-models-stl) for why. The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document actions. (The STL viewer has a short menu of its own; see [STL models](#stl-models-stl). The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
 
 The top level is short: it names whatever you clicked ("Copy Email Address", "Copy Link", "Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Link > Selection > Code > a grid cell whose own text is a recognized email address or URL > Table > Diagram > Equation > Block. An ordinary grid cell, with no recognized address of its own, remains behind "Copy Table" and is reachable under **Copy as** > **Cell Text**. Thus a selection inside a table still gets "Copy Selection" at the top, not "Copy Table", and a link takes the top from both: right-clicking one names a single element, where a selection names a range that may not have been aimed at anything.
 
@@ -147,6 +147,10 @@ Each page has a real pdf.js text layer (transparent, selectable spans over the c
 
 Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that PDF in this exact same viewer, so every action and clipboard flavor above under [A page in the PDF preview](#a-page-in-the-pdf-preview) applies unchanged: **Copy Selection**, **Copy Page N as PNG**, **Copy as** for page or all text, and **Add Comment Here**. The one addition is **Recompile LaTeX**, which reruns the compile rather than copying anything, and is offered only here, never on a plain `.pdf`.
 
+### Open in Default App
+
+Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
+
 ### Always available
 
 | Action              | Output                     | Goes to                           |
@@ -158,9 +162,9 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 
 All four are also available without the preview focused, via the Command Palette: **MarkCopy: Copy Whole Document as Rich Text**, **MarkCopy: Save as PDF**, **MarkCopy: Save as Word Document**, and **MarkCopy: Save as PowerPoint**. Save as PDF assembles a standalone page (with the preview's CSS, KaTeX fonts, and local images inlined) and has a headless Chrome, Edge, or Chromium render it to the file you chose, so equations, diagrams, and highlighted code all carry over and the text stays selectable. There is no print dialog and no header or footer on the pages. With no such browser installed it falls back to opening the page in your default browser to print by hand (Ctrl/Cmd+P, then **Save as PDF**).
 
-**Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and images retain their supplied alt text (MarkCopy cannot invent alt text an image never had). Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](../README.md#save-as-word).
+**Save as Word writes a `.docx` in memory and needs nothing installed.** Where Save as PDF preserves the _look_ of the page, this preserves its _structure_, which is the part assistive software reads: headings become the built-in Heading 1-6 styles (so they carry an outline level and fill the Navigation Pane), a table's header row is marked as one, lists are real Word numbering, and images retain their supplied alt text (MarkCopy cannot invent alt text an image never had). Mermaid diagrams and equations are rasterized with their source as the alt text, so neither is silent. The export reports how many images had no alt text, since that is the one defect that quietly costs a document its audibility. See [Save as Word](guide/export.md#save-as-word).
 
-**Save as PowerPoint writes a `.pptx` in memory and needs nothing installed either.** Like Save as Word, it ships structure rather than a picture: headings become slide titles (a thematic break, `---`, also starts a new slide), lists are real bulleted paragraphs at their indent level, a table's header row is marked, images carry their alt text as the shape description, and links stay clickable. It differs from the docx export in one respect a page never has to worry about: a slide is a fixed canvas, not a flowing page, so content that overflows one is left overflowing rather than silently repaginated into a second slide, which would scramble a deliberate build. The export reports missing alt text the same way Save as Word does, plus images it could not embed and slides that likely ran past the bottom edge. See [Save as PowerPoint](../README.md#save-as-powerpoint).
+**Save as PowerPoint writes a `.pptx` in memory and needs nothing installed either.** Like Save as Word, it ships structure rather than a picture: headings become slide titles (a thematic break, `---`, also starts a new slide), lists are real bulleted paragraphs at their indent level, a table's header row is marked, images carry their alt text as the shape description, and links stay clickable. It differs from the docx export in one respect a page never has to worry about: a slide is a fixed canvas, not a flowing page, so content that overflows one is left overflowing rather than silently repaginated into a second slide, which would scramble a deliberate build. The export reports missing alt text the same way Save as Word does, plus images it could not embed and slides that likely ran past the bottom edge. See [Save as PowerPoint](guide/export.md#save-as-powerpoint).
 
 ## Notes
 
@@ -168,8 +172,8 @@ All four are also available without the preview focused, via the Command Palette
 - **Rich text is inline-styled.** Styles are baked into `style` attributes so formatting survives Gmail and Outlook, which discard `<style>` blocks and external CSS.
 - **CSV and TSV both offered.** TSV pastes as individual cells in Excel and Google Sheets most reliably (nothing to confuse it, since cell text rarely contains tabs). CSV is there for importers and tools that expect commas; it follows RFC 4180, quoting any field that contains a comma, quote, or newline.
 - **PNG copy needs clipboard image support.** It uses the async Clipboard API with a `ClipboardItem`. If the host blocks image writes you get a toast saying so, never a silent failure.
-- **Selection vs block Markdown.** "Copy Selection > Markdown" converts exactly the selected HTML back to Markdown (Turndown), so partial paragraphs and multi-block selections come through faithfully, though delimiters may be normalized (for example `*` for emphasis). "Copy Block > Markdown" instead returns the verbatim source of the whole block.
-- **Everything else (Preferences, Theme, sync scroll, and so on) lives under the "Preferences" submenu**, not in this matrix; see the [README](../README.md#features) and [Architecture](ARCHITECTURE.md#context-menu) for those.
+- **Selection vs block Markdown.** "Copy Selection > Markdown" converts exactly the selected HTML back to Markdown (Turndown), so partial paragraphs and multi-block selections come through faithfully, though delimiters may be normalized (for example `*` for emphasis). An empty table in the selection (`<table></table>`) is left out, and the rest of the selection still copies. "Copy Block > Markdown" instead returns the verbatim source of the whole block.
+- **Everything else (Preferences, Theme, sync scroll, and so on) lives under the "Preferences" submenu**, not in this matrix; see the [user guide](guide/settings.md#settings-without-leaving-the-preview) and [Architecture](ARCHITECTURE.md#context-menu) for those.
 
 ## Spreadsheet sheets (.xlsx / .xlsm)
 
@@ -214,9 +218,25 @@ Differences worth stating:
 
 ## STL models (.stl)
 
-The STL viewer has **no copy actions**, and its absence from this matrix is deliberate rather than an omission. Every row above copies something the reader can identify and a receiving app can use: text, a table of cells, an image of a diagram. An STL is an unstructured list of triangles with no text, no structure, and no author-intended visual, so there is no format to offer that is not a screenshot of an arbitrary camera angle. Right-clicking in the viewer does nothing; its toolbar is view controls only.
+The STL viewer's menu has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
 
-**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply either, for the same reason: all four serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
+| Action                       | Clipboard flavor | Pastes cleanly into                                     |
+| ---------------------------- | ---------------- | ------------------------------------------------------- |
+| **Copy View as PNG**         | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save View as PNG…**        | (writes a file)  | Anywhere, via a save dialog                             |
+| **Copy as > File Name**      | `text/plain`     | Anywhere                                                |
+| **Copy as > Full Path**      | `text/plain`     | A terminal, a script, another editor                    |
+| **Copy as > Dimensions**     | `text/plain`     | Anywhere (`X × Y × Z`, two decimals, as the overlay)    |
+| **Copy as > Triangle Count** | `text/plain`     | Anywhere (a plain integer, no thousands separators)     |
+
+Notes:
+
+- **The view is the canvas as it is on screen**, at the canvas's pixel size, with the viewport background (so the theme shows). The grid and wireframe appear if they are on. **Save View as PNG…** proposes `part.png` for `part.stl`.
+- **Both view actions and Dimensions and Triangle Count are greyed out until a model has loaded.** File Name and Full Path work even when the file was refused.
+- **View** holds Fit View, the camera presets (Front, Back, Left, Right, Top, Bottom, Isometric), and Wireframe and Grid checkboxes that mirror the toolbar buttons. **Preferences > Theme** writes `markcopy.theme`. **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
+- **A right-drag pans and does not open the menu.** Only a right click that stays within a few pixels does. The menu key and Shift+F10 open it too.
+
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: all four serialize a rendered HTML document, and the STL viewer renders into a WebGL canvas instead of one.
 
 ## Video (.mov / .mp4 / .m4v)
 
@@ -259,3 +279,31 @@ Notes:
 - **Both frame actions need `ImageDecoder`.** Where it is missing the GIF is shown in a plain image element and the two rows are greyed out under a "Frames unavailable in this viewer" label. PNG copy additionally needs clipboard image support, as elsewhere in this matrix.
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a canvas.
+
+## Images (.png, .jpg, .webp, .bmp, .ico, .avif, .svg)
+
+The image viewer's menu is about getting the picture, or a reference to it, somewhere else.
+
+| Action                         | Clipboard flavor | Pastes cleanly into                                     |
+| ------------------------------ | ---------------- | ------------------------------------------------------- |
+| **Copy Image as PNG**          | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save as PNG…**               | (writes a file)  | Anywhere, via a save dialog                             |
+| **Copy as > File Name**        | `text/plain`     | Anywhere                                                |
+| **Copy as > Full Path**        | `text/plain`     | A terminal, a script, another editor                    |
+| **Copy as > Markdown Image**   | `text/plain`     | A Markdown file in the same workspace                   |
+| **Copy as > HTML Image**       | `text/plain`     | An HTML file, an HTML email source                      |
+| **Copy as > Data URI**         | `text/plain`     | CSS, HTML, or Markdown that must carry the picture      |
+| **Copy SVG Source** (SVG only) | `text/plain`     | A text editor, a code file, an issue                    |
+
+Notes:
+
+- **The picture is copied at its own size**, not the size it is zoomed to, from any source format: the viewer draws it onto a canvas and exports a PNG. For a raster the size is the decoded one, so an EXIF-rotated JPEG copies as portrait, matching how it is shown; the header size is used only before the picture has loaded.
+- **An SVG has no pixel size**, so **Copy as > SVG Scale** sets one: 1x, 2x (the default), or 4x of its size. That size is the browser-resolved one when the root has a `width` or `height` (any CSS length), else the `viewBox`, else the decoded size. An SVG with `<foreignObject>` still exports, because it is loaded from a `data:` URL rather than a Blob URL. The choice lasts for the session and a side is capped at 16384 px. **Copy SVG Source** is unaffected by it: it is the file's text, uninterpreted, in the encoding the file uses (UTF-8, or UTF-16 LE or BE) and decoded to plain text.
+- **Markdown Image** is `![name](path)`, where `name` is the file name without its extension and `path` is relative to the workspace folder containing the file, with forward slashes and spaces and reserved characters (including `&`) percent-encoded. Outside a workspace the path is the bare file name. **HTML Image** is `<img src alt width height>` with the same path and the picture's dimensions when known (the decoded size once loaded); it omits `width` and `height` when the file failed to decode.
+- **Data URI** is `data:<type>;base64,...` using the type detected from the file's bytes, not its extension. Above 4 MiB the row is greyed out under a "Too large for a data URI" label.
+- **The saved file** is `<name>.png`, beside the original, chosen in a save dialog.
+- **A file that fails to decode** (the header is recognised but the browser cannot draw it) shows "Could not decode <name>"; **Copy Image as PNG** and **Save as PNG…** are greyed out and the SVG Scale rows are hidden. The text copies still work.
+- **A host error** (the file was deleted, cannot be read, or is above 64 MiB) drops the picture, so the menu offers only **File Name**, **Full Path**, **Open in Default App**, and **Reveal**. The same four remain for bytes that are "Not a recognised image".
+- **Copy Image as PNG** needs clipboard image support, as elsewhere in this matrix.
+
+**Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: there is no HTML document to serialize, only a picture.

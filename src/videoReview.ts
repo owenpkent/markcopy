@@ -1,14 +1,33 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { escapeGlobName } from './globEscape';
 import { isMap, isScalar, isSeq, parseDocument, type Pair, type YAMLMap, type YAMLSeq } from 'yaml';
 import type {
   FpsSource,
   ReviewErrorMessage,
   ReviewNote,
   ReviewStateMessage,
-  ReviewWebviewMessage,
 } from './review/protocol';
 import { reviewMarkdown } from './review/markdown';
+
+export {
+  MAX_NOTE_TEXT,
+  isReviewAdd,
+  isReviewDelete,
+  isReviewRestore,
+  reviewAddError,
+  type ReviewBounds,
+} from './review/validate';
+import {
+  isNumber,
+  isObject,
+  isPair,
+  isReviewAdd,
+  isReviewDelete,
+  isReviewRestore,
+  isString,
+  reviewAddError,
+} from './review/validate';
 import type { ReviewFile } from './review/schema';
 
 // The host half of video review: finds, reads, validates and watches the
@@ -44,13 +63,6 @@ export interface SidecarLoad {
   /** The file's own `fps`, when it is a positive number. */
   fps?: number;
 }
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const isString = (v: unknown): v is string => typeof v === 'string';
-const isUnit = (v: unknown): boolean => isNumber(v) && v >= 0 && v <= 1;
-const isPair = (v: unknown): boolean => Array.isArray(v) && v.length === 2 && v.every(isUnit);
 
 // Read as YAML 1.1 because PyYAML does: `yes`, `on` and `1:30` mean what Marker sees.
 const YAML_OPTS = { version: '1.1' } as const;
@@ -243,6 +255,9 @@ function toReviewNote(n: Record<string, unknown>): ReviewNote {
     done: n.done === true,
     created: isString(n.created) ? n.created : '',
   };
+  if (n.target === 'source' || n.target === 'render') {
+    note.target = n.target;
+  }
   if (isNumber(n.out) && n.out > note.at) {
     note.out = n.out;
   }
@@ -332,71 +347,6 @@ function isNotFound(err: unknown): boolean {
 
 /** A failure the toast can say as is. */
 export class EditError extends Error {}
-
-/** Longest note text a page may send. */
-export const MAX_NOTE_TEXT = 10_000;
-
-/** What the validators check times against. `durationSec` is absent when unknown. */
-export interface ReviewBounds {
-  durationSec?: number;
-  fps: number;
-}
-
-type AddMessage = Extract<ReviewWebviewMessage, { type: 'reviewAdd' }>;
-type DeleteMessage = Extract<ReviewWebviewMessage, { type: 'reviewDelete' }>;
-type RestoreMessage = Extract<ReviewWebviewMessage, { type: 'reviewRestore' }>;
-
-/** A key outside `allowed`: the messages come from a page, so extra fields are refused. */
-const extraKey = (msg: Record<string, unknown>, allowed: string[]) =>
-  Object.keys(msg).find((k) => !allowed.includes(k));
-
-/** Why a `reviewAdd` is refused, or null when it is fine. */
-export function reviewAddError(msg: unknown, bounds: ReviewBounds): string | null {
-  if (!isObject(msg)) {
-    return 'That note is not valid';
-  }
-  const extra = extraKey(msg, ['type', 'at', 'out', 'text', 'point']);
-  if (extra) {
-    return `That note has an unexpected field "${extra}"`;
-  }
-  if (!isNumber(msg.at) || msg.at < 0) {
-    return 'The note time must be a number of seconds, 0 or more';
-  }
-  const hasOut = msg.out !== undefined;
-  if (hasOut && (!isNumber(msg.out) || msg.out <= msg.at)) {
-    return 'The range end must be after its start';
-  }
-  if (msg.point !== undefined && !isPair(msg.point)) {
-    return 'The pin must be two numbers from 0 to 1';
-  }
-  if (!isString(msg.text) || msg.text.length > MAX_NOTE_TEXT) {
-    return `The note text must be ${MAX_NOTE_TEXT.toLocaleString('en-US')} characters or fewer`;
-  }
-  // One frame of slack, because the last frame starts a frame before the duration.
-  const limit =
-    bounds.durationSec !== undefined && bounds.durationSec > 0
-      ? bounds.durationSec + 1 / bounds.fps
-      : Infinity;
-  if (msg.at > limit || (hasOut && (msg.out as number) > limit)) {
-    return 'That time is past the end of the video';
-  }
-  return null;
-}
-
-export function isReviewAdd(msg: unknown, bounds: ReviewBounds): msg is AddMessage {
-  return reviewAddError(msg, bounds) === null;
-}
-
-const knownId = (id: unknown, ids: readonly string[]): id is string =>
-  isString(id) && ids.includes(id);
-
-export function isReviewDelete(msg: unknown, ids: readonly string[]): msg is DeleteMessage {
-  return isObject(msg) && !extraKey(msg, ['type', 'id']) && knownId(msg.id, ids);
-}
-
-export function isReviewRestore(msg: unknown): msg is RestoreMessage {
-  return isObject(msg) && !extraKey(msg, ['type']);
-}
 
 /** `datetime.now().isoformat(timespec="seconds")`: local time, no zone. */
 export function localTimestamp(d: Date): string {
@@ -1021,7 +971,7 @@ export class ReviewSession {
       // A RelativePattern on the video's folder, not the workspace, so a video
       // opened from outside the workspace is watched as well.
       const watcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(this.dir, sidecarName(this.videoName)),
+        new vscode.RelativePattern(this.dir, escapeGlobName(sidecarName(this.videoName))),
       );
       const reload = () => void this.reload();
       watcher.onDidChange(reload);

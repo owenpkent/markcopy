@@ -585,11 +585,14 @@ body.mc-pdf {
 }
 /* Hand tool: grab cursor while idle, grabbing while dragging. The pointer tool
    uses default cursors so text is selectable. */
-body.mc-pdf.mc-mode-hand {
+body.mc-pdf.mc-mode-hand,
+body.mc-image.mc-mode-hand {
   cursor: grab;
 }
 body.mc-pdf.mc-grabbing,
-body.mc-pdf.mc-grabbing * {
+body.mc-pdf.mc-grabbing *,
+body.mc-image.mc-grabbing,
+body.mc-image.mc-grabbing * {
   cursor: grabbing !important;
 }
 /* In hand mode the text layer must not swallow the drag; in pointer mode it is
@@ -884,7 +887,8 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   height: 16px;
   background: var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.18));
 }
-#mc-page-input {
+#mc-page-input,
+#mc-zoom-input {
   font: inherit;
   font-size: 12px;
   width: 52px;
@@ -896,6 +900,9 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   border-radius: 5px;
   -moz-appearance: textfield;
   appearance: textfield;
+}
+#mc-zoom-input {
+  width: 44px; /* the label's min-width, so the toolbar does not jump */
 }
 #mc-page-input::-webkit-outer-spin-button,
 #mc-page-input::-webkit-inner-spin-button {
@@ -1330,6 +1337,36 @@ body.mc-video .mc-rv-pending {
 body.mc-video .mc-rv-band--selected {
   --rv-band: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 30%, transparent);
+}
+/* A tick on the bar at each note's exact frame, so a merged badge does not hide
+   where its notes are. Centred on its x, like the thumb's line. */
+body.mc-video .mc-rv-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--mc-video-fg);
+  opacity: 0.75;
+}
+body.mc-video .mc-rv-tick--done {
+  opacity: 0.4;
+}
+body.mc-video .mc-rv-tick--selected {
+  background: var(--rv-accent);
+  opacity: 1;
+}
+/* Under a merged badge: a faint bracket from its first note to its last. */
+body.mc-video .mc-rv-span {
+  position: absolute;
+  bottom: 2px;
+  height: 4px;
+  box-sizing: border-box;
+  border: solid color-mix(in srgb, var(--mc-video-fg) 45%, transparent);
+  border-width: 0 1px 1px;
+  pointer-events: none;
 }
 /* The scrubber's thumb is the same 44px as a marker's target, so the two
    travel the same distance and a marker sits over the frame it names. */

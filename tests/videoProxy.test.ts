@@ -211,6 +211,21 @@ describe('parseProbe', () => {
     }
   });
 
+  it('answers blankly for a root or stream entry that is not an object', () => {
+    // JSON.parse returns null for "null", which has no .streams to read; a null
+    // entry in "streams" used to throw on its codec_type.
+    for (const bad of ['null', '5', '"x"', 'true', '[]']) {
+      expect(parseProbe(bad).codec, bad).toBe('');
+    }
+    const odd = parseProbe(
+      '{"streams":[null,1,"x",[],{"codec_type":"video","codec_name":"h264","tags":null},{"codec_type":"audio","codec_name":"aac"}],"format":null}',
+    );
+    expect(odd.codec).toBe('h264');
+    expect(odd.hasAlpha).toBe(false);
+    expect(odd.audioCodec).toBe('aac');
+    expect(odd.durationSec).toBe(0);
+  });
+
   it('treats a missing or zero duration as unknown', () => {
     expect(parseProbe(JSON.stringify({ format: { duration: 'N/A' } })).durationSec).toBe(0);
   });

@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { escapeAttr } from './escape';
 import { renderDeckHtml, DeckError } from './pptx/read';
-import { OoxmlEditorProvider, describeReadError, type OoxmlSession } from './ooxmlEditor';
+import {
+  OoxmlEditorProvider,
+  describeReadError,
+  type OoxmlSession,
+  type RenderResult,
+} from './ooxmlEditor';
 export type { ExportPdf, ExportXhtml } from './ooxmlEditor';
 
 // The settings a deck is drawn from. Anything outside this list cannot change
@@ -34,13 +39,14 @@ export class PptxEditorProvider extends OoxmlEditorProvider {
     return { render: () => this.renderDeck(document.uri) };
   }
 
-  private async renderDeck(uri: vscode.Uri): Promise<string> {
+  private async renderDeck(uri: vscode.Uri): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     const bytes = await vscode.workspace.fs.readFile(uri);
-    return renderDeckHtml(bytes, {
+    const deck = renderDeckHtml(bytes, {
       maxSlides: cfg.get<number>('pptx.maxSlides', 100),
       showNotes: cfg.get<boolean>('pptx.showNotes', true),
-    }).html;
+    });
+    return { html: deck.html, media: deck.media };
   }
 
   protected errorHtml(err: unknown): string {

@@ -1,10 +1,11 @@
-// Bundles the browser-side webview code. Six outputs:
+// Bundles the browser-side webview code. Seven outputs:
 //   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
 //   media/stl.js         STL preview (esm, bundles Three.js)
 //   media/video.js       video preview (esm)
 //   media/gif.js         GIF preview (esm)
+//   media/image.js       image preview (esm)
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
@@ -106,6 +107,14 @@ async function main() {
     run({
       ...shared,
       entryPoints: [{ in: 'src/webview/gif.ts', out: 'gif' }],
+      format: 'esm',
+      outdir: 'media',
+    }),
+    // Image preview: the GIF viewer's sibling for still pictures and SVG, drawn
+    // by a plain <img>, so it is its own entry point as well.
+    run({
+      ...shared,
+      entryPoints: [{ in: 'src/webview/image.ts', out: 'image' }],
       format: 'esm',
       outdir: 'media',
     }),

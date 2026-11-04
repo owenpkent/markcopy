@@ -2,13 +2,14 @@
 //
 // Free of the `vscode` module, like src/xlsx and src/csv.ts, so the whole
 // fidelity surface unit-tests directly: slide order, placeholder inheritance,
-// EMU-to-percent conversion, bullet nesting, table merges, the media budget,
+// EMU-to-percent conversion, bullet nesting, table merges, the media cap,
 // and scheme colour resolution are all exercised in tests/pptx without a
 // webview or a running editor.
 import { openZip, partText, type Parts, type ZipLimits } from '../../ooxml/zip';
 import { readDeck, type SlideSize } from './deck';
 import { readSlideRelInfo, resolveSlideContext, type SlideContext } from './layout';
-import { readSlideShapes, readSpeakerNotes, type MediaBudget } from './shape';
+import { readSlideShapes, readSpeakerNotes } from './shape';
+import { createMediaSink, type MediaItem } from '../../ooxml/media';
 import { renderDeck, renderSlide, truncationNote } from './render';
 
 export { OpcError as DeckError } from '../../ooxml/zip';
@@ -18,8 +19,10 @@ export interface ReadOptions {
   maxSlides?: number;
   /** Show each slide's speaker notes under it. Default true. */
   showNotes?: boolean;
-  /** Total budget, in bytes, for images inlined as data URIs. Default 16 MiB. */
+  /** Total cap, in bytes, on the images sent with the deck. Default 128 MiB. */
   maxMediaBytes?: number;
+  /** Cap on any single image. Default 32 MiB. */
+  maxImageBytes?: number;
   zipLimits?: ZipLimits;
 }
 
@@ -29,22 +32,22 @@ export interface DeckHtml {
   slides: number;
   /** Slides actually rendered, which is fewer when maxSlides bit. */
   rendered: number;
+  /** The images the HTML references by `data-mc-media`, each distinct part once. */
+  media: MediaItem[];
 }
 
 const DEFAULT_MAX_SLIDES = 100;
-const DEFAULT_MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 
 export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckHtml {
   const maxSlides = Math.max(1, opts.maxSlides ?? DEFAULT_MAX_SLIDES);
   const showNotes = opts.showNotes ?? true;
-  const media: MediaBudget = {
-    used: 0,
-    max: Math.max(0, opts.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES),
-  };
-  // One cache for the whole deck, not one per slide: a media part reused
+  // One sink for the whole deck, not one per slide: a media part reused
   // across slides (a logo, a repeated header image) is encoded once and
-  // charged against `media` once, no matter how many slides embed it.
-  const imageCache = new Map<string, string>();
+  // charged once, no matter how many slides embed it.
+  const media = createMediaSink({
+    maxTotalBytes: opts.maxMediaBytes,
+    maxItemBytes: opts.maxImageBytes,
+  });
 
   const parts = openZip(bytes, {
     limits: opts.zipLimits,
@@ -82,7 +85,6 @@ export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckH
       parts,
       slideRels: relInfo.rels,
       media,
-      imageCache,
       defaultTextStyle: deck.defaultTextStyle,
       ...slideContextFor(parts, relInfo.layoutPath, contextCache),
     });
@@ -95,6 +97,7 @@ export function renderDeckHtml(bytes: Uint8Array, opts: ReadOptions = {}): DeckH
     html: renderDeck(sections, truncationNote(rendered, totalSlides, toRender.length)),
     slides: totalSlides,
     rendered,
+    media: media.items,
   };
 }
 

@@ -159,12 +159,18 @@ function footnoteFixups(state: StateCore): void {
       const raw = srcLines.slice(startLine, endLine).join('\n');
       // Disabled only for the duration of this nested parse, so a real,
       // later `[^other]: ...` in the rest of the document is unaffected.
+      // The anchor rule is off too: the outer pass names these headings along
+      // with the rest of the document. Left on, it stamped them with ids from a
+      // slug list of their own, which the outer pass then took for ids the
+      // author wrote and threw on as duplicates, failing the whole preview.
       state.md.block.ruler.disable('footnote_def');
+      state.md.core.ruler.disable('anchor');
       let replacement: Token[];
       try {
         replacement = state.md.parse(raw, {});
       } finally {
         state.md.block.ruler.enable('footnote_def');
+        state.md.core.ruler.enable('anchor');
       }
       for (const rt of replacement) {
         if (rt.map) rt.map = [rt.map[0] + startLine, rt.map[1] + startLine];

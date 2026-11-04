@@ -19,6 +19,7 @@ const PDF_VIEW = 'markcopy.pdfPreview';
 const STL_VIEW = 'markcopy.stlPreview';
 const VIDEO_VIEW = 'markcopy.videoPreview';
 const GIF_VIEW = 'markcopy.gifPreview';
+const IMAGE_VIEW = 'markcopy.imagePreview';
 const MARKDOWN_VIEW = 'markcopy.markdownPreview';
 const CSV_VIEW = 'markcopy.csvPreview';
 const TEX_VIEW = 'markcopy.texPreview';
@@ -367,6 +368,42 @@ suite('MarkCopy custom editors', () => {
         tab?.viewType,
         GIF_VIEW,
         `${name} did not open in the MarkCopy GIF preview`,
+      );
+    }
+  });
+
+  test('.png, .PNG, .svg and .SVG open in the image preview, ahead of the built-in one', async () => {
+    // The built-in image preview claims *.png at "builtin" and an SVG opens in the
+    // text editor, so "default" outranks both. Distinct base names, for the same
+    // case-insensitive file system reason as the GIF test. A 1x1 PNG and a tiny
+    // SVG: this proves the registration, not the viewer.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4"/></svg>',
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const files: Array<[string, Buffer]> = [
+      ['pixel.png', png],
+      ['LOUD.PNG', png],
+      ['icon.svg', svg],
+      ['LOGO.SVG', svg],
+    ];
+    for (const [name, bytes] of files) {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      fs.writeFileSync(uri.fsPath, bytes);
+
+      await vscode.commands.executeCommand('vscode.open', uri);
+
+      const tab = await waitFor(() =>
+        customTabs().find((candidate) => candidate.uri === uri.toString()),
+      );
+      assert.strictEqual(
+        tab?.viewType,
+        IMAGE_VIEW,
+        `${name} did not open in the MarkCopy image preview`,
       );
     }
   });

@@ -40,4 +40,10 @@ describe('htmlToMarkdown', () => {
     expect(md).toMatch(/-\s+one/);
     expect(md).toMatch(/-\s+two/);
   });
+
+  it('drops a table with no rows instead of throwing', async () => {
+    // Found by the paste-export fuzz target: the GFM plugin read rows[0] of it.
+    expect(await htmlToMarkdown('before<table></table>after')).toBe('beforeafter');
+    expect(await htmlToMarkdown('<table><tbody></tbody></table>')).toBe('');
+  });
 });

@@ -1,0 +1,41 @@
+# libFuzzer dictionary for the gif target (src/webview/gifInfo.ts parseGif).
+# parseGif accepts the signature GIF87a or GIF89a, then walks blocks by
+# introducer: 0x21 extension, 0x2c image descriptor, 0x3b trailer.
+sig87="GIF87a"
+sig89="GIF89a"
+sig_prefix="GIF"
+# Logical screen descriptor packed byte: bit 0x80 means a global colour table follows.
+packed_gct="\x80"
+packed_gct_max="\xf7"
+packed_none="\x00"
+# Block introducers (intro === 0x3b / 0x21 / 0x2c).
+trailer="\x3b"
+extension="\x21"
+image_descriptor="\x2c"
+# Extension labels: 0xf9 graphic control (frame delay), 0xff application,
+# plus the comment and plain-text labels parseGif skips by sub-block.
+gce_label="\x21\xf9\x04"
+gce_full="\x21\xf9\x04\x00\x0a\x00\x00\x00"
+gce_transparent="\x21\xf9\x04\x09\x00\x00\x00\x00"
+gce_zero_delay="\x21\xf9\x04\x00\x00\x00\x00\x00"
+gce_disposal="\x21\xf9\x04\x08\x0a\x00\x00\x00"
+app_label="\x21\xff\x0b"
+comment_label="\x21\xfe"
+text_label="\x21\x01\x0c"
+# Application identifiers parseGif checks (NETSCAPE2.0 or ANIMEXTS1.0), then
+# the loop sub-block (length 3, id 1, little-endian repeat count, 0 = forever).
+netscape="NETSCAPE2.0"
+animexts="ANIMEXTS1.0"
+loop_forever="\x03\x01\x00\x00\x00"
+loop_once="\x03\x01\x01\x00\x00"
+loop_big="\x03\x01\xff\xff\x00"
+netscape_block="\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00"
+other_app="XMP DataXMP"
+# Image descriptor: separator then local colour table flag (flags & 0x80).
+image_lct="\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x80"
+image_nolct="\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00"
+# Sub-block structure: a block size byte followed by data, ended by a zero byte.
+block_end="\x00"
+min_code_size="\x02"
+sub_block_255="\xff"
+width_height_big="\xff\xff\xff\xff"

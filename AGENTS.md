@@ -10,7 +10,7 @@ boundary.
 - `src/extension.ts` owns activation, Markdown/CSV preview lifecycle, and export
   orchestration. Other preview providers live beside it in `src/`.
 - `src/webview/` contains browser behavior. `src/previewShell.ts` provides the
-  shared Markdown/CSV/Excel/PowerPoint shell; PDF, STL, video, and GIF have separate viewers.
+  shared Markdown/CSV/Excel/PowerPoint shell; PDF, STL, video, GIF, and image have separate viewers.
 - `src/xlsx/` reads workbooks, `src/pptx/` reads and builds decks, and `src/docx/` builds
   Word documents; `src/ooxml/` holds the container code they share.
 - Edit source files and `media/preview.css`, not generated bundles. `esbuild.js`
@@ -48,8 +48,8 @@ CI before merging them.
 
 - Use `rg` for searches and never use em dashes in text or comments.
 - Update [COPY-MATRIX](docs/COPY-MATRIX.md) when copy actions or formats change.
-  Keep the README, architecture, testing guide, and changelog aligned with
-  substantive behavior changes. Record measured results, not assumed coverage.
+  Keep the README, user guide (`docs/guide/`), architecture, testing guide,
+  and changelog aligned with substantive behavior changes. Record measured results, not assumed coverage.
 - Follow [RELEASING](docs/RELEASING.md) for releases. Tag the complete release
   commit after updating the changelog, and publish the smoke-tested VSIX to
   both registries. A push or tag alone does not publish the extension.

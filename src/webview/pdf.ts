@@ -3,9 +3,11 @@ import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
+  PageViewport,
   RenderTask,
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -67,6 +69,13 @@ const MAX_CANVAS_PIXELS = 16_777_216;
 // value as GNOME Terminal's "Green on black" profile. Matches the Markdown
 // preview's `--mc-fg` in the green palette (media/preview.css).
 const PHOSPHOR_GREEN = '#00ff00';
+const PHOSPHOR_GREEN_RGB = [0, 255, 0] as const;
+
+// The parts of a page's pdf.js operator list the dark-page recolour reads.
+interface PageOps {
+  fnArray: number[];
+  argsArray: unknown[];
+}
 
 let observer: IntersectionObserver | null = null;
 let zoomTimer = 0;
@@ -90,8 +99,20 @@ let commentSeq = 0;
 window.addEventListener('message', (e: MessageEvent) => {
   const msg = e.data;
   if (msg?.type === 'load') {
+    const editing = noteEl && noteComment ? noteComment : null;
     comments = Array.isArray(msg.comments) ? (msg.comments as Comment[]) : [];
     commentSeq = comments.length;
+    if (editing) {
+      // An open editor holds the user's draft in its textarea. Bind it to the
+      // refreshed comment so Save persists the draft; a comment the fresh data
+      // lacks (new, never saved) is kept so the draft is not lost.
+      const fresh = comments.find((x) => x.id === editing.id);
+      if (fresh) {
+        noteComment = fresh;
+      } else {
+        comments.push(editing);
+      }
+    }
     load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
   } else if (msg?.type === 'setTheme' && typeof msg.value === 'string') {
     // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
@@ -336,25 +357,36 @@ async function renderPage(n: number): Promise<void> {
 
   renderTasks.get(n)?.cancel();
   const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
-  const task = page.render({ canvas, canvasContext: ctx, viewport, transform });
+  // The filter keeps every operation; it is only there to hand back the page's
+  // operator list, which tells us whether the page paints any images.
+  let opList: PageOps | undefined;
+  const task = page.render({
+    canvas,
+    canvasContext: ctx,
+    viewport,
+    transform,
+    operationsFilter: (_i, list) => {
+      opList = list;
+      return true;
+    },
+  });
   renderTasks.set(n, task);
   await task.promise;
 
   // Dark/green pages: recolour the rasterised pixels here rather than with a CSS
   // filter. A CSS filter forces the browser to re-rasterise the layer at CSS
   // resolution (blurry on HiDPI); baking it into the bitmap keeps it crisp.
-  tintCanvas(ctx, canvas, pageAppearance());
+  const appearance = pageAppearance();
+  if (appearance === 'normal' || !opList || !hasImageOps(opList.fnArray)) {
+    tintCanvas(ctx, canvas, appearance);
+  } else {
+    await tintKeepingImages(n, ctx, canvas, appearance, viewport, transform, opList);
+  }
 
   // Text layer: transparent, selectable spans over the canvas.
   const textContent = await page.getTextContent();
   if (!pageText.has(n)) {
-    pageText.set(
-      n,
-      textContent.items
-        .map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : ''))
-        .join('')
-        .trim(),
-    );
+    pageText.set(n, flattenText(textContent));
   }
   const textLayerDiv = wrap.querySelector('.textLayer') as HTMLElement;
   textLayerDiv.innerHTML = '';
@@ -676,20 +708,25 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
   el.style.left = `${Math.min(window.innerWidth - 280, Math.max(8, rect.left))}px`;
   el.style.top = `${Math.min(window.innerHeight - 170, rect.bottom + 6)}px`;
 
+  // A reload swaps in fresh comment objects; `noteComment` is rebound to the
+  // current one, so act on that rather than the object this editor opened with.
+  const current = () => noteComment ?? c;
   const save = () => {
-    c.text = textarea.value.trim();
-    if (!c.text) {
+    const target = current();
+    target.text = textarea.value.trim();
+    if (!target.text) {
       remove();
       return;
     }
     saveComments();
-    placePins(c.page);
+    placePins(target.page);
     closeNote();
   };
   const remove = () => {
-    comments = comments.filter((x) => x.id !== c.id);
+    const target = current();
+    comments = comments.filter((x) => x.id !== target.id);
     saveComments();
-    placePins(c.page);
+    placePins(target.page);
     closeNote();
   };
 
@@ -702,7 +739,7 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
     textarea.addEventListener(
       'blur',
       () => {
-        if (!textarea.value.trim() && noteComment === c) {
+        if (!textarea.value.trim() && noteComment?.id === c.id) {
           remove();
         }
       },
@@ -724,6 +761,9 @@ function closeNote(): void {
 // never sends one, so this stays false and the "Recompile LaTeX" menu entry
 // never appears there.
 let texMode = false;
+// True once a compile has finished and its PDF is on screen, so there is a file
+// for "Open PDF in Default App" to open.
+let texHasPdf = false;
 
 /**
  * Compile status pushed by the host's tex editor provider (src/texEditor.ts,
@@ -796,6 +836,9 @@ function ensureTexOverlay(): TexOverlay {
 
 function handleTexState(msg: TexStateMessage): void {
   texMode = true; // gates the "Recompile LaTeX" context-menu entry, from here on
+  if (msg.state === 'ok') {
+    texHasPdf = true;
+  }
   const overlay = ensureTexOverlay();
 
   if (msg.state === 'ok') {
@@ -852,11 +895,11 @@ document.addEventListener('contextmenu', (e) => {
     variants.push({
       kind: 'item',
       label: `Page ${n} Text`,
-      run: () => copyText(pageText.get(n) ?? ''),
+      run: async () => copyText(await textOfPage(n)),
     });
   }
 
-  variants.push({ kind: 'item', label: 'All Text', run: () => copyText(allText()) });
+  variants.push({ kind: 'item', label: 'All Text', run: async () => copyText(await allText()) });
   entries.push({ kind: 'submenu', label: 'Copy as', entries: variants });
 
   if (pageEl) {
@@ -880,6 +923,12 @@ document.addEventListener('contextmenu', (e) => {
   }
 
   entries.push({ kind: 'divider' });
+  entries.push({
+    kind: 'item',
+    label: texMode ? 'Open PDF in Default App' : 'Open in Default App',
+    disabled: texMode && !texHasPdf,
+    run: () => vscode.postMessage({ type: 'openExternal' }),
+  });
   entries.push({
     kind: 'item',
     label: revealLabel(),
@@ -990,6 +1039,70 @@ function tintCanvas(
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.restore();
+}
+
+// Recolour a page that paints images without turning them into negatives: render
+// its images alone onto a transparent canvas (see pdfRecolour) and keep true
+// colours wherever that coverage lands. A scan, where an image covers nearly the
+// whole page, and a page whose clips the coverage render cannot reproduce fall
+// back to plain inversion.
+async function tintKeepingImages(
+  n: number,
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  appearance: 'inverted' | 'green',
+  viewport: PageViewport,
+  transform: number[] | undefined,
+  opList: PageOps,
+): Promise<void> {
+  const keep = imageCoverageOps(opList.fnArray, opList.argsArray);
+  const coverage = keep && (await renderOps(n, keep, canvas, viewport, transform));
+  if (!coverage) {
+    tintCanvas(ctx, canvas, appearance);
+    return;
+  }
+  const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (recolourKeepingImages(page.data, coverage, appearance, PHOSPHOR_GREEN_RGB)) {
+    ctx.putImageData(page, 0, 0);
+  } else {
+    tintCanvas(ctx, canvas, appearance);
+  }
+}
+
+// Render the operations `keep` selects onto a transparent scratch canvas the size
+// of `like`, and return its pixels.
+async function renderOps(
+  n: number,
+  keep: boolean[],
+  like: HTMLCanvasElement,
+  viewport: PageViewport,
+  transform: number[] | undefined,
+): Promise<Uint8ClampedArray | null> {
+  const scratch = document.createElement('canvas');
+  scratch.width = like.width;
+  scratch.height = like.height;
+  // Create the context here, with alpha, before pdf.js sees the canvas: given a
+  // `canvas`, pdf.js asks for an opaque one (`alpha: false`), but a canvas hands
+  // back the context it already has whatever options a later call passes, so
+  // this one stays transparent where nothing lands.
+  const sctx = scratch.getContext('2d', { alpha: true, willReadFrequently: true });
+  if (!sctx) {
+    return null;
+  }
+  const task = pages[n - 1].render({
+    canvas: scratch,
+    canvasContext: sctx,
+    viewport,
+    transform,
+    background: 'rgba(0,0,0,0)',
+    operationsFilter: (i) => keep[i] ?? true,
+  });
+  renderTasks.set(n, task);
+  await task.promise;
+  const data = sctx.getImageData(0, 0, scratch.width, scratch.height).data;
+  scratch.width = 0;
+  scratch.height = 0;
+  return data;
 }
 
 // Session-only quick invert (does not touch the persisted theme): flips between
@@ -1289,12 +1402,36 @@ buildToolbar();
 // ---------------------------------------------------------------------------
 // Clipboard
 // ---------------------------------------------------------------------------
-function allText(): string {
-  return Array.from(pageText.keys())
-    .sort((a, b) => a - b)
-    .map((n) => pageText.get(n) ?? '')
-    .join('\n\n')
+function flattenText(textContent: { items: Array<unknown> }): string {
+  return textContent.items
+    .map((it) => {
+      const item = it as { str?: string; hasEOL?: boolean };
+      return typeof item.str === 'string' ? item.str + (item.hasEOL ? '\n' : ' ') : '';
+    })
+    .join('')
     .trim();
+}
+
+// `pageText` only fills as pages are rasterised, so it is an accelerator: a page
+// that has not been rendered yet is read straight from pdf.js.
+async function textOfPage(n: number): Promise<string> {
+  const cached = pageText.get(n);
+  if (cached !== undefined) return cached;
+  const source = doc;
+  if (!source) return '';
+  const page = pages[n - 1] ?? (await source.getPage(n));
+  const text = flattenText(await page.getTextContent());
+  if (doc === source) pageText.set(n, text);
+  return text;
+}
+
+async function allText(): Promise<string> {
+  const count = doc?.numPages ?? 0;
+  const parts: string[] = [];
+  for (let n = 1; n <= count; n++) {
+    parts.push(await textOfPage(n));
+  }
+  return parts.join('\n\n').trim();
 }
 
 function copyText(text: string): void {
@@ -1329,15 +1466,14 @@ async function copyPagePng(n: number): Promise<void> {
   }
 }
 
-// A canvas holding the page in its original colours. For `inverted` the on-screen
-// bitmap is an exact inversion, so we invert a throwaway copy back (fast). For
-// `green` the phosphor multiply is not exactly reversible, so re-rasterise the
-// page clean from pdf.js instead.
+// A canvas holding the page in its original colours. The on-screen bitmap of a
+// dark or green page is not reversible (green's multiply loses information, and
+// images keep their true colours under either), so re-rasterise it clean.
 async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
   const appearance = pageAppearance();
   const onscreen = wrappers[n - 1].querySelector('canvas') as HTMLCanvasElement;
 
-  if (appearance === 'green') {
+  if (appearance !== 'normal') {
     const page = pages[n - 1];
     const viewport = page.getViewport({ scale });
     const outputScale = outputScaleFor(viewport);
@@ -1353,19 +1489,6 @@ async function truePageCanvas(n: number): Promise<HTMLCanvasElement> {
     return onscreen;
   }
 
-  if (appearance === 'inverted') {
-    const off = document.createElement('canvas');
-    off.width = onscreen.width;
-    off.height = onscreen.height;
-    const octx = off.getContext('2d');
-    if (octx) {
-      octx.drawImage(onscreen, 0, 0);
-      octx.globalCompositeOperation = 'difference';
-      octx.fillStyle = '#fff';
-      octx.fillRect(0, 0, off.width, off.height);
-      return off;
-    }
-  }
   return onscreen;
 }
 

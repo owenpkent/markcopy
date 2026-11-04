@@ -6,6 +6,7 @@
 // this HTML is also what html-to-image rasterizes for Copy as PNG and what
 // headless Chrome prints for Save as PDF.
 import { escapeAttr, escapeHtml } from '../../escape';
+import { mediaAttr } from '../../ooxml/media';
 import { clamp, fmtNum } from './format';
 import {
   alignCss,
@@ -95,7 +96,7 @@ function renderShape(shape: RenderShape, size: SlideSize): string {
     case 'picture':
       return (
         `<img class="mc-pptx-shape mc-pptx-pic" style="${boxStyle(shape.geom, size)}" ` +
-        `src="${shape.content.dataUri}" alt="${escapeAttr(shape.content.alt)}">`
+        `${mediaAttr(shape.content.mediaId)} alt="${escapeAttr(shape.content.alt)}">`
       );
     case 'table':
       return renderTable(shape.content.table, shape.geom, size);

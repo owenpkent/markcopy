@@ -15,15 +15,59 @@ The manual layer is smaller than it was. What keeps a row in it is needing a rea
 
 ### Fuzzing
 
-Seven parsers read files the user did not write, so they are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), XML (`xml`), CSV (`csv`), video notes files (`review`) and Markdown (`markdown`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue. It is not part of `npm test`.
+Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), video notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
 
 ```bash
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
 ```
 
-The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding.
+The `image` target also runs once per format (`image-png`, `image-jpeg`, `image-webp`, `image-bmp`, `image-ico`, `image-avif`, `image-svg`): `fuzz/run.js` sets `FUZZ_IMAGE_FORMAT`, and the target prefixes the fuzzer's bytes with that format's magic so every input reaches its header parser instead of failing the sniff in the first bytes. Each is seeded from the files of that format in `fuzz/corpus/image/`, and `fuzz/dict/image.dict` (chunk types, markers, boxes, SVG attributes and units) is passed as a libFuzzer dictionary. A 60 second run on 2026-10-30 (Windows, one core) ended at `cov: 306` for `image` (catch-all), `cov: 65` for `image-png` (the PNG parser is one IHDR read, so it saturates at once) and `cov: 155` for `image-svg`, with no crash.
+
+Two targets check a property rather than only looking for crashes. `links` throws when a href a browser reads as `javascript:`, `data:`, `file:` or any scheme other than `http`, `https` and `mailto` is both followed by the host (`hostFollowsLink`) and classified as an external link (`classifyLink`). `markdown-html` renders the input, runs it through DOMPurify in jsdom with the defaults the webview uses (`DOMPurify.sanitize` in `src/webview/main.ts`), and throws if a `<script>`, an `on*` attribute or a `javascript:` / `vbscript:` URL survives. It covers that one sanitize call, not the later KaTeX or Mermaid upgrades, and jsdom is not a browser, so a mutation-XSS difference between the two would not show. `paste-export` is the one async target; `fuzz/run.js` leaves out `--sync` for it. A target whose harness leaks memory can declare `export const SESSION_SECONDS = <n>`; `fuzz/run.js` then spends the time budget in fresh processes of at most that length, which share the evolved corpus (`markdown-html` uses 90 s, because DOMPurify under jsdom keeps every document it parses).
+
+The script transpiles `src/` and the targets to `out/fuzz/` with esbuild, then runs Jazzer.js with only that code instrumented. The evolved corpus is kept in `fuzz/.corpus/<name>/` and crashing inputs land in `fuzz/crashes/<name>/` as `crash-<hash>` (both untracked). A target catches only the errors the code raises on purpose (`OpcError`, saxes' positioned XML errors, `EditError`); anything else, a hang or an out-of-memory is a finding. The one third-party exception is `paste-export`, which ignores a `TypeError` whose stack is inside `@mixmark-io/domino` (`isDominoParserBug` in `fuzz/targets/expected.ts`): domino is the DOM turndown uses under Node only, and the shipped webview parses with the browser's `DOMParser`. Its crashing input is kept in `fuzz/corpus/paste-export/` so the fuzzer replays it.
+
+Each target can carry a libFuzzer dictionary, `fuzz/dict/<name>.dict`, which `fuzz/run.js` passes as `-dict=`. A dictionary is a list of tokens (one `name="token"` per line, `\xNN` for binary bytes, `#` for comments) that the mutator splices into inputs: format keywords, magic numbers, element and message names it would otherwise take a long time to find by chance. To add one, read the parser the target calls, list the strings and byte sequences it branches on, and save them under the target's name; a target with no file runs without. Measured on 2026-10-30, one 60 s run per cell on a Windows dev machine from an empty evolved corpus (`cov` is libFuzzer's edge count, `ft` its feature count; one run each, so differences of a few percent are noise):
+
+| Target   | cov without | cov with | ft without | ft with |
+| -------- | ----------- | -------- | ---------- | ------- |
+| xlsx     | 419         | 419      | 1273       | 1251    |
+| markdown | 74          | 74       | 449        | 451     |
+| messages | 518         | 518      | 747        | 762     |
+
+The dictionaries did not move coverage in 60 s, which is expected for xlsx (the input is deflated zip data, so tokens rarely land where the XML parser sees them) and for markdown (the seed corpus already reaches most of the parser). The first `messages` run without a dictionary crashed after 15,856 executions (a `Number()` call on a hostile `gridOp` field in `src/messages/markdown.ts`, reported in the pull request); the run in the table is a second one.
 
 To turn a finding into a regression test, fix the bug, then copy the crash file into `tests/fixtures/` and add a Vitest case that feeds it to the same function and asserts it either returns or throws the documented error. Copy a small input into `fuzz/corpus/<name>/` too if it reaches code the seeds do not.
+
+#### Seed corpus
+
+Seeds are small real files, not hand-typed headers: a stub seed gives the fuzzer nothing to mutate, and an oversized one slows every run. The caps are 2 KB for `gif`, 4 KB for `video-probe`, 8 KB for `zip`/`xlsx`/`pptx`/`docx`, and a few KB for text targets. A few older Word and PowerPoint seeds (`docx/pandoc.docx`, `docx/comments.docx`, `docx/equations-lo.docx`, `pptx/sample.pptx`, and their copies in `zip/`) predate the caps and exceed them; shrink them with the merge below when they are next touched. Name a seed by what it contains.
+
+How the added seeds were made (PIL, ffmpeg and LibreOffice 26.2 were available; ImageMagick was not; the image target is not on `main`, so it has none):
+
+| Target                      | Seed                                                                                                     | Made with                                                                                                                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gif`                       | `animated-loop-forever.gif` (3 frames, NETSCAPE 2.0 loop block, 253 B), `still.gif` (91 B)               | Pillow: `Image.save(..., save_all=True, loop=0, duration=[100, 100, 200])`, and a plain `save('still.gif')`                                                                                                                                 |
+| `docx`, `zip`               | `heading-table-list-image.docx`                                                                          | The repo's own writer: `htmlToDocx` from `src/docxExport.ts` on a heading, table with a colspan, nested list, ordered list and a PNG data URI                                                                                               |
+| `pptx`, `zip`               | `two-slides-table-image.pptx`                                                                            | `htmlToPptx` from `src/pptxExport.ts` on an h1 slide with a list and an h2 slide with a table and an image                                                                                                                                  |
+| `xlsx`, `zip`               | `libreoffice-two-sheets-merged-formula-date.xlsx`                                                        | A flat ODS (two sheets, a merged A5:C5, `=SUM(B2:B3)`, ISO dates) converted with `soffice --headless --convert-to xlsx`                                                                                                                     |
+| `xml`                       | worksheet, workbook, slide and document parts                                                            | Unzipped from the three files above (`sheet1.xml`, `workbook.xml`, `slide2.xml`, `document.xml`)                                                                                                                                            |
+| `csv`                       | `csv-quoted-embedded-newline-crlf.csv`, `csv-bom-semicolon-crlf.csv`, `libreoffice-semicolon-export.csv` | Python `csv.writer` with CRLF (embedded quotes, comma and newline in a field; UTF-8 BOM, `;` delimiter), and `soffice --convert-to csv:"Text - txt - csv (StarCalc)":59,34,76,1`. The first byte is the delimiter selector the target reads |
+| `stl`                       | `tetrahedron-binary.stl`, `tetrahedron-ascii.stl`                                                        | Python `struct` (80-byte header, count, 4 triangles with computed normals) and the same mesh as ASCII                                                                                                                                       |
+| `video-probe`               | `ffprobe-*.seed` (H.264/AAC mp4, ProRes 4444 mov, VP9 webm)                                              | `ffmpeg -f lavfi -i testsrc=size=64x48:rate=10:duration=1 ...` clips, then the exact ffprobe call from `probeArgs` in `src/videoProxy.ts`, a NUL, and `ffmpeg -progress pipe:1` output                                                      |
+| `review`                    | `add-*.review.yaml`                                                                                      | Copied from `tests/fixtures/review/edit/*.after.review.yaml` (generated by `tests/fixtures/review/generate.py`)                                                                                                                             |
+| `markdown`, `markdown-html` | `kitchen-sink.md`, `html-blocks-and-refs.md`, `equations.md`                                             | Written as documents exercising tables, math, mermaid, footnotes, task lists, nested lists and HTML blocks; `equations.md` is `tests/fixtures/docx/equations.md`                                                                            |
+
+Treat any downloaded or generated binary seed as untrusted data: write it into `fuzz/corpus/<name>/` and never run it.
+
+To minimize a corpus, run libFuzzer's merge mode through Jazzer.js:
+
+```bash
+npm run fuzz:merge -- xlsx                  # committed seeds + fuzz/.corpus/xlsx -> fuzz/.corpus-min/xlsx
+npm run fuzz:merge -- xlsx path/to/corpus   # or merge an unpacked nightly corpus instead
+```
+
+It runs `-merge=1`, which keeps only the inputs that add coverage over the others, and writes them to a fresh `fuzz/.corpus-min/<name>/` (untracked, recreated each time). To start from the nightly cache, download the `fuzz-corpus-<name>-*` cache from the Actions page, unpack it, and pass its directory. On Windows with Jazzer.js 4 the merge runs but libFuzzer records no coverage for any input (tested on `gif`: 89 files in, 0 features), so the output is empty and the script exits 3; run the merge on Linux (a container or the CI runner). Then look at what survived: keep inputs under the caps above, copy the small, well-named ones back into `fuzz/corpus/<name>/`, and record in the PR which target was minimized and the file counts before and after. Do not commit a whole evolved corpus.
 
 ### The webview E2E layer
 
@@ -121,6 +165,7 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] ☑ Right-click a link, **Copy Link** (top-level): the target arrives, not the words that stand in for it. **Copy as** -> **Markdown** gives `[text](target)`.
 - [ ] ★ **Copy Whole Document** (top-level menu, or the command palette's **Copy Whole Document as Rich Text**), paste into an email draft: formatting intact.
 - [ ] Every successful copy shows a toast.
+- [ ] **Open in Default App** (above the Reveal row) opens the `.md` file in the operating system's default app for Markdown. Repeat on a CSV, an Excel sheet, a PowerPoint deck, and a Word document: each opens its own file in its default app. In an untitled Markdown document it shows "This file is not on disk" in the status bar and opens nothing.
 - [ ] Right-click something that matches more than one context (for example, select text inside a table): the top level shows **Copy Selection**, and **Copy as** splits into headed sections (`SELECTION`, `TABLE`) rather than one flat list.
 - [ ] Select `AT&T C++` in the prose, right-click -> **Search Google for "AT&T C++"**: the browser opens a Google search for exactly `AT&T C++`, not for `AT`. Selecting a long passage shows only its first 30 characters in the row, and the search still opens.
 - [ ] Select a sentence containing an inline equation, then search it: the query has the equation once, not its hidden MathML twin as well. In a CSV grid, a selection across rows searches the cell text without the row numbers.
@@ -131,6 +176,8 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.
 - [ ] Green on black is pure `#00ff00` on black (not a soft mint), and copied/exported output still forces light styling.
 - [ ] **Sync scroll**, **Auto-open preview**, **Math**, and **Footnotes** toggles under **Preferences** write through to settings; **MarkCopy Settings...** (also under **Preferences**) and the gear icon both open the MarkCopy settings page.
+- [ ] Every setting under **Preferences** still applies from the menu: **Theme** (all four), **Sync scroll**, **Auto-open preview**, **Math** and **Footnotes** each take effect and show in settings. The host accepts only these five keys from the page (`src/messages/settings.ts`), so a row that silently does nothing means the allow-list and the menu have drifted apart.
+- [ ] Right-click to open the menu, then dismiss it each way: click on empty page, press Escape, click into the text editor beside the preview, and switch to another window. Each closes every panel, submenus included. Repeat on a CSV grid, a sheet, a deck and a Word document.
 - [ ] Arrow keys navigate the menu: Down/Up move between rows, Right or Enter opens a submenu (**Copy as**, **Preferences**, **Theme**), Left or Escape steps back out, and Enter/Space activates the highlighted row.
 - [ ] ☑ With sync scroll on, scrolling the editor scrolls the preview to match, and scrolling the preview scrolls the editor to match.
 - [ ] ☑ Neither surface fights the other: drag the preview's scrollbar slowly and it keeps going where you put it instead of jumping back to a block boundary. Same for the editor.
@@ -199,7 +246,8 @@ Open [sample.docx](../sample.docx) (repo root), then a real document of your own
 - [ ] A header shows once at the top and a footer once at the bottom, muted, with no page number. **Copy Whole Document**: neither is in the paste.
 - [ ] Text boxes and shapes with text show as bordered boxes under their paragraph, once each. A document with a comment shows the highlighted range with a small marker and a Comments list at the end (replies nested, resolved labelled); the marker link scrolls to the comment and the arrow goes back. Paste a whole-document copy into Word: the commented words are plain, with no highlight, marker, or comments.
 - [ ] A text box that contains a picture shows the picture once, inside the box. Select text across a comment marker and the Comments list, **Copy Selection**, and paste into a plain-text editor: the comment markers and Comments text are absent, paragraphs are on separate lines, and table cells are tab-separated.
-- [ ] A document that repeats one large image (or a chart) many times shows the first copies, then placeholders and a note at the end that some repeated images or charts are not shown.
+- [ ] A document that repeats one large image many times shows every copy. One that repeats a chart many times shows the first copies, then placeholders and a note at the end that some repeated images or charts are not shown.
+- [ ] A document or deck well over 25 MB of photographs (a dozen 4000 px camera JPEGs) opens with its text visible before the pictures finish filling in, and every picture shows. Re-save it from Word or PowerPoint while the preview is open: it redraws with every picture, none blank. **Save as PDF**, **Save as Word**, **Save as PowerPoint**, and **Copy Rich Text** pasted into Word each carry the pictures, and the exported file is far smaller than the source (pictures are downscaled to 2048 px on the long side). **Copy as** > **Markdown** on a selection with a picture gives a `data:` image, not a `blob:` URL.
 - [ ] A chart shows as a table under a caption with its title and type. Right-click it: **Copy as** > CSV and TSV paste into a spreadsheet with a header row and one column per series.
 - [ ] Replace the file on disk (re-save from Word): the preview redraws. Open a text file renamed to `.docx`: the panel says it is not a document rather than failing to open.
 
@@ -306,6 +354,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Select text with the Pointer tool; right-click, top-level **Copy Selection** pastes the selection.
 - [ ] Right-click -> **Copy as** -> **Page N Text** and **Copy as** -> **All Text** paste the expected plain text.
 - [ ] ★ Right-click a page, top-level **Copy Page N as PNG** yields a true-color page image even when the viewer shows dark or green pages.
+- [ ] Right-click -> **Open in Default App** opens the `.pdf` in the default PDF reader.
 
 ### Comments
 
@@ -315,8 +364,10 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 ### Theming
 
 - [ ] ★ Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black re-tint the pages; Green on black renders green-on-black phosphor in pure `#00ff00`.
+- [ ] In Dark and Green on black, a PDF with photographs, a transparent logo, and a rotated picture inverts its text and background while every picture keeps its true colours, with no white box around the logo. A scanned PDF (one full-page image) still inverts as a whole. **Copy Page N as PNG** copies the page in true colours.
 - [ ] Right-click -> **Preferences**, the **Dark Pages** / **Light Pages** quick toggle changes the pages for this session only (the saved `markcopy.theme` is untouched).
 - [ ] Changing the theme from a Markdown preview (or settings.json) re-tints an already-open PDF.
+- [ ] Open the menu and dismiss it by clicking on the page, by Escape, and by clicking into the editor beside it: each closes the menu. After **Theme** is picked, the saved `markcopy.theme` is the one chosen (the PDF viewer may write only that setting).
 - [ ] Scrollbars are always visible and styled.
 
 ## STL viewer
@@ -358,6 +409,21 @@ The guards here are what stop a crafted file hanging the window, so these are wo
 - [ ] An empty `.stl` reports that it received no data, rather than blaming the file's format.
 - [ ] Right-click the tab -> **Reopen Editor With...** -> a text or hex editor still opens the raw bytes.
 
+### Context menu
+
+- [ ] ★ Right-click (no movement) on the model opens the menu at the pointer. Right-click on empty viewport opens it too.
+- [ ] ★ Right-**drag** pans the model and does **not** open a menu on release. A right click that wobbles a pixel or two still opens it. (Check on Windows, where the menu opens on release, and on macOS or Linux, where it opens on press.)
+- [ ] With the menu open, a left-press on the model closes it and does not start an orbit.
+- [ ] Shift+F10 (or the menu key) with the viewer focused opens the menu.
+- [ ] ★ **Copy View as PNG**, then paste into an image editor or chat: the picture is the model at the angle you left it, on the viewport background, not blank or black. Orbit and repeat to confirm it follows the camera.
+- [ ] **Save View as PNG…** offers `sample.png` beside the file and the saved image matches.
+- [ ] **Copy as** pastes the name, the full path, `1.00 × 1.00 × 1.00` and `12`.
+- [ ] **View** > Front, Back, Left, Right, Top, Bottom each look at the cube from that side with the model framed, and Isometric returns to the opening angle. Top and Bottom are not flipped or spinning.
+- [ ] ★ **View** > Wireframe and Grid checkboxes toggle the model and grid, and the toolbar buttons light and dim to match; toggling from the toolbar updates the checkmarks the next time the menu opens.
+- [ ] **Preferences** > **Theme** changes the viewport background at once and persists (reopen the file). Changing `markcopy.theme` from another preview retints this one.
+- [ ] On a file that is refused (for example a truncated binary STL), Copy View, Save View, Dimensions and Triangle Count are greyed, while File Name and Full Path still copy.
+- [ ] **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
+
 ## Video player
 
 Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with a tone, so a frozen frame, a silent track, and a wrong grab are all visible or audible at once.
@@ -396,6 +462,8 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 - [ ] With autoplay starting muted, clicking the player's own mute button does not get overridden: the sound stays as the button left it.
 - [ ] Right-click -> **Playback** -> **Autoplay** toggles with a checkmark, shows an **Autoplay on** / **Autoplay off** toast, persists to `markcopy.video.autoplay`, and affects the next opened video without starting or stopping the current one.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
+- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
+- [ ] While the video plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** paused. Do the same while paused: it does not start. Escape and clicking into the editor close the menu too. A plain click on the picture with no menu open still toggles playback.
 
 ### Bad input and codecs
 
@@ -465,6 +533,7 @@ Review mode. Make a clip whose frames are numbered so a step that lands on the w
 - [ ] ★ **Re-open in Marker**: close the video in MarkCopy and open the same video in Marker after adding, deleting and pinning notes in MarkCopy. Marker lists exactly those notes with the right times and pins in the same place, and loads without an error; saving from Marker changes nothing else in the file.
 - [ ] ★ **External edit**: reopen the video in MarkCopy and leave it open, then add a note to the sidecar in Marker (or a text editor, then save). The panel and markers update without reopening the tab. Delete the sidecar: the notes clear and **Copy as Markdown** greys out.
 - [ ] ★ **First note, no notes file**: with the sidecar deleted, add a note. The file is created beside the video with `version: 1`, a 12-character `id`, the video's name as `source`, `next_note_id: 2` and the note. With ffmpeg available and a 25 fps clip it says `fps: 25.0`; without ffmpeg a line above the composer reads "Frame rate unknown: notes will be saved at 30 fps" and the file says `fps: 30.0`. **Send** is not accepted until a rate is known.
+- [ ] **Scrubber alignment**: with review mode on, the grey scrubber bar spans only the playhead's travel, so no bar shows before the playhead at 0:00 or after it at the end. Seek to the start and to the end: the playhead line sits on the bar's end each time, and a marker at 0:00 sits on the bar, not outside it.
 - [ ] ★ **Themes**: in Auto (both a light and a dark VS Code theme), Light, Dark and Green, the panel, cards, selected card, markers, range bands and caps, pin studs, banner and transport are all legible, including the focus ring on a button.
 
 ## GIF viewer
@@ -501,9 +570,54 @@ ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -frames:v 1 -loop 0 still.gif
 
 ### Theme, fallback and errors
 
+- [ ] While a GIF plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** toggled. Escape and clicking into the editor close the menu as well; a plain click with no menu open still toggles playback.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround and the status line stays legible in Light, Dark, Green on black, and a high-contrast VS Code theme. Changing the theme from a Markdown or PDF preview re-tints an open GIF viewer.
+- [ ] The GIF viewer's **Theme** is the only setting its menu writes; each of the four values applies and persists.
 - [ ] A text file renamed `.gif` shows "is not a GIF MarkCopy can read" rather than a blank pane.
 - [ ] Automation cannot exercise `ImageDecoder` playback (jsdom has none); the fallback is covered by `tests/gifWebview.test.ts`. To see it for real, check the viewer in a VS Code build whose Chromium lacks WebCodecs image decoding, if one is available: the GIF still plays, and the frame rows are greyed under "Frames unavailable in this viewer".
+
+## Image viewer
+
+There is no committed image fixture. Use a PNG with transparency (a screenshot of a window with rounded corners will do), a photo saved as `.jpg`, a `.webp`, and an SVG with a `viewBox` and no width (an icon, for example). Make two extra files: a copy of the JPEG renamed `.png`, and a text file renamed `.png`. Keep the SVG in a workspace folder whose path contains a space (`my icons/logo.svg`) for the Markdown check. For the later checks also make: an SVG that contains a `<foreignObject>`, an SVG saved as UTF-16 (for example from PowerShell with `Out-File -Encoding unicode`), a JPEG with an EXIF orientation of 6 or 8 (a phone photo taken sideways), and a PNG truncated to its first few hundred bytes.
+
+### Opening and status line
+
+- [ ] ★ Each of `.png`, `.jpg`, `.webp`, `.bmp`, `.ico`, `.avif`, and `.svg` opens in MarkCopy's viewer, not VS Code's built-in image preview, and an upper-case extension (`PHOTO.PNG`) does the same. **Reopen Editor With...** reaches the built-in preview, and for the SVG it also offers the text editor.
+- [ ] The status line reads like `photo.webp · 1.2 MB · 1920 x 1080 · WebP`. The SVG with no width shows `viewBox 0 0 24 24` in place of pixels and `SVG` as its format.
+- [ ] ★ The JPEG renamed `.png` still displays, and the status line says JPEG, not PNG.
+- [ ] The text file renamed `.png` shows "Not a recognised image" rather than a blank pane.
+- [ ] A file above 64 MiB (pad one with `fsutil file createnew big.png 70000000` on Windows) shows a message naming its size and the 64 MiB limit instead of loading, and VS Code stays responsive.
+- [ ] An SVG that contains a `<script>` element or an `onload` attribute shows its drawing and runs nothing.
+- [ ] The UTF-16 SVG opens as a drawing, not an error, and **Copy SVG Source** pastes readable text (not NUL-separated characters).
+- [ ] The EXIF-rotated JPEG shows upright and portrait, and the status line reports the portrait dimensions.
+- [ ] The truncated PNG shows "Could not decode <name>"; right-click shows **Copy Image as PNG** and **Save as PNG…** greyed out, **HTML Image** pastes with no `width` or `height`, and the file's other copy rows still work.
+- [ ] Edit the open picture on disk (save it from an image editor, or overwrite it with another file of the same name): the viewer reloads it within a moment. Delete the file: the pane says "<name> was deleted.", the status line is empty, and right-click offers only **File Name**, **Full Path**, **Open in Default App**, and **Reveal** (no stale picture or copy rows). Restore it: the picture comes back. Do the same with a file whose name contains brackets or an asterisk (`logo[1].png`, `a*b.svg`): it still reloads on change.
+
+### View
+
+- [ ] Ctrl+wheel, Ctrl+plus, and Ctrl+minus zoom in steps between 10% and 800%; Ctrl+0 and **F** fit the picture to the pane, and **1** shows it at 100%. Right-click -> **View** does the same.
+- [ ] ★ The floating toolbar sits at the bottom right above the status line. It has six controls: zoom out (title "Zoom out (Ctrl -)"), percentage label (title "Zoom level (click to type)"), zoom in ("Zoom in (Ctrl +)"), **Fit to window**, **Hand Tool**, and **Transparency grid**. The percentage tracks the zoom, and **Fit to window** is lit while fit is on and goes to 100% when clicked while lit.
+- [ ] ★ Click the percentage label: it becomes a text box with the number selected. Type 150 or 150% and press Enter, and the picture zooms to 150%; type 5000 and it clamps to 800, type 1 and it clamps to 10; Escape cancels and leaves the zoom alone; text that is not a number changes nothing. The shortcuts (`1`, `F`) do not fire while you type.
+- [ ] ★ Fit after zoom: zoom to 400% so the pane scrolls, then click **Fit to window** (and again after pressing **F**, and after resizing the window while fit is on). The whole picture is visible with its 12 px margin, with no scrollbar and no picture a scrollbar's width too large.
+- [ ] ★ With the picture zoomed larger than the pane, the **Hand Tool** ("Hand Tool (Drag to Pan)") is on by default, the cursor is a grab hand, and dragging pans the picture. Turn it off from the toolbar and from right-click -> **View** -> **Hand Tool** in turn: the checkbox and the toolbar button agree, and dragging no longer pans. It is on again after reopening the file.
+- [ ] ★ Right-click -> **View** -> **Transparency Grid** unticks the grid on alpha.png, the toolbar button goes unlit, and the choice survives opening another PNG (it is the saved `markcopy.image.background`). Tick it again and it returns. On gradient.jpg the row is absent.
+- [ ] Zoomed past 200%, a small icon shows hard square pixels rather than a blur.
+- [ ] ★ Right-click -> **Preferences** -> **Background** -> **Checkerboard**, **Light**, **Dark**, and **Theme** each repaint the backdrop (Checkerboard and Theme share the theme backdrop; only Checkerboard puts faint squares under the picture itself, never covering the pane around it), and the status line stays legible against each in the Light, Dark, Green on black, and a high-contrast VS Code theme. **Theme** follows the MarkCopy theme: set **Preferences** -> **Theme** to one that differs from VS Code's (Light in a dark VS Code, say) and the backdrop matches MarkCopy's theme, not the editor. The choice persists after closing and reopening the file, and it matches `markcopy.image.background` in Settings.
+- [ ] The checkerboard sits only under the picture and follows it through zoom, fit, and a window resize. A `.jpg` never shows one, whatever the Background setting, and the toolbar's **Transparency grid** button (the last of the six) is disabled with the tooltip "No transparency in a JPEG". On a transparent PNG the button toggles the squares, its tooltip flips between "Transparency grid (click to hide)" and "(click to show)", and it stays in step with the Background radios and the setting.
+- [ ] **Preferences** -> **Theme** re-tints the surround in the four themes.
+
+### Copy and save
+
+- [ ] ★ Right-click -> **Copy Image as PNG** on the transparent PNG and paste into Word and Slack: the picture arrives at its own size with the transparency intact, not at the zoom it was viewed at. Do the same for the JPEG and the WebP.
+- [ ] ★ On the SVG, set **Copy as** -> **SVG Scale** to 1x, 2x, and 4x in turn, copying and pasting into Paint each time: the pasted bitmap is the SVG's size times the scale, and the default is 2x. The scale resets when the file is reopened.
+- [ ] ★ The `<foreignObject>` SVG exports: **Copy Image as PNG** pastes a bitmap rather than failing with "Could not read the image".
+- [ ] **Save as PNG…** offers `<name>.png` in the picture's own folder, and the saved file matches what was copied. On the SVG it honours the scale.
+- [ ] ★ **Copy as** -> **Markdown Image**, pasted into a Markdown file in the same workspace, gives `![logo](my%20icons/logo.svg)` (the path relative to the workspace folder, spaces encoded), and the MarkCopy preview of that file shows the picture. The same copy from a file opened outside any workspace gives just `![name](name.ext)`.
+- [ ] **Copy as** -> **HTML Image** pastes `<img src="..." alt="..." width="..." height="...">` with the same path and the picture's pixel size.
+- [ ] **Copy as** -> **Data URI** pastes a `data:image/...;base64,` string that opens the picture when put in a browser's address bar. On a picture above 4 MiB the row is greyed out and reads "Too large for a data URI".
+- [ ] **Copy as** -> **File Name** and **Full Path** paste the right text. **Copy SVG Source** (SVG only; it is absent for a raster file) pastes the file's XML.
+- [ ] **Open in Default App** and **Reveal** act on the file.
+- [ ] Automation cannot exercise the PNG copy (jsdom decodes no images, so `tests/imageWebview.test.ts` stops at the menu and the text copies); the checks above are the only coverage of the pixels.
 
 ## LaTeX preview
 
@@ -555,6 +669,8 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 ### Copy actions and theming
 
 - [ ] ☑ The right-click menu offers exactly what the PDF viewer's does (Copy Selection, Copy Page N as PNG, **Copy as** Page/All Text, Add Comment Here, the **Theme** submenu), plus the LaTeX-only **Recompile LaTeX** entry, since it is the same viewer; see the [Copy Matrix](COPY-MATRIX.md#a-page-in-the-latex-preview).
+- [ ] **Preferences** -> **Theme** applies all four values on a LaTeX preview, and the menu dismisses on a click outside, Escape and a click into the source editor, as on a PDF.
+- [ ] ★ Right-click -> **Open PDF in Default App** opens the compiled PDF (the temporary build output, not the `.tex` source) in the default PDF reader. While the first compile is still running, or after it failed with no earlier result, the row is greyed out.
 - [ ] Comments added on the compiled PDF persist to `<filename>.tex.mccomments.json` beside the source and survive a recompile.
 
 ## Paste-target pass

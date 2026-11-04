@@ -1,0 +1,130 @@
+import { isGridOp, type GridOp } from '../csv';
+import {
+  asMessage,
+  exportMessage,
+  settingMessage,
+  toastMessage,
+  type ExportMessage,
+  type ToastMessage,
+  type UpdateSettingMessage,
+  numberField,
+} from './common';
+import { isPreviewSetting } from './settings';
+
+// Webview to host messages of the Markdown and CSV preview (src/extension.ts).
+export type MarkdownMessage =
+  | { type: 'revealInOS' }
+  | { type: 'openExternal' }
+  | { type: 'revealLine'; line: number }
+  | ToastMessage
+  | UpdateSettingMessage
+  | { type: 'openSettings' }
+  | { type: 'openLink'; href: string }
+  | ExportMessage
+  | {
+      type: 'editCell';
+      line: number;
+      column: number;
+      value: string;
+      docVersion?: number;
+      docKey: string;
+    }
+  | {
+      type: 'gridOp';
+      op: GridOp;
+      line: number;
+      column: number;
+      docVersion?: number;
+      docKey: string;
+    }
+  | {
+      type: 'editBlock';
+      editId?: number;
+      // Checked by editTargetsDocument and planBlockEdit, which also decide how
+      // the webview is told an edit was refused: an invalid one is still answered.
+      docKey: unknown;
+      startLine: unknown;
+      endLine: unknown;
+      original: unknown;
+      text: unknown;
+    };
+
+export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined {
+  const msg = asMessage(raw);
+  if (!msg) {
+    return undefined;
+  }
+  switch (msg.type) {
+    case 'revealInOS':
+    case 'openExternal':
+    case 'openSettings':
+      return { type: msg.type };
+    case 'revealLine':
+      // revealEditorLine ignores anything that is not a finite number.
+      return typeof msg.line === 'number' && Number.isFinite(msg.line)
+        ? { type: 'revealLine', line: msg.line }
+        : undefined;
+    case 'toast':
+      return toastMessage(msg);
+    case 'updateSetting':
+      return settingMessage(msg, isPreviewSetting);
+    case 'openLink':
+      return typeof msg.href === 'string' ? { type: 'openLink', href: msg.href } : undefined;
+    case 'pdfHtml':
+    case 'docxXhtml':
+    case 'pptxXhtml':
+      return exportMessage(msg);
+    case 'editCell': {
+      const line = numberField(msg.line);
+      const column = numberField(msg.column);
+      if (
+        !Number.isInteger(line) ||
+        !Number.isInteger(column) ||
+        typeof msg.value !== 'string' ||
+        typeof msg.docKey !== 'string'
+      ) {
+        return undefined;
+      }
+      return {
+        type: 'editCell',
+        line,
+        column,
+        value: msg.value,
+        docKey: msg.docKey,
+        ...(typeof msg.docVersion === 'number' ? { docVersion: msg.docVersion } : {}),
+      };
+    }
+    case 'gridOp': {
+      const line = numberField(msg.line);
+      const column = numberField(msg.column);
+      if (
+        !isGridOp(msg.op) ||
+        !Number.isInteger(line) ||
+        !Number.isInteger(column) ||
+        typeof msg.docKey !== 'string'
+      ) {
+        return undefined;
+      }
+      return {
+        type: 'gridOp',
+        op: msg.op,
+        line,
+        column,
+        docKey: msg.docKey,
+        ...(typeof msg.docVersion === 'number' ? { docVersion: msg.docVersion } : {}),
+      };
+    }
+    case 'editBlock':
+      return {
+        type: 'editBlock',
+        ...(Number.isSafeInteger(msg.editId) ? { editId: msg.editId as number } : {}),
+        docKey: msg.docKey,
+        startLine: msg.startLine,
+        endLine: msg.endLine,
+        original: msg.original,
+        text: msg.text,
+      };
+    default:
+      return undefined;
+  }
+}

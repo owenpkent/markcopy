@@ -315,8 +315,16 @@ export function parseProbe(json: string): SourceProbe {
   } catch {
     return empty;
   }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return empty;
+  }
   const root = parsed as { streams?: unknown; format?: { duration?: unknown } };
-  const streams = Array.isArray(root.streams) ? (root.streams as Record<string, unknown>[]) : [];
+  // Entries that are not objects (`null`, a number) carry no stream to read.
+  const streams = Array.isArray(root.streams)
+    ? (root.streams as unknown[]).filter(
+        (s): s is Record<string, unknown> => typeof s === 'object' && s !== null,
+      )
+    : [];
   const video = streams.find((s) => s.codec_type === 'video');
   const audio = streams.find((s) => s.codec_type === 'audio');
   return {

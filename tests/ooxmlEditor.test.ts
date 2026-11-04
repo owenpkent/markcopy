@@ -60,7 +60,7 @@ vi.mock('vscode', () => {
   };
 });
 
-import { OoxmlEditorProvider, type OoxmlSession } from '../src/ooxmlEditor';
+import { OoxmlEditorProvider, batchMedia, type OoxmlSession } from '../src/ooxmlEditor';
 import type * as vscode from 'vscode';
 
 /** A message handler captured off a fake webview, and the fake panel it came from. */
@@ -100,7 +100,7 @@ class TestEditorProvider extends OoxmlEditorProvider {
   public readonly sessionHandleMessage = vi.fn();
 
   protected createSession(): OoxmlSession {
-    return { render: async () => '', handleMessage: this.sessionHandleMessage };
+    return { render: async () => ({ html: '' }), handleMessage: this.sessionHandleMessage };
   }
 
   protected errorHtml(): string {
@@ -170,5 +170,47 @@ describe('OoxmlEditorProvider message router: openLink', () => {
     await post({ type: 'openLink', href: 'vscode:extension/x.y' });
 
     expect(provider.sessionHandleMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('OoxmlEditorProvider file watcher', () => {
+  it('escapes glob metacharacters so a bracketed file name watches itself', async () => {
+    const vs = await import('vscode');
+    const watch = vi.mocked(vs.workspace.createFileSystemWatcher);
+    watch.mockClear();
+    const provider = new TestEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    const { panel } = createPanel();
+    const bracketed = {
+      uri: {
+        path: '/workspace/deck [1].pptx',
+        fsPath: '/workspace/deck [1].pptx',
+        toString: () => 'file:///workspace/deck%20%5B1%5D.pptx',
+      },
+      dispose: () => undefined,
+    } as unknown as vscode.CustomDocument;
+    await provider.resolveCustomEditor(bracketed, panel);
+    const pattern = watch.mock.calls[0]?.[0] as { pattern: string } | undefined;
+    expect(pattern?.pattern).toBe('deck [[]1[]].pptx');
+  });
+});
+
+describe('batchMedia', () => {
+  const item = (id: string, size: number) => ({ id, mime: 'image/png', base64: 'x'.repeat(size) });
+
+  it('groups items up to the byte limit per message, in order', () => {
+    const batches = batchMedia([item('m1', 3), item('m2', 3), item('m3', 3), item('m4', 1)], 6);
+    expect(batches.map((b) => b.map((i) => i.id))).toEqual([
+      ['m1', 'm2'],
+      ['m3', 'm4'],
+    ]);
+  });
+
+  it('sends an item larger than the limit on its own rather than dropping it', () => {
+    const batches = batchMedia([item('m1', 1), item('m2', 10), item('m3', 1)], 4);
+    expect(batches.map((b) => b.map((i) => i.id))).toEqual([['m1'], ['m2'], ['m3']]);
+  });
+
+  it('sends nothing for a file with no images', () => {
+    expect(batchMedia([])).toEqual([]);
   });
 });

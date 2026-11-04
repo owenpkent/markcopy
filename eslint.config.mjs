@@ -18,6 +18,7 @@ export default tseslint.config(
       'media/stl.js',
       'media/video.js',
       'media/gif.js',
+      'media/image.js',
       '**/*.map',
     ],
   },

@@ -6,12 +6,19 @@ Dependabot security alerts and automatic security update pull requests are enabl
 Weekly version updates are configured in `dependabot.yml`, with compatibility
 exclusions for dependencies tied to the project's Node and VS Code versions.
 
+CodeQL (`codeql.yml`) analyses the TypeScript sources with the `security-extended` suite on
+pushes to main, pull requests and weekly. Findings appear under the repository's Security
+tab (Code scanning). Generated bundles and vendored assets are excluded in
+`.github/codeql/codeql-config.yml`.
+
 `npm audit` is clean as of the move to `@vscode/vsce` 4 and `ovsx` 1.3 on Node 22.
 That removed the only advisory with no fixed release, `braces`
 (GHSA-vfj7-8cjw-p6xm), which vsce 3 reached through `secretlint`, `globby`,
 `fast-glob` and `micromatch` and which `ovsx` 1.2 pulled in again through its
 nested vsce 3. None of that chain was ever bundled into the extension. Check
 `npm audit` again after any dependency change.
+
+Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together.
 
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove
@@ -31,6 +38,24 @@ It is a root override rather than one scoped under `@vscode/vsce` because npm 10
 which CI uses, rejects the scoped form during `npm ci` as out of sync with the
 lockfile. Remove this override when `@azure/identity` accepts a patched `msal-node`.
 
+The root `package.json` override for `minimatch` moves every copy in the
+development tree (under `@vscode/vsce`, ESLint, Mocha, and `@vscode/test-cli`)
+from 9 and 10 to 11 to fix
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249), a
+denial of service through globparts amplification. It is checked by the full
+unit and integration suites and by confirming that `vsce ls` packages the same file
+list, since `vsce` uses `minimatch` to apply `.vscodeignore`. Remove this override
+once those packages depend on `minimatch` 11 themselves.
+
+The root `package.json` override for `glob` moves the 10 and 13 copies under
+`@vscode/test-cli` (its own, its nested Mocha 11, and `c8` through `test-exclude`)
+to 14.0.3 to fix
+[GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4), an
+AbortSignal cancellation bypass. glob 14 requires `minimatch` 11, which the override
+above already supplies. The integration suite still discovers and runs every test
+file through the CLI. Remove this override when `@vscode/test-cli` resolves a
+patched `glob` on its own.
+
 The `package.json` override for `mermaid` makes it use the project's own `katex`
 (`"$katex"` resolves to the direct dependency's version) instead of a nested copy
 from its `^0.16` range. This keeps one KaTeX version in the lockfile, so Mermaid's
@@ -40,12 +65,20 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, or STL model you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
-engine against the opened source and its included files. Video and GIF previews hand
+engine against the opened source and its included files. Video, GIF, and image previews hand
 media to Chromium and can optionally run ffprobe and ffmpeg. Word export parses
 webview-produced XHTML and writes an OOXML package, including external links.
+
+## Webview messages
+
+A webview is untrusted: it renders content from files you did not write, so the messages it posts to the extension host are treated as input, not as commands. Each preview has a `parse<Surface>Message` function in `src/messages/` (no `vscode` import) that accepts exactly the message shapes its handler acts on and returns `undefined` for anything else; the host handlers switch over the parsed result only. Messages that write a setting go through per-surface allow-lists in `src/messages/settings.ts`: the Markdown, CSV, spreadsheet, deck and Word previews may write `theme`, `syncScroll`, `autoPreview`, `math` and `footnotes`; the video viewer `theme`, `video.loop`, `video.autoplay` and `video.review`; the PDF, LaTeX and GIF viewers `theme` only. Each key is checked together with the type or enumerated value it takes. Settings that name an executable (`video.ffmpegPath`, `pdf.browserPath`, `tex.enginePath`) are not on any list, so a page cannot point the host at a program. A CSV cell edit is refused past column 500,000 rather than padding a row to that width, and a toast message must be a string.
+
+Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
+
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, image, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
 
 ## Content Security Policy
 
@@ -67,7 +100,7 @@ script-src 'nonce-${nonce}' 'strict-dynamic';
 
 The PDF and LaTeX previews share one policy (the LaTeX preview renders through the same pdf.js viewer): the shared-preview policy above, but with a bare `script-src 'nonce-${nonce}'` (their bundle is not code-split, so `'strict-dynamic'` is not needed), `worker-src ${cspSource} blob:` added for the pdf.js worker, and `connect-src ${cspSource} blob: data:`. Neither adds `https:` to `img-src`, because a PDF is rendered to a canvas from bytes the extension supplies, not from remote resources.
 
-The STL preview is the most restrictive of the six webview surfaces (shared preview, PDF, LaTeX, video, GIF, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
+The STL preview is the most restrictive of the seven webview surfaces (shared preview, PDF, LaTeX, video, GIF, image, and STL): `default-src 'none'`, a bare nonced `script-src`, and `style-src` / `font-src` scoped to `${cspSource}`, with no `img-src`, `connect-src`, `worker-src`, or `media-src` at all. It draws into a WebGL canvas from bytes the extension supplies and has nothing to fetch. The video preview sits between the two: `media-src ${cspSource} blob:` for the `<video>` element and `img-src ${cspSource} blob: data:` for frame capture, but still no `connect-src` or `worker-src` (see [Video preview](#video-preview)).
 
 ## Mermaid
 
@@ -196,12 +229,12 @@ the table passes either limit instead of expanding further.
 
 ## Word preview
 
-A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx/read/` reads it in the extension host under the same guards: the guarded unpacker in `src/ooxml/zip.ts` (25 MB file, 1,000 entries, 64 MB per inflated part, 256 MB total), the saxes parser that never expands a DTD entity, and the same DOMPurify pass and CSP in the webview. Beyond that:
+A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx/read/` reads it in the extension host under the same guards: the guarded unpacker in `src/ooxml/zip.ts` (256 MB file, 1,000 entries, 64 MB per inflated part, 256 MB total), the saxes parser that never expands a DTD entity, and the same DOMPurify pass and CSP in the webview. Beyond that:
 
 - **Links are filtered by scheme.** Only `http`, `https`, and `mailto` become a link; `file:`, `javascript:`, `ftp:`, a UNC path, and a relationship that is not marked external are shown as plain text. The hostile part of a hyperlink is its target, and `readExternalRels` is the only place an external relationship is read; the target is never fetched, only shown as a link the reader clicks.
-- **Images are never fetched.** An embedded picture is read from the package and inlined as a `data:` URI (16 MiB total budget, charged for every reference, so a picture repeated many times cannot multiply the preview's size); a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
+- **Images are never fetched.** An embedded picture is read from the package and sent to the webview beside the markup, base64 in its own `media` messages, each distinct part once (128 MiB total, 32 MiB per image; past that a picture is a placeholder). The markup carries only a `data-mc-media` reference, and the webview (`src/webview/ooxmlMedia.ts`) accepts an item only with a well-formed id and a MIME type from the reader's own table before turning it into a `blob:` URL; a linked picture (`r:link`) is a placeholder, so opening a document cannot make a network request or leak credentials to a share.
 - **Output is escaped.** Every piece of text is HTML-escaped and every attribute value is attribute-escaped before it reaches the preview. Bookmark names become element ids with a fixed prefix and a restricted character set.
-- **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget. Generated output has its own document-wide budget (16 MiB): every image reference and every chart table is charged against it, not just each unique part once, so a document that repeats one picture or chart cannot multiply the preview's size; once it is spent, the extras become placeholders and the preview says so. Equation text is capped at 100,000 characters before conversion, and an oversized equation is dropped. A crafted document therefore costs a bounded amount of time and memory.
+- **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget. Generated output has its own document-wide budget (16 MiB): every chart table is charged against it per reference, not once per unique part, so a document that repeats one chart cannot multiply the preview's size; once it is spent, the extras become placeholders and the preview says so. An image reference is a short attribute, so repeating a picture costs nothing beyond its one copy. Equation text is capped at 100,000 characters before conversion, and an oversized equation is dropped. A crafted document therefore costs a bounded amount of time and memory.
 - **Parts read.** Beyond the body, styles, numbering, and notes, the reader opens the header and footer parts a section names, `comments.xml` and `commentsExtended.xml`, and the chart parts the body references, always through the guarded unpacker. Header, footer, and comment content goes through the same escaping as the body, and a chart is drawn only from its cached values (no embedded workbook is opened). Each is bounded by the paragraph budget, a text box nesting limit, and chart row and series caps, and a malformed part is skipped rather than failing the preview.
 - **Read-only.** The preview never writes to the document, and macros in a `.docm` are not read, let alone run.
 
@@ -227,7 +260,7 @@ Edit mode in the Markdown preview is the second place MarkCopy writes to a file,
 
 An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before a single tag is parsed. `src/xlsx/` reads it in the extension host, never in the webview, and the resulting HTML goes through the same DOMPurify sanitize and the same CSP as everything else.
 
-- **Decompression is bounded.** A few hundred kilobytes on disk can inflate to gigabytes in memory, so `src/ooxml/zip.ts` caps the file size before unzipping (25 MB), the entry count, the size of any single inflated part, and the running total across all of them. Nothing is ever written to disk, so a malicious entry name (`../../etc/passwd`, an absolute path) has nothing to act on: names are only ever map keys.
+- **Decompression is bounded.** A few hundred kilobytes on disk can inflate to gigabytes in memory, so `src/ooxml/zip.ts` caps the file size before unzipping (256 MB, the same as the inflate total, and the only bound on an entry whose header understates its size), the entry count, the size of any single inflated part, and the running total across all of them. Nothing is ever written to disk, so a malicious entry name (`../../etc/passwd`, an absolute path) has nothing to act on: names are only ever map keys.
 - **External relationships are refused.** A workbook can point outside its own package at another workbook on a share, a remote image, or a DDE/OLE link. Following one turns opening a file into a network fetch, which on Windows can hand your credentials to whatever host it names. Any relationship marked `TargetMode="External"` is dropped.
 - **Entity expansion cannot happen.** The parser (saxes) resolves the five predefined XML entities and never expands entities declared in a DTD, so the classic billion-laughs expansion and XXE are inert here structurally rather than by a check that could be forgotten. A test pins this, so replacing the parser with one that does expand them fails the suite rather than the extension host.
 - **The preview is read-only.** MarkCopy never writes to a workbook, so it cannot corrupt one. There is no equivalent of the CSV grid's cell writeback.
@@ -258,7 +291,21 @@ Copy actions only ever write to the clipboard, and only in response to a user ac
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via the contact form at <https://www.owenpkent.com/> rather than opening a public issue. Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.xlsx`, `.pdf`, or `.stl`), and the observed behavior. You will get an acknowledgement and a fix timeline.
+Please report suspected vulnerabilities privately rather than opening a public issue.
+
+- **Preferred:** GitHub private vulnerability reporting. Open the repository's Security tab and choose **Report a vulnerability**, or go straight to <https://github.com/owenpkent/markcopy/security/advisories/new>. The report stays private between you and the maintainer, and a fix can be developed in a private fork.
+- **Alternative:** the contact form at <https://www.owenpkent.com/>, if you do not want to use GitHub.
+
+Include the VS Code version, OS, a minimal reproducing file (`.md`, `.csv`, `.tsv`, `.xlsx`, `.pptx`, `.docx`, `.pdf`, `.tex`, `.stl`, a video such as `.mp4`, or `.gif`), and the observed behavior.
+
+### Response times
+
+- **Acknowledgement:** within 3 business days.
+- **Target fix:** within 30 days for anything exploitable by opening a file, and within 90 days for everything else. If a fix will slip past its target, the reporter is told why and given a new date.
+
+### Advisories
+
+Each fixed security issue gets a GitHub Security Advisory, and a CVE is requested from GitHub, which is a CVE Numbering Authority. The advisory is published once the fixed release is live on both the VS Code Marketplace and Open VSX, so the fix is available before the details are. The CHANGELOG's Security entry for that release links the advisory. The reporter is credited unless they ask not to be. See [RELEASING](../docs/RELEASING.md#phase-2-publish-to-the-registries) for the publishing step.
 
 ## GIF preview
 
@@ -276,3 +323,34 @@ document in the default app, reveal it, or write `markcopy.theme`; the host
 checks the setting key and value against an allowlist of that one setting. As
 with video, the browser's decoder still processes the file, so a malformed GIF
 could consume resources or trigger a vulnerability in the host's Chromium build.
+
+## Image preview
+
+The image viewer reads the file on the extension host (refusing anything above
+64 MiB before it is read) and posts it to the webview as base64. A small header
+parser in `src/webview/imageInfo.ts` reads the magic bytes and reports the
+type, and the webview builds a `Blob` from that sniffed type, never from the
+file extension; bytes it does not recognise are shown as an error rather than
+handed to the decoder. The parser reads only the header, bounds every read by
+the buffer's length, and never allocates in proportion to a size the file
+declares. An SVG is drawn only through an `<img>` element: it is never parsed
+into the page or inlined, so it runs no script and loads no external resource.
+It reaches the `<img>` as a `data:image/svg+xml;base64,` URL rather than a Blob
+URL (so an SVG with `<foreignObject>` can still be exported to PNG); that is
+still an image load under the same restrictions. A UTF-16 SVG is decoded with
+`TextDecoder` only, for sniffing and for **Copy SVG Source**.
+The CSP, unchanged by this, is `default-src 'none'` with `img-src` limited to the webview origin,
+`blob:`, and `data:`, `style-src` and `font-src` limited to the webview origin
+(plus inline styles), and a bare nonced `script-src`; there is no
+`connect-src`, `media-src`, or `worker-src`. The webview may ask the host to
+save a PNG (through a save dialog), open the document in the default app,
+reveal it, or write `markcopy.theme` or `markcopy.image.background`; the host
+checks the key and value against an allowlist of those two settings. The host
+also watches the opened file (a `FileSystemWatcher` on its folder and exact
+base name, with glob characters escaped so the name matches literally) and
+reloads it when it changes; the watcher reads that same URI and nothing the
+webview names. As with
+GIF, the browser's decoder still processes the file, so a malformed image could
+consume resources or trigger a vulnerability in the host's Chromium build. The
+parser and the message validator are unit-tested and fuzzed (see
+[Fuzzing](../docs/TESTING.md#fuzzing)).

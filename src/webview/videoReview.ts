@@ -300,7 +300,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
   function select(id: string, seek: boolean): void {
     selected = id;
     const note = state?.notes.find((n) => n.id === id);
-    if (note && seek) {
+    if (note && seek && note.target !== 'render') {
       seekMs(noteSeekMs(note));
     }
     renderSelection();
@@ -609,7 +609,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     const rate = fps();
-    const rows: DotRow[] = state.notes.map((n) => ({
+    // Render notes sit on the output timeline, which this scrubber cannot place, so
+    // they get no dot, band, or pin; their card still selects them.
+    const sourceNotes = state.notes.filter((n) => n.target !== 'render');
+    const rows: DotRow[] = sourceNotes.map((n) => ({
       id: n.id,
       at: n.at,
       startMs: noteSeekMs(n),
@@ -639,13 +642,34 @@ export function createReview(deps: ReviewDeps): ReviewController {
         const member = dot.members.find((m) => m.id === id);
         if (member) {
           select(id, false);
-          seekMs(member.startMs);
+          if (state?.notes.find((n) => n.id === id)?.target !== 'render') {
+            seekMs(member.startMs);
+          }
           scrollCardIntoView(id);
         }
       });
       markers.appendChild(b);
+      // A merged badge sits at its first note, so a faint bracket under it runs out
+      // to its last one.
+      if (dot.count > 1) {
+        const ats = dot.ids.map((id) => state?.notes.find((n) => n.id === id)?.at ?? 0);
+        const [x, w] = bandGeometry(Math.min(...ats), Math.max(...ats), dur, width);
+        const span = el('div', 'mc-rv-span');
+        span.setAttribute('aria-hidden', 'true');
+        span.style.left = `${x}px`;
+        span.style.width = `${w}px`;
+        markers.insertBefore(span, markers.firstChild);
+      }
     }
-    for (const n of state.notes) {
+    for (const n of sourceNotes) {
+      // Every note gets a tick on the bar at its exact frame, merged or not.
+      const [tx] = bandGeometry(n.at, n.at, dur, width);
+      const tickEl = el('div', 'mc-rv-tick');
+      tickEl.classList.toggle('mc-rv-tick--selected', n.id === selected);
+      tickEl.classList.toggle('mc-rv-tick--done', n.done);
+      tickEl.dataset.id = n.id;
+      tickEl.style.left = `${tx}px`;
+      bands.appendChild(tickEl);
       if (n.out !== undefined && n.out > n.at) {
         const [x, w] = bandGeometry(n.at, n.out, dur, width);
         const bar = el('div', 'mc-rv-band');
@@ -710,7 +734,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const live = new Set<string>();
     if (isActive && state) {
       for (const n of state.notes) {
-        if (!n.point || !pinVisible(n.at, n.out ?? null, video.currentTime * 1000, fps())) {
+        if (
+          n.target === 'render' ||
+          !n.point ||
+          !pinVisible(n.at, n.out ?? null, video.currentTime * 1000, fps())
+        ) {
           continue;
         }
         live.add(n.id);
@@ -823,10 +851,17 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const b = el('button', 'mc-rv-card');
     b.type = 'button';
     b.dataset.id = note.id;
+    if (note.target === 'render') {
+      // No trim or retime model reaches the webview, so output time cannot become a source time.
+      b.title = 'This note refers to output (render) time, so it cannot seek the source video';
+    }
     const meta = el('span', 'mc-rv-meta');
     meta.append(el('span', 'mc-rv-tc', when), el('span', 'mc-rv-id', note.id));
     if (note.kind !== 'note') {
       meta.appendChild(el('span', 'mc-rv-kind', note.kind));
+    }
+    if (note.target === 'render') {
+      meta.appendChild(el('span', 'mc-rv-kind', 'Output time'));
     }
     if (note.point) {
       meta.appendChild(el('span', 'mc-rv-kind', 'Pin'));

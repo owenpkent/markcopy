@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyCsvEdits,
   cellEdit,
+  CSV_MAX_CELLS,
   formatField,
   gridEdits,
   isGridOp,
@@ -136,6 +137,21 @@ describe('cellEdit', () => {
   it('drops quoting a value no longer needs', () => {
     const quoted = 'a,"b,c",d';
     expect(apply(quoted, cellEdit(quoted, ',', 0, 1, 'plain'))).toBe('a,plain,d');
+  });
+
+  it('pads a short row out to the edited column', () => {
+    const ragged = 'a,b,c\nd';
+    expect(apply(ragged, cellEdit(ragged, ',', 1, 2, 'z'))).toBe('a,b,c\nd,,z');
+  });
+
+  // Found by the messages fuzz target: the column comes from the webview, and a
+  // huge one made the padding a string of that many delimiters.
+  it('refuses a column no rendered grid could hold, instead of padding to it', () => {
+    const ragged = 'a,b,c\nd';
+    expect(cellEdit(ragged, ',', 1, 1e60, 'z')).toBeNull();
+    expect(cellEdit(ragged, ',', 1, 2 ** 31, 'z')).toBeNull();
+    expect(cellEdit(ragged, ',', 1, CSV_MAX_CELLS + 1, 'z')).toBeNull();
+    expect(cellEdit(ragged, ',', 1, CSV_MAX_CELLS, 'z')?.text).toHaveLength(CSV_MAX_CELLS + 1);
   });
 
   it('clears a field to empty', () => {

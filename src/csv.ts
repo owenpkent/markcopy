@@ -287,7 +287,11 @@ export function cellEdit(
   // The row is shorter than the grid is wide (a ragged file). Grow it in place:
   // append enough delimiters to reach the edited column, then the value.
   const last = record.spans[record.spans.length - 1];
-  if (!last) {
+  // The padding below is one delimiter per missing column, and the column comes
+  // from the webview. The grid never draws more than CSV_MAX_CELLS cells, so no
+  // rendered column lies past that; a larger one is refused rather than written
+  // into the file (or, past the string limit, thrown from the host).
+  if (!last || column > CSV_MAX_CELLS) {
     return null;
   }
   return {

@@ -16,7 +16,7 @@
 // when the author adds a Title) and matches what this extension's own Word
 // export writes, which is what makes a round trip come back unchanged.
 import { escapeHtml } from '../../escape';
-import { type MediaBudget } from '../../ooxml/media';
+import { createMediaSink, type MediaItem } from '../../ooxml/media';
 import { readExternalRels, readRels, relsPathFor } from '../../ooxml/rels';
 import { attr, walkXml } from '../../ooxml/xml';
 import { child, children, parseXml, type XNode } from '../../ooxml/xnode';
@@ -33,11 +33,12 @@ export { OpcError as DocxError } from '../../ooxml/zip';
 export interface ReadOptions {
   /** Paragraphs to render before stopping, counting those inside tables. Default 50,000. */
   maxParagraphs?: number;
-  /**
-   * Total budget, in bytes, for images inlined as data URIs. Default 16 MiB.
-   * It bounds distinct parts and, separately, every emitted image reference.
-   */
+  /** Total cap, in bytes, on the images sent with the document, each distinct part once. Default 128 MiB. */
   maxMediaBytes?: number;
+  /** Cap on any single image. Default 32 MiB. */
+  maxImageBytes?: number;
+  /** Cap on the generated markup itself (chart tables, mostly), charged per reference. Default 16 MiB. */
+  maxOutputBytes?: number;
   zipLimits?: ZipLimits;
   /** Render equations as KaTeX math (default true). Off shows each one's LaTeX as code. */
   math?: boolean;
@@ -47,10 +48,13 @@ export interface DocxHtml {
   html: string;
   /** True when `maxParagraphs` cut the document short, or repeated content hit the output budget. */
   truncated: boolean;
+  /** The images the HTML references by `data-mc-media`, each distinct part once. */
+  media: MediaItem[];
 }
 
 const DEFAULT_MAX_PARAGRAPHS = 50_000;
-const DEFAULT_MAX_MEDIA_BYTES = 16 * 1024 * 1024;
+/** What the generated HTML itself (chart tables, mostly) may grow to. */
+const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
 export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxHtml {
   const parts = openZip(bytes, {
@@ -78,10 +82,10 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
   }
 
   const dir = mainPath.slice(0, mainPath.lastIndexOf('/') + 1);
-  const media: MediaBudget = {
-    used: 0,
-    max: Math.max(0, opts.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES),
-  };
+  const media = createMediaSink({
+    maxTotalBytes: opts.maxMediaBytes,
+    maxItemBytes: opts.maxImageBytes,
+  });
   const footnotePath = `${dir}footnotes.xml`;
   const endnotePath = `${dir}endnotes.xml`;
   const ctx: ReadCtx = {
@@ -94,7 +98,6 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
       new Numbering(undefined),
     ),
     media,
-    imageCache: new Map(),
     chartCache: new Map(),
     rels: partRels(parts, mainPath),
     bookmarks: new Set(),
@@ -119,7 +122,11 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
       truncated: false,
     },
     inHeaderCell: false,
-    output: { used: 0, max: media.max, truncated: false },
+    output: {
+      used: 0,
+      max: Math.max(1, opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES),
+      truncated: false,
+    },
   };
 
   const sects = sectionProps(body);
@@ -143,6 +150,7 @@ export function renderDocxHtml(bytes: Uint8Array, opts: ReadOptions = {}): DocxH
   return {
     html: `<div class="mc-docx">${html}</div>`,
     truncated: ctx.budget.truncated || ctx.output.truncated,
+    media: media.items,
   };
 }
 

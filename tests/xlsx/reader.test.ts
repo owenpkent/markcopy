@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
 import { renderWorkbookHtml, WorkbookError } from '../../src/xlsx';
+import { DEFAULT_LIMITS } from '../../src/ooxml/zip';
 import { columnName } from '../../src/xlsx/render';
 import { columnOf, columnRange } from '../../src/xlsx/sheet';
 import { buildXlsx, row, sheetData } from './fixture';
@@ -226,6 +227,44 @@ describe('structure', () => {
     expect(html).toContain('b3');
   });
 
+  it('counts a merge colspan in visible columns only', () => {
+    const html = render(
+      `<cols><col min="2" max="2" hidden="1"/></cols>` +
+        `<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>` +
+        sheetData([row(1, '<c r="A1" t="inlineStr"><is><t>wide</t></is></c>')]),
+    );
+    expect(html).toContain('colspan="2"');
+    expect(html).not.toContain('colspan="3"');
+    expect(cells(html)[0]).toEqual(['wide']);
+  });
+
+  it('keeps the value of a merge anchored in a hidden column', () => {
+    const html = render(
+      `<cols><col min="1" max="1" hidden="1"/></cols>` +
+        `<mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells>` +
+        sheetData([row(1, '<c r="A1" t="inlineStr"><is><t>wide</t></is></c>')]),
+    );
+    expect(html).toContain('colspan="2"');
+    expect(cells(html)[0]).toEqual(['wide']);
+  });
+
+  it('counts a merge rowspan past a hidden row and keeps a hidden-row anchor value', () => {
+    const body = (hide1: string) =>
+      `<mergeCells count="1"><mergeCell ref="A1:A3"/></mergeCells>` +
+      sheetData([
+        row(1, '<c r="A1" t="inlineStr"><is><t>tall</t></is></c>', hide1),
+        row(2, '<c r="B2"><v>2</v></c>', ' hidden="1"'),
+        row(3, '<c r="B3"><v>3</v></c>'),
+      ]);
+    const middle = render(body(''));
+    expect(middle).toContain('rowspan="2"');
+    expect(middle).not.toContain('rowspan="3"');
+
+    const anchorHidden = render(body(' hidden="1"'));
+    expect(cells(anchorHidden)).toEqual([['tall', '3']]);
+    expect(anchorHidden).not.toContain('rowspan');
+  });
+
   it('hides rows, columns, and sheets the author hid', () => {
     const hiddenRow = render(
       sheetData([
@@ -365,10 +404,13 @@ describe('hostile and malformed input', () => {
   });
 
   it('refuses a workbook larger than the preview limit before unzipping it', () => {
-    const big = new Uint8Array(30 * 1024 * 1024);
+    // The default cap is 256 MB, too much to allocate in a test, so the limit is
+    // lowered to prove the check runs before anything is inflated.
+    const big = new Uint8Array(2 * 1024 * 1024);
     big[0] = 0x50;
     big[1] = 0x4b;
-    expect(() => renderWorkbookHtml(big)).toThrow(/larger than/);
+    const limits = { ...DEFAULT_LIMITS, maxFileBytes: 1024 * 1024 };
+    expect(() => renderWorkbookHtml(big, { zipLimits: limits })).toThrow(/larger than/);
   });
 
   it('refuses an entry on its declared size, before it is inflated', () => {

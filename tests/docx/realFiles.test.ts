@@ -49,7 +49,7 @@ describe.each(['pandoc.docx', 'lo.docx'])('real document: %s', (name) => {
 
   it('has the image with its alt text', () => {
     expect(dom.querySelector('img')?.getAttribute('alt')).toBe('Company logo');
-    expect(dom.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    expect(dom.querySelector('img')?.getAttribute('data-mc-media')).toMatch(/^m\d+$/);
   });
 
   it('keeps the safe link and reduces the javascript: one to plain text', () => {

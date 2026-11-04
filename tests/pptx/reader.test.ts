@@ -308,7 +308,7 @@ describe('tables', () => {
 describe('pictures', () => {
   const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
-  it('inlines an embedded image as a data: URI', () => {
+  it('references an embedded image by media id and sends its bytes once', () => {
     const pic = picShape({
       embedId: 'rIdImg',
       xfrm: xfrmXml(0, 0, 1000000, 1000000),
@@ -323,22 +323,27 @@ describe('pictures', () => {
       ],
       media: { 'ppt/media/image1.png': PNG_BYTES },
     });
-    const html = renderDeckHtml(bytes).html;
-    expect(html).toContain('<img class="mc-pptx-shape mc-pptx-pic"');
-    expect(html).toContain('src="data:image/png;base64,');
-    expect(html).toContain('alt="A test image"');
+    const deck = renderDeckHtml(bytes);
+    expect(deck.html).toContain('<img class="mc-pptx-shape mc-pptx-pic"');
+    expect(deck.html).toContain('data-mc-media="m1"');
+    expect(deck.html).not.toContain('src=');
+    expect(deck.html).toContain('alt="A test image"');
+    expect(deck.media).toEqual([
+      { id: 'm1', mime: 'image/png', base64: Buffer.from(PNG_BYTES).toString('base64') },
+    ]);
   });
 
-  it('falls back to a placeholder box once the media budget is spent', () => {
+  it('falls back to a placeholder box once the media cap is spent', () => {
     const pic = picShape({ embedId: 'rIdImg', xfrm: xfrmXml(0, 0, 1000000, 1000000) });
     const bytes = buildPptx({
       slides: [{ spTree: pic, extraRels: extraRel('rIdImg', 'image', '../media/image1.png') }],
       media: { 'ppt/media/image1.png': PNG_BYTES },
     });
-    const html = renderDeckHtml(bytes, { maxMediaBytes: 4 }).html;
-    expect(html).not.toContain('data:image');
-    expect(html).toContain('mc-pptx-placeholder');
-    expect(html).toContain('Image');
+    const deck = renderDeckHtml(bytes, { maxMediaBytes: 4 });
+    expect(deck.html).not.toContain('data-mc-media');
+    expect(deck.media).toEqual([]);
+    expect(deck.html).toContain('mc-pptx-placeholder');
+    expect(deck.html).toContain('Image');
   });
 });
 
@@ -622,7 +627,8 @@ describe('relationship-namespaced attributes', () => {
     const deck = renderDeckHtml(bytes);
     expect(deck.slides).toBe(1);
     expect(deck.rendered).toBe(1);
-    expect(deck.html).toContain('src="data:image/png;base64,');
+    expect(deck.html).toContain('data-mc-media="m1"');
+    expect(deck.media).toHaveLength(1);
   });
 });
 
@@ -666,7 +672,7 @@ describe('picture and table placeholder geometry', () => {
 });
 
 describe('image caching', () => {
-  it('renders a media part reused across many slides on every slide, not just until the budget runs out once', () => {
+  it('renders a media part reused across many slides on every slide, and sends it once', () => {
     const LOGO_BYTES = new Uint8Array(200).fill(7);
     const pic = picShape({ embedId: 'rIdImg', xfrm: xfrmXml(0, 0, 500000, 500000) });
     const slideCount = 8;
@@ -677,13 +683,14 @@ describe('image caching', () => {
       })),
       media: { 'ppt/media/logo.png': LOGO_BYTES },
     });
-    // Enough budget for one encoded copy of the logo but nowhere near eight:
-    // without a cache keyed by the target part, each slide re-encodes and
-    // re-charges the same bytes, so only the first slide or two would render
-    // it before the budget looked spent.
-    const html = renderDeckHtml(bytes, { maxMediaBytes: LOGO_BYTES.length + 50 }).html;
-    const imgCount = (html.match(/data:image\/png;base64,/g) ?? []).length;
+    // Enough cap for one copy of the logo but nowhere near eight: without
+    // deduplication keyed by the target part, each slide would re-encode and
+    // re-charge the same bytes, so only the first slide or two would render
+    // it before the cap looked spent.
+    const deck = renderDeckHtml(bytes, { maxMediaBytes: LOGO_BYTES.length + 50 });
+    const imgCount = (deck.html.match(/data-mc-media="m1"/g) ?? []).length;
     expect(imgCount).toBe(slideCount);
+    expect(deck.media).toHaveLength(1);
   });
 });
 

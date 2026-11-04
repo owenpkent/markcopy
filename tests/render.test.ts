@@ -116,6 +116,16 @@ describe('createMarkdownIt', () => {
     expect(html).not.toContain('[^a]:');
   });
 
+  // Found by the markdown fuzz target. Display math left open on a definition's
+  // first line carries the lines below it into the definition, so its re-parse
+  // can hold a heading. That parse used to run the anchor rule too, and the
+  // outer pass then threw on the id it found, failing the whole render.
+  it('names headings inside a re-parsed unreferenced definition with the rest of the document', () => {
+    const html = md.render('##\n[^n]:$$\n##\nx$$\n');
+    expect(html).toContain('<h2 id="" data-source-line="0" data-source-end="1"></h2>');
+    expect(html).toMatch(/<h2 id="-1"[^>]*><\/h2>/);
+  });
+
   it('leaves ^[...] inline footnote shorthand as literal text', () => {
     // markdown-it-footnote's `^[...]` inline syntax is not documented anywhere
     // in this repo (only [^note] is) and `^[` shows up constantly in prose

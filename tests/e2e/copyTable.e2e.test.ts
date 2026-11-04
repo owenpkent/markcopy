@@ -137,6 +137,7 @@ describe('copy from a CSV cell being edited', () => {
     'Save as PDF…',
     'Save as Word…',
     'Save as PowerPoint…',
+    'Open in Default App',
     revealLabel(),
     'Preferences',
   ];
