@@ -9,6 +9,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [1.1.0] - 2026-11-04
+
+One change to how Video Notes are written, with no new settings. Updating needs no action.
+
 ### Changed
 
 - **Video Notes keeps the note field focused after a send.** Pressing Enter saves the note and resumes playback as before, but the cursor stays in the field; typing the next note pauses the video again. Escape still hands the keyboard back to the player shortcuts.
@@ -551,7 +555,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/owenpkent/markcopy/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/owenpkent/markcopy/compare/v0.22.0...v1.0.0
