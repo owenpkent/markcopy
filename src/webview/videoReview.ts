@@ -649,8 +649,27 @@ export function createReview(deps: ReviewDeps): ReviewController {
         }
       });
       markers.appendChild(b);
+      // A merged badge sits at its first note, so a faint bracket under it runs out
+      // to its last one.
+      if (dot.count > 1) {
+        const ats = dot.ids.map((id) => state?.notes.find((n) => n.id === id)?.at ?? 0);
+        const [x, w] = bandGeometry(Math.min(...ats), Math.max(...ats), dur, width);
+        const span = el('div', 'mc-rv-span');
+        span.setAttribute('aria-hidden', 'true');
+        span.style.left = `${x}px`;
+        span.style.width = `${w}px`;
+        markers.insertBefore(span, markers.firstChild);
+      }
     }
     for (const n of sourceNotes) {
+      // Every note gets a tick on the bar at its exact frame, merged or not.
+      const [tx] = bandGeometry(n.at, n.at, dur, width);
+      const tickEl = el('div', 'mc-rv-tick');
+      tickEl.classList.toggle('mc-rv-tick--selected', n.id === selected);
+      tickEl.classList.toggle('mc-rv-tick--done', n.done);
+      tickEl.dataset.id = n.id;
+      tickEl.style.left = `${tx}px`;
+      bands.appendChild(tickEl);
       if (n.out !== undefined && n.out > n.at) {
         const [x, w] = bandGeometry(n.at, n.out, dur, width);
         const bar = el('div', 'mc-rv-band');
