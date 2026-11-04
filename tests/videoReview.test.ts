@@ -69,12 +69,20 @@ describe('loadSidecar', () => {
     }
   });
 
+  it('keeps a note target in the webview payload', () => {
+    const loaded = loadSidecar(BASE.replace('target: source', 'target: render'));
+    expect(loaded.readOnly).toBeNull();
+    expect(loaded.notes[0].target).toBe('render');
+    expect(loadSidecar(BASE).notes[0].target).toBe('source');
+  });
+
   it('maps notes to what the webview shows', () => {
     const loaded = loadSidecar(BASE.replace('at: 1', 'at: 1\n    out: 2\n    text: Hi'));
     expect(loaded.notes).toEqual([
       {
         id: 'n1',
         at: 1,
+        target: 'source',
         out: 2,
         text: 'Hi',
         kind: 'note',

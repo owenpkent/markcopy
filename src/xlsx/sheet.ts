@@ -290,7 +290,7 @@ export function readSheet(xml: string, ctx: SheetContext): Sheet {
     }
   }
 
-  applyMerges(rows, merges, columns);
+  applyMerges(rows, merges, columns, hiddenColumns);
 
   return { rows, widths, hiddenColumns, columns, dropped, columnsTruncated };
 }
@@ -357,6 +357,7 @@ function applyMerges(
   rows: SheetRow[],
   merges: { top: number; left: number; bottom: number; right: number }[],
   columns: number,
+  hiddenColumns: ReadonlySet<number>,
 ): void {
   // A merge ref names absolute sheet rows, but `rows` holds only the <row>
   // elements the file actually contains. A sheet whose data starts at row 3, or
@@ -383,31 +384,44 @@ function applyMerges(
       bottom++;
     }
 
-    const anchorRow = rows[top];
-    const anchor = anchorRow.cells[m.left] ?? { text: '', numeric: false };
-    // Spans are counted in rendered rows rather than sheet rows: the rows between
-    // may be missing from the file, and the renderer drops hidden ones before it
-    // emits anything, so a sheet-row count would overshoot the table.
-    let visible = 0;
+    // Spans are counted in rendered rows and columns rather than sheet ones: the
+    // renderer drops hidden rows and columns before it emits anything, so a
+    // sheet-range count would overshoot the table (three fields for an A:C merge
+    // whose B is hidden, with only two columns shown). The merged value lives at
+    // the first visible position of the range, the way Excel shows it, so a merge
+    // anchored in a hidden row or column keeps its value. A range with nothing
+    // visible has nothing to render and is left alone.
+    const visibleRows: number[] = [];
     for (let r = top; r <= bottom; r++) {
       if (!rows[r].hidden) {
-        visible++;
+        visibleRows.push(r);
       }
     }
-    anchor.colspan = right - m.left + 1;
-    anchor.rowspan = Math.max(1, visible);
-    anchorRow.cells[m.left] = anchor;
+    const visibleCols: number[] = [];
+    for (let c = m.left; c <= right; c++) {
+      if (!hiddenColumns.has(c)) {
+        visibleCols.push(c);
+      }
+    }
+    if (visibleRows.length === 0 || visibleCols.length === 0) {
+      continue;
+    }
+    const anchorR = visibleRows[0];
+    const anchorC = visibleCols[0];
+
+    const value = rows[top].cells[m.left] ?? { text: '', numeric: false };
+    value.colspan = visibleCols.length;
+    value.rowspan = visibleRows.length;
 
     for (let r = top; r <= bottom; r++) {
       for (let c = m.left; c <= right; c++) {
-        if (r === top && c === m.left) {
-          continue;
-        }
         rows[r].cells[c] = undefined;
         // Mark the position as covered so the renderer emits no <td> for it.
         covered(rows[r]).add(c);
       }
     }
+    rows[anchorR].cells[anchorC] = value;
+    covered(rows[anchorR]).delete(anchorC);
   }
 }
 

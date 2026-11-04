@@ -1046,6 +1046,11 @@ async function applyCellEdit(
   if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
     return;
   }
+  // The panel may have been retargeted since the grid was drawn; the version
+  // below cannot tell, because versions are per document.
+  if (!editTargetsDocument(msg.docKey, state.docUri.toString())) {
+    return;
+  }
   if (msg.docVersion !== undefined && !addressable(state, doc, msg.docVersion)) {
     return; // stale grid; the re-render already on its way carries the truth
   }
@@ -1157,6 +1162,11 @@ async function applyGridOp(
     (d) => d.uri.toString() === state.docUri.toString(),
   );
   if (!doc || previewKind(doc.languageId, state.docUri.path) !== 'csv') {
+    return;
+  }
+  // The panel may have been retargeted since the grid was drawn; the version
+  // below cannot tell, because versions are per document.
+  if (!editTargetsDocument(msg.docKey, state.docUri.toString())) {
     return;
   }
   if (msg.docVersion !== undefined && !addressable(state, doc, msg.docVersion)) {

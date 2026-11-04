@@ -9,6 +9,14 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Fixed
+
+- **A CSV edit from the side preview can no longer land in the wrong file.** When the side preview moved to another CSV before a queued cell edit or row and column operation reached the extension host, the host applied it to the file now in the panel. Every grid edit message now names the document it was drawn from, and the host drops an edit whose document is not the one it is showing.
+- **PDF "All Text" copies every page, rendered or not.** It read only the text cached while pages were drawn, so a five-page file with one page scrolled into view copied one page. "All Text" and "Page N Text" now read each page from the PDF directly, using the cache only as a shortcut.
+- **A comment being edited survives a LaTeX recompile.** The reload replaced the comments under an open editor, whose Save then wrote the text from before the edit. The open editor is rebound to the refreshed comment, and a new comment the file does not yet hold is kept, so the draft is what gets saved.
+- **Merged cells across hidden spreadsheet columns copy with the right width.** An A:C merge with B hidden came out three fields wide in a two-column table. Merge spans are now counted in visible columns and rows, and a merge whose first cell is hidden shows its value in the first visible cell of the range, as Excel does.
+- **Video notes timed on the rendered output no longer seek the source video.** The host dropped the note's `target`, so a `render` note was treated as a source time, which selects the wrong moment after a trim or retime. The target is kept, a render note's card says "Output time" and selecting it does not seek, and it draws no marker, band, or pin on the source timeline.
+
 ## [1.0.0] - 2026-11-03
 
 MarkCopy 1.0. The extension's purpose is now stated plainly: read any document in VS Code, edit it lightly, and hand it off in the format the next person needs (rich text, PDF, Word, or PowerPoint). Settings, commands, and file associations are unchanged from 0.22.0, so updating needs no action.

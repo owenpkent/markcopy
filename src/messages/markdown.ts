@@ -21,8 +21,22 @@ export type MarkdownMessage =
   | { type: 'openSettings' }
   | { type: 'openLink'; href: string }
   | ExportMessage
-  | { type: 'editCell'; line: number; column: number; value: string; docVersion?: number }
-  | { type: 'gridOp'; op: GridOp; line: number; column: number; docVersion?: number }
+  | {
+      type: 'editCell';
+      line: number;
+      column: number;
+      value: string;
+      docVersion?: number;
+      docKey: string;
+    }
+  | {
+      type: 'gridOp';
+      op: GridOp;
+      line: number;
+      column: number;
+      docVersion?: number;
+      docKey: string;
+    }
   | {
       type: 'editBlock';
       editId?: number;
@@ -63,7 +77,12 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     case 'editCell': {
       const line = numberField(msg.line);
       const column = numberField(msg.column);
-      if (!Number.isInteger(line) || !Number.isInteger(column) || typeof msg.value !== 'string') {
+      if (
+        !Number.isInteger(line) ||
+        !Number.isInteger(column) ||
+        typeof msg.value !== 'string' ||
+        typeof msg.docKey !== 'string'
+      ) {
         return undefined;
       }
       return {
@@ -71,13 +90,19 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
         line,
         column,
         value: msg.value,
+        docKey: msg.docKey,
         ...(typeof msg.docVersion === 'number' ? { docVersion: msg.docVersion } : {}),
       };
     }
     case 'gridOp': {
       const line = numberField(msg.line);
       const column = numberField(msg.column);
-      if (!isGridOp(msg.op) || !Number.isInteger(line) || !Number.isInteger(column)) {
+      if (
+        !isGridOp(msg.op) ||
+        !Number.isInteger(line) ||
+        !Number.isInteger(column) ||
+        typeof msg.docKey !== 'string'
+      ) {
         return undefined;
       }
       return {
@@ -85,6 +110,7 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
         op: msg.op,
         line,
         column,
+        docKey: msg.docKey,
         ...(typeof msg.docVersion === 'number' ? { docVersion: msg.docVersion } : {}),
       };
     }
