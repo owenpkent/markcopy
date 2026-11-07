@@ -6,6 +6,7 @@
 // picture is drawn by one <img>; SVG in particular is never parsed into the DOM
 // or inlined, so it can run no script and load no external resource.
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { createImageReview } from './imageReview';
 import {
   MAX_DATA_URI_BYTES,
   MAX_SVG_RASTER_SIDE,
@@ -54,7 +55,11 @@ const scroller = box(
 );
 // The frame is exactly the picture's rendered size; the transparency checkerboard
 // lives on it, never on the scroller.
-const frame = box('div', 'mc-image-frame', 'margin:auto;flex:none;display:block;');
+const frame = box(
+  'div',
+  'mc-image-frame',
+  'margin:auto;flex:none;display:block;position:relative;',
+);
 const img = box('img', 'mc-image', 'display:block;outline:none;');
 img.alt = '';
 img.draggable = false;
@@ -131,6 +136,21 @@ function toast(text: string, ms = 1600): void {
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (toastEl.hidden = true), ms);
 }
+
+// Image Notes (src/webview/imageReview.ts). The panel takes room from the scroller,
+// so a fit zoom is measured again when it comes or goes.
+const review = createImageReview({
+  frame,
+  scroller,
+  toolbar: toolbarEl,
+  post: (msg) => vscode.postMessage(msg),
+  toast: (text) => toast(text),
+  onLayout: () => {
+    if (zoom === 'fit') {
+      applyZoom();
+    }
+  },
+});
 
 function dims(): { width?: number; height?: number } {
   // A raster's decoded size wins once loaded: it honours EXIF orientation, which
@@ -488,6 +508,9 @@ document.addEventListener('keydown', (e) => {
   if (contextMenu.isOpen() || e.altKey) {
     return;
   }
+  if (review.onKeydown(e)) {
+    return;
+  }
   if (e.ctrlKey || e.metaKey) {
     if (e.key === '+' || e.key === '=') {
       e.preventDefault();
@@ -757,6 +780,10 @@ let startScrollX = 0;
 let startScrollY = 0;
 
 document.addEventListener('pointerdown', (e) => {
+  // Image Notes' Area and Pin modes take the press before the hand tool can pan.
+  if (review.onPointerDown(e)) {
+    return;
+  }
   const target = e.target as HTMLElement | null;
   if (
     e.button !== 0 ||
@@ -876,6 +903,8 @@ document.addEventListener('contextmenu', (e) => {
         ? [{ kind: 'item', label: 'Copy SVG Source', run: copySvgSource } as MenuEntry]
         : []),
       { kind: 'divider' },
+      ...review.menuEntries(),
+      { kind: 'divider' },
       {
         kind: 'submenu',
         label: 'View',
@@ -983,8 +1012,16 @@ window.addEventListener('message', (event: MessageEvent) => {
     | LoadMessage
     | { type: 'error'; message: string; position?: LoadMessage['position'] }
     | { type: 'setTheme'; value: string }
-    | { type: 'setBackground'; value?: unknown };
+    | { type: 'setBackground'; value?: unknown }
+    | { type: 'toast'; message?: unknown }
+    | { type: 'review' }
+    | { type: 'reviewError' };
   if (!msg) {
+    return;
+  }
+  // Notes mode: `review` and `reviewError`. A `toast` (after a copy) also reaches it
+  // so its button can flash, and is then shown below.
+  if (review.onMessage(msg)) {
     return;
   }
   if (msg.type === 'load') {
@@ -1008,6 +1045,8 @@ window.addEventListener('message', (event: MessageEvent) => {
     applyTheme(msg.value);
   } else if (msg.type === 'setBackground') {
     applyBackground(msg.value);
+  } else if (msg.type === 'toast') {
+    toast(String(msg.message ?? ''));
   }
 });
 
