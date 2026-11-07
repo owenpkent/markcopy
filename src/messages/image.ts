@@ -13,6 +13,7 @@ export type ImageMessage =
   | { type: 'revealInOS' }
   | SaveFrameMessage
   | { type: 'openExternal' }
+  | { type: 'navigate'; step: 1 | -1 }
   | UpdateSettingMessage;
 
 export function parseImageMessage(raw: unknown): ImageMessage | undefined {
@@ -29,6 +30,8 @@ export function parseImageMessage(raw: unknown): ImageMessage | undefined {
       return saveFrame(msg);
     case 'updateSetting':
       return settingMessage(msg, isImageSetting);
+    case 'navigate':
+      return msg.step === 1 || msg.step === -1 ? { type: 'navigate', step: msg.step } : undefined;
     default:
       return undefined;
   }

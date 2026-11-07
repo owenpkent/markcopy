@@ -117,6 +117,9 @@ let svgScale = 2;
 let hand = true;
 let background: Background = 'checkerboard';
 let currentTheme = document.body.getAttribute('data-mc-theme') || 'auto';
+// This image's place among its folder's (1-based), from the host.
+let imageIndex = 1;
+let imageCount = 1;
 
 // ---------------------------------------------------------------------------
 // Chrome
@@ -222,6 +225,28 @@ interface LoadMessage {
   size: number;
   data: string;
   background?: unknown;
+  position?: { index?: unknown; count?: unknown };
+}
+
+// Back and Next step through the folder's images; the host opens the other file.
+function navigate(step: 1 | -1): void {
+  if (imageCount > 1) {
+    vscode.postMessage({ type: 'navigate', step });
+  }
+}
+
+function updateNav(): void {
+  const show = imageCount > 1;
+  for (const id of ['mc-prev', 'mc-image-pos', 'mc-next', 'mc-nav-sep']) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = show ? '' : 'none';
+    }
+  }
+  const pos = document.getElementById('mc-image-pos');
+  if (pos) {
+    pos.textContent = `${imageIndex} / ${imageCount}`;
+  }
 }
 
 function resetImage(): void {
@@ -240,6 +265,11 @@ function load(msg: LoadMessage): void {
   filePath = String(msg.path ?? '');
   relativePath = String(msg.relativePath ?? fileName);
   fileBytes = Number(msg.size) || 0;
+  const index = Number(msg.position?.index);
+  const count = Number(msg.position?.count);
+  imageCount = Number.isInteger(count) && count > 0 ? count : 1;
+  imageIndex = Number.isInteger(index) && index > 0 && index <= imageCount ? index : 1;
+  updateNav();
   base64 = typeof msg.data === 'string' ? msg.data : '';
   if (msg.background !== undefined) {
     applyBackground(msg.background);
@@ -452,7 +482,16 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.key === '1') {
+  // The arrows step through the folder unless the picture overflows sideways,
+  // where they keep scrolling it.
+  const sideways = scroller.scrollWidth > scroller.clientWidth;
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !sideways) {
+    e.preventDefault();
+    navigate(e.key === 'ArrowLeft' ? -1 : 1);
+  } else if (e.key === 'PageUp' || e.key === 'PageDown') {
+    e.preventDefault();
+    navigate(e.key === 'PageUp' ? -1 : 1);
+  } else if (e.key === '1') {
     setZoom(100);
   } else if (e.key === 'f' || e.key === 'F') {
     setZoom('fit');
@@ -614,8 +653,20 @@ const GRID_ICON =
   'stroke-width="1.8" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
   '<rect x="3" y="3" width="18" height="18" rx="2" /><rect x="3" y="3" width="9" height="9" fill="currentColor" />' +
   '<rect x="12" y="12" width="9" height="9" fill="currentColor" /></svg>';
+const PREV_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+  'focusable="false"><path d="M15 5l-7 7 7 7" /></svg>';
+const NEXT_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+  'focusable="false"><path d="M9 5l7 7-7 7" /></svg>';
 const ICON_BUTTON_CSS = 'display:inline-flex;align-items:center;justify-content:center;padding:0;';
 toolbarEl.innerHTML =
+  `<button type="button" id="mc-prev" data-act="prev" aria-label="Previous image" title="Previous image in folder (Left arrow)" style="${ICON_BUTTON_CSS}">${PREV_ICON}</button>` +
+  '<span id="mc-image-pos" aria-live="polite" style="padding:0 6px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;">1 / 1</span>' +
+  `<button type="button" id="mc-next" data-act="next" aria-label="Next image" title="Next image in folder (Right arrow)" style="${ICON_BUTTON_CSS}">${NEXT_ICON}</button>` +
+  '<span id="mc-nav-sep" class="mc-toolbar-sep" aria-hidden="true"></span>' +
   '<button type="button" data-act="out" aria-label="Zoom out" title="Zoom out (Ctrl -)">\u2212</button>' +
   '<button type="button" id="mc-zoom-label" aria-label="Zoom level" title="Zoom level (click to type)">100%</button>' +
   '<button type="button" data-act="in" aria-label="Zoom in" title="Zoom in (Ctrl +)">+</button>' +
@@ -625,6 +676,7 @@ toolbarEl.innerHTML =
   `<button type="button" id="mc-hand" data-act="hand" aria-pressed="true" aria-label="Hand tool" title="Hand Tool (Drag to Pan)" style="${ICON_BUTTON_CSS}">${HAND_ICON}</button>` +
   '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
   `<button type="button" id="mc-grid" data-act="grid" aria-pressed="true" aria-label="Transparency grid" title="Transparency grid (click to hide)" style="${ICON_BUTTON_CSS}">${GRID_ICON}</button>`;
+updateNav();
 toolbarEl.addEventListener('pointerdown', (e) => e.stopPropagation());
 toolbarEl.addEventListener('click', (e) => {
   const target = (e.target as HTMLElement).closest<HTMLElement>('button');
@@ -646,6 +698,10 @@ toolbarEl.addEventListener('click', (e) => {
     setHand(!hand);
   } else if (act === 'grid') {
     toggleGrid();
+  } else if (act === 'prev') {
+    navigate(-1);
+  } else if (act === 'next') {
+    navigate(1);
   }
 });
 

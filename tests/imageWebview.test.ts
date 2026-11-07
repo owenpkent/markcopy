@@ -780,14 +780,41 @@ describe('image webview', () => {
         new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }),
       );
 
-    it('renders the six controls with labels', async () => {
+    it('renders the eight controls with labels', async () => {
       await boot();
       fromHost(loadMsg());
       const buttons = Array.from($('mc-toolbar').querySelectorAll('button'));
-      expect(buttons).toHaveLength(6);
+      expect(buttons).toHaveLength(8);
       expect(buttons.every((b) => b.getAttribute('aria-label'))).toBe(true);
       expect($('mc-hand').title).toBe('Hand Tool (Drag to Pan)');
       expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('hides Back and Next for a lone image', async () => {
+      await boot();
+      fromHost(loadMsg());
+      expect($('mc-prev').style.display).toBe('none');
+      expect($('mc-next').style.display).toBe('none');
+      $('mc-next').click();
+      key('ArrowRight');
+      expect(posted).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate' }));
+    });
+
+    it('steps through the folder with the buttons and the keys', async () => {
+      await boot();
+      fromHost(loadMsg({ position: { index: 2, count: 5 } }));
+      expect($('mc-prev').style.display).toBe('');
+      expect($('mc-image-pos').textContent).toBe('2 / 5');
+      $('mc-next').click();
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: 1 });
+      $('mc-prev').click();
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: -1 });
+      key('ArrowRight');
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: 1 });
+      key('ArrowLeft');
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: -1 });
+      key('PageDown');
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: 1 });
     });
 
     it('zooms with the buttons and updates the label', async () => {
