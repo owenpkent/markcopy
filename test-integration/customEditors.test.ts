@@ -408,6 +408,44 @@ suite('MarkCopy custom editors', () => {
     }
   });
 
+  test('Back or Next onto an image open in another group leaves that group alone', async () => {
+    // The image viewer's Back and Next open the neighbour with vscode.openWith in
+    // the panel's own column. With one editor per document, VS Code would move an
+    // existing tab on that file out of the other group, breaking a side-by-side
+    // layout; the image provider allows several, so it opens a second one.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const a = vscode.Uri.file(path.join(dir, 'a.png'));
+    const b = vscode.Uri.file(path.join(dir, 'b.png'));
+    fs.writeFileSync(a.fsPath, png);
+    fs.writeFileSync(b.fsPath, png);
+
+    await vscode.commands.executeCommand('vscode.openWith', b, IMAGE_VIEW, {
+      viewColumn: vscode.ViewColumn.Two,
+    });
+    await vscode.commands.executeCommand('vscode.openWith', a, IMAGE_VIEW, {
+      viewColumn: vscode.ViewColumn.One,
+    });
+    await vscode.commands.executeCommand('vscode.openWith', b, IMAGE_VIEW, {
+      viewColumn: vscode.ViewColumn.One,
+    });
+
+    const columnsOfB = () =>
+      vscode.window.tabGroups.all
+        .filter((group) => group.tabs.some((tab) => isEditorOn(tab.input, b, 'custom')))
+        .map((group) => group.viewColumn)
+        .sort();
+    const both = await waitFor(() => (columnsOfB().length === 2 ? columnsOfB() : undefined));
+    assert.deepStrictEqual(
+      both,
+      [vscode.ViewColumn.One, vscode.ViewColumn.Two],
+      `b.png should be open in both groups, got ${tabsFor(b).join(', ')}`,
+    );
+  });
+
   test('containers VS Code cannot open (.mkv, .webm, .AVI) open in the video preview', async () => {
     // Measured: VS Code's own player refuses everything outside the MP4 family,
     // WebM included. The bytes are an MP4 renamed, which is enough here: this

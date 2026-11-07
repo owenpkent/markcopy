@@ -790,6 +790,33 @@ describe('image webview', () => {
       expect($('mc-fit').getAttribute('aria-pressed')).toBe('true');
     });
 
+    it('keeps Back and Next when the image cannot load', async () => {
+      await boot();
+      fromHost({ type: 'error', message: 'b.png is too big', position: { index: 2, count: 3 } });
+      expect($('mc-toolbar').style.display).toBe('');
+      expect($('mc-prev').style.display).toBe('');
+      expect($('mc-image-pos').textContent).toBe('2 / 3');
+      expect($('mc-fit').style.display).toBe('none');
+      key('PageDown');
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: 1 });
+      key('PageUp');
+      expect(posted).toHaveBeenLastCalledWith({ type: 'navigate', step: -1 });
+      // The next good load brings the other controls back.
+      fromHost(loadMsg({ position: { index: 2, count: 3 } }));
+      expect($('mc-fit').style.display).toBe('');
+    });
+
+    it('leaves Page Up and Page Down to scroll a lone image', async () => {
+      await boot();
+      fromHost(loadMsg({ position: { index: 1, count: 1 } }));
+      for (const k of ['PageDown', 'PageUp', 'ArrowRight']) {
+        const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+        document.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+      }
+      expect(posted).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'navigate' }));
+    });
+
     it('hides Back and Next for a lone image', async () => {
       await boot();
       fromHost(loadMsg());

@@ -163,7 +163,9 @@ function updateStatus(): void {
 
 function showError(message: string): void {
   scroller.style.display = 'none';
-  toolbarEl.style.display = 'none';
+  // Back and Next stay usable, so a file that cannot load is no dead end.
+  toolbarEl.style.display = imageCount > 1 ? '' : 'none';
+  setNavOnly(true);
   errorEl.style.display = 'flex';
   errorEl.textContent = message;
 }
@@ -235,9 +237,28 @@ function navigate(step: 1 | -1): void {
   }
 }
 
+const NAV_IDS = ['mc-prev', 'mc-image-pos', 'mc-next', 'mc-nav-sep'];
+
+// With no picture on screen, only the folder controls make sense in the toolbar.
+function setNavOnly(on: boolean): void {
+  for (const child of Array.from(toolbarEl.children) as HTMLElement[]) {
+    if (!NAV_IDS.includes(child.id)) {
+      child.style.display = on ? 'none' : '';
+    }
+  }
+}
+
+function applyPosition(position: LoadMessage['position']): void {
+  const index = Number(position?.index);
+  const count = Number(position?.count);
+  imageCount = Number.isInteger(count) && count > 0 ? count : 1;
+  imageIndex = Number.isInteger(index) && index > 0 && index <= imageCount ? index : 1;
+  updateNav();
+}
+
 function updateNav(): void {
   const show = imageCount > 1;
-  for (const id of ['mc-prev', 'mc-image-pos', 'mc-next', 'mc-nav-sep']) {
+  for (const id of NAV_IDS) {
     const el = document.getElementById(id);
     if (el) {
       el.style.display = show ? '' : 'none';
@@ -265,11 +286,7 @@ function load(msg: LoadMessage): void {
   filePath = String(msg.path ?? '');
   relativePath = String(msg.relativePath ?? fileName);
   fileBytes = Number(msg.size) || 0;
-  const index = Number(msg.position?.index);
-  const count = Number(msg.position?.count);
-  imageCount = Number.isInteger(count) && count > 0 ? count : 1;
-  imageIndex = Number.isInteger(index) && index > 0 && index <= imageCount ? index : 1;
-  updateNav();
+  applyPosition(msg.position);
   base64 = typeof msg.data === 'string' ? msg.data : '';
   if (msg.background !== undefined) {
     applyBackground(msg.background);
@@ -285,6 +302,7 @@ function load(msg: LoadMessage): void {
   }
   scroller.style.display = 'flex';
   toolbarEl.style.display = '';
+  setNavOnly(false);
   if (info.format === 'svg') {
     // A data URL, not a Blob URL: an SVG with <foreignObject> taints the canvas
     // when loaded from a Blob URL, which would break PNG export. It still only
@@ -306,6 +324,7 @@ img.addEventListener('load', () => {
   errorEl.style.display = 'none';
   scroller.style.display = 'flex';
   toolbarEl.style.display = '';
+  setNavOnly(false);
   updateStatus();
   applyZoom();
 });
@@ -485,10 +504,12 @@ document.addEventListener('keydown', (e) => {
   // The arrows step through the folder unless the picture overflows sideways,
   // where they keep scrolling it.
   const sideways = scroller.scrollWidth > scroller.clientWidth;
-  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !sideways) {
+  // A lone image keeps the keys for scrolling.
+  const steps = imageCount > 1;
+  if (steps && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !sideways) {
     e.preventDefault();
     navigate(e.key === 'ArrowLeft' ? -1 : 1);
-  } else if (e.key === 'PageUp' || e.key === 'PageDown') {
+  } else if (steps && (e.key === 'PageUp' || e.key === 'PageDown')) {
     e.preventDefault();
     navigate(e.key === 'PageUp' ? -1 : 1);
   } else if (e.key === '1') {
@@ -960,7 +981,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
   const msg = event.data as
     | LoadMessage
-    | { type: 'error'; message: string }
+    | { type: 'error'; message: string; position?: LoadMessage['position'] }
     | { type: 'setTheme'; value: string }
     | { type: 'setBackground'; value?: unknown };
   if (!msg) {
@@ -977,6 +998,10 @@ window.addEventListener('message', (event: MessageEvent) => {
     bytes = new Uint8Array(0);
     base64 = '';
     fileBytes = 0;
+    // Only sendLoad's errors carry the folder position; a later one keeps it.
+    if (msg.position !== undefined) {
+      applyPosition(msg.position);
+    }
     showError(msg.message);
     statusEl.textContent = '';
   } else if (msg.type === 'setTheme') {

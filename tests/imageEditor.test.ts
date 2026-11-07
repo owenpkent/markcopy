@@ -201,6 +201,8 @@ describe('ImageEditorProvider', () => {
     await send({ type: 'ready' });
     expect(readFile).not.toHaveBeenCalled();
     expect(posted.find((m) => m.type === 'error')?.message).toContain('limit for image previews');
+    // The folder position rides on the error, so Back and Next still work.
+    expect(posted.find((m) => m.type === 'error')?.position).toEqual({ index: 1, count: 1 });
   });
 
   it('ignores a saveFrame with no data', async () => {

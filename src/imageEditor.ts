@@ -253,6 +253,10 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
 
   private async sendLoad(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
     const name = basename(uri);
+    // Where this image sits among its folder's, for Back and Next. It goes out
+    // with an error too, so a neighbour that cannot load still steps on.
+    const images = await this.folderImages(uri);
+    const position = { index: images.indexOf(name) + 1, count: images.length };
     try {
       // Size first, off stat, so a huge file is refused before it is read and
       // base64'd in the extension host (see src/stlEditor.ts for the reasoning).
@@ -261,11 +265,11 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
         void webview.postMessage({
           type: 'error',
           message: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_IMAGE_BYTES)} limit for image previews.`,
+          position,
         });
         return;
       }
       const bytes = await vscode.workspace.fs.readFile(uri);
-      const images = await this.folderImages(uri);
       void webview.postMessage({
         type: 'load',
         name,
@@ -277,8 +281,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
           : name,
         background: this.background(uri),
         size: bytes.byteLength,
-        // Where this image sits among its folder's, for Back and Next.
-        position: { index: images.indexOf(name) + 1, count: images.length },
+        position,
         // Base64, not the raw Uint8Array: the webview transport JSON-encodes
         // messages, and JSON turns a typed array into a numeric-keyed object.
         data: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
@@ -287,6 +290,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       void webview.postMessage({
         type: 'error',
         message: `Could not read ${name} (${String(err)}).`,
+        position,
       });
     }
   }
