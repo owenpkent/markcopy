@@ -397,6 +397,15 @@ describe('Pin mode', () => {
     expect(reviewPosts().at(-1)).toEqual({ type: 'reviewAdd', text: 'here', point: [0.5, 0.5] });
   });
 
+  it('ignores a press on the margin around the picture', async () => {
+    await open();
+    key('p');
+    pointer('pointerdown', 20, 70);
+    expect(chip().textContent).not.toMatch(/^Pin /);
+    pointer('pointerdown', 250, 120);
+    expect(chip().textContent).toBe('Pin 100%, 100%');
+  });
+
   it('keeps the modes exclusive', async () => {
     await open();
     key('a');

@@ -577,7 +577,14 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
     }
     const r = frameBox();
     if (mode === 'pin') {
-      if (r) {
+      // A press on the margin around the picture is no pin, as in the video's letterbox.
+      const onPicture =
+        r &&
+        e.clientX >= r.left &&
+        e.clientX <= r.right &&
+        e.clientY >= r.top &&
+        e.clientY <= r.bottom;
+      if (r && onPicture) {
         const [fx, fy] = fraction(e.clientX, e.clientY, r);
         pending = { point: [units(fx) / 10000, units(fy) / 10000] };
         renderComposer();
