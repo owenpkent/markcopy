@@ -58,6 +58,8 @@ npm test          # vitest run (what CI runs)
 npm run test:watch
 ```
 
+Vitest runs on half the CPU cores (`maxWorkers: '50%'` in `vitest.config.ts`), so a run leaves the desktop responsive; a run on every core has frozen the maintainer's machine. The suite takes a few seconds either way.
+
 Unit tests live in `tests/` and run under vitest + jsdom. They cover the pure, host-independent logic: markdown-it rendering and source-line mapping (`src/render.ts`), CSV/TSV parsing, delimiter sniffing, grid rendering and the field spans that drive cell editing (`src/csv.ts`), the grid's column resizing and cell editing (`src/webview/csvTable.ts`, `src/webview/csvEdit.ts`), clipboard table serialization (`src/webview/table.ts`, RFC 4180), link and email-address detection (`src/webview/links.ts`), the shared context-menu engine (`src/webview/menu.ts`), what the PDF export and rich-text clipboard payload strip from the live preview DOM (`src/webview/main.ts`), HTML-to-Markdown conversion (`src/webview/markdownConvert.ts`), scroll-sync interpolation (`src/webview/scrollSync.ts`), the PDF export's browser discovery, command line, and print stylesheet (`src/pdfExport.ts`), the Word export writer (`src/docxExport.ts`, `src/docx/`), LaTeX engine discovery, the per-engine command line, and compile-log parsing (`src/texCompile.ts`, `src/texInfo.ts`), the video preview's ffmpeg discovery, probing, and transcode command line (`src/videoProxy.ts`), the GIF viewer's header parser and formatters (`src/webview/gifInfo.ts`), and the image viewer's format sniffer, header parser, and copy-text builders (`src/webview/imageInfo.ts`).
 
 Two kinds of logic are deliberately kept in files with no `vscode` import and no DOM dependency, so they can be tested like this: geometry and mapping arithmetic (`scrollSync.ts`), and anything describing a command line or generated document (`pdfExport.ts`). When you find yourself wanting to assert on a string the extension builds, that is the signal to move its construction into such a file.
@@ -88,7 +90,7 @@ npm run test:integration   # downloads VS Code and runs the extension inside it
 
 Integration tests live in `test-integration/` and run under Mocha inside a real VS Code instance (via `@vscode/test-electron`). They verify activation, command registration, configuration defaults, that the `csv` and `tsv` language ids the extension contributes are actually registered, that the preview panel opens (for both Markdown and CSV), and which editor claims a file: a `.xlsx`, `.xlsm`, `.pptx`, `.pdf`, `.stl`, `.mov`, or `.mp4` has to land in its custom editor rather than in the text editor, and a file that is not really a workbook has to open far enough to say so. That last group is worth having here specifically because it is contributed entirely through `package.json`: a selector that stops matching leaves a workbook opening as binary junk while every test outside VS Code still passes.
 
-On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored).
+CI runs them on every pull request. A local run opens a second VS Code window for a minute or two, so run it on its own, not alongside other tests. On Linux and CI they need a display: `xvfb-run -a npm run test:integration`. The downloaded VS Code and compiled test output go to `.vscode-test/` and `out/` (both gitignored).
 
 ### Manual testing
 
