@@ -672,6 +672,11 @@
           "default": false,
           "description": "Open videos in review mode, with timecoded notes and a notes panel, even when there is no review file beside them yet. A video with a .review.yaml file beside it opens in review mode regardless. Also set from the preview's right-click Open Video Notes / Close Video Notes item."
         },
+        "markcopy.image.review": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open images with Image Notes on, with notes pinned to a point, an area or the whole picture and a notes panel, even when there is no review file beside them yet. An image with a .review.yaml file beside it (photo.png.review.yaml) opens with notes on regardless. Also set from the preview's right-click Open Image Notes / Close Image Notes item."
+        },
         "markcopy.video.transcode": {
           "type": "string",
           "enum": [

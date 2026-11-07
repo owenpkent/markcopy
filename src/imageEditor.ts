@@ -3,6 +3,7 @@ import { revealInOs, openInDefaultApp } from './revealInOs';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import { basename, saveFrame } from './videoEditor';
+import { ImageReviewSession } from './imageReview';
 import { parseImageMessage } from './messages/image';
 import { IMAGE_BACKGROUNDS, THEMES, isImageSetting } from './messages/settings';
 import { MAX_IMAGE_BYTES } from './webview/imageInfo';
@@ -101,6 +102,9 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       background,
     );
 
+    // Image Notes: nothing runs until notes are turned on or a sidecar exists.
+    const review = new ImageReviewSession(document.uri, webview);
+
     let navigating = false;
     webview.onDidReceiveMessage(async (raw) => {
       const msg = parseImageMessage(raw);
@@ -110,6 +114,24 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       switch (msg.type) {
         case 'ready':
           await this.sendLoad(webview, document.uri);
+          // Notes follow the sidecar: one beside the image, or the setting.
+          await review.onReady();
+          break;
+        case 'reviewEnable':
+          await review.enable();
+          break;
+        case 'reviewCopy':
+          await review.copy();
+          break;
+        case 'reviewAdd':
+          // The session checks each edit with its validator before it touches the file.
+          await review.add(msg.raw);
+          break;
+        case 'reviewDelete':
+          await review.delete(msg.raw);
+          break;
+        case 'reviewRestore':
+          await review.restore(msg.raw);
           break;
         case 'revealInOS':
           revealInOs(document.uri);
@@ -185,6 +207,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
 
     panel.onDidDispose(() => {
       disposed = true;
+      review.dispose();
       clearTimeout(timer);
       themeListener.dispose();
       watchers.forEach((w) => w.dispose());

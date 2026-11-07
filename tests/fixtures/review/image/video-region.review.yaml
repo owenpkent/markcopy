@@ -1,0 +1,46 @@
+version: 1
+id: ffffffffffff
+source: clip.mp4
+fps: 25.0
+next_note_id: 4
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  at: 1.0
+  kind: note
+  text: Region only.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  region: [0.1, 0.2, 0.3, 0.4]
+- id: n2
+  target: source
+  at: 2.0
+  kind: note
+  text: Range with a region.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  out: 3.0
+  author: Dana
+  region: [0.0, 0.0, 0.5, 0.5]
+- id: n3
+  target: source
+  at: 4.0
+  kind: note
+  text: Pin only.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  point: [0.5, 0.5]

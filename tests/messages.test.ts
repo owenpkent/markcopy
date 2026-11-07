@@ -326,6 +326,30 @@ describe('parseStlMessage', () => {
 });
 
 describe('parseImageMessage', () => {
+  it('passes the Image Notes messages through, the edits raw', () => {
+    for (const type of ['reviewEnable', 'reviewCopy']) {
+      expect(parseImageMessage({ type, extra: 1 })).toEqual({ type });
+    }
+    for (const type of ['reviewAdd', 'reviewDelete', 'reviewRestore']) {
+      const raw = { type, text: 'x', point: [0.5, 0.5], junk: true };
+      expect(parseImageMessage(raw)).toEqual({ type, raw });
+    }
+  });
+
+  it('writes image.review only as a boolean', () => {
+    expect(parseImageMessage({ type: 'updateSetting', key: 'image.review', value: true })).toEqual({
+      type: 'updateSetting',
+      key: 'image.review',
+      value: true,
+    });
+    expect(
+      parseImageMessage({ type: 'updateSetting', key: 'image.review', value: 'yes' }),
+    ).toBeUndefined();
+    expect(
+      parseImageMessage({ type: 'updateSetting', key: 'video.review', value: true }),
+    ).toBeUndefined();
+  });
+
   it('accepts the image messages', () => {
     for (const type of ['ready', 'revealInOS', 'openExternal']) {
       expect(parseImageMessage({ type })).toEqual({ type });

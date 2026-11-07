@@ -49,7 +49,16 @@ vi.mock('vscode', () => {
         uri.fsPath.startsWith('/ws/') ? { uri: { fsPath: '/ws' } } : undefined,
       ),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath.replace('/ws/', '')),
-      fs: { stat, readFile, writeFile },
+      // Image Notes reads `<name>.review.yaml` through the same fs; there is none here,
+      // so the image reads below are only the image's own.
+      fs: {
+        stat,
+        readFile: (uri: { path: string }) =>
+          uri.path.endsWith('.review.yaml')
+            ? Promise.reject(Object.assign(new Error('no such file'), { code: 'FileNotFound' }))
+            : readFile(),
+        writeFile,
+      },
       createFileSystemWatcher: vi.fn((pattern: unknown) => {
         watcherHooks.pattern = pattern;
         const dispose = vi.fn();
