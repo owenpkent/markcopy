@@ -40,6 +40,14 @@ export type Change = { text: string; added?: string; applied?: () => void } | st
 
 const idsOf = (loaded: SidecarLoad | undefined): string[] => (loaded?.notes ?? []).map((n) => n.id);
 
+/**
+ * One edit queue per sidecar, shared by every panel on it (the same image can be
+ * open in two groups). Each edit re-reads the file inside its turn, so a second
+ * panel's add sees the first one's note and takes the next id, instead of both
+ * allocating the same id and one silently overwriting the other.
+ */
+const sidecarQueues = new Map<string, Promise<void>>();
+
 /** The fields every state message carries; a subclass adds its own and the `type`. */
 export interface StateFields {
   sidecar: string | null;
@@ -60,8 +68,6 @@ export abstract class NotesSession {
   // Bumped by every post, so a slow read that started before a newer one (the
   // watcher often fires twice for one save) cannot post stale notes last.
   private generation = 0;
-  // Every edit runs after the one before it, so two quick adds get n1 and n2.
-  private queue: Promise<void> = Promise.resolve();
   private editing = false;
   // The sidecar text this panel last wrote, so the watcher event it raises is not
   // answered with a second post.
@@ -270,14 +276,22 @@ export abstract class NotesSession {
   // Machinery for subclasses' `add` -------------------------------------------
 
   protected enqueue(job: () => Promise<void>, failed?: 'add'): Promise<void> {
-    const run = this.queue.then(job).catch((err) => {
+    const key = this.sidecarUri.toString();
+    const before = sidecarQueues.get(key) ?? Promise.resolve();
+    const run = before.then(job).catch((err) => {
       this.editing = false;
       this.error(
         err instanceof EditError ? err.message : `Could not save the notes (${String(err)})`,
         failed,
       );
     });
-    this.queue = run;
+    sidecarQueues.set(key, run);
+    // Drop the entry once idle, unless a later edit has queued behind this one.
+    void run.then(() => {
+      if (sidecarQueues.get(key) === run) {
+        sidecarQueues.delete(key);
+      }
+    });
     return run;
   }
 

@@ -138,6 +138,28 @@ beforeEach(() => {
 });
 
 describe('ImageReviewSession', () => {
+  it('serializes adds from two panels on one image, so neither note is lost', async () => {
+    hooks.setting = true;
+    const a = make();
+    const b = make();
+    await a.session.onReady();
+    await b.session.onReady();
+    // Both start before either has written: without a shared queue both read an
+    // empty file, both allocate n1, and the second write silently replaces the first.
+    await Promise.all([
+      a.session.add({ type: 'reviewAdd', text: 'from A' }),
+      b.session.add({ type: 'reviewAdd', text: 'from B' }),
+    ]);
+    const loaded = loadSidecar(files.get(SIDECAR)!);
+    expect(loaded.notes.map((n) => [n.id, n.text])).toEqual([
+      ['n1', 'from A'],
+      ['n2', 'from B'],
+    ]);
+    expect(a.states().some((m) => m.added === 'n1')).toBe(true);
+    expect(b.states().some((m) => m.added === 'n2')).toBe(true);
+    expect([...a.posted, ...b.posted].some((m) => m.type === 'reviewError')).toBe(false);
+  });
+
   it('stays off with no sidecar and the setting off', async () => {
     const { session, posted } = make();
     await session.onReady();

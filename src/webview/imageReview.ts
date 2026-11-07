@@ -564,15 +564,39 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
       renderPendingShape();
     }
   }
+  function cancelDrag(): void {
+    if (!drag) {
+      return;
+    }
+    try {
+      scroller.releasePointerCapture?.(drag.id);
+    } catch {
+      /* best-effort */
+    }
+    drag = null;
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onCancel);
+    document.body.classList.remove('mc-rv-drawing');
+    renderPendingShape();
+  }
   const onUp = (e: PointerEvent): void => endDrag(e, true);
   const onCancel = (e: PointerEvent): void => endDrag(e, false);
 
   function onPointerDown(e: PointerEvent): boolean {
-    if (!isActive || !ui || !state || readOnly() || mode === 'none' || e.button !== 0) {
+    if (!isActive || !ui || !state || e.button !== 0) {
       return false;
     }
     const target = e.target as HTMLElement | null;
     if (!target || !scroller.contains(target) || target.closest('.mc-menu, #mc-toolbar')) {
+      return false;
+    }
+    // With no mode on, a press on a saved shape is a click that selects its
+    // note: claim it so the hand tool does not capture the pointer and swallow it.
+    if (mode === 'none') {
+      return ui.layer.contains(target) && target.closest('button') !== null;
+    }
+    if (readOnly()) {
       return false;
     }
     const r = frameBox();
@@ -782,6 +806,9 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
   }
 
   function clearAnchor(): void {
+    // A drag still under way is cancelled too, or its pointerup would bring the
+    // region straight back.
+    cancelDrag();
     mode = 'none';
     pending = null;
     renderComposer();
@@ -792,7 +819,9 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
       return;
     }
     const text = ui.field.value.trim();
-    if (!text && !pending) {
+    // One note in flight at a time, as in Video Notes, so a failed save always
+    // has its own draft to give back.
+    if ((!text && !pending) || sent) {
       return;
     }
     const msg: Extract<ImageReviewWebviewMessage, { type: 'reviewAdd' }> = {

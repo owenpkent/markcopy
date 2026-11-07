@@ -1698,6 +1698,19 @@ body.mc-review #mc-stage[hidden] {
    and toolbar are inset by the script (320px on the right, or 40% below when
    narrow), always above the 30px status line. The shapes sit inside
    #mc-image-frame in percentages, so they follow zoom and pan. */
+/* The shapes live in #mc-image-frame, outside .mc-rv, so the tokens they use are
+   set on the body as well; .mc-rv below re-grounds the panel's copy. */
+body.mc-image {
+  --rv-bg: var(--mc-bg);
+  --rv-fg: var(--mc-fg);
+  --rv-surface: color-mix(in srgb, var(--rv-fg) 6%, var(--rv-bg));
+  --rv-hover: color-mix(in srgb, var(--rv-accent) 14%, var(--rv-bg));
+  --rv-line: color-mix(in srgb, var(--rv-fg) 24%, var(--rv-bg));
+  --rv-edge: color-mix(in srgb, var(--rv-fg) 60%, var(--rv-bg));
+  --rv-muted: color-mix(in srgb, var(--rv-fg) 72%, var(--rv-bg));
+  --rv-accent: var(--mc-accent);
+  --rv-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
 body.mc-image .mc-rv {
   --rv-bg: var(--mc-bg);
   --rv-fg: var(--mc-fg);

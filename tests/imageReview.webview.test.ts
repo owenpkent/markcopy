@@ -288,6 +288,25 @@ describe('cards and the overlay', () => {
     expect(posted).toContainEqual({ type: 'reviewDelete', id: 'n1' });
   });
 
+  it('a press on a saved shape selects it instead of starting a hand-tool pan', async () => {
+    await open();
+    for (const [selector, card] of [
+      ['.mc-rv-region', 0],
+      ['.mc-rv-pin', 1],
+    ] as const) {
+      const shape = frame().querySelector<HTMLElement>(selector)!;
+      // jsdom has no pointer capture; the hand tool calls it when it starts a pan.
+      const capture = vi.fn();
+      scroller().setPointerCapture = capture;
+      pointer('pointerdown', 60, 30, shape);
+      expect(capture).not.toHaveBeenCalled();
+      expect(document.body.classList.contains('mc-grabbing')).toBe(false);
+      pointer('pointerup', 60, 30, shape);
+      shape.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      expect(cards()[card].getAttribute('aria-pressed')).toBe('true');
+    }
+  });
+
   it('selects the card when a shape is clicked', async () => {
     await open();
     frame().querySelector<HTMLElement>('.mc-rv-pin')!.click();
@@ -467,6 +486,45 @@ describe('composer', () => {
     expect(document.getElementById('mc-toast')!.hidden).toBe(true);
   });
 
+  it('holds a second Send until the first note is answered, so its draft survives', async () => {
+    await open();
+    field().value = 'first';
+    key('Enter', field());
+    expect(reviewPosts().filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
+    key('a');
+    drag(70, 40, 150, 90);
+    field().value = 'second';
+    key('Enter', field());
+    // Not sent while the first is in flight: the draft stays in the composer.
+    expect(reviewPosts().filter((m) => m.type === 'reviewAdd')).toHaveLength(1);
+    expect(field().value).toBe('second');
+    fromHost(review({ added: 'n3' }));
+    expect(field().value).toBe('second');
+    expect(chip().textContent).toBe('Area 10%, 20%, 40% x 50%');
+    key('Enter', field());
+    expect(reviewPosts().at(-1)).toEqual({
+      type: 'reviewAdd',
+      text: 'second',
+      region: [0.1, 0.2, 0.4, 0.5],
+    });
+    fromHost({ type: 'reviewError', message: 'disk full', failed: 'add' });
+    expect(field().value).toBe('second');
+    expect(chip().textContent).toBe('Area 10%, 20%, 40% x 50%');
+  });
+
+  it('Escape during an Area drag cancels it, so the release draws nothing', async () => {
+    await open();
+    key('a');
+    pointer('pointerdown', 70, 40);
+    pointer('pointermove', 150, 90, document);
+    key('Escape');
+    pointer('pointerup', 150, 90, document);
+    expect(byLabel('Area').getAttribute('aria-pressed')).toBe('false');
+    field().value = 'no area';
+    byLabel('Send').click();
+    expect(reviewPosts().at(-1)).toEqual({ type: 'reviewAdd', text: 'no area' });
+  });
+
   it('gives the draft back on a failed add and toasts every reviewError', async () => {
     await open();
     key('a');
@@ -529,5 +587,30 @@ describe('panel actions', () => {
     expect(document.body.classList.contains('mc-image-aim')).toBe(false);
     cards()[0].click();
     expect(byLabel('Delete n1').disabled).toBe(true);
+  });
+});
+
+describe('overlay tokens in media/preview.css', () => {
+  // The shapes sit in #mc-image-frame, outside the .mc-rv panel root, so every
+  // --rv-* token an image shape rule uses must be set on body.mc-image or the
+  // shapes lose their outline and fill. jsdom applies no CSS, so this reads the file.
+  it('defines on body.mc-image every --rv-* token the shape rules use', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    // jsdom gives import.meta.url an http scheme, so resolve from the repo root.
+    const css = readFileSync(join(process.cwd(), 'media', 'preview.css'), 'utf8');
+    const body = /(?:^|\n)body\.mc-image \{([^}]*)\}/.exec(css);
+    expect(body).not.toBeNull();
+    const defined = new Set([...body![1].matchAll(/(--rv-[a-z]+):/g)].map((m) => m[1]));
+    const used = new Set<string>();
+    for (const rule of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      if (/body\.mc-image[^,{]*\.mc-rv-(region|pin|ring|draft|num|pins)/.test(rule[1])) {
+        for (const m of rule[2].matchAll(/var\((--rv-[a-z]+)/g)) {
+          used.add(m[1]);
+        }
+      }
+    }
+    expect(used.size).toBeGreaterThan(0);
+    expect([...used].filter((v) => !defined.has(v))).toEqual([]);
   });
 });
