@@ -184,16 +184,22 @@ describe('VideoEditorProvider sound copy', () => {
     await send({ type: 'playable' });
     const loads = () => posted.filter((m) => m.type === 'load');
     expect(loads()).toHaveLength(2);
-    expect(loads()[0].src).toBe('webview:/videos/clip.mp4');
+    expect(loads()[0].source).toBe('file');
     expect(loads()[0].proxyNote).toBeUndefined();
+    // The page itself carries both addresses, and the proxy's is the path the
+    // encode was told to write, decided before ffmpeg ran.
+    const html = (panel.webview as { html: string }).html;
+    expect(html).toContain('data-mc-src="webview:/videos/clip.mp4"');
+    const output = tools.transcode.mock.calls[0][0].output;
+    expect(output).toMatch(/^[\\/]proxies[\\/]clip-/);
+    expect(html).toContain(`data-mc-proxy-src="webview:${output}"`);
 
     // The webview reloads: back to `ready`, and the original plays again.
     await send({ type: 'ready' });
     await send({ type: 'playable' });
 
     const last = loads().at(-1);
-    expect(last?.src).toMatch(/^webview:[\\/]proxies[\\/]clip-/);
-    expect(last?.src).not.toBe('webview:/videos/clip.mp4');
+    expect(last?.source).toBe('proxy');
     expect(last?.proxyNote).toBe('ffmpeg copy · sound re-encoded to MP3');
     // The second `playable` is the spent offer, not a second encode.
     expect(tools.transcode).toHaveBeenCalledTimes(1);
@@ -285,6 +291,46 @@ describe('VideoEditorProvider container offers', () => {
       codec: 'H.264',
       remux: true,
     });
+  });
+
+  // Every build of a panel writes one fixed path (the page names it up front),
+  // so a cancelled attempt's cleanup must finish before a retry is let in, or
+  // the removal lands on the retry's finished copy and playback points at a
+  // file that is gone.
+  it('holds the retry until a cancelled build has been cleaned up', async () => {
+    tools.probeSource.mockResolvedValue(probeOf({ codec: 'vp8' }));
+    const { TranscodeCancelled } = await import('../src/videoProxy');
+    tools.transcode.mockRejectedValueOnce(new TranscodeCancelled());
+    let releaseCleanup: (() => void) | undefined;
+    tools.removeQuietly.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        releaseCleanup = resolve;
+      }),
+    );
+    const { posted, send } = await open('clip.webm');
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    // Attempt one is cancelled; its cleanup is now pending.
+    const first = send({ type: 'proxyStart', kind: 'picture' });
+    for (let i = 0; i < 10 && tools.removeQuietly.mock.calls.length === 0; i++) await tick();
+    expect(tools.removeQuietly).toHaveBeenCalledTimes(1);
+    const output = tools.transcode.mock.calls[0][0].output;
+    expect(tools.removeQuietly).toHaveBeenCalledWith(output);
+    // No offer yet, and a press that arrives anyway does not start an encode.
+    expect(posted.find((m) => m.state === 'ask')).toBeUndefined();
+    await send({ type: 'proxyStart', kind: 'picture' });
+    expect(tools.transcode).toHaveBeenCalledTimes(1);
+
+    // The cleanup settles: the offer appears, and the retry goes through to a
+    // copy at the same path that nothing then removes.
+    releaseCleanup?.();
+    await first;
+    expect(posted.find((m) => m.state === 'ask')).toBeDefined();
+    await send({ type: 'proxyStart', kind: 'picture' });
+    expect(tools.transcode).toHaveBeenCalledTimes(2);
+    expect(tools.transcode.mock.calls[1][0].output).toBe(output);
+    expect(tools.removeQuietly).toHaveBeenCalledTimes(1);
+    expect(posted.filter((m) => m.type === 'load').at(-1)).toMatchObject({ source: 'proxy' });
   });
 
   it('does not flag a codec that has to be re-encoded', async () => {

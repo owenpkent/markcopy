@@ -25,6 +25,8 @@ const play = vi.fn(() => Promise.resolve());
 beforeEach(() => {
   vi.resetModules();
   document.body.className = 'mc-video';
+  document.body.dataset.mcSrc = 'https://file.test/clip.mp4';
+  document.body.dataset.mcProxySrc = 'https://file.test/proxy.mp4';
   document.body.innerHTML = BODY;
   play.mockClear();
   vi.stubGlobal('acquireVsCodeApi', () => ({
@@ -54,9 +56,9 @@ function fromHost(data: unknown): void {
   window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
 }
 
-const load = (src: string, extra: Record<string, unknown> = {}) => ({
+const load = (source: 'file' | 'proxy', extra: Record<string, unknown> = {}) => ({
   type: 'load',
-  src,
+  source,
   name: 'clip.mp4',
   path: '/videos/clip.mp4',
   size: 1,
@@ -70,7 +72,8 @@ describe('video webview sound-copy swap', () => {
     await import('../src/webview/video');
     const video = document.getElementById('mc-video') as HTMLVideoElement;
 
-    fromHost(load('https://file.test/clip.mp4'));
+    fromHost(load('file'));
+    expect(video.src).toBe('https://file.test/clip.mp4');
     // jsdom loads nothing, so fake an original that has metadata and is playing
     // at 2x, three seconds in.
     Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
@@ -78,9 +81,8 @@ describe('video webview sound-copy swap', () => {
     Object.defineProperty(video, 'currentTime', { value: 3, writable: true, configurable: true });
     video.playbackRate = 2;
 
-    fromHost(
-      load('https://file.test/proxy.mp4', { proxyNote: 'ffmpeg copy · sound re-encoded to MP3' }),
-    );
+    fromHost(load('proxy', { proxyNote: 'ffmpeg copy · sound re-encoded to MP3' }));
+    expect(video.src).toBe('https://file.test/proxy.mp4');
     // What the browser does when the new source starts loading.
     video.playbackRate = 1;
     video.currentTime = 0;
@@ -101,7 +103,7 @@ describe('video webview autoplay', () => {
     await import('../src/webview/video');
     const video = document.getElementById('mc-video') as HTMLVideoElement;
     play.mockImplementationOnce(firstPlay);
-    fromHost(load('https://file.test/clip.mp4', { autoplay: true }));
+    fromHost(load('file', { autoplay: true }));
     // The attempt waits for metadata, and does not use the autoplay attribute.
     expect(video.autoplay).toBe(false);
     expect(play).not.toHaveBeenCalled();
@@ -136,7 +138,7 @@ describe('video webview autoplay', () => {
     // so the click the toast promised has to survive the swap.
     Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
     fromHost(
-      load('https://file.test/proxy.mp4', {
+      load('proxy', {
         autoplay: true,
         proxyNote: 'ffmpeg copy · sound re-encoded to MP3',
       }),
@@ -157,7 +159,7 @@ describe('video webview autoplay', () => {
     play.mockImplementationOnce(
       () => new Promise<void>((_resolve, rejectPlay) => (reject = rejectPlay)),
     );
-    fromHost(load('https://file.test/clip.mp4', { autoplay: true }));
+    fromHost(load('file', { autoplay: true }));
     video.dispatchEvent(new Event('loadedmetadata'));
     expect(play).toHaveBeenCalledTimes(1);
 
