@@ -18,6 +18,39 @@ import { MAX_IMAGE_BYTES } from './webview/imageInfo';
 /** A tool that writes in several chunks reloads once, not once per chunk. */
 const RELOAD_DEBOUNCE_MS = 100;
 
+/** The extensions this editor claims in package.json, lower case. */
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'ico', 'avif', 'svg'];
+
+/** True when a file name ends in one of the extensions the viewer opens. */
+export function isViewerImage(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && IMAGE_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+}
+
+// Explorer-like order: case-insensitive, with digit runs compared as numbers, so
+// photo2 comes before photo10.
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/**
+ * The viewer's images among a folder's file names, in Explorer order. The
+ * current file is always included, even if the listing missed it.
+ */
+export function sortedImages(names: readonly string[], current: string): string[] {
+  const set = new Set(names.filter(isViewerImage));
+  set.add(current);
+  return [...set].sort((a, b) => collator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The file `step` places from `current`, wrapping round at either end. */
+export function stepImage(images: readonly string[], current: string, step: number): string {
+  const index = images.indexOf(current);
+  if (index < 0 || images.length === 0) {
+    return current;
+  }
+  const n = images.length;
+  return images[(((index + step) % n) + n) % n];
+}
+
 // The allow-list lives with the message parsers; re-exported for the tests.
 export { isImageSetting };
 
@@ -68,6 +101,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       background,
     );
 
+    let navigating = false;
     webview.onDidReceiveMessage(async (raw) => {
       const msg = parseImageMessage(raw);
       if (!msg) {
@@ -89,6 +123,17 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
           break;
         case 'updateSetting':
           await applyMarkcopySetting(msg.key, msg.value, document.uri);
+          break;
+        case 'navigate':
+          // One step per panel: a double click must not open two images.
+          if (!navigating) {
+            navigating = true;
+            try {
+              await this.navigate(document.uri, panel, msg.step);
+            } finally {
+              navigating = false;
+            }
+          }
           break;
       }
     });
@@ -157,8 +202,61 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
     return vscode.workspace.getConfiguration('markcopy', uri).get<string>(key, fallback);
   }
 
+  /** The folder's images in Explorer order; just this one if it cannot be read. */
+  private async folderImages(uri: vscode.Uri): Promise<string[]> {
+    const name = basename(uri);
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(uri, '..'));
+      const files = entries
+        .filter(([, type]) => (type & vscode.FileType.File) !== 0)
+        .map(([entry]) => entry);
+      return sortedImages(files, name);
+    } catch {
+      return [name];
+    }
+  }
+
+  /**
+   * Show the previous or next image of the folder in this tab's place: open it
+   * with this editor in the same group, then close the tab it replaces. The
+   * folder is listed afresh, so files added since the panel opened count.
+   */
+  private async navigate(uri: vscode.Uri, panel: vscode.WebviewPanel, step: number) {
+    const name = basename(uri);
+    const target = stepImage(await this.folderImages(uri), name, step);
+    if (target === name) {
+      return;
+    }
+    const findTab = () =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find(
+          (tab) =>
+            tab.input instanceof vscode.TabInputCustom &&
+            tab.input.viewType === ImageEditorProvider.viewType &&
+            tab.input.uri.toString() === uri.toString() &&
+            tab.group.viewColumn === panel.viewColumn,
+        );
+    const before = findTab();
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      vscode.Uri.joinPath(uri, '..', target),
+      ImageEditorProvider.viewType,
+      { viewColumn: panel.viewColumn, preview: before?.isPreview ?? false },
+    );
+    // A preview tab is replaced by the new one; a pinned tab is still there.
+    const after = findTab();
+    if (after) {
+      await vscode.window.tabGroups.close(after, true);
+    }
+  }
+
   private async sendLoad(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
     const name = basename(uri);
+    // Where this image sits among its folder's, for Back and Next. It goes out
+    // with an error too, so a neighbour that cannot load still steps on.
+    const images = await this.folderImages(uri);
+    const position = { index: images.indexOf(name) + 1, count: images.length };
     try {
       // Size first, off stat, so a huge file is refused before it is read and
       // base64'd in the extension host (see src/stlEditor.ts for the reasoning).
@@ -167,6 +265,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
         void webview.postMessage({
           type: 'error',
           message: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_IMAGE_BYTES)} limit for image previews.`,
+          position,
         });
         return;
       }
@@ -182,6 +281,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
           : name,
         background: this.background(uri),
         size: bytes.byteLength,
+        position,
         // Base64, not the raw Uint8Array: the webview transport JSON-encodes
         // messages, and JSON turns a typed array into a numeric-keyed object.
         data: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
@@ -190,6 +290,7 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
       void webview.postMessage({
         type: 'error',
         message: `Could not read ${name} (${String(err)}).`,
+        position,
       });
     }
   }

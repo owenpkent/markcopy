@@ -206,7 +206,9 @@ export function activate(context: vscode.ExtensionContext): void {
       ImageEditorProvider.viewType,
       new ImageEditorProvider(context),
       {
-        supportsMultipleEditorsPerDocument: false,
+        // Each panel is an independent read-only view. Without this, Back or Next
+        // onto an image open in another group would move that group's tab here.
+        supportsMultipleEditorsPerDocument: true,
         // Without this, switching tabs tears the webview down and the file is
         // read and decoded again on the way back.
         webviewOptions: { retainContextWhenHidden: true },

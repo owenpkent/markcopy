@@ -337,6 +337,14 @@ describe('parseImageMessage', () => {
     });
     expect(parseImageMessage({ type: 'saveFrame', data: '' })).toBeUndefined();
     expect(parseImageMessage({ type: 'copyText', text: 'x' })).toBeUndefined();
+    expect(parseImageMessage({ type: 'navigate', step: 1 })).toEqual({ type: 'navigate', step: 1 });
+    expect(parseImageMessage({ type: 'navigate', step: -1 })).toEqual({
+      type: 'navigate',
+      step: -1,
+    });
+    for (const step of [0, 2, '1', undefined]) {
+      expect(parseImageMessage({ type: 'navigate', step })).toBeUndefined();
+    }
   });
 
   it('writes the theme and the background, with valid values only', () => {

@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Back and Next in the image preview.** The toolbar now starts with Back and Next buttons and a counter (`3 / 12`) that step through the other images in the same folder like a slideshow, in Explorer order, wrapping round at either end. The Left and Right arrow keys (while the picture fits the width) and Page Up and Page Down do the same. Each image replaces the last in the same tab, and the controls are hidden when the folder has only one image.
+
 ### Planned
 
 - PlantUML support.
