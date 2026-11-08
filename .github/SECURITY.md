@@ -74,11 +74,11 @@ webview-produced XHTML and writes an OOXML package, including external links.
 
 ## Webview messages
 
-A webview is untrusted: it renders content from files you did not write, so the messages it posts to the extension host are treated as input, not as commands. Each preview has a `parse<Surface>Message` function in `src/messages/` (no `vscode` import) that accepts exactly the message shapes its handler acts on and returns `undefined` for anything else; the host handlers switch over the parsed result only. Messages that write a setting go through per-surface allow-lists in `src/messages/settings.ts`: the Markdown, CSV, spreadsheet, deck and Word previews may write `theme`, `syncScroll`, `autoPreview`, `math` and `footnotes`; the video viewer `theme`, `video.loop`, `video.autoplay` and `video.review`; the PDF, LaTeX and GIF viewers `theme` only. Each key is checked together with the type or enumerated value it takes. Settings that name an executable (`video.ffmpegPath`, `pdf.browserPath`, `tex.enginePath`) are not on any list, so a page cannot point the host at a program. A CSV cell edit is refused past column 500,000 rather than padding a row to that width, and a toast message must be a string.
+A webview is untrusted: it renders content from files you did not write, so the messages it posts to the extension host are treated as input, not as commands. Each preview has a `parse<Surface>Message` function in `src/messages/` (no `vscode` import) that accepts exactly the message shapes its handler acts on and returns `undefined` for anything else; the host handlers switch over the parsed result only. Messages that write a setting go through per-surface allow-lists in `src/messages/settings.ts`: the Markdown, CSV, spreadsheet, deck and Word previews may write `theme`, `syncScroll`, `autoPreview`, `math` and `footnotes`; the video viewer `theme`, `video.loop`, `video.autoplay` and `video.review`; the image viewer `theme`, `image.background` and `image.review`; the PDF, LaTeX, GIF and STL viewers `theme` only. Each key is checked together with the type or enumerated value it takes. Settings that name an executable (`video.ffmpegPath`, `pdf.browserPath`, `tex.enginePath`) are not on any list, so a page cannot point the host at a program. A CSV cell edit is refused past column 500,000 rather than padding a row to that width, and a toast message must be a string.
 
 Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
 
-The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, video notes, Markdown, GIF, image, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
 
 ## Content Security Policy
 
@@ -344,8 +344,12 @@ The CSP, unchanged by this, is `default-src 'none'` with `img-src` limited to th
 (plus inline styles), and a bare nonced `script-src`; there is no
 `connect-src`, `media-src`, or `worker-src`. The webview may ask the host to
 save a PNG (through a save dialog), open the document in the default app,
-reveal it, or write `markcopy.theme` or `markcopy.image.background`; the host
-checks the key and value against an allowlist of those two settings. The host
+reveal it, step to the previous or next image in the folder (`navigate`), edit
+its Image Notes (below), or write `markcopy.theme`, `markcopy.image.background`
+or `markcopy.image.review`; the host checks the key and value against an
+allowlist of those three settings. `navigate` carries only a step of 1 or -1:
+the host lists the folder itself, keeps the extensions the editor claims, and
+opens the neighbour, so the page cannot name a file. The host
 also watches the opened file (a `FileSystemWatcher` on its folder and exact
 base name, with glob characters escaped so the name matches literally) and
 reloads it when it changes; the watcher reads that same URI and nothing the
@@ -354,3 +358,21 @@ GIF, the browser's decoder still processes the file, so a malformed image could
 consume resources or trigger a vulnerability in the host's Chromium build. The
 parser and the message validator are unit-tested and fuzzed (see
 [Fuzzing](../docs/TESTING.md#fuzzing)).
+
+### Image Notes
+
+Image Notes is the video preview's review mode applied to a still picture, and
+its rules are the ones listed under [Video preview](#video-preview): the same
+`NotesSession` (`src/review/session.ts`) does the reading and writing. The
+sidecar is `<full file name>.review.yaml` (`photo.png.review.yaml`), with
+`photo.png.review.md` beside it, and both names come from the open document, not
+from the page. `reviewEnable` and `reviewCopy` carry no data. `reviewAdd`,
+`reviewDelete` and `reviewRestore` are checked on the host before any write
+(`imageReviewAddError` in `src/review/validate.ts`): extra fields refused, at
+most one of a `point` (two finite numbers from 0 to 1) and a `region` (four
+finite numbers, a positive size, inside the picture), text of at most 10,000
+characters, and ids that exist in the file just read. Writes are silent, atomic
+(a temporary file renamed over the target) and queued; nothing is written on
+open; and a file that is not an image review (a video's, another version, broken
+YAML) is shown read-only and never overwritten. Two panels on one image share
+one edit queue, so neither can act on a stale read of the other's change.

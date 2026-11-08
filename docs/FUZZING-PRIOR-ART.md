@@ -131,7 +131,7 @@ loader runs as the user. The only sandbox is Flatpak's whole-app one. Nothing in
 | Private reporting channel    | Yes, mail                            | GNOME form or confidential issue        | Yes, contact form in SECURITY.md                          |
 | Own advisories               | Bulletins and advisories per release | None; ZDI, CVE, NEWS                    | Changelog "Security" subsection per release               |
 | CVE assignment               | Inconsistent, mostly issue numbers   | Via ZDI and distributions               | None                                                      |
-| Continuous fuzzing           | OSS-Fuzz, 27 targets, three engines  | None in-tree; libraries fuzzed upstream | Nightly Jazzer.js, 16 targets, 60 min each, corpus cached |
+| Continuous fuzzing           | OSS-Fuzz, 27 targets, three engines  | None in-tree; libraries fuzzed upstream | Nightly Jazzer.js, 16 targets, 10 min each, corpus cached |
 | Per-format targets           | Yes, one binary per format           | n/a                                     | Mostly per parser; `image` is one catch-all over formats  |
 | Dictionaries                 | Yes, per format, in corpus repo      | n/a                                     | No                                                        |
 | Seed corpus                  | Separate repo, partly generated      | n/a                                     | 166 KB committed, hand-built headers                      |
