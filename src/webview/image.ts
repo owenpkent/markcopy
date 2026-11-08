@@ -288,6 +288,9 @@ function updateNav(): void {
   const pos = document.getElementById('mc-image-pos');
   if (pos) {
     pos.textContent = `${imageIndex} / ${imageCount}`;
+    // The toolbar is anchored on the right, so a counter that grows from "9 / 12"
+    // to "10 / 12" would push the arrows sideways. Reserve the widest index's room.
+    pos.style.minWidth = `${String(imageCount).length * 2 + 3}ch`;
   }
 }
 
@@ -709,7 +712,7 @@ const NEXT_ICON =
 const ICON_BUTTON_CSS = 'display:inline-flex;align-items:center;justify-content:center;padding:0;';
 toolbarEl.innerHTML =
   `<button type="button" id="mc-prev" data-act="prev" aria-label="Previous image" title="Previous image in folder (Left arrow)" style="${ICON_BUTTON_CSS}">${PREV_ICON}</button>` +
-  '<span id="mc-image-pos" aria-live="polite" style="padding:0 6px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;">1 / 1</span>' +
+  '<span id="mc-image-pos" aria-live="polite" style="padding:0 6px;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;text-align:center;box-sizing:content-box;">1 / 1</span>' +
   `<button type="button" id="mc-next" data-act="next" aria-label="Next image" title="Next image in folder (Right arrow)" style="${ICON_BUTTON_CSS}">${NEXT_ICON}</button>` +
   '<span id="mc-nav-sep" class="mc-toolbar-sep" aria-hidden="true"></span>' +
   '<button type="button" data-act="out" aria-label="Zoom out" title="Zoom out (Ctrl -)">\u2212</button>' +
