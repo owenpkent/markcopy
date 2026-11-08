@@ -5,8 +5,11 @@ kept as the record of why it is shaped the way it is. It is not maintained as a
 description of the current code: see [Image preview](ARCHITECTURE.md#image-preview) for
 that, and treat any file or line reference below as of its time of writing (MarkCopy
 `a0c7f2a`, 0.19.2). Image Notes (areas and pins on a picture, in a `.review.yaml`
-sidecar) came later and is not part of this note: see
-[Image Notes](ARCHITECTURE.md#image-notes).
+sidecar) and Back and Next through the folder's images (both 1.2.0) came later
+and are not part of this note: see [Image Notes](ARCHITECTURE.md#image-notes) and
+the toolbar paragraph of [Image preview](ARCHITECTURE.md#image-preview). The
+gallery view under Out of scope is still out of scope; Back and Next step through
+one image at a time.
 
 What changed in the building. The sniffer is stricter than a bare magic-byte check so
 a mislabelled file is not misread: BMP needs a plausible DIB header size, ICO needs
