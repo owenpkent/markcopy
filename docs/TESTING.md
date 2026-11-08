@@ -102,7 +102,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] ★ Open `sample.md`; its tab shows the rendered preview (`markcopy.autoPreview`), in one editor group, with no split and no text editor left beside it.
 - [ ] Headings, lists, task lists, blockquotes, links, and footnotes render GitHub-style.
 - [ ] Fenced code blocks are syntax-highlighted.
-- [ ] Mermaid diagrams render and re-theme when the VS Code theme changes.
+- [ ] Mermaid diagrams render and re-theme when the VS Code theme changes. A flowchart such as `flowchart LR; A[Alpha] -->|Edge| B[Beta]` shows its node text and the edge label, not empty boxes (the SVG passes through DOMPurify, which once stripped them).
 - [ ] With `"markcopy.mermaid": { "layout": "elk" }`, a flowchart still renders in the preview with no CSP errors in the webview developer tools (ELK loads as a separate chunk), and its edges are routed as orthogonal elbows rather than dagre's curves.
 - [ ] A `mindmap` diagram still renders with its radial layout (branches fanning out from the center), not a left-to-right tree.
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
@@ -517,6 +517,7 @@ ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvp
 - [ ] `alpha.mov` plays over a grey **transparency checkerboard**, not flat black, and the status line says `alpha on checkerboard`. **Copy Frame as PNG** from it: the board is in the pasted image (it is baked into the proxy, which is what the status line is warning you about).
 - [ ] `alpha.webm` (transparent VP9) gets the same checkerboard re-encode, not a `repackaged as MP4` copy: the status line says `alpha on checkerboard` and the red is tinted by the grey squares rather than flat.
 - [ ] Press **Cancel** during a long file's encode: it stops, and the offer to build one comes back rather than an error.
+- [ ] Press **Cancel**, then **Build Playable Copy** again as soon as the offer returns: the second build runs to the end and plays, and keeps playing (every build of a panel writes the same proxy path, so the cancelled attempt's cleanup has to finish first; a copy that vanishes after the retry means it did not).
 - [ ] Close the tab after a proxy has played, then check `%TEMP%\markcopy-video` (`/tmp/markcopy-video`): the copy is gone. Nothing accumulates across a session of opening clips.
 - [ ] The original file's timestamp and size are unchanged after all of the above.
 - [ ] With `markcopy.video.transcode` set to `ask`, the same file offers a **Build Playable Copy** button naming the codec ("clip.mov is ProRes 4444, which VS Code cannot play") instead of starting on its own. Pressing it encodes and plays.
@@ -689,7 +690,7 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 
 ### Opening and first compile
 
-- [ ] ★ Double-click `sample.tex` in the Explorer: it opens in the text editor as usual (the entry is `option` priority, not `default`), and the LaTeX preview opens automatically beside it (`markcopy.autoPreview`, on by default), without stealing focus from the source. It compiles the document and shows the result through the same pdf.js viewer `.pdf` files use.
+- [ ] ★ Double-click `sample.tex` in the Explorer: it opens in the text editor as usual (the entry is `option` priority, not `default`), and the LaTeX preview opens automatically beside it (`markcopy.autoPreview`, on by default), without stealing focus from the source. It compiles the document and shows the result through the same pdf.js viewer `.pdf` files use: rendered pages, not a "Failed to start PDF worker" message (the LaTeX host has to write the worker's address into its page the same way the PDF editor does).
 - [ ] Close the preview tab, then click back into `sample.tex`'s editor (or switch away to another file and back): the preview stays closed rather than reopening on its own. Running **MarkCopy: Open Rich Preview to the Side** (or **Reopen Editor With...** > **MarkCopy LaTeX Preview**) reopens it, and it resumes auto-opening on focus after that.
 - [ ] With `markcopy.autoPreview` set to `false`, opening or focusing `sample.tex` leaves only the text editor open; the preview still opens via **Reopen Editor With...** or **MarkCopy: Open Rich Preview to the Side**.
 - [ ] `sample.tex` also opens this way via **MarkCopy: Open Rich Preview to the Side** (Command Palette, or right-click in the editor or Explorer), beside the source rather than replacing it.
