@@ -8,6 +8,7 @@
 // of those. Where ImageDecoder is missing the file is shown in a plain <img>
 // and only the actions that do not need a frame are left.
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { fromHost } from './fromHost';
 import { base64ToBytes, frameFileName, parseGif, statusLine, type GifInfo } from './gifInfo';
 
 // Minimal VS Code webview API surface we use.
@@ -543,6 +544,9 @@ function applyTheme(value: string): void {
 // Host messages
 // ---------------------------------------------------------------------------
 window.addEventListener('message', (event: MessageEvent) => {
+  if (!fromHost(event)) {
+    return;
+  }
   const msg = event.data as
     | LoadMessage
     | { type: 'error'; message: string }

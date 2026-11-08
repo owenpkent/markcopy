@@ -15,7 +15,7 @@
 // function of the paragraph (no look-ahead, no renumbering that would change
 // when the author adds a Title) and matches what this extension's own Word
 // export writes, which is what makes a round trip come back unchanged.
-import { escapeHtml } from '../../escape';
+import { escapeAttr } from '../../escape';
 import { createMediaSink, type MediaItem } from '../../ooxml/media';
 import { readExternalRels, readRels, relsPathFor } from '../../ooxml/rels';
 import { attr, walkXml } from '../../ooxml/xml';
@@ -242,7 +242,7 @@ function renderNotes(
   ctx.rels = bodyRels;
   const label = kind === 'footnote' ? 'Footnotes' : 'Endnotes';
   return (
-    `<section class="mc-docx-notes" aria-label="${escapeHtml(label)}">` +
+    `<section class="mc-docx-notes" aria-label="${escapeAttr(label)}">` +
     `<hr><ol>${items.join('')}</ol></section>`
   );
 }

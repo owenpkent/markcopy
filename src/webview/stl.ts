@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { fromHost } from './fromHost';
 import {
   VIEW_PRESETS,
   checkStl,
@@ -532,6 +533,9 @@ function applyTheme(value: string): void {
 }
 
 window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
+  if (!fromHost(event)) {
+    return;
+  }
   const msg = event.data;
   if (msg?.type === 'load') {
     loadModel(msg);

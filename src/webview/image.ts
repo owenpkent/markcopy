@@ -7,6 +7,7 @@
 // or inlined, so it can run no script and load no external resource.
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { createImageReview } from './imageReview';
+import { fromHost } from './fromHost';
 import {
   MAX_DATA_URI_BYTES,
   MAX_SVG_RASTER_SIDE,
@@ -996,14 +997,8 @@ function applyTheme(value: string): void {
 // ---------------------------------------------------------------------------
 // Host messages
 // ---------------------------------------------------------------------------
-// Only the extension host talks to this frame. VS Code delivers its messages from
-// the webview's outer frame, which is the parent of this one and shares its origin
-// (the inner document is written into a blank frame, so it inherits the origin).
-// Either test identifies that sender; anything else is ignored.
-function fromHost(event: MessageEvent): boolean {
-  return event.origin === window.origin || event.source === window.parent;
-}
-
+// Host messages
+// ---------------------------------------------------------------------------
 window.addEventListener('message', (event: MessageEvent) => {
   if (!fromHost(event)) {
     return;

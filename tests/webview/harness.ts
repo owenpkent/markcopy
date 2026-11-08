@@ -334,6 +334,7 @@ async function bootOnce(): Promise<Harness> {
       window.dispatchEvent(
         new MessageEvent('message', {
           data: { type: 'render', kind: 'markdown', ...RENDER_DEFAULTS, ...options },
+          origin: window.origin,
         }),
       );
       await settle();

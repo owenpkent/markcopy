@@ -152,7 +152,9 @@ describe('exporting a sheet to PDF', () => {
   beforeEach(renderSheet);
 
   it('sends the grid without the tab strip or the row-number gutter', async () => {
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'exportPdf' } }));
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'exportPdf' }, origin: window.origin }),
+    );
     await h.settle();
 
     const posted = h.posted.find((message) => message.type === 'pdfHtml');

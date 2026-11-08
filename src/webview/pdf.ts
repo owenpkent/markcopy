@@ -7,6 +7,7 @@ import type {
   RenderTask,
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
+import { fromHost } from './fromHost';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
@@ -97,6 +98,9 @@ let commentSeq = 0;
 // Messaging
 // ---------------------------------------------------------------------------
 window.addEventListener('message', (e: MessageEvent) => {
+  if (!fromHost(e)) {
+    return;
+  }
   const msg = e.data;
   if (msg?.type === 'load') {
     const editing = noteEl && noteComment ? noteComment : null;
@@ -113,7 +117,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         comments.push(editing);
       }
     }
-    load(base64ToBytes(msg.data as string), msg.workerSrc as string).catch(showFatal);
+    load(base64ToBytes(msg.data as string)).catch(showFatal);
   } else if (msg?.type === 'setTheme' && typeof msg.value === 'string') {
     // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
     // to match, without persisting again.
@@ -160,7 +164,12 @@ function toast(text: string, ms = 1600): void {
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------
-async function load(data: Uint8Array, workerSrc: string): Promise<void> {
+// The worker's address is written into the page by the host (`data-worker-src`
+// on <body>) rather than carried by the load message, so the one URL this page
+// fetches is never a value a message could supply.
+const workerSrc = document.body.dataset.workerSrc ?? '';
+
+async function load(data: Uint8Array): Promise<void> {
   // Where the reader was, so a recompile can put them back. Only meaningful on a
   // reload, and `resetViewer` is about to throw the page list away, so it has to
   // be read first.

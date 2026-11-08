@@ -15,6 +15,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 - Folder stepping for the image preview moved into a module shared with the audio preview (`src/folderNav.ts`). Image behavior is unchanged.
 
+### Security
+
+- Every preview webview now ignores a `message` event that did not come from the extension host (the Markdown, PDF, video, STL and GIF viewers join the image and audio viewers, which already checked). The video viewer accepts a media address only as an absolute https URL, the shape VS Code hands it, and the PDF viewer reads its pdf.js worker address from the page the host wrote rather than from a message. Mermaid's SVG goes through DOMPurify before it is written into the preview. A Markdown link copied from the preview escapes a backslash in its text, so a backslash before a bracket can no longer end the label early. Two filename clean-ups for exports trim dashes without a regular expression that took quadratic time on a long run of dashes. These close the open GitHub code scanning alerts; none was known to be exploitable from a document.
+
 ### Planned
 
 - PlantUML support.

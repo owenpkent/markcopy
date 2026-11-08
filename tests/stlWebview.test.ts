@@ -67,7 +67,10 @@ describe('STL webview host replies', () => {
     expect(toast.hidden).toBe(true);
 
     window.dispatchEvent(
-      new MessageEvent('message', { data: { type: 'toast', message: 'Frame saved' } }),
+      new MessageEvent('message', {
+        data: { type: 'toast', message: 'Frame saved' },
+        origin: window.origin,
+      }),
     );
 
     expect(toast.hidden).toBe(false);

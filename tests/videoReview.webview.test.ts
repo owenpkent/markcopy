@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 function fromHost(data: unknown): void {
-  window.dispatchEvent(new MessageEvent('message', { data }));
+  window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
 }
 
 const note = (id: string, at: number, extra: Partial<ReviewNote> = {}): ReviewNote => ({

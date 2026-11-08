@@ -103,7 +103,12 @@ describe('a scroll the host caused', () => {
     // scrolling is a consequence of that, not a user gesture, and reporting it
     // back is how the two surfaces used to fight: the round trip lands on a
     // slightly different line and knocks the editor off where it was put.
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'scrollToLine', line: 6 } }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'scrollToLine', line: 6 },
+        origin: window.origin,
+      }),
+    );
     await h.settle();
     window.dispatchEvent(new Event('scroll'));
     await h.settleSync();
@@ -119,7 +124,12 @@ describe('a scroll the host caused', () => {
     // The deferral exists to catch exactly this: the host moved the preview,
     // and before the echo window closed the reader took over. Muting that is
     // how a genuine scroll gets swallowed.
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'scrollToLine', line: 6 } }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'scrollToLine', line: 6 },
+        origin: window.origin,
+      }),
+    );
     await h.settle();
     layout.scrollTo(layout.topOfBlock(1));
     await h.settleSync();

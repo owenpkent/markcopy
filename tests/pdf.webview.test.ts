@@ -40,6 +40,7 @@ beforeEach(async () => {
   copied = [];
   textCalls = [];
   document.body.innerHTML = BODY;
+  document.body.dataset.workerSrc = 'w.js';
   const mine = posted;
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: (msg: Record<string, unknown>) => mine.push(msg),
@@ -91,7 +92,8 @@ async function settle(): Promise<void> {
 async function loadDoc(comments: unknown[] = []): Promise<void> {
   window.dispatchEvent(
     new MessageEvent('message', {
-      data: { type: 'load', data: btoa('x'), workerSrc: 'w.js', comments },
+      data: { type: 'load', data: btoa('x'), comments },
+      origin: window.origin,
     }),
   );
   await settle();

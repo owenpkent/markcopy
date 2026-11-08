@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { htmlToDocx } from '../src/docxExport';
 import { renderDocxHtml } from '../src/docx/read';
 import { createMarkdownIt } from '../src/render';
+import { stripTags } from './helpers/html';
 
 const PNG =
   'data:image/png;base64,' +
@@ -64,7 +65,7 @@ function readBack(markdown: string): ReturnType<typeof renderDocxHtml> {
 function headings(html: string): [string, string][] {
   const out: [string, string][] = [];
   for (const m of html.matchAll(/<(h[1-6])[^>]*>(.*?)<\/h[1-6]>/g)) {
-    out.push([m[1], m[2].replace(/<[^>]*>/g, '')]);
+    out.push([m[1], stripTags(m[2])]);
   }
   return out;
 }

@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { htmlToPptx } from '../src/pptxExport';
 import { renderDeckHtml } from '../src/pptx/read';
+import { stripTags } from './helpers/html';
 
 const DECK = `<div>
   <h1>Quarterly review</h1>
@@ -69,7 +70,7 @@ describe('pptx round trip', () => {
     // the markup here once pushed the reader into suppressing bold to match.
     const titles = [
       ...deck.html.matchAll(/<h2[^>]*class="[^"]*mc-pptx-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/g),
-    ].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+    ].map((m) => stripTags(m[1]).trim());
     expect(titles).toEqual(['Quarterly review', 'Revenue', 'Detail']);
   });
 
@@ -81,7 +82,7 @@ describe('pptx round trip', () => {
     // re-export to Markdown both need. What that header cell wraps its text in
     // is left open, for the same reason as the titles above.
     const headers = [...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((m) =>
-      m[1].replace(/<[^>]*>/g, '').trim(),
+      stripTags(m[1]).trim(),
     );
     expect(headers).toContain('Region');
   });

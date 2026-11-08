@@ -75,7 +75,7 @@ afterEach(() => {
 });
 
 function fromHost(data: unknown): void {
-  window.dispatchEvent(new MessageEvent('message', { data }));
+  window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));

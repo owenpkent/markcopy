@@ -39,7 +39,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const theme = vscode.workspace
       .getConfiguration('markcopy', document.uri)
       .get<string>('theme', 'auto');
-    webview.html = this.html(webview, scriptUri, styleUri, nonce, theme);
+    webview.html = this.html(webview, scriptUri, workerUri, styleUri, nonce, theme);
 
     // Comments persist to a sidecar JSON file next to the PDF, so the PDF itself
     // stays untouched (this is a read-only editor).
@@ -58,7 +58,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         webview.postMessage({
           type: 'load',
           data: Buffer.from(bytes).toString('base64'),
-          workerSrc: workerUri.toString(),
           comments: await readComments(commentsUri),
         });
       } else if (msg.type === 'openExternal') {
@@ -98,6 +97,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private html(
     webview: vscode.Webview,
     scriptUri: vscode.Uri,
+    workerUri: vscode.Uri,
     styleUri: vscode.Uri,
     nonce: string,
     theme: string,
@@ -121,7 +121,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 <link href="${styleUri}" rel="stylesheet" />
 <title>MarkCopy PDF Preview</title>
 </head>
-<body class="mc-pdf" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
+<body class="mc-pdf" data-mc-theme="${theme}" data-worker-src="${workerUri}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="pdf-root"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>

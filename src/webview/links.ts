@@ -131,7 +131,9 @@ function decode(value: string): string {
  * A `[text](href)` link, escaped enough to survive being pasted back into a
  * document.
  *
- * Brackets in the text would end the label early. Parentheses and whitespace in
+ * Brackets in the text would end the label early, and a backslash before one
+ * would turn the escape added here back into a literal backslash and a live
+ * bracket, so backslashes are escaped first. Parentheses and whitespace in
  * the address would end the target early, and are percent-encoded rather than
  * wrapped in `<…>`: the angle-bracket form ends at the first `>`, so an href
  * holding both a paren and a `>` would paste as a link pointing somewhere the
@@ -139,7 +141,7 @@ function decode(value: string): string {
  * link and have no character that can close them early.
  */
 export function markdownLink(text: string, href: string): string {
-  const label = text.replace(/([[\]])/g, '\\$1');
+  const label = text.replace(/([\\[\]])/g, '\\$1');
   const target = href.replace(/[()\s]/g, (char) =>
     char === '(' ? '%28' : char === ')' ? '%29' : encodeURIComponent(char),
   );
