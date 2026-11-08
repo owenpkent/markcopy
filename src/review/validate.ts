@@ -1,7 +1,7 @@
 // The checks a video-review message from the webview must pass before the host
 // acts on it. Pure, so they can be unit-tested and fuzzed without `vscode`.
 import type { ImageReviewWebviewMessage } from './imageProtocol';
-import type { ReviewWebviewMessage } from './protocol';
+import type { AudioReviewAddMessage, ReviewWebviewMessage } from './protocol';
 
 export const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -117,4 +117,42 @@ export function imageReviewAddError(msg: unknown): string | null {
 
 export function isImageReviewAdd(msg: unknown): msg is ImageAddMessage {
   return imageReviewAddError(msg) === null;
+}
+
+/**
+ * Why an audio `reviewAdd` is refused, or null when it is fine. A time in seconds
+ * (0 or more), an optional end after it, and the text; no pin, area, drawing or
+ * render target (the kit's audio sidecar has none). `durationSec` is the file's
+ * length when the host knows it; without it there is no upper bound.
+ */
+export function audioReviewAddError(msg: unknown, durationSec?: number): string | null {
+  if (!isObject(msg)) {
+    return 'That note is not valid';
+  }
+  const extra = extraKey(msg, ['type', 'at', 'out', 'text']);
+  if (extra) {
+    return `That note has an unexpected field "${extra}"`;
+  }
+  if (!isNumber(msg.at) || msg.at < 0) {
+    return 'The note time must be a number of seconds, 0 or more';
+  }
+  const hasOut = msg.out !== undefined;
+  if (hasOut && (!isNumber(msg.out) || msg.out <= msg.at)) {
+    return 'The range end must be after its start';
+  }
+  if (!isString(msg.text) || msg.text.length > MAX_NOTE_TEXT) {
+    return `The note text must be ${MAX_NOTE_TEXT.toLocaleString('en-US')} characters or fewer`;
+  }
+  if (
+    durationSec !== undefined &&
+    durationSec > 0 &&
+    (msg.at > durationSec || (hasOut && (msg.out as number) > durationSec))
+  ) {
+    return 'That time is past the end of the audio';
+  }
+  return null;
+}
+
+export function isAudioReviewAdd(msg: unknown, durationSec?: number): msg is AudioReviewAddMessage {
+  return audioReviewAddError(msg, durationSec) === null;
 }

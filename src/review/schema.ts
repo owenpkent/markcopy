@@ -1,9 +1,9 @@
 // A parsed review sidecar, following okstudio_video/schema/review.schema.json in
 // owenpkent/okstudio-video-kit (video notes at 467ec02; `media` and `region` from
-// PR #4, branch feat/image-region). Types only. The schema sets
+// PR #4, branch feat/image-region; `media: audio` from feat/audio-media). Types only. The schema sets
 // additionalProperties false everywhere, so these carry no extra fields.
 
-export type ReviewMedia = 'video' | 'image';
+export type ReviewMedia = 'video' | 'image' | 'audio';
 export type ReviewTarget = 'source' | 'render';
 export type ReviewKind = 'note' | 'keep' | 'reject';
 export type ReviewStatus = 'none' | 'needs_review' | 'in_progress' | 'approved' | 'rejected';
@@ -32,7 +32,7 @@ export interface ReviewAsset {
 export interface ReviewFileNote {
   id: string;
   target: ReviewTarget;
-  /** Seconds, 0 or more. Required for a video, absent from an image's notes. */
+  /** Seconds, 0 or more. Required for a video or audio file, absent from an image's notes. */
   at?: number;
   /** Seconds, greater than `at`. */
   out?: number;
@@ -57,7 +57,7 @@ export interface ReviewFile {
   source: string;
   /** Absent means video. */
   media?: ReviewMedia;
-  /** Required for a video, optional for an image (and then still above 0). */
+  /** Required for a video, optional for an image or audio file (and then still above 0). */
   fps?: number;
   /** Integer high-water mark, 1 or more. */
   next_note_id?: number;

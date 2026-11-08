@@ -1,9 +1,9 @@
 // A port of Review.export_markdown in owenpkent/okstudio-video-kit
-// (okstudio_video/review.py, PR #4 on feat/image-region), minus transcript cues. The webview never
+// (okstudio_video/review.py, PR #4 on feat/image-region, plus `media: audio` from feat/audio-media), minus transcript cues. The webview never
 // builds markdown; the host does, so the clipboard text matches the file on disk.
 
 import type { ReviewFile } from './schema';
-import { secondsToTimecode } from './timecode';
+import { secondsToClock, secondsToTimecode } from './timecode';
 
 /** Python's `format(x, "g")` for the plain numbers a frame rate is: 6 significant digits. */
 function formatG(value: number): string {
@@ -15,11 +15,15 @@ const percent = (v: number): number => Math.floor(v * 100 + 0.5);
 
 /** One markdown section per note, led by a status line. Ends with one newline. */
 export function reviewMarkdown(file: ReviewFile): string {
+  const audio = file.media === 'audio';
   const video = file.media !== 'image';
   const fps = Number(file.fps) || 0;
   const asset = file.asset ?? {};
   const lines: string[] = [`# Review notes: ${file.source ?? ''}`, ''];
-  const meta = [video ? `fps ${formatG(fps)}` : 'image', `status ${asset.status ?? 'none'}`];
+  const meta = [
+    audio ? 'audio' : video ? `fps ${formatG(fps)}` : 'image',
+    `status ${asset.status ?? 'none'}`,
+  ];
   if (asset.rating) {
     meta.push(`rating ${asset.rating}/5`);
   }
@@ -42,9 +46,10 @@ export function reviewMarkdown(file: ReviewFile): string {
         : undefined;
     let tc: string;
     if (video) {
-      tc = secondsToTimecode(Number(note.at), fps);
+      const stamp = (t: number): string => (audio ? secondsToClock(t) : secondsToTimecode(t, fps));
+      tc = stamp(Number(note.at));
       if (note.out !== undefined && note.out !== null) {
-        tc += ` to ${secondsToTimecode(Number(note.out), fps)}`;
+        tc += ` to ${stamp(Number(note.out))}`;
       }
     } else {
       tc = area ? `area ${area}` : pin ? `pin ${pin}` : 'whole image';

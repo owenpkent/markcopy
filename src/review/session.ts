@@ -57,6 +57,13 @@ export interface StateFields {
   added: string | null;
 }
 
+/** How the read-only message names each kind of review. */
+const MEDIA_NOUN: Record<ReviewMedia, string> = {
+  video: 'a video',
+  image: 'an image',
+  audio: 'an audio',
+};
+
 /**
  * One panel's notes mode. Owns the watcher and the edit queue, all scoped to the
  * panel. Nothing runs until notes mode is on, so a plain preview costs nothing.
@@ -87,7 +94,7 @@ export abstract class NotesSession {
 
   /**
    * `setting` is the `markcopy.*` key that turns notes on without a sidecar
-   * (`video.review`, `image.review`).
+   * (`video.review`, `image.review`, `audio.review`).
    */
   protected constructor(
     protected readonly source: vscode.Uri,
@@ -131,10 +138,9 @@ export abstract class NotesSession {
   protected load(text: string): SidecarLoad {
     const loaded = loadSidecar(text);
     if (loaded.media !== undefined && loaded.media !== this.media) {
-      const other = loaded.media === 'image' ? 'an image' : 'a video';
       return {
         notes: [],
-        readOnly: `Not ${this.media === 'image' ? 'an image' : 'a video'} review (this file is for ${other})`,
+        readOnly: `Not ${MEDIA_NOUN[this.media]} review (this file is for ${MEDIA_NOUN[loaded.media]})`,
         fps: loaded.fps,
         media: loaded.media,
       };

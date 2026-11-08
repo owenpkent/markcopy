@@ -8,6 +8,7 @@ regenerates; run it by hand when the kit's format changes and commit the result.
 
     python generate.py          # every fixture
     python generate.py image    # only image/ (Image Notes, needs the kit's feat/image-region)
+    python generate.py audio    # only audio/ (Audio Notes, needs the kit's feat/audio-media)
 
 Ids and timestamps are fixed below so a rerun gives identical files.
 
@@ -19,6 +20,13 @@ operation each pair is.
 
 The image/ folder holds the same for Image Notes (media: image, named after the full
 file name: photo.png.review.yaml) and a video review whose notes carry a region.
+
+The audio/ folder holds the same for Audio Notes (media: audio, no fps, wall-clock
+`at`/`out`, markdown times as HH:MM:SS.mmm, named after the full file name:
+song.mp3.review.yaml), with add and remove edit pairs and edit/cases.json.
+
+The kit is not pip-installed; point PYTHONPATH at its checkout:
+    PYTHONPATH=/path/to/okstudio-video-kit python generate.py audio
 """
 from __future__ import annotations
 
@@ -234,11 +242,82 @@ def images() -> None:
     (out / "cases.json").write_text(json.dumps(cases, indent=2) + "\n", encoding="utf-8")
 
 
+AUDIO = HERE / "audio"
+AWKWARD = "yes: no # not a comment [x] {y} - \"q\" 'z'\nSecond line: Café ☃ 😀"
+AUDIO_CASES = [
+    # name, base, op, arguments
+    ("add-point", "empty", "add", {"at": 12.5, "text": "Click in the vocal."}),
+    ("add-range", "empty", "add", {"at": 72.5, "out": 75.0, "text": "Hiss under the verse."}),
+    ("add-zero", "empty", "add", {"at": 0, "text": "Count-in."}),
+    ("add-sub-ms", "empty", "add", {"at": 59.9995, "text": "Rounds up to a minute."}),
+    ("add-over-hour", "empty", "add", {"at": 3661.25, "out": 3700.0, "text": "Long recording."}),
+    ("add-empty-text", "empty", "add", {"at": 1.0, "text": ""}),
+    ("add-awkward", "empty", "add", {"at": 2.0, "text": AWKWARD}),
+    ("add-number-text", "empty", "add", {"at": 2.0, "text": "12"}),
+    ("add-to-full", "full", "add", {"at": 100.125, "out": 101.0, "text": "New on a rich file."}),
+    ("remove-first", "full", "remove", {"id": "n1"}),
+    ("remove-middle", "full", "remove", {"id": "n4"}),
+    ("remove-last", "full", "remove", {"id": "n8"}),
+]
+
+
+def audio_review(name: str, rid: str) -> Review:
+    rev = Review.new(name, None, AUDIO / f"{name}.review.yaml", media="audio")
+    rev.data["id"] = rid
+    return rev
+
+
+def audios() -> None:
+    AUDIO.mkdir(exist_ok=True)
+    (AUDIO / "edit").mkdir(exist_ok=True)
+
+    # A rich audio review and its markdown (Markdown times are HH:MM:SS.mmm).
+    rev = audio_review("full.mp3", "112233445566")
+    rev.set_asset(rating=2, status="in_progress", keywords=["vocal", "mix"], notes="Second listen.")
+    add(rev, at=3.25, text="Count-in is late.")
+    add(rev, at=72.5, out=75.0, kind="reject", text="Click in the vocal.", author="Dana")
+    add(rev, at=10.0, out=20.0, kind="keep", text="Best take.")
+    add(rev, at=59.9995, text="Time that rounds half up to a whole minute.")
+    done = add(rev, at=125.0, text="Fixed in the last bounce.")
+    done["done"] = True
+    add(rev, at=3661.25, out=3700.0, text="Past the hour mark.")
+    add(rev, at=1.0, text=AWKWARD)
+    add(rev, at=2.0, text="")
+    finish(rev)
+
+    # An audio review with no notes yet: what Review.new saves.
+    rev = audio_review("empty.mp3", "dddddddddddd")
+    finish(rev)
+
+    out = AUDIO / "edit"
+    bases = {"empty": AUDIO / "empty.mp3.review.yaml", "full": AUDIO / "full.mp3.review.yaml"}
+    for name, base, op, args in AUDIO_CASES:
+        before = out / f"{name}.before.review.yaml"
+        after = out / f"{name}.after.review.yaml"
+        before.write_bytes(bases[base].read_bytes())
+        rev = Review.load(before)
+        rev.path = after
+        if op == "add":
+            note = rev.add_note(at=args["at"], out=args.get("out"), text=args["text"])
+            note["created"] = CREATED
+        else:
+            assert rev.remove_note(args["id"])
+        rev.validate()
+        rev.save()
+        after.write_bytes(after.read_bytes().replace(b"\r\n", b"\n"))
+    cases = [{"name": n, "base": b, "op": o, "args": a} for n, b, o, a in AUDIO_CASES]
+    (out / "cases.json").write_text(json.dumps(cases, indent=2) + "\n", encoding="utf-8")
+
+
 if __name__ == "__main__":
     import sys
 
-    if "image" not in sys.argv[1:]:
+    modes = sys.argv[1:]
+    if not modes:
         minimal()
         full()
         edits()
-    images()
+    if not modes or "image" in modes:
+        images()
+    if not modes or "audio" in modes:
+        audios()

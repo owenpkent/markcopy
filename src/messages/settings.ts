@@ -18,6 +18,20 @@ export function isViewerSetting(key: string, value: unknown): boolean {
   );
 }
 
+/** The settings the audio viewer's menus write (src/webview/audio.ts): the theme, Loop, Autoplay, Show Tags and Audio Notes. */
+export function isAudioSetting(key: string, value: unknown): boolean {
+  if (key === 'theme') {
+    return isTheme(value);
+  }
+  return (
+    (key === 'audio.review' ||
+      key === 'audio.loop' ||
+      key === 'audio.autoplay' ||
+      key === 'audio.showTags') &&
+    typeof value === 'boolean'
+  );
+}
+
 /** True for the one setting the GIF viewer's menus write, with a valid value. */
 export function isGifSetting(key: string, value: unknown): boolean {
   return key === 'theme' && isViewerSetting(key, value);

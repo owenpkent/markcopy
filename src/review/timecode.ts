@@ -43,3 +43,16 @@ export function positionTimecode(seconds: number, fps: number): string {
   const frame = Math.max(0, Math.floor(seconds * rate + EPS));
   return framesToTimecode(frame, Math.round(rate) || 30);
 }
+
+/**
+ * Wall-clock `HH:MM:SS.mmm` for media without frames (audio), as the kit's
+ * `seconds_to_clock`: milliseconds rounded half up, `int(seconds * 1000 + 0.5)`,
+ * not Python's half-even `round`. Negative reads as zero; hours are not capped.
+ */
+export function secondsToClock(seconds: number): string {
+  const totalMs = Math.max(0, Math.trunc(seconds * 1000 + 0.5));
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const ms = totalMs % 1000;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  return `${pad(Math.floor(totalMinutes / 60))}:${pad(totalMinutes % 60)}:${pad(totalSeconds % 60)}.${String(ms).padStart(3, '0')}`;
+}

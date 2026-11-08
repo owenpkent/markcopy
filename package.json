@@ -308,6 +308,61 @@
         "priority": "option"
       },
       {
+        "viewType": "markcopy.audioPreview",
+        "displayName": "MarkCopy Audio Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.mp3"
+          },
+          {
+            "filenamePattern": "*.MP3"
+          },
+          {
+            "filenamePattern": "*.wav"
+          },
+          {
+            "filenamePattern": "*.WAV"
+          },
+          {
+            "filenamePattern": "*.ogg"
+          },
+          {
+            "filenamePattern": "*.OGG"
+          },
+          {
+            "filenamePattern": "*.oga"
+          },
+          {
+            "filenamePattern": "*.OGA"
+          },
+          {
+            "filenamePattern": "*.opus"
+          },
+          {
+            "filenamePattern": "*.OPUS"
+          },
+          {
+            "filenamePattern": "*.flac"
+          },
+          {
+            "filenamePattern": "*.FLAC"
+          },
+          {
+            "filenamePattern": "*.m4a"
+          },
+          {
+            "filenamePattern": "*.M4A"
+          },
+          {
+            "filenamePattern": "*.aac"
+          },
+          {
+            "filenamePattern": "*.AAC"
+          }
+        ],
+        "priority": "default"
+      },
+      {
         "viewType": "markcopy.videoPreview",
         "displayName": "MarkCopy Video Preview",
         "selector": [
@@ -656,6 +711,26 @@
           "type": "string",
           "default": "#8ab4f8",
           "description": "Color of the mesh material in the STL preview."
+        },
+        "markcopy.audio.autoplay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start playing as soon as an audio preview opens. Autoplay tries to play with sound; if VS Code requires a click first, the file stays paused until you press Play."
+        },
+        "markcopy.audio.loop": {
+          "type": "boolean",
+          "default": false,
+          "description": "Repeat an audio file when it reaches the end."
+        },
+        "markcopy.audio.showTags": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the file's tags (title, artist, album...) in the audio viewer's details panel. Also toggled from the viewer's right-click menu."
+        },
+        "markcopy.audio.review": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open audio files with Audio Notes on, with timestamped notes and a notes panel, even when there is no review file beside them yet. An audio file with a .review.yaml file beside it (song.mp3.review.yaml) opens with notes on regardless. Also set from the Notes button on the player."
         },
         "markcopy.video.autoplay": {
           "type": "boolean",

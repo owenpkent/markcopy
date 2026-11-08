@@ -1,0 +1,87 @@
+version: 1
+id: '112233445566'
+source: full.mp3
+media: audio
+next_note_id: 9
+asset:
+  rating: 2
+  status: in_progress
+  keywords: [vocal, mix]
+  notes: Second listen.
+notes:
+- id: n1
+  target: source
+  at: 3.25
+  kind: note
+  text: Count-in is late.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n2
+  target: source
+  at: 72.5
+  kind: reject
+  text: Click in the vocal.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  out: 75.0
+  author: Dana
+- id: n3
+  target: source
+  at: 10.0
+  kind: keep
+  text: Best take.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  out: 20.0
+- id: n5
+  target: source
+  at: 125.0
+  kind: note
+  text: Fixed in the last bounce.
+  done: true
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n6
+  target: source
+  at: 3661.25
+  kind: note
+  text: Past the hour mark.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  out: 3700.0
+- id: n7
+  target: source
+  at: 1.0
+  kind: note
+  text: 'yes: no # not a comment [x] {y} - "q" ''z''
+
+    Second line: Café ☃ 😀'
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n8
+  target: source
+  at: 2.0
+  kind: note
+  text: ''
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
