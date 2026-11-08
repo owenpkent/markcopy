@@ -239,6 +239,24 @@ describe('entering and leaving', () => {
     expect(menuRow('Open Image Notes')).toBeTruthy();
   });
 
+  it('settles a save that lands while closed, so Send works after reopening', async () => {
+    await open();
+    field().value = 'A';
+    key('Enter', field());
+    byLabel('Close image notes').click();
+    // The host answers A while notes are closed; it sends `added` only once.
+    fromHost(review({ added: 'n4' }));
+    openMenu();
+    menuRow('Open Image Notes').click();
+    fromHost(review());
+    field().value = 'B';
+    key('Enter', field());
+    expect(reviewPosts().filter((m) => m.type === 'reviewAdd')).toEqual([
+      { type: 'reviewAdd', text: 'A' },
+      { type: 'reviewAdd', text: 'B' },
+    ]);
+  });
+
   it('closes from the x button', async () => {
     await open();
     byLabel('Close image notes').click();

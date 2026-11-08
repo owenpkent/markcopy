@@ -935,6 +935,11 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
         return false;
       }
       const next = msg as ImageReviewStateMessage;
+      // The note in flight is saved even if notes were closed meanwhile; the host
+      // sends `added` only once, so settle it now or Send stays blocked after reopening.
+      if (next.added) {
+        sent = null;
+      }
       if (turnedOff) {
         return true;
       }
