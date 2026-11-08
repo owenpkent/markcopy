@@ -144,9 +144,10 @@ preview closes (abandoned directories are swept after 24 hours).
 
 ## Video preview
 
-The video webview receives a VS Code webview resource URI rooted at the video's own
-directory and uses a CSP with `media-src` limited to that origin and `blob:`;
-it does not fetch arbitrary network media. The browser's media demuxer and
+The video webview reads the VS Code webview resource URI of the file (rooted at
+the video's own directory) and of its possible ffmpeg proxy from attributes the
+host wrote into the page, never from a message, and uses a CSP with `media-src`
+limited to that origin and `blob:`; it does not fetch arbitrary network media. The browser's media demuxer and
 decoder still process the file, so malformed media can consume resources or
 trigger a vulnerability in the host's Chromium build.
 
