@@ -4,16 +4,29 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.2.0] - 2026-11-07
+
+Two additions to the image preview: Back and Next through a folder, and Image Notes. One new setting, `markcopy.image.review` (default off). Updating needs no action.
+
 ### Added
 
 - **Back and Next in the image preview.** The toolbar now starts with Back and Next buttons and a counter (`3 / 12`) that step through the other images in the same folder like a slideshow, in Explorer order, wrapping round at either end. The Left and Right arrow keys (while the picture fits the width) and Page Up and Page Down do the same. Each image replaces the last in the same tab, and the controls are hidden when the folder has only one image.
 - **Image Notes in the image preview.** Notes on a picture, each pinned to an area (drag a rectangle with **Area**, or **A**), a spot (**Pin**, or **P**) or the whole image, in a notes panel with a composer, **Delete** and **Restore**, and **Copy notes as Markdown**. Both modes are off by default, so a drag still pans. Notes live in `<full file name>.review.yaml` (`photo.png.review.yaml`) in the OK Studio review format with `media: image`; an area is `region: [x, y, w, h]` and a pin is `point: [x, y]`, each 0 to 1 of the picture, as defined by [okstudio-video-kit PR #4](https://github.com/owenpkent/okstudio-video-kit/pull/4). `<name>.review.md` is rewritten after every edit. A notes file for the other kind of media opens read-only. The new `markcopy.image.review` setting (default off) turns notes on for every image, and the right-click **Open Image Notes** / **Close Image Notes** entry sets it; an image with a notes file beside it opens with notes on regardless.
   - **Video Notes shares its code.** The watcher, edit queue, atomic writes and Copy as Markdown moved into a shared notes session that Video Notes and Image Notes both extend. Video Notes behaves as before.
 
-### Planned
+### Changed
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- **The same image can be open in two editor groups.** Each image tab is its own read-only view, so Back or Next onto an image already open in another group opens it here too instead of pulling that group's tab across. Two panels on one image share one edit queue for its notes file, so notes added from both are never lost.
+
+### Maintenance
+
+- Dependencies: pdfjs-dist 6.5.438, three 0.187.0, numfmt 4.1.2 and turndown 7.2.5, plus the development dependency group (#198, #203).
+- The unit test suite runs on half the CPU cores (`maxWorkers` in `vitest.config.ts`), and local integration runs are left to CI unless asked (#202).
 
 ## [1.1.0] - 2026-11-04
 
@@ -561,7 +574,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/owenpkent/markcopy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/owenpkent/markcopy/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/owenpkent/markcopy/compare/v1.0.0...v1.0.1
