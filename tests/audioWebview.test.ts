@@ -29,6 +29,7 @@ beforeEach(() => {
   document.body.className = 'mc-audio';
   document.body.removeAttribute('style');
   document.body.innerHTML = '<div id="app"></div>';
+  document.body.dataset.mcSrc = 'vscode-resource://x/take 1.flac';
   posted.mockClear();
   play.mockClear();
   pause.mockClear();
@@ -55,7 +56,6 @@ function fromHost(data: unknown): void {
 
 const loadMsg = (over: Record<string, unknown> = {}) => ({
   type: 'load',
-  src: 'vscode-resource://x/take 1.flac',
   name: 'take 1.flac',
   path: '/audio/take 1.flac',
   size: 2048,

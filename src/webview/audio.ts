@@ -10,9 +10,11 @@ import {
   AUDIO_SPEEDS,
   SEEK_STEP,
   SEEK_STEP_LONG,
+  WAVEFORM_DECODE_BUDGET,
   WAVEFORM_SIZE_CAP,
   analyzeChannels,
   cycleSpeed,
+  decodedBytes,
   describeAudioError,
   detailRows,
   detailsMarkdown,
@@ -25,6 +27,7 @@ import {
   tagRows,
   timeAtX,
   waveformSkipped,
+  waveformTooLong,
   type DecodedFacts,
   type DetailRow,
 } from './audioInfo';
@@ -39,6 +42,10 @@ interface VsCodeApi {
 declare function acquireVsCodeApi(): VsCodeApi;
 
 const vscode = acquireVsCodeApi();
+
+// The file's webview URI, written into the page by the host at render time. It is
+// read once here and never from a message, so no message can redirect the player.
+const mediaSrc = document.body.dataset.mcSrc ?? '';
 
 // ---------------------------------------------------------------------------
 // DOM. The host provides only #app; everything else is built here.
@@ -315,8 +322,14 @@ audio.addEventListener('play', refreshPlayButton);
 audio.addEventListener('pause', refreshPlayButton);
 audio.addEventListener('ended', refreshPlayButton);
 audio.addEventListener('timeupdate', refreshTime);
-audio.addEventListener('durationchange', refreshDuration);
-audio.addEventListener('loadedmetadata', refreshDuration);
+// Metadata can arrive after the first render (a file over the waveform cap, no
+// ffprobe), so the Details panel follows it too; the render is cheap and idempotent.
+const onDuration = (): void => {
+  refreshDuration();
+  renderDetails();
+};
+audio.addEventListener('durationchange', onDuration);
+audio.addEventListener('loadedmetadata', onDuration);
 audio.addEventListener('ratechange', refreshSpeed);
 audio.addEventListener('error', () => {
   failed = true;
@@ -646,6 +659,31 @@ audio.addEventListener('seeked', drawWave);
 audio.addEventListener('timeupdate', drawWave);
 audio.addEventListener('durationchange', drawWave);
 
+/** Resolve with the element's duration once it is finite, or NaN if it errors first. */
+function whenDuration(): Promise<number> {
+  if (Number.isFinite(audio.duration)) {
+    return Promise.resolve(audio.duration);
+  }
+  return new Promise((resolve) => {
+    const done = (): void => {
+      // durationchange also fires for Infinity: a stream never gets a length.
+      if (Number.isFinite(audio.duration) || audio.duration === Infinity) {
+        finish(audio.duration);
+      }
+    };
+    const finish = (value: number): void => {
+      audio.removeEventListener('loadedmetadata', done);
+      audio.removeEventListener('durationchange', done);
+      audio.removeEventListener('error', onError);
+      resolve(value);
+    };
+    const onError = (): void => finish(NaN);
+    audio.addEventListener('loadedmetadata', done);
+    audio.addEventListener('durationchange', done);
+    audio.addEventListener('error', onError);
+  });
+}
+
 /** Decode `src`, keep the peaks and levels, and let the rest go. */
 async function buildWaveform(src: string, bytes: number): Promise<void> {
   const run = ++decodeRun;
@@ -664,6 +702,17 @@ async function buildWaveform(src: string, bytes: number): Promise<void> {
   waveEl.hidden = false;
   waveCanvas.hidden = true;
   setWaveStatus('Drawing waveform...');
+  // The decoded PCM is bounded by duration, not by the encoded size: wait for it.
+  const length = await whenDuration();
+  if (run !== decodeRun) {
+    return;
+  }
+  const estimate = decodedBytes(length, probe?.sampleRate, probe?.channels);
+  if (!(estimate <= WAVEFORM_DECODE_BUDGET)) {
+    waveCanvas.hidden = true;
+    setWaveStatus(waveformTooLong(length));
+    return;
+  }
   let ctx: AudioContext | undefined;
   try {
     const Ctor =
@@ -943,7 +992,6 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------------------
 interface LoadMessage {
   type: 'load';
-  src: string;
   name: string;
   path: string;
   size: number;
@@ -969,9 +1017,9 @@ function load(msg: LoadMessage): void {
     btn.disabled = false;
   }
   audio.loop = msg.loop === true;
-  audio.src = String(msg.src ?? '');
+  audio.src = mediaSrc;
   probe = undefined;
-  void buildWaveform(String(msg.src ?? ''), fileBytes);
+  void buildWaveform(mediaSrc, fileBytes);
   refreshDuration();
   refreshPlayButton();
   refreshSpeed();

@@ -25,6 +25,7 @@ beforeEach(() => {
   document.body.className = 'mc-audio';
   document.body.removeAttribute('style');
   document.body.innerHTML = '<div id="app"></div>';
+  document.body.dataset.mcSrc = 'vscode-resource://x/take 1.flac';
   posted.mockClear();
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: posted,
@@ -93,7 +94,6 @@ async function boot(count = 3): Promise<{ audio: HTMLAudioElement; clock: { time
   });
   fromHost({
     type: 'load',
-    src: 'vscode-resource://x/take 1.flac',
     name: 'take 1.flac',
     path: '/audio/take 1.flac',
     size: 2048,

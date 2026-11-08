@@ -7,6 +7,7 @@ import { probeAudio } from './audioProbe';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseAudioMessage } from './messages/audio';
 import { THEMES } from './messages/settings';
+import { escapeAttr } from './escape';
 
 // A read-only custom editor that plays audio files (MP3, WAV, Ogg, Opus, FLAC,
 // M4A, AAC) in a webview, with Back and Next through the folder's audio files.
@@ -64,6 +65,7 @@ export class AudioEditorProvider implements vscode.CustomReadonlyEditorProvider 
       asUri('preview.css'),
       nonce,
       this.theme(document.uri),
+      webview.asWebviewUri(document.uri).toString(),
     );
 
     // Audio Notes: nothing runs until notes are turned on or a sidecar exists.
@@ -160,7 +162,6 @@ export class AudioEditorProvider implements vscode.CustomReadonlyEditorProvider 
     );
     void webview.postMessage({
       type: 'load',
-      src: webview.asWebviewUri(uri).toString(),
       name: basename(uri),
       path: uri.fsPath,
       size,
@@ -193,6 +194,7 @@ export class AudioEditorProvider implements vscode.CustomReadonlyEditorProvider 
     styleUri: vscode.Uri,
     nonce: string,
     theme: string,
+    src: string,
   ): string {
     const csp = [
       `default-src 'none'`,
@@ -222,7 +224,7 @@ export class AudioEditorProvider implements vscode.CustomReadonlyEditorProvider 
   html, body { height: 100%; margin: 0; }
 </style>
 </head>
-<body class="mc-audio" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
+<body class="mc-audio" data-mc-theme="${theme}" data-mc-src="${escapeAttr(src)}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="app"></div>
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>

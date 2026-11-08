@@ -6,8 +6,10 @@ import { describe, it, expect } from 'vitest';
 import {
   CLIP_THRESHOLD,
   PEAK_BUCKETS,
+  WAVEFORM_DECODE_BUDGET,
   WAVEFORM_SIZE_CAP,
   analyzeChannels,
+  decodedBytes,
   detailRows,
   detailsMarkdown,
   formatBitRate,
@@ -20,6 +22,7 @@ import {
   timeAtX,
   toDb,
   waveformSkipped,
+  waveformTooLong,
 } from '../src/webview/audioInfo';
 
 const noYield = () => Promise.resolve();
@@ -127,6 +130,29 @@ describe('formatting', () => {
   it('says why a file over the cap has no waveform', () => {
     expect(WAVEFORM_SIZE_CAP).toBe(150 * 1024 * 1024);
     expect(waveformSkipped(200 * 1024 * 1024)).toContain('over the');
+  });
+
+  it('estimates decoded bytes as duration x rate x channels x 4', () => {
+    // 2 h of stereo at 48 kHz: the 86 MB MP3 that decodes to ~2.5 GB.
+    expect(decodedBytes(7200)).toBe(7200 * 48000 * 2 * 4);
+    // A lower probed rate is raised to 48 kHz (the context may resample up).
+    expect(decodedBytes(10, 22050, 1)).toBe(10 * 48000 * 4);
+    expect(decodedBytes(10, 96000, 6)).toBe(10 * 96000 * 6 * 4);
+    expect(decodedBytes(10, 0, 0)).toBe(10 * 48000 * 2 * 4);
+    expect(decodedBytes(Number.NaN)).toBeNaN();
+    expect(decodedBytes(Infinity)).toBeNaN();
+  });
+
+  it('budgets about 46 minutes of 48 kHz stereo', () => {
+    expect(WAVEFORM_DECODE_BUDGET).toBe(1024 ** 3);
+    expect(decodedBytes(45 * 60)).toBeLessThan(WAVEFORM_DECODE_BUDGET);
+    expect(decodedBytes(47 * 60)).toBeGreaterThan(WAVEFORM_DECODE_BUDGET);
+  });
+
+  it('words the too-long and unknown-length skips', () => {
+    expect(waveformTooLong(7080)).toBe('Waveform skipped: 1 h 58 min is too long to decode here.');
+    expect(waveformTooLong(3000)).toBe('Waveform skipped: 50 min is too long to decode here.');
+    expect(waveformTooLong(Infinity)).toContain('not known');
   });
 });
 

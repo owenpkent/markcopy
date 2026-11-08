@@ -47,6 +47,7 @@ beforeEach(() => {
   document.body.className = 'mc-audio';
   document.body.removeAttribute('style');
   document.body.innerHTML = '<div id="app"></div>';
+  document.body.dataset.mcSrc = 'vscode-resource://x/take.flac';
   posted.mockClear();
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: posted,
@@ -81,11 +82,15 @@ function fromHost(data: unknown): void {
   window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
 }
 
-async function boot(size = 2048, showTags?: boolean) {
+// The element's duration, which a test can change after the load (metadata arriving late).
+const dur = { value: 120 };
+
+async function boot(size = 2048, showTags?: boolean, initial = 120) {
+  dur.value = initial;
   await import('../src/webview/audio');
   const audio = document.getElementById('mc-audio') as HTMLAudioElement;
   const clock = { time: 0 };
-  Object.defineProperty(audio, 'duration', { configurable: true, get: () => 120 });
+  Object.defineProperty(audio, 'duration', { configurable: true, get: () => dur.value });
   Object.defineProperty(audio, 'currentTime', {
     configurable: true,
     get: () => clock.time,
@@ -107,7 +112,6 @@ async function boot(size = 2048, showTags?: boolean) {
     }) as DOMRect;
   fromHost({
     type: 'load',
-    src: 'vscode-resource://x/take.flac',
     name: 'take.flac',
     path: '/a/take.flac',
     size,
@@ -176,6 +180,54 @@ describe('waveform', () => {
     expect(document.getElementById('mc-wave-status')?.textContent).toContain('Waveform skipped');
   });
 
+  it('decodes a short file after checking its length', async () => {
+    const decode = vi.spyOn(FakeAudioContext.prototype, 'decodeAudioData');
+    await boot(2048);
+    await vi.waitFor(() => expect(canvasShown()).toBe(true));
+    expect(decode).toHaveBeenCalled();
+    decode.mockRestore();
+  });
+
+  it('skips a long file by decoded size, keeps the player, and never fetches', async () => {
+    const decode = vi.spyOn(FakeAudioContext.prototype, 'decodeAudioData');
+    const { audio, clock } = await boot(86_400_000, undefined, NaN);
+    dur.value = 7200;
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    await vi.waitFor(() =>
+      expect(document.getElementById('mc-wave-status')?.textContent).toBe(
+        'Waveform skipped: 2 h is too long to decode here.',
+      ),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(decode).not.toHaveBeenCalled();
+    clock.time = 10;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(clock.time).toBe(15);
+    decode.mockRestore();
+  });
+
+  it('skips a file whose length never becomes finite', async () => {
+    const { audio } = await boot(2048, undefined, NaN);
+    dur.value = Infinity;
+    audio.dispatchEvent(new Event('durationchange'));
+    await vi.waitFor(() =>
+      expect(document.getElementById('mc-wave-status')?.textContent).toBe(
+        'Waveform skipped: the length of this file is not known.',
+      ),
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('waits for metadata, and an error stops the wait without a decode', async () => {
+    const { audio } = await boot(2048, undefined, NaN);
+    await Promise.resolve();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(document.getElementById('mc-wave-status')?.textContent).toBe('Drawing waveform...');
+    audio.dispatchEvent(new Event('error'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('hides the waveform when decoding fails and keeps the player', async () => {
     decodeFails = true;
     const { wave, clock } = await boot();
@@ -226,6 +278,22 @@ describe('details panel', () => {
     expect(document.getElementById('mc-audio-error')?.style.display).toBe('none');
     // The rows the page knows itself (format from the name, size) are still there.
     expect(document.getElementById('mc-audio-details')?.textContent).toContain('FLAC');
+  });
+
+  it('shows Duration when the metadata arrives after the first render', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const { audio } = await boot(200 * 1024 * 1024, undefined, NaN);
+    audio.dispatchEvent(new Event('durationchange'));
+    const panel = document.getElementById('mc-audio-details') as HTMLElement;
+    expect(panel.textContent).not.toContain('Duration');
+    dur.value = 120;
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(panel.textContent).toContain('Duration');
+    expect(panel.textContent).toContain('0:02:00.000');
+    (document.getElementById('mc-audio-copy-details') as HTMLButtonElement).click();
+    const text = (writeText.mock.calls[0] as unknown as [string])[0];
+    expect(text).toContain('0:02:00.000');
   });
 
   it('copies the panel as Markdown', async () => {

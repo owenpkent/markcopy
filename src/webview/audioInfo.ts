@@ -77,6 +77,45 @@ export function describeAudioError(name: string): string {
 /** Files above this many bytes are not decoded for a waveform: the decoded PCM is ~10x the file. */
 export const WAVEFORM_SIZE_CAP = 150 * 1024 * 1024;
 
+/**
+ * Decoded-memory budget for the waveform: decodeAudioData materialises 32-bit float
+ * PCM, so the encoded size says little (a 2 h stereo MP3 of 86 MB decodes to ~2.5 GB).
+ * 1 GiB is 48000 Hz x 2 channels x 4 bytes = 384000 bytes/s, about 46 min of 48 kHz stereo.
+ */
+export const WAVEFORM_DECODE_BUDGET = 1024 * 1024 * 1024;
+
+/**
+ * Estimated bytes decodeAudioData will hold: duration x sample rate x channels x 4.
+ * The context may resample up, so the rate is never taken below 48 kHz; channels are
+ * ffprobe's when known, else 2. NaN when the duration is not finite.
+ */
+export function decodedBytes(duration: number, sampleRate?: number, channels?: number): number {
+  if (!Number.isFinite(duration) || duration < 0) {
+    return NaN;
+  }
+  const rate = Math.max(48000, sampleRate && sampleRate > 0 ? sampleRate : 0);
+  const ch = channels && channels > 0 ? channels : 2;
+  return duration * rate * ch * 4;
+}
+
+/** Spoken length for the skip line: "1 h 58 min", "46 min", "40 s". */
+function spokenDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 0) {
+    return m > 0 ? `${h} h ${m} min` : `${h} h`;
+  }
+  return m > 0 ? `${m} min` : `${total} s`;
+}
+
+/** The one line shown when the decoded size would pass the budget, or the length is unknown. */
+export function waveformTooLong(duration: number): string {
+  return Number.isFinite(duration)
+    ? `Waveform skipped: ${spokenDuration(duration)} is too long to decode here.`
+    : 'Waveform skipped: the length of this file is not known.';
+}
+
 /** Peaks kept per channel. The canvas folds them down to its pixel width at draw time. */
 export const PEAK_BUCKETS = 2000;
 
