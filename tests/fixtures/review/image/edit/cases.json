@@ -1,0 +1,143 @@
+[
+  {
+    "name": "add-whole",
+    "base": "empty",
+    "args": {
+      "text": "Crop is too tight."
+    }
+  },
+  {
+    "name": "add-pin",
+    "base": "empty",
+    "args": {
+      "text": "Dust spot here.",
+      "point": [
+        0.42,
+        0.3
+      ]
+    }
+  },
+  {
+    "name": "add-region",
+    "base": "empty",
+    "args": {
+      "text": "Re-light this.",
+      "region": [
+        0.1,
+        0.2,
+        0.3,
+        0.4
+      ]
+    }
+  },
+  {
+    "name": "add-region-clean",
+    "base": "empty",
+    "args": {
+      "text": "Rounded.",
+      "region": [
+        0.123456789,
+        0.99991,
+        0.50004,
+        6e-05
+      ]
+    }
+  },
+  {
+    "name": "add-region-tie",
+    "base": "empty",
+    "args": {
+      "text": "Tie.",
+      "region": [
+        0.03125,
+        0.09375,
+        0.15625,
+        0.21875
+      ]
+    }
+  },
+  {
+    "name": "add-region-flush",
+    "base": "empty",
+    "args": {
+      "text": "Edge to edge.",
+      "region": [
+        0,
+        0,
+        1,
+        1
+      ]
+    }
+  },
+  {
+    "name": "add-region-flush-far",
+    "base": "empty",
+    "args": {
+      "text": "Far corner.",
+      "region": [
+        0.3333,
+        0.6667,
+        0.6667,
+        0.3333
+      ]
+    }
+  },
+  {
+    "name": "add-region-slack",
+    "base": "empty",
+    "args": {
+      "text": "Slack.",
+      "region": [
+        0.3,
+        0.3,
+        0.7000000001,
+        0.7
+      ]
+    }
+  },
+  {
+    "name": "add-empty-text",
+    "base": "empty",
+    "args": {
+      "text": ""
+    }
+  },
+  {
+    "name": "add-multiline",
+    "base": "empty",
+    "args": {
+      "text": "Line one.\n\nLine two: 'quoted' and more."
+    }
+  },
+  {
+    "name": "add-unicode",
+    "base": "empty",
+    "args": {
+      "text": "Caf\u00e9 \u2603 \ud83d\ude00, tab\there"
+    }
+  },
+  {
+    "name": "add-to-full",
+    "base": "full",
+    "args": {
+      "text": "New on a rich file.",
+      "region": [
+        0.5,
+        0.5,
+        0.25,
+        0.25
+      ]
+    }
+  },
+  {
+    "name": "add-pin-to-full",
+    "base": "full",
+    "args": {
+      "text": "Pin on a rich file.",
+      "point": [
+        0.0001,
+        0.3333333
+      ]
+    }
+  }
+]

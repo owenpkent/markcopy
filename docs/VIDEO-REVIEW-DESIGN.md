@@ -7,7 +7,9 @@ that, and treat any file or line reference below as of its time of writing (Mark
 `2905d2c`, Marker `bed7d13`, okstudio-video-kit `467ec02`, whose schema is the
 contract). It brings the review loop from [Marker](https://github.com/owenpkent/Marker)
 (timecoded notes, In and Out ranges, a markdown hand-off) into the existing video
-preview.
+preview. The session code (watcher, edit queue, writes) was later split out into a
+shared `NotesSession` so the image preview could reuse it for
+[Image Notes](ARCHITECTURE.md#image-notes); this note is unchanged by that.
 
 What changed in the building. The sidecar is named from the stem (`clip.review.yaml`);
 an early draft of this plan had `clip.mp4.review.yaml`, which the kit's `review_path`

@@ -4,6 +4,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Back and Next in the image preview.** The toolbar now starts with Back and Next buttons and a counter (`3 / 12`) that step through the other images in the same folder like a slideshow, in Explorer order, wrapping round at either end. The Left and Right arrow keys (while the picture fits the width) and Page Up and Page Down do the same. Each image replaces the last in the same tab, and the controls are hidden when the folder has only one image.
+- **Image Notes in the image preview.** Notes on a picture, each pinned to an area (drag a rectangle with **Area**, or **A**), a spot (**Pin**, or **P**) or the whole image, in a notes panel with a composer, **Delete** and **Restore**, and **Copy notes as Markdown**. Both modes are off by default, so a drag still pans. Notes live in `<full file name>.review.yaml` (`photo.png.review.yaml`) in the OK Studio review format with `media: image`; an area is `region: [x, y, w, h]` and a pin is `point: [x, y]`, each 0 to 1 of the picture, as defined by [okstudio-video-kit PR #4](https://github.com/owenpkent/okstudio-video-kit/pull/4). `<name>.review.md` is rewritten after every edit. A notes file for the other kind of media opens read-only. The new `markcopy.image.review` setting (default off) turns notes on for every image, and the right-click **Open Image Notes** / **Close Image Notes** entry sets it; an image with a notes file beside it opens with notes on regardless.
+  - **Video Notes shares its code.** The watcher, edit queue, atomic writes and Copy as Markdown moved into a shared notes session that Video Notes and Image Notes both extend. Video Notes behaves as before.
+
 ### Planned
 
 - PlantUML support.

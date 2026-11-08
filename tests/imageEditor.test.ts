@@ -49,7 +49,16 @@ vi.mock('vscode', () => {
         uri.fsPath.startsWith('/ws/') ? { uri: { fsPath: '/ws' } } : undefined,
       ),
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath.replace('/ws/', '')),
-      fs: { stat, readFile, writeFile },
+      // Image Notes reads `<name>.review.yaml` through the same fs; there is none here,
+      // so the image reads below are only the image's own.
+      fs: {
+        stat,
+        readFile: (uri: { path: string }) =>
+          uri.path.endsWith('.review.yaml')
+            ? Promise.reject(Object.assign(new Error('no such file'), { code: 'FileNotFound' }))
+            : readFile(),
+        writeFile,
+      },
       createFileSystemWatcher: vi.fn((pattern: unknown) => {
         watcherHooks.pattern = pattern;
         const dispose = vi.fn();
@@ -71,7 +80,14 @@ vi.mock('vscode', () => {
   };
 });
 
-import { ImageEditorProvider, escapeGlobName, isImageSetting } from '../src/imageEditor';
+import {
+  ImageEditorProvider,
+  escapeGlobName,
+  isImageSetting,
+  isViewerImage,
+  sortedImages,
+  stepImage,
+} from '../src/imageEditor';
 import type * as vscode from 'vscode';
 
 function createPanel() {
@@ -173,6 +189,8 @@ describe('ImageEditorProvider', () => {
       background: 'checkerboard',
       size: 3,
       data: 'R0lG',
+      // The mock has no readDirectory, so the folder is just this file.
+      position: { index: 1, count: 1 },
     });
     expect(readFile).toHaveBeenCalledTimes(1);
   });
@@ -192,6 +210,8 @@ describe('ImageEditorProvider', () => {
     await send({ type: 'ready' });
     expect(readFile).not.toHaveBeenCalled();
     expect(posted.find((m) => m.type === 'error')?.message).toContain('limit for image previews');
+    // The folder position rides on the error, so Back and Next still work.
+    expect(posted.find((m) => m.type === 'error')?.position).toEqual({ index: 1, count: 1 });
   });
 
   it('ignores a saveFrame with no data', async () => {
@@ -291,5 +311,39 @@ describe('ImageEditorProvider', () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe('folder navigation', () => {
+  it('keeps only the extensions the viewer opens, in any case', () => {
+    expect(isViewerImage('a.PNG')).toBe(true);
+    expect(isViewerImage('b.jpeg')).toBe(true);
+    expect(isViewerImage('c.svg')).toBe(true);
+    expect(isViewerImage('d.gif')).toBe(false);
+    expect(isViewerImage('notes.md')).toBe(false);
+    expect(isViewerImage('.png')).toBe(false);
+    expect(isViewerImage('png')).toBe(false);
+  });
+
+  it('sorts like the Explorer, numbers by value and case ignored', () => {
+    expect(
+      sortedImages(
+        ['photo10.png', 'readme.md', 'Photo2.jpg', 'photo1.png', 'clip.gif'],
+        'photo1.png',
+      ),
+    ).toEqual(['photo1.png', 'Photo2.jpg', 'photo10.png']);
+  });
+
+  it('always includes the current file', () => {
+    expect(sortedImages([], 'shot.png')).toEqual(['shot.png']);
+  });
+
+  it('steps forward and back, wrapping at both ends', () => {
+    const images = ['a.png', 'b.png', 'c.png'];
+    expect(stepImage(images, 'a.png', 1)).toBe('b.png');
+    expect(stepImage(images, 'c.png', 1)).toBe('a.png');
+    expect(stepImage(images, 'a.png', -1)).toBe('c.png');
+    expect(stepImage(['a.png'], 'a.png', 1)).toBe('a.png');
+    expect(stepImage(images, 'gone.png', 1)).toBe('gone.png');
   });
 });

@@ -6,7 +6,8 @@ parses the YAML, runs reviewMarkdown and compares with the checked-in .md byte
 for byte. This script needs Python and the kit, so CI only compares and never
 regenerates; run it by hand when the kit's format changes and commit the result.
 
-    python generate.py
+    python generate.py          # every fixture
+    python generate.py image    # only image/ (Image Notes, needs the kit's feat/image-region)
 
 Ids and timestamps are fixed below so a rerun gives identical files.
 
@@ -15,6 +16,9 @@ pairs: the kit's own add_note, update_note and remove_note applied to the "befor
 sidecar and saved. tests/videoReview.test.ts applies MarkCopy's operation to the
 before file and requires the after file byte for byte. edit/cases.json says which
 operation each pair is.
+
+The image/ folder holds the same for Image Notes (media: image, named after the full
+file name: photo.png.review.yaml) and a video review whose notes carry a region.
 """
 from __future__ import annotations
 
@@ -158,7 +162,83 @@ def edits() -> None:
             (HERE / f"{extra}.{ext}").unlink(missing_ok=True)
 
 
+IMAGE = HERE / "image"
+IMAGE_CASES = [
+    # name, base, arguments
+    ("add-whole", "empty", {"text": "Crop is too tight."}),
+    ("add-pin", "empty", {"text": "Dust spot here.", "point": [0.42, 0.3]}),
+    ("add-region", "empty", {"text": "Re-light this.", "region": [0.1, 0.2, 0.3, 0.4]}),
+    ("add-region-clean", "empty", {"text": "Rounded.", "region": [0.123456789, 0.99991, 0.50004, 0.00006]}),
+    ("add-region-tie", "empty", {"text": "Tie.", "region": [0.03125, 0.09375, 0.15625, 0.21875]}),
+    ("add-region-flush", "empty", {"text": "Edge to edge.", "region": [0, 0, 1, 1]}),
+    ("add-region-flush-far", "empty", {"text": "Far corner.", "region": [0.3333, 0.6667, 0.6667, 0.3333]}),
+    ("add-region-slack", "empty", {"text": "Slack.", "region": [0.3, 0.3, 0.7000000001, 0.7]}),
+    ("add-empty-text", "empty", {"text": ""}),
+    ("add-multiline", "empty", {"text": "Line one.\n\nLine two: 'quoted' and more."}),
+    ("add-unicode", "empty", {"text": "Café ☃ 😀, tab\there"}),
+    ("add-to-full", "full", {"text": "New on a rich file.", "region": [0.5, 0.5, 0.25, 0.25]}),
+    ("add-pin-to-full", "full", {"text": "Pin on a rich file.", "point": [0.0001, 0.3333333]}),
+]
+
+
+def image_review(name: str, rid: str) -> Review:
+    rev = Review.new(name, None, IMAGE / f"{name}.review.yaml", media="image")
+    rev.data["id"] = rid
+    return rev
+
+
+def images() -> None:
+    IMAGE.mkdir(exist_ok=True)
+    (IMAGE / "edit").mkdir(exist_ok=True)
+
+    # A rich image review and its markdown.
+    rev = image_review("full.png", "eeeeeeeeeeee")
+    rev.set_asset(rating=3, status="in_progress", keywords=["hero", "retouch"], notes="First pass.")
+    add(rev, text="Whole picture is too warm.")
+    add(rev, text="Dust here.", point=[0.126, 0.5], author="Dana")
+    add(rev, text="Re-light this corner.", region=[0.1, 0.25, 0.375, 0.5])
+    add(rev, text="")
+    done = add(rev, text="Fixed already.", region=[0.0, 0.0, 1.0, 1.0])
+    done["done"] = True
+    finish(rev)
+
+    # An image review with no notes yet: what Review.new saves.
+    rev = image_review("empty.png", "dddddddddddd")
+    finish(rev)
+
+    # A video review whose notes carry a region (an Area: line in the markdown).
+    rev = Review.new("clip.mp4", 25, IMAGE / "video-region.review.yaml")
+    rev.data["id"] = "ffffffffffff"
+    add(rev, at=1.0, text="Region only.", region=[0.1, 0.2, 0.3, 0.4])
+    add(rev, at=2.0, out=3.0, text="Range with a region.", region=[0.0, 0.0, 0.5, 0.5], author="Dana")
+    add(rev, at=4.0, text="Pin only.", point=[0.5, 0.5])
+    finish(rev)
+
+    # The kit's own add_note on each base, saved to the "after" file.
+    out = IMAGE / "edit"
+    bases = {"empty": IMAGE / "empty.png.review.yaml", "full": IMAGE / "full.png.review.yaml"}
+    for name, base, args in IMAGE_CASES:
+        before = out / f"{name}.before.review.yaml"
+        after = out / f"{name}.after.review.yaml"
+        before.write_bytes(bases[base].read_bytes())
+        rev = Review.load(before)
+        rev.path = after
+        note = rev.add_note(
+            text=args["text"], point=args.get("point"), region=args.get("region")
+        )
+        note["created"] = CREATED
+        rev.validate()
+        rev.save()
+        after.write_bytes(after.read_bytes().replace(b"\r\n", b"\n"))
+    cases = [{"name": n, "base": b, "args": a} for n, b, a in IMAGE_CASES]
+    (out / "cases.json").write_text(json.dumps(cases, indent=2) + "\n", encoding="utf-8")
+
+
 if __name__ == "__main__":
-    minimal()
-    full()
-    edits()
+    import sys
+
+    if "image" not in sys.argv[1:]:
+        minimal()
+        full()
+        edits()
+    images()

@@ -1,5 +1,5 @@
 // A port of Review.export_markdown in owenpkent/okstudio-video-kit
-// (okstudio_video/review.py at 467ec02), minus transcript cues. The webview never
+// (okstudio_video/review.py, PR #4 on feat/image-region), minus transcript cues. The webview never
 // builds markdown; the host does, so the clipboard text matches the file on disk.
 
 import type { ReviewFile } from './schema';
@@ -15,10 +15,11 @@ const percent = (v: number): number => Math.floor(v * 100 + 0.5);
 
 /** One markdown section per note, led by a status line. Ends with one newline. */
 export function reviewMarkdown(file: ReviewFile): string {
+  const video = file.media !== 'image';
   const fps = Number(file.fps) || 0;
   const asset = file.asset ?? {};
   const lines: string[] = [`# Review notes: ${file.source ?? ''}`, ''];
-  const meta = [`fps ${formatG(fps)}`, `status ${asset.status ?? 'none'}`];
+  const meta = [video ? `fps ${formatG(fps)}` : 'image', `status ${asset.status ?? 'none'}`];
   if (asset.rating) {
     meta.push(`rating ${asset.rating}/5`);
   }
@@ -30,9 +31,23 @@ export function reviewMarkdown(file: ReviewFile): string {
     lines.push(String(asset.notes), '');
   }
   for (const note of file.notes ?? []) {
-    let tc = secondsToTimecode(Number(note.at), fps);
-    if (note.out !== undefined && note.out !== null) {
-      tc += ` to ${secondsToTimecode(Number(note.out), fps)}`;
+    // Half up, not round(): the web export does the same sum in JS.
+    const pin =
+      note.point && note.point.length > 0
+        ? `${percent(note.point[0])}% from left, ${percent(note.point[1])}% from top`
+        : undefined;
+    const area =
+      note.region && note.region.length > 0
+        ? `${percent(note.region[0])}%, ${percent(note.region[1])}%, ${percent(note.region[2])}% x ${percent(note.region[3])}%`
+        : undefined;
+    let tc: string;
+    if (video) {
+      tc = secondsToTimecode(Number(note.at), fps);
+      if (note.out !== undefined && note.out !== null) {
+        tc += ` to ${secondsToTimecode(Number(note.out), fps)}`;
+      }
+    } else {
+      tc = area ? `area ${area}` : pin ? `pin ${pin}` : 'whole image';
     }
     lines.push(`## ${note.id}  ${tc}  ${note.kind}`, '');
     if (note.target === 'render') {
@@ -41,12 +56,13 @@ export function reviewMarkdown(file: ReviewFile): string {
     if (note.author) {
       lines.push(`By ${note.author}`, '');
     }
-    if (note.point && note.point.length > 0) {
-      // Half up, not round(): the web export does the same sum in JS.
-      lines.push(
-        `Pin: ${percent(note.point[0])}% from left, ${percent(note.point[1])}% from top`,
-        '',
-      );
+    if (video) {
+      if (pin) {
+        lines.push(`Pin: ${pin}`, '');
+      }
+      if (area) {
+        lines.push(`Area: ${area}`, '');
+      }
     }
     if (note.text) {
       lines.push(note.text, '');
