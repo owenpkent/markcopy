@@ -464,7 +464,6 @@ function buildPdfHarness(theme) {
   const message = {
     type: 'load',
     data: pdfBase64,
-    workerSrc: '/media/pdf.worker.js',
     comments: [],
   };
   return `<!doctype html>
@@ -483,7 +482,7 @@ body {
   --vscode-menu-selectionForeground:#ffffff;
 }
 </style>
-<body class="mc-pdf" data-mc-theme="${theme}">
+<body class="mc-pdf" data-mc-theme="${theme}" data-worker-src="/media/pdf.worker.js">
   <div id="pdf-root"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>

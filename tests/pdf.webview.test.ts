@@ -40,6 +40,7 @@ beforeEach(async () => {
   copied = [];
   textCalls = [];
   document.body.innerHTML = BODY;
+  document.body.dataset.workerSrc = 'w.js';
   const mine = posted;
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: (msg: Record<string, unknown>) => mine.push(msg),
@@ -88,10 +89,21 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 10; i++) await tick();
 }
 
+// Every host that writes this page has to put the worker's address on <body>.
+// Dropping it is how the LaTeX preview once lost its worker while the PDF
+// editor's tests, which set the attribute themselves, stayed green.
+it('refuses to start without data-worker-src on the body', async () => {
+  delete document.body.dataset.workerSrc;
+  await loadDoc();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(document.getElementById('pdf-root')?.textContent).toContain('data-worker-src');
+});
+
 async function loadDoc(comments: unknown[] = []): Promise<void> {
   window.dispatchEvent(
     new MessageEvent('message', {
-      data: { type: 'load', data: btoa('x'), workerSrc: 'w.js', comments },
+      data: { type: 'load', data: btoa('x'), comments },
+      origin: window.origin,
     }),
   );
   await settle();

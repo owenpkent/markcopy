@@ -62,7 +62,10 @@ const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64')
 
 function postMedia(set: string, items: unknown): void {
   window.dispatchEvent(
-    new MessageEvent('message', { data: { type: 'media', docKey: DOC_KEY, mediaSet: set, items } }),
+    new MessageEvent('message', {
+      data: { type: 'media', docKey: DOC_KEY, mediaSet: set, items },
+      origin: window.origin,
+    }),
   );
 }
 
@@ -133,7 +136,9 @@ describe('Save as Word while the file is re-saved', () => {
     postMedia(`${DOC_KEY}#1`, [{ id: 'm1', mime: 'image/png', base64: b64(PNG_A) }]);
     await h.settle();
 
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'exportDocx' } }));
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'exportDocx' }, origin: window.origin }),
+    );
     // Wait for the export to reach the rasterizer and stop there.
     for (let i = 0; i < 200 && releasePng === undefined; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5));

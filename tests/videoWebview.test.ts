@@ -51,7 +51,7 @@ afterEach(() => {
 
 /** Deliver a host message the way the webview receives it. */
 function fromHost(data: unknown): void {
-  window.dispatchEvent(new MessageEvent('message', { data }));
+  window.dispatchEvent(new MessageEvent('message', { data, origin: window.origin }));
 }
 
 const load = (src: string, extra: Record<string, unknown> = {}) => ({

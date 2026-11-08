@@ -1601,13 +1601,28 @@ async function runPptxExport(docUri: vscode.Uri, bodyXhtml: string): Promise<voi
 // Where the save dialog starts: beside the source document, or failing that in the
 // first workspace folder.
 function defaultExportUri(docUri: vscode.Uri, name: string, ext: string): vscode.Uri {
-  const stem = name.replace(/[^\w.\- ]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
+  const stem = trimDashes(name.replace(/[^\w.\- ]+/g, '-')) || 'markcopy';
   const safe = `${stem}.${ext}`;
   if (docUri.scheme === 'file') {
     return vscode.Uri.joinPath(docUri, '..', safe);
   }
   const folder = vscode.workspace.workspaceFolders?.[0];
   return folder ? vscode.Uri.joinPath(folder.uri, safe) : vscode.Uri.file(safe);
+}
+
+// `/^-+|-+$/` would do this in one line, but `-+$` rescans from every dash in a
+// run that turns out not to reach the end, so a name of many dashes with a
+// letter after them takes quadratic time. Two index scans are linear.
+function trimDashes(s: string): string {
+  let start = 0;
+  let end = s.length;
+  while (start < end && s[start] === '-') {
+    start++;
+  }
+  while (end > start && s[end - 1] === '-') {
+    end--;
+  }
+  return s.slice(start, end);
 }
 
 // The document's name with the source extension taken off, used both as the
@@ -1631,7 +1646,7 @@ async function printViaBrowser(
     const html = await buildPdfHtml(context, bodyHtml, name, { pageSize, autoPrint: true });
     const dir = context.globalStorageUri;
     await vscode.workspace.fs.createDirectory(dir);
-    const safe = name.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'markcopy';
+    const safe = trimDashes(name.replace(/[^\w.-]+/g, '-')) || 'markcopy';
     const fileUri = vscode.Uri.joinPath(dir, `${safe}.html`);
     await vscode.workspace.fs.writeFile(fileUri, Buffer.from(html, 'utf8'));
     // globalStorageUri uses the `vscode-userdata:` scheme, which the OS shell

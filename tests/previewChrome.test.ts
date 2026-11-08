@@ -39,6 +39,7 @@ const GRID =
 async function render(html: string, kind: string): Promise<void> {
   window.dispatchEvent(
     new MessageEvent('message', {
+      origin: window.origin,
       data: {
         type: 'render',
         kind,
@@ -60,7 +61,9 @@ async function render(html: string, kind: string): Promise<void> {
 /** Drive `exportPdf` and return the body HTML it hands the host. */
 async function exportedBody(): Promise<string> {
   posted.length = 0;
-  window.dispatchEvent(new MessageEvent('message', { data: { type: 'exportPdf' } }));
+  window.dispatchEvent(
+    new MessageEvent('message', { data: { type: 'exportPdf' }, origin: window.origin }),
+  );
   await new Promise((r) => setTimeout(r, 0));
   const msg = posted.find((m) => (m as { type?: string }).type === 'pdfHtml') as
     { bodyHtml: string } | undefined;

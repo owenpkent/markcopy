@@ -19,6 +19,8 @@ import { splitMermaidConfig } from './mermaidDefaults';
 import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
+import { fromHost } from './fromHost';
+import { diagramHtml } from './diagramHtml';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
 // no host code follows it into the webview bundle.
@@ -179,6 +181,9 @@ function applyRenderMessage(msg: Record<string, any>): void {
 }
 
 window.addEventListener('message', (e: MessageEvent) => {
+  if (!fromHost(e)) {
+    return;
+  }
   const msg = e.data;
   switch (msg?.type) {
     case 'render':
@@ -350,7 +355,7 @@ async function renderMermaid(): Promise<void> {
     pre.replaceWith(host);
     try {
       const { svg } = await mermaid.render(`mc-mmd-${i}-${idSeed()}`, code);
-      host.innerHTML = svg;
+      host.innerHTML = diagramHtml(svg);
     } catch (err) {
       host.innerHTML = `<pre class="mc-error">Mermaid error: ${escapeHtml(String(err))}</pre>`;
     }
@@ -1467,7 +1472,7 @@ async function relightMermaid(root: HTMLElement): Promise<void> {
       }
       try {
         const { svg } = await mermaid.render(`mc-pdf-${i}-${idSeed()}`, src);
-        hosts[i].innerHTML = svg;
+        hosts[i].innerHTML = diagramHtml(svg);
       } catch {
         /* leave the existing SVG; a themed diagram beats no diagram */
       }

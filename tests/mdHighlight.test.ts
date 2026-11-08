@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { highlightMarkdown } from '../src/webview/mdHighlight';
+import { stripTags } from './helpers/html';
 
 // Strip tags and decode the five entities the highlighter emits.
 function textOf(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, '')
+  return stripTags(html)
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')

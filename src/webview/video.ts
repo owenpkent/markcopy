@@ -22,6 +22,8 @@ import {
   soundProgress,
 } from './videoInfo';
 import { createReview, isTextEntry } from './videoReview';
+import { fromHost } from './fromHost';
+import { hostMediaUrl } from './hostMediaUrl';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -311,7 +313,7 @@ function load(msg: LoadMessage): void {
   fileName = msg.name;
   filePath = msg.path;
   fileBytes = msg.size;
-  sourceUri = msg.src;
+  sourceUri = hostMediaUrl(msg.src);
   proxyNote = msg.proxyNote ?? '';
   playableReported = false;
   // A copy replacing the original under the reader's feet (the sound copy) must
@@ -900,6 +902,9 @@ function applyTheme(value: string): void {
 // Host messages
 // ---------------------------------------------------------------------------
 window.addEventListener('message', (event: MessageEvent) => {
+  if (!fromHost(event)) {
+    return;
+  }
   const msg = event.data as
     | LoadMessage
     | ProxyMessage

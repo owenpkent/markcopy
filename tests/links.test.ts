@@ -129,6 +129,14 @@ describe('markdownLink', () => {
     );
   });
 
+  // Without this, `a\]` became `a\\]`: an escaped backslash and a bracket that
+  // still closes the label.
+  it('escapes a backslash in the text, so it cannot neutralize the bracket escape', () => {
+    expect(markdownLink('path\\to\\]x', 'https://example.com')).toBe(
+      '[path\\\\to\\\\\\]x](https://example.com)',
+    );
+  });
+
   it('percent-encodes the parentheses and spaces that would end the target early', () => {
     expect(markdownLink('wiki', 'https://example.com/Foo_(bar)')).toBe(
       '[wiki](https://example.com/Foo_%28bar%29)',

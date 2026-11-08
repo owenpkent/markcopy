@@ -33,6 +33,7 @@ import {
 } from './audioInfo';
 import type { AudioDetails } from '../messages/audioDetails';
 import { createReview, isTextEntry } from './videoReview';
+import { fromHost } from './fromHost';
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -1026,11 +1027,6 @@ function load(msg: LoadMessage): void {
   if (msg.autoplay === true) {
     togglePlay();
   }
-}
-
-// Only the extension host talks to this frame; see the same check in image.ts.
-function fromHost(event: MessageEvent): boolean {
-  return event.origin === window.origin || event.source === window.parent;
 }
 
 window.addEventListener('message', (event: MessageEvent) => {

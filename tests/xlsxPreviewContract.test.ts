@@ -31,6 +31,7 @@ beforeAll(async () => {
 async function renderSheet(html: string): Promise<void> {
   window.dispatchEvent(
     new MessageEvent('message', {
+      origin: window.origin,
       data: {
         type: 'render',
         kind: 'xlsx',
