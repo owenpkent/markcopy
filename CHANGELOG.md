@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.3.0] - 2026-11-08
+
 ### Added
 
 - **Audio preview.** `.mp3`, `.wav`, `.ogg`, `.oga`, `.opus`, `.flac`, `.m4a`, and `.aac` files open in a player with Back 5 s, Play or Pause, Forward 5 s, a position readout, a seek slider, and a speed control (0.5x to 2x). Space or K plays and pauses, the arrow keys seek 5 s (30 s with Shift), Home and End jump to the ends, and J and L change the speed. Page Up and Page Down, and Previous and Next buttons, step through the audio files in the same folder. The file is streamed from disk, so a long recording or a file outside the workspace plays. VS Code cannot decode AAC, so an unplayable `.m4a` shows a message and an Open in default player button. New settings `markcopy.audio.autoplay` and `markcopy.audio.loop` (both off by default).
@@ -22,11 +29,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ### Security
 
 - Every preview webview now ignores a `message` event that did not come from the extension host (the Markdown, PDF, video, STL and GIF viewers join the image and audio viewers, which already checked). The video viewer no longer takes a media address from a message: the host writes the file's URL and its proxy's URL into the page and the message only names which to play, and the PDF viewer reads its pdf.js worker address from the page the host wrote rather than from a message. Mermaid's SVG goes through DOMPurify before it is written into the preview. A Markdown link copied from the preview escapes a backslash in its text, so a backslash before a bracket can no longer end the label early. Two filename clean-ups for exports trim dashes without a regular expression that took quadratic time on a long run of dashes. These close the open GitHub code scanning alerts; none was known to be exploitable from a document.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [1.2.0] - 2026-11-07
 
@@ -593,7 +595,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/owenpkent/markcopy/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/owenpkent/markcopy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/owenpkent/markcopy/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/owenpkent/markcopy/compare/v1.0.1...v1.0.2

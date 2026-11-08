@@ -1,6 +1,7 @@
 import { FuzzedDataProvider } from '@jazzer.js/core';
 import { planBlockEdit } from '../../src/blockEdit';
 import { applyCsvEdits, cellEdit, gridEdits } from '../../src/csv';
+import { parseAudioMessage } from '../../src/messages/audio';
 import { parseGifMessage } from '../../src/messages/gif';
 import { parseImageMessage } from '../../src/messages/image';
 import { parseMarkdownMessage } from '../../src/messages/markdown';
@@ -35,6 +36,7 @@ const THEMES = ['auto', 'light', 'dark', 'green'];
 const PREVIEW_TOGGLES = ['syncScroll', 'autoPreview', 'math', 'footnotes'];
 const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
 const VIEWER_TOGGLES = ['video.loop', 'video.autoplay', 'video.review'];
+const AUDIO_TOGGLES = ['audio.review', 'audio.loop', 'audio.autoplay', 'audio.showTags'];
 const GRID_OPS = [
   'insertRowAbove',
   'insertRowBelow',
@@ -93,7 +95,31 @@ const TYPES = {
     'updateSetting',
   ],
   gif: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
-  image: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
+  image: [
+    'ready',
+    'revealInOS',
+    'saveFrame',
+    'openExternal',
+    'navigate',
+    'reviewEnable',
+    'reviewCopy',
+    'reviewAdd',
+    'reviewDelete',
+    'reviewRestore',
+    'updateSetting',
+  ],
+  audio: [
+    'ready',
+    'revealInOS',
+    'openExternal',
+    'navigate',
+    'reviewEnable',
+    'reviewCopy',
+    'reviewAdd',
+    'reviewDelete',
+    'reviewRestore',
+    'updateSetting',
+  ],
 };
 const ALL_TYPES = [...new Set(Object.values(TYPES).flat()), 'toString', '__proto__', ''];
 
@@ -106,6 +132,7 @@ const PARSERS: [keyof typeof TYPES, Parser][] = [
   ['video', parseVideoMessage],
   ['gif', parseGifMessage],
   ['image', parseImageMessage],
+  ['audio', parseAudioMessage],
 ];
 
 function fail(surface: string, why: string, msg: unknown): never {
@@ -125,7 +152,13 @@ function settingAllowed(surface: string, key: string, value: unknown): boolean {
     case 'video':
       return theme || (VIEWER_TOGGLES.includes(key) && bool);
     case 'image':
-      return theme || (key === 'image.background' && IMAGE_BACKGROUNDS.includes(value as string));
+      return (
+        theme ||
+        (key === 'image.review' && bool) ||
+        (key === 'image.background' && IMAGE_BACKGROUNDS.includes(value as string))
+      );
+    case 'audio':
+      return theme || (AUDIO_TOGGLES.includes(key) && bool);
     default:
       return theme; // pdf, tex, gif, stl
   }
@@ -239,6 +272,11 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
         fail(surface, 'saveFrame.name is not a non-empty string', msg);
       }
       break;
+    case 'navigate':
+      if (msg.step !== 1 && msg.step !== -1) {
+        fail(surface, 'navigate.step is not 1 or -1', msg);
+      }
+      break;
     case 'proxyStart':
       if (msg.kind !== 'sound' && msg.kind !== 'picture') {
         fail(surface, 'proxyStart.kind is not sound or picture', msg);
@@ -247,7 +285,7 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
     case 'reviewAdd':
     case 'reviewDelete':
     case 'reviewRestore':
-      // The review session validates these against the video; they must carry the page's object.
+      // The review session validates these against the media; they must carry the page's object.
       if (msg.raw !== raw || typeof msg.raw !== 'object' || msg.raw === null) {
         fail(surface, 'review message lost its original object', msg);
       }
