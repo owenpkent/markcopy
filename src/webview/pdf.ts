@@ -164,11 +164,6 @@ function toast(text: string, ms = 1600): void {
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------
-// The worker's address is written into the page by the host (`data-worker-src`
-// on <body>) rather than carried by the load message, so the one URL this page
-// fetches is never a value a message could supply.
-const workerSrc = document.body.dataset.workerSrc ?? '';
-
 async function load(data: Uint8Array): Promise<void> {
   // Where the reader was, so a recompile can put them back. Only meaningful on a
   // reload, and `resetViewer` is about to throw the page list away, so it has to
@@ -179,6 +174,16 @@ async function load(data: Uint8Array): Promise<void> {
   // Run pdf.js off the main thread. The worker script is a webview-resource URI
   // (cross-origin to the vscode-webview:// document), so `new Worker(workerSrc)`
   // would throw a SecurityError; fetch it and start from a same-origin blob URL.
+  // Its address is written into the page by the host (`data-worker-src` on
+  // <body>) rather than carried by the load message, so the one URL this page
+  // fetches is never a value a message could supply.
+  // Three hosts write this page (the PDF editor, the LaTeX preview and the
+  // screenshot harness); one that forgets the attribute should fail in words.
+  const workerSrc = document.body.dataset.workerSrc ?? '';
+  if (!workerSrc) {
+    root.innerHTML = `<pre class="mc-error">Failed to start PDF worker: the page has no data-worker-src</pre>`;
+    return;
+  }
   try {
     const res = await fetch(workerSrc);
     const code = await res.text();

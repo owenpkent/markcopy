@@ -75,12 +75,13 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
     webview.html = this.html(
       webview,
       asUri('pdf.js', true),
+      asUri('pdf.worker.js'),
       asUri('preview.css', true),
       nonce,
       theme,
     );
 
-    const session = new CompileSession(document, webview, asUri('pdf.worker.js').toString());
+    const session = new CompileSession(document, webview);
     const entry = { panel, session, document };
     active.add(entry);
 
@@ -157,6 +158,7 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
   private html(
     webview: vscode.Webview,
     scriptUri: vscode.Uri,
+    workerUri: vscode.Uri,
     styleUri: vscode.Uri,
     nonce: string,
     theme: string,
@@ -183,7 +185,7 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
 <link href="${styleUri}" rel="stylesheet" />
 <title>MarkCopy LaTeX Preview</title>
 </head>
-<body class="mc-pdf" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
+<body class="mc-pdf" data-mc-theme="${theme}" data-worker-src="${workerUri}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="pdf-root"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>
@@ -266,7 +268,6 @@ class CompileSession {
   constructor(
     private readonly document: vscode.TextDocument,
     private readonly webview: vscode.Webview,
-    private readonly workerSrc: string,
   ) {}
 
   /** A file holding the PDF on screen, or undefined before the first good compile. */
@@ -376,7 +377,6 @@ class CompileSession {
       await this.webview.postMessage({
         type: 'load',
         data: bytes.toString('base64'),
-        workerSrc: this.workerSrc,
         comments: await readComments(this.commentsUri()),
       });
       this.post({ state: 'ok' });

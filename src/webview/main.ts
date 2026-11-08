@@ -20,6 +20,7 @@ import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 import { fromHost } from './fromHost';
+import { diagramHtml } from './diagramHtml';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
 // no host code follows it into the webview bundle.
@@ -359,15 +360,6 @@ async function renderMermaid(): Promise<void> {
       host.innerHTML = `<pre class="mc-error">Mermaid error: ${escapeHtml(String(err))}</pre>`;
     }
   }
-}
-
-// Mermaid's `securityLevel: 'strict'` already sanitizes the labels a diagram
-// supplies, so this pass is the same defense in depth as the one over the page:
-// the diagram source is document text, and the SVG it becomes is the one
-// fragment written to the DOM without going through DOMPurify otherwise.
-// `foreignObject` has to be re-allowed because Mermaid draws HTML labels in one.
-function diagramHtml(svg: string): string {
-  return DOMPurify.sanitize(svg, { ADD_TAGS: ['foreignObject'] });
 }
 
 // Upgrade the inert math placeholders emitted by render.ts into rendered KaTeX.

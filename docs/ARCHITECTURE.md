@@ -31,7 +31,7 @@ The PDF preview uses the same host/webview split with its own custom editor and 
 
 ```
  ┌──────────────────────────┐        load (bytes,        ┌───────────────────────────┐
- │  Extension host (Node)    │        workerSrc)          │  PDF webview (browser)    │
+ │  Extension host (Node)    │        comments)           │  PDF webview (browser)    │
  │  src/pdfEditor.ts         │  ───────────────────────► │  src/webview/pdf.ts       │
  │  workspace.fs.readFile    │  ◄─────────────────────── │  pdf.js + module worker   │
  │  (CustomReadonlyEditor)   │        ready / toast       │  canvas render, copy      │
