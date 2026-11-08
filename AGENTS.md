@@ -24,8 +24,14 @@ boundary.
   together when updating dependencies.
 - For code changes, run `npm run lint`, `npm run format:check`, `npm test`, and
   `npm run compile`. Compilation includes type-checking.
-- Run `npm run test:integration` for host or manifest changes. On Linux, use
+- CI runs `npm run test:integration` on every pull request. Run it locally only
+  when the maintainer asks: it opens a second VS Code window, and on the
+  maintainer's machine heavy local test runs have frozen the desktop and crashed
+  the on-screen keyboard they type with. On Linux, use
   `xvfb-run -a npm run test:integration` for a virtual display.
+- `npm test` uses half the CPU cores (`maxWorkers` in `vitest.config.ts`). Keep
+  that cap, run one test command at a time, and never start test runs in parallel
+  agents or alongside another tool's tests.
 - For documentation-only changes, check formatting and local links; a manual
   extension-host run is unnecessary unless the change needs behavior verification.
 - Use [TESTING](docs/TESTING.md) for manual coverage of canvas, media playback,
