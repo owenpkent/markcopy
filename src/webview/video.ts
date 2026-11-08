@@ -23,7 +23,6 @@ import {
 } from './videoInfo';
 import { createReview, isTextEntry } from './videoReview';
 import { fromHost } from './fromHost';
-import { hostMediaUrl } from './hostMediaUrl';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -51,6 +50,11 @@ let fileName = '';
 let filePath = '';
 let fileBytes = 0;
 let sourceUri = '';
+// The only two addresses this page ever plays, written by the host into the
+// page itself (src/videoEditor.ts html()). A load message picks one by name;
+// no URL from a message reaches the element.
+const fileSrc = document.body.dataset.mcSrc ?? '';
+const proxySrc = document.body.dataset.mcProxySrc ?? '';
 
 /**
  * Whether the frame grabs are off the table for this file.
@@ -299,7 +303,8 @@ function updateNotice(message: string, fraction: number, actions: OverlayAction[
 // ---------------------------------------------------------------------------
 interface LoadMessage {
   type: 'load';
-  src: string;
+  /** Which of the page's two addresses to play. */
+  source: 'file' | 'proxy';
   name: string;
   path: string;
   size: number;
@@ -313,7 +318,7 @@ function load(msg: LoadMessage): void {
   fileName = msg.name;
   filePath = msg.path;
   fileBytes = msg.size;
-  sourceUri = hostMediaUrl(msg.src);
+  sourceUri = msg.source === 'proxy' ? proxySrc : fileSrc;
   proxyNote = msg.proxyNote ?? '';
   playableReported = false;
   // A copy replacing the original under the reader's feet (the sound copy) must

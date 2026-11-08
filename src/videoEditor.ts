@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { getNonce } from './previewShell';
+import { escapeAttr } from './escape';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseVideoMessage } from './messages/video';
 import { isViewerSetting } from './messages/settings';
@@ -75,9 +76,22 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     const theme = vscode.workspace
       .getConfiguration('markcopy', document.uri)
       .get<string>('theme', 'auto');
-    webview.html = this.html(webview, asUri('video.js'), asUri('preview.css'), nonce, theme);
+    // Both addresses the element may ever play are written into the page here,
+    // and the load message only says which of the two to use. The proxy's name
+    // is decided now, before any encode, so the page can carry it: a URL that
+    // arrives in a message would be a value a message could steer.
+    const proxyPath = join(proxyDir(), proxyFileName(basename(document.uri)));
+    webview.html = this.html(
+      webview,
+      asUri('video.js'),
+      asUri('preview.css'),
+      nonce,
+      theme,
+      webview.asWebviewUri(document.uri).toString(),
+      webview.asWebviewUri(vscode.Uri.file(proxyPath)).toString(),
+    );
 
-    const proxy = new ProxySession(document.uri, webview, (built) =>
+    const proxy = new ProxySession(document.uri, proxyPath, webview, (built) =>
       this.sendLoad(webview, document.uri, built),
     );
 
@@ -179,6 +193,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   /**
    * Point the webview at something playable and tell it what it is about to play.
    *
+   * The message names the source (`file` or `proxy`) rather than carrying a URL:
+   * both URLs are already in the page, written by `html()`.
    * `built` swaps the source for an ffmpeg proxy while leaving every other field
    * describing the original, because that is what the reader opened: the name in
    * the status line, the path its copy actions yield, and the size on disk are
@@ -198,7 +214,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     );
     void webview.postMessage({
       type: 'load',
-      src: webview.asWebviewUri(built ? vscode.Uri.file(built.path) : uri).toString(),
+      source: built ? 'proxy' : 'file',
       name: basename(uri),
       path: uri.fsPath,
       size,
@@ -214,6 +230,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     styleUri: vscode.Uri,
     nonce: string,
     theme: string,
+    fileSrc: string,
+    proxySrc: string,
   ): string {
     const csp = [
       `default-src 'none'`,
@@ -381,7 +399,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   .mc-video-notice .mc-video-progress { flex: 0 0 160px; width: 160px; }
 </style>
 </head>
-<body class="mc-video" data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
+<body class="mc-video" data-mc-theme="${theme}" data-mc-src="${escapeAttr(fileSrc)}" data-mc-proxy-src="${escapeAttr(proxySrc)}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="mc-stage" hidden>
     <video id="mc-video" controls playsinline preload="metadata"></video>
   </div>
@@ -444,6 +462,8 @@ class ProxySession {
 
   constructor(
     private readonly source: vscode.Uri,
+    /** Where the proxy goes when built. Fixed per panel, so the page can name it up front. */
+    private readonly output: string,
     private readonly webview: vscode.Webview,
     private readonly play: (built: BuiltProxy) => Promise<void>,
   ) {}
@@ -560,8 +580,8 @@ class ProxySession {
       const probe = await this.probe(tools.ffprobe);
       this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec }, kind);
 
-      const dir = await ensureProxyDir();
-      output = join(dir, proxyFileName(basename(this.source)));
+      await ensureProxyDir();
+      output = this.output;
 
       let lastPost = 0;
       await transcode({

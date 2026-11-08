@@ -184,16 +184,22 @@ describe('VideoEditorProvider sound copy', () => {
     await send({ type: 'playable' });
     const loads = () => posted.filter((m) => m.type === 'load');
     expect(loads()).toHaveLength(2);
-    expect(loads()[0].src).toBe('webview:/videos/clip.mp4');
+    expect(loads()[0].source).toBe('file');
     expect(loads()[0].proxyNote).toBeUndefined();
+    // The page itself carries both addresses, and the proxy's is the path the
+    // encode was told to write, decided before ffmpeg ran.
+    const html = (panel.webview as { html: string }).html;
+    expect(html).toContain('data-mc-src="webview:/videos/clip.mp4"');
+    const output = tools.transcode.mock.calls[0][0].output;
+    expect(output).toMatch(/^[\\/]proxies[\\/]clip-/);
+    expect(html).toContain(`data-mc-proxy-src="webview:${output}"`);
 
     // The webview reloads: back to `ready`, and the original plays again.
     await send({ type: 'ready' });
     await send({ type: 'playable' });
 
     const last = loads().at(-1);
-    expect(last?.src).toMatch(/^webview:[\\/]proxies[\\/]clip-/);
-    expect(last?.src).not.toBe('webview:/videos/clip.mp4');
+    expect(last?.source).toBe('proxy');
     expect(last?.proxyNote).toBe('ffmpeg copy · sound re-encoded to MP3');
     // The second `playable` is the spent offer, not a second encode.
     expect(tools.transcode).toHaveBeenCalledTimes(1);
