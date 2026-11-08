@@ -284,19 +284,21 @@ Notes:
 
 The image viewer's menu is about getting the picture, or a reference to it, somewhere else.
 
-| Action                         | Clipboard flavor | Pastes cleanly into                                     |
-| ------------------------------ | ---------------- | ------------------------------------------------------- |
-| **Copy Image as PNG**          | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors |
-| **Save as PNG…**               | (writes a file)  | Anywhere, via a save dialog                             |
-| **Copy as > File Name**        | `text/plain`     | Anywhere                                                |
-| **Copy as > Full Path**        | `text/plain`     | A terminal, a script, another editor                    |
-| **Copy as > Markdown Image**   | `text/plain`     | A Markdown file in the same workspace                   |
-| **Copy as > HTML Image**       | `text/plain`     | An HTML file, an HTML email source                      |
-| **Copy as > Data URI**         | `text/plain`     | CSS, HTML, or Markdown that must carry the picture      |
-| **Copy SVG Source** (SVG only) | `text/plain`     | A text editor, a code file, an issue                    |
+| Action                                   | Clipboard flavor                  | Pastes cleanly into                                     |
+| ---------------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| **Copy Image as PNG**                    | `image/png`                       | Word, Outlook, Gmail, Google Docs, Slack, image editors |
+| **Save as PNG…**                         | (writes a file)                   | Anywhere, via a save dialog                             |
+| **Copy as > File Name**                  | `text/plain`                      | Anywhere                                                |
+| **Copy as > Full Path**                  | `text/plain`                      | A terminal, a script, another editor                    |
+| **Copy as > Markdown Image**             | `text/plain`                      | A Markdown file in the same workspace                   |
+| **Copy as > HTML Image**                 | `text/plain`                      | An HTML file, an HTML email source                      |
+| **Copy as > Data URI**                   | `text/plain`                      | CSS, HTML, or Markdown that must carry the picture      |
+| **Copy SVG Source** (SVG only)           | `text/plain`                      | A text editor, a code file, an issue                    |
+| **Copy notes as Markdown** (notes panel) | `text/plain` (also writes a file) | A chat, an issue, an editor, an agent in the folder     |
 
 Notes:
 
+- **Copy notes as Markdown is plain text only**, written by the host like the video's, and only in Image Notes (a button on the notes panel, not a right-click row, disabled while there is no `<name>.review.yaml`). It saves the same text as `<name>.review.md` beside the image (`photo.png.review.md`) without a dialog, shows "Copied 3 notes, saved photo.png.review.md", and the file is rewritten after every note edit. A notes file that is invalid, another version or a video's is refused with an error and nothing is written. The format is the okstudio-video-kit's `export_markdown` for an image: a `# Review notes: photo.png` heading, an `image, status none` line, then a heading per note with where it is (`## n1  area 10%, 21%, 30% x 40%  note`, `pin 42% from left, 30% from top`, or `whole image`) and its text.
 - **The picture is copied at its own size**, not the size it is zoomed to, from any source format: the viewer draws it onto a canvas and exports a PNG. For a raster the size is the decoded one, so an EXIF-rotated JPEG copies as portrait, matching how it is shown; the header size is used only before the picture has loaded.
 - **An SVG has no pixel size**, so **Copy as > SVG Scale** sets one: 1x, 2x (the default), or 4x of its size. That size is the browser-resolved one when the root has a `width` or `height` (any CSS length), else the `viewBox`, else the decoded size. An SVG with `<foreignObject>` still exports, because it is loaded from a `data:` URL rather than a Blob URL. The choice lasts for the session and a side is capped at 16384 px. **Copy SVG Source** is unaffected by it: it is the file's text, uninterpreted, in the encoding the file uses (UTF-8, or UTF-16 LE or BE) and decoded to plain text.
 - **Markdown Image** is `![name](path)`, where `name` is the file name without its extension and `path` is relative to the workspace folder containing the file, with forward slashes and spaces and reserved characters (including `&`) percent-encoded. Outside a workspace the path is the bare file name. **HTML Image** is `<img src alt width height>` with the same path and the picture's dimensions when known (the decoded size once loaded); it omits `width` and `height` when the file failed to decode.

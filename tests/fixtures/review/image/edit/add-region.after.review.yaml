@@ -1,0 +1,21 @@
+version: 1
+id: dddddddddddd
+source: empty.png
+media: image
+next_note_id: 2
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  kind: note
+  text: Re-light this.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  region: [0.1, 0.2, 0.3, 0.4]

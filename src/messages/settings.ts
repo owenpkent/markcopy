@@ -30,8 +30,11 @@ export function isStlSetting(key: string, value: unknown): boolean {
 
 export const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
 
-/** The settings the image viewer's menus write: the theme and the picture's backdrop. */
+/** The settings the image viewer's menus write: the theme, the picture's backdrop and Image Notes. */
 export function isImageSetting(key: string, value: unknown): boolean {
+  if (key === 'image.review') {
+    return typeof value === 'boolean';
+  }
   if (key === 'image.background') {
     return typeof value === 'string' && IMAGE_BACKGROUNDS.includes(value);
   }

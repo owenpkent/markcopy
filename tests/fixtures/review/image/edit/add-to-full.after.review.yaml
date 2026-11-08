@@ -1,0 +1,70 @@
+version: 1
+id: eeeeeeeeeeee
+source: full.png
+media: image
+next_note_id: 7
+asset:
+  rating: 3
+  status: in_progress
+  keywords: [hero, retouch]
+  notes: First pass.
+notes:
+- id: n1
+  target: source
+  kind: note
+  text: Whole picture is too warm.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n2
+  target: source
+  kind: note
+  text: Dust here.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  author: Dana
+  point: [0.126, 0.5]
+- id: n3
+  target: source
+  kind: note
+  text: Re-light this corner.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  region: [0.1, 0.25, 0.375, 0.5]
+- id: n4
+  target: source
+  kind: note
+  text: ''
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+- id: n5
+  target: source
+  kind: note
+  text: Fixed already.
+  done: true
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  region: [0.0, 0.0, 1.0, 1.0]
+- id: n6
+  target: source
+  kind: note
+  text: New on a rich file.
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
+  region: [0.5, 0.5, 0.25, 0.25]

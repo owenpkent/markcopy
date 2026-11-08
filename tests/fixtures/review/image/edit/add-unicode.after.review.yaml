@@ -1,0 +1,20 @@
+version: 1
+id: dddddddddddd
+source: empty.png
+media: image
+next_note_id: 2
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  kind: note
+  text: "Café ☃ \U0001F600, tab\there"
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'
