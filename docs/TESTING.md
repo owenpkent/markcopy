@@ -424,6 +424,44 @@ The guards here are what stop a crafted file hanging the window, so these are wo
 - [ ] On a file that is refused (for example a truncated binary STL), Copy View, Save View, Dimensions and Triangle Count are greyed, while File Name and Full Path still copy.
 - [ ] **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
 
+## Audio player
+
+Automated tests cover the keys, folder stepping, error message, peak and level maths, ffprobe shaping, the details panel and click-to-seek on jsdom; real playback, real decoding and how the waveform looks need a real VS Code window.
+
+- [ ] Open an `.mp3`, `.wav`, `.ogg`, `.opus` and `.flac` file: each plays, the position readout and seek slider advance, and the info line shows format, size and duration.
+- [ ] Open a file from outside the workspace (Downloads, or a drag onto the window): it plays.
+- [ ] Space and K play and pause; Left and Right seek 5 s, Shift+Left and Shift+Right 30 s; Home and End jump to the ends. With the slider focused, one arrow press moves exactly 5 s.
+- [ ] J and L change the speed through 0.5x to 2x, and the speed button cycles it.
+- [ ] Drag the seek slider: the sound follows and the readout updates. A file over one hour reads `h:mm:ss`.
+- [ ] In a folder with several audio files, Previous, Next, Page Up and Page Down open the neighbours in Explorer order in the same tab, wrapping at both ends. In a folder with one audio file, the Previous and Next buttons are hidden.
+- [ ] Theme: `auto`, `light`, `dark` and `green` each keep the toolbar, readout and slider legible, and the focus ring is visible on every button.
+- [ ] With `markcopy.audio.autoplay` on, a file starts playing on open (or waits for Play if VS Code blocks it); with `markcopy.audio.loop` on, it repeats.
+- [ ] Right-click the player: the menu lists Copy, Playback, Audio Notes, View, Preferences, Open in Default App and Reveal. **Show Tags** starts unchecked and the details panel has no Tags section; checking it shows the tags (and Copy details then includes them) and survives reopening the file (`markcopy.audio.showTags`). Loop and Autoplay checkmarks match the settings. Right-click inside the note text field: the native menu appears, not this one.
+- [ ] An unplayable `.m4a` (AAC): the preview shows a message naming `.m4a` and saying VS Code cannot decode it, the player controls are disabled, and **Open in default player** opens the file in the OS player.
+- [ ] Waveform: a stereo MP3 shows two lanes, a mono WAV one; "Drawing waveform..." appears briefly, then the wave. The played part is accent-coloured and the rest dimmer, in the `light`, `dark` and `green` (terminal) themes, and the playhead and hover time are legible in each.
+- [ ] Click the waveform: playback jumps to that point; drag to scrub (the sound follows, also when the pointer leaves the box while held); the hover time matches where it lands. Resize the pane and change `markcopy.theme`: the wave redraws sharply (try a 150% display scale) with the right colours.
+- [ ] A long file (an hour or more) shows a wave within a few seconds and the page stays responsive while it draws. A file over 150 MB shows the "Waveform skipped" line and still plays.
+- [ ] An `.m4a` (AAC): the waveform area disappears if VS Code cannot decode it, the details panel still lists the codec, bitrate and tags with ffmpeg installed, and no error is shown.
+- [ ] With Notes on: set In and Out and the range is shaded on the wave; a saved range note is tinted; each note has a marker at the top, and clicking it selects the note and seeks to it. Arrow keys seek once per press, not twice, with the pointer over the wave.
+- [ ] Details: with ffmpeg installed an MP3 with tags lists Format, Codec, Sample rate, Channels, Bitrate, Duration, File size, Peak, RMS, Clipping, then the tags; a tag with `<b>` in it shows as plain text and a long comment wraps. With `markcopy.video.ffmpegPath` pointing nowhere (or ffmpeg removed from PATH) the panel keeps the rows the page knows and shows no error. **Copy details** pastes Markdown.
+- [ ] A deliberately clipped WAV reports a nonzero Clipping count and a Peak near 0.0 dBFS; a silent WAV reads "silent" for Peak and RMS.
+- [ ] Switching tabs and back does not restart playback.
+
+### Audio notes
+
+Automated tests cover the sidecar bytes, the Markdown, the host session and the jsdom wiring; layout and real playback need a real VS Code window.
+
+- [ ] Press **Notes**: the panel appears beside the page, the toolbar's seek bar is replaced by the notes timeline, and the toolbar buttons (Back 5 s, Play, Forward 5 s, speed, Previous and Next) still work.
+- [ ] Play, pause in the middle of a phrase, type a note and press **Add note**: `song.mp3.review.yaml` and `song.mp3.review.md` appear beside the file, the marker lands under the playhead, and the card shows `HH:MM:SS.mmm`.
+- [ ] **In**, move on, **Out**, then **Add note**: the card and marker show a range. **Clear** drops it.
+- [ ] Press a marker and a card: the sound jumps there. Two notes close together share one marker that cycles through them.
+- [ ] **I**, **O** and **N** set In, set Out and focus the note field; Left, Right, Page Up and Page Down still seek 5 s and change file when the focus is not in the field.
+- [ ] **Delete** then **Restore** bring the file back to the same bytes; **Copy as Markdown** puts the text on the clipboard and says "Copied 2 notes, saved song.mp3.review.md".
+- [ ] Open the sidecar in okstudio-video-kit (`Review.load` then `validate`, and `export_markdown`): it loads and the Markdown matches the one MarkCopy saved.
+- [ ] A note made inside a file longer than an hour reads `01:02:03.500`. In a narrow pane the panel drops below the page, and in `light`, `dark` and `green` themes the panel, markers and the Notes button stay legible.
+- [ ] A video review file or an image review file with the audio's name shows the panel read-only with a banner, and an edit is refused.
+- [ ] With `markcopy.audio.review` on, a file with no sidecar opens with notes on; closing them with the panel's close button turns the setting off.
+
 ## Video player
 
 Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with a tone, so a frozen frame, a silent track, and a wrong grab are all visible or audible at once.

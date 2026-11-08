@@ -41,3 +41,5 @@ fuzz/.corpus-min/
 fuzz/crashes/
 media/image.js
 media/image.js.map
+media/audio.js
+media/audio.js.map

@@ -967,6 +967,11 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   color: var(--vscode-descriptionForeground, #59636e);
   cursor: default;
 }
+/* A heading over checkbox or radio rows starts where their text does, past the
+   check gutter: 12px padding + the 1.4em check (in the menu's 13px) + the 2px gap. */
+.mc-menu-group-label:has(+ .mc-menu-item--check) {
+  padding-left: calc(12px + 1.4 * 13px + 2px);
+}
 .mc-menu-item--check {
   display: flex;
   align-items: center;
@@ -1016,7 +1021,7 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
    live timecode, focus and Send, and --mc-error-fg marks Delete. Every control has a
    44px target with 8px between neighbours; the drawn part is smaller (about 28px).
    Labels are 13px, notes and timecodes 14px or more. */
-:is(body.mc-video, body.mc-image) .mc-rv {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv {
   --rv-bg: var(--mc-video-bg);
   --rv-fg: var(--mc-video-fg);
   --rv-surface: color-mix(in srgb, var(--rv-fg) 6%, var(--rv-bg));
@@ -1039,13 +1044,13 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
 body.mc-video.vscode-light[data-mc-theme='auto'] .mc-rv {
   --rv-accent: #4493f8;
 }
-:is(body.mc-video, body.mc-image) .mc-rv[hidden] {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv[hidden] {
   display: none;
 }
-:is(body.mc-video, body.mc-image) .mc-rv--narrow {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv--narrow {
   flex-direction: column;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-main {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-main {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
@@ -1067,19 +1072,19 @@ body.mc-review #mc-stage[hidden] {
 }
 
 /* Transport: text buttons on 44px targets, the live timecode in the accent. */
-:is(body.mc-video, body.mc-image) .mc-rv-transport {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-transport {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0 8px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-time {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-time {
   margin-left: 8px;
   font: 600 18px/1 var(--rv-mono);
   color: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-total,
-:is(body.mc-video, body.mc-image) .mc-rv-rate {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-total,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-rate {
   font: 14px/1 var(--rv-mono);
   color: var(--rv-muted);
 }
@@ -1087,7 +1092,7 @@ body.mc-review #mc-stage[hidden] {
 /* Buttons. Each is a 44px target with a drawn area of about 28px behind its icon
    and label: ghosts tint on hover, keys (Copy, In, Out) carry an edge, the play
    button is a filled round hero and Send a filled primary. */
-:is(body.mc-video, body.mc-image) .mc-rv-btn {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn {
   position: relative;
   isolation: isolate;
   min-width: 44px;
@@ -1111,12 +1116,12 @@ body.mc-review #mc-stage[hidden] {
     color 120ms,
     transform 120ms;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn svg {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn svg {
   flex: none;
   opacity: 0.85;
   transition: opacity 120ms;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn::before {
   content: '';
   position: absolute;
   z-index: -1;
@@ -1128,152 +1133,152 @@ body.mc-review #mc-stage[hidden] {
     background-color 120ms,
     border-color 120ms;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn:hover:not(:disabled) svg {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn:hover:not(:disabled) svg {
   opacity: 1;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn:hover:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 14%, transparent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn:active:not(:disabled) {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn:active:not(:disabled) {
   transform: translateY(1px);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn:active:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn:active:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 24%, transparent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn:disabled {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-ghost {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ghost {
   padding: 0 8px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-ghost::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ghost::before {
   inset: 6px 4px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tool,
-:is(body.mc-video, body.mc-image) .mc-rv-quiet {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tool,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-quiet {
   color: var(--rv-muted);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tool:hover:not(:disabled) {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tool:hover:not(:disabled) {
   color: var(--rv-fg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-quiet:hover:not(:disabled) {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-quiet:hover:not(:disabled) {
   color: var(--mc-error-fg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-quiet:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-quiet:hover:not(:disabled)::before {
   background: color-mix(in srgb, var(--mc-error-fg) 14%, transparent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-key {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-key {
   padding: 0 12px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-key::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-key::before {
   border-color: var(--rv-edge);
   background: var(--rv-surface);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-key:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-key:hover:not(:disabled)::before {
   border-color: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 14%, var(--rv-surface));
 }
 /* In and Out are toggles: a soft accent tint while set. */
-:is(body.mc-video, body.mc-image) .mc-rv-point[aria-pressed='true'] {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-point[aria-pressed='true'] {
   color: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-point[aria-pressed='true'] svg {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-point[aria-pressed='true'] svg {
   opacity: 1;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-point[aria-pressed='true']::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-point[aria-pressed='true']::before {
   border-color: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 22%, var(--rv-bg));
 }
 /* The play button: the one filled round control in the transport. */
-:is(body.mc-video, body.mc-image) .mc-rv-hero {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-hero {
   min-width: 44px;
   padding: 0;
   border-radius: 50%;
   color: var(--rv-bg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-hero svg {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-hero svg {
   opacity: 1;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-hero::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-hero::before {
   inset: 6px;
   border-radius: 50%;
   border-color: var(--rv-accent);
   background: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-hero:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-hero:hover:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 86%, var(--rv-fg));
 }
-:is(body.mc-video, body.mc-image) .mc-rv-hero:active:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-hero:active:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 78%, var(--rv-bg));
 }
 /* The speed: a small mono pill. */
-:is(body.mc-video, body.mc-image) .mc-rv-pill {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pill {
   padding: 0 14px;
   font: 600 12px/1 var(--rv-mono);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pill::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pill::before {
   inset: 10px 4px;
   border-radius: 12px;
   border-color: var(--rv-edge);
 }
 /* Send: the filled primary. */
-:is(body.mc-video, body.mc-image) .mc-rv-send {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send {
   color: var(--rv-bg);
   font-weight: 600;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-send svg {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send svg {
   opacity: 1;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-send::before,
-:is(body.mc-video, body.mc-image) .mc-rv-send:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send::before,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send:hover:not(:disabled)::before {
   border-color: var(--rv-accent);
   background: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-send:hover:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send:hover:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 86%, var(--rv-fg));
 }
-:is(body.mc-video, body.mc-image) .mc-rv-send:active:not(:disabled)::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send:active:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 78%, var(--rv-bg));
 }
-:is(body.mc-video, body.mc-image) .mc-rv button:focus-visible,
-:is(body.mc-video, body.mc-image) .mc-rv-slider:focus-visible {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv button:focus-visible,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:focus-visible {
   outline: 2px solid var(--rv-accent);
   outline-offset: 2px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-btn[hidden],
-:is(body.mc-video, body.mc-image) .mc-rv-chip[hidden],
-:is(body.mc-video, body.mc-image) .mc-rv-fpsnote[hidden],
-:is(body.mc-video, body.mc-image) .mc-rv-ring[hidden] {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn[hidden],
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-chip[hidden],
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-fpsnote[hidden],
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring[hidden] {
   display: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  :is(body.mc-video, body.mc-image) .mc-rv-btn,
-  :is(body.mc-video, body.mc-image) .mc-rv-btn svg,
-  :is(body.mc-video, body.mc-image) .mc-rv-btn::before {
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn,
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn svg,
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-btn::before {
     transition: none;
   }
 }
 
 /* Scrubber and markers. */
-:is(body.mc-video, body.mc-image) .mc-rv-timeline {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-timeline {
   flex: none;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-markers {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers {
   position: relative;
   height: 44px;
 }
 /* The bands lie over the slider's track, the full height of it, and let every
    press through to the slider and its thumb. */
-:is(body.mc-video, body.mc-image) .mc-rv-track {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-track {
   position: relative;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-bands {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-bands {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-marker {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-marker {
   position: absolute;
   top: 0;
   height: 44px;
@@ -1288,7 +1293,7 @@ body.mc-review #mc-stage[hidden] {
   cursor: pointer;
 }
 /* A small rounded badge: the note's number; the selected note is the accent. */
-:is(body.mc-video, body.mc-image) .mc-rv-dot {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-dot {
   min-width: 24px;
   height: 24px;
   box-sizing: border-box;
@@ -1302,30 +1307,32 @@ body.mc-review #mc-stage[hidden] {
   font: 600 14px/1 var(--rv-mono);
 }
 /* A cluster: the count, with a second edge stacked behind the first. */
-:is(body.mc-video, body.mc-image) .mc-rv-dot--cluster {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-dot--cluster {
   margin: 0 3px 3px 0;
   box-shadow:
     3px 3px 0 -1px var(--rv-surface),
     3px 3px 0 0 var(--rv-edge);
 }
 /* Done is a dashed edge as well as a dimmer badge, so it is not told by tone alone. */
-:is(body.mc-video, body.mc-image) .mc-rv-dot--done {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-dot--done {
   border-style: dashed;
   opacity: 0.7;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-marker[aria-pressed='true'] .mc-rv-dot {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-marker[aria-pressed='true'] .mc-rv-dot {
   background: var(--rv-accent);
   border-color: var(--rv-accent);
   color: var(--rv-bg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-marker[aria-pressed='true'] .mc-rv-dot--cluster {
+:is(body.mc-video, body.mc-image, body.mc-audio)
+  .mc-rv-marker[aria-pressed='true']
+  .mc-rv-dot--cluster {
   box-shadow:
     3px 3px 0 -1px var(--rv-bg),
     3px 3px 0 0 var(--rv-accent);
 }
 /* A range note: a translucent band with a 2px edge at each end. */
-:is(body.mc-video, body.mc-image) .mc-rv-band,
-:is(body.mc-video, body.mc-image) .mc-rv-pending {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-band,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pending {
   --rv-band: var(--rv-edge);
   position: absolute;
   top: 0;
@@ -1336,13 +1343,13 @@ body.mc-review #mc-stage[hidden] {
   border-radius: 2px;
   background: color-mix(in srgb, var(--rv-fg) 14%, transparent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-band--selected {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-band--selected {
   --rv-band: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 30%, transparent);
 }
 /* A tick on the bar at each note's exact frame, so a merged badge does not hide
    where its notes are. Centred on its x, like the thumb's line. */
-:is(body.mc-video, body.mc-image) .mc-rv-tick {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tick {
   position: absolute;
   top: 50%;
   width: 2px;
@@ -1353,15 +1360,15 @@ body.mc-review #mc-stage[hidden] {
   background: var(--rv-fg);
   opacity: 0.75;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tick--done {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tick--done {
   opacity: 0.4;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tick--selected {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tick--selected {
   background: var(--rv-accent);
   opacity: 1;
 }
 /* Under a merged badge: a faint bracket from its first note to its last. */
-:is(body.mc-video, body.mc-image) .mc-rv-span {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-span {
   position: absolute;
   bottom: 2px;
   height: 4px;
@@ -1372,7 +1379,7 @@ body.mc-review #mc-stage[hidden] {
 }
 /* The scrubber's thumb is the same 44px as a marker's target, so the two
    travel the same distance and a marker sits over the frame it names. */
-:is(body.mc-video, body.mc-image) .mc-rv-slider {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider {
   display: block;
   width: 100%;
   height: 44px;
@@ -1385,12 +1392,12 @@ body.mc-review #mc-stage[hidden] {
 /* The thumb's line is its centre, so it travels from 22px in to 22px short of
    the end. The track keeps its full width (the thumb's travel depends on it),
    but draws only that span, so 0:00 sits on the start of the bar. */
-:is(body.mc-video, body.mc-image) .mc-rv-slider::-webkit-slider-runnable-track {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider::-webkit-slider-runnable-track {
   height: 4px;
   background: linear-gradient(var(--rv-edge), var(--rv-edge)) center / calc(100% - 44px) 100%
     no-repeat;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-slider::-webkit-slider-thumb {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 44px;
   height: 44px;
@@ -1400,7 +1407,7 @@ body.mc-review #mc-stage[hidden] {
 }
 
 /* The notes panel. */
-:is(body.mc-video, body.mc-image) .mc-rv-panel {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-panel {
   flex: none;
   width: 320px;
   box-sizing: border-box;
@@ -1412,52 +1419,52 @@ body.mc-review #mc-stage[hidden] {
   background: var(--rv-surface);
   border-left: 1px solid var(--rv-line);
 }
-:is(body.mc-video, body.mc-image) .mc-rv--narrow .mc-rv-panel {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv--narrow .mc-rv-panel {
   width: auto;
   height: 40%;
   border-left: 0;
   border-top: 1px solid var(--rv-line);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-head {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-head {
   display: flex;
   flex-direction: column;
   gap: 0;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-count {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-count {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
 }
 /* The title row: the count, and a close button at the far right. */
-:is(body.mc-video, body.mc-image) .mc-rv-titlerow {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-titlerow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-close {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-close {
   margin: -12px -8px -12px 0;
 }
 /* Pin mode: the picture takes a press as a pin, so it shows a crosshair. */
-:is(body.mc-video, body.mc-image) .mc-rv--pin video,
-:is(body.mc-video, body.mc-image) .mc-rv--pin .mc-rv-pins {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv--pin video,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv--pin .mc-rv-pins {
   cursor: crosshair;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tools {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 0 8px;
   margin-left: -8px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-banner {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-banner {
   padding: 8px 12px;
   border: 1px solid var(--rv-line);
   border-left: 3px solid var(--mc-error-fg);
   border-radius: 6px;
   background: var(--rv-bg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-list {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-list {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
@@ -1465,12 +1472,12 @@ body.mc-review #mc-stage[hidden] {
   flex-direction: column;
   gap: 8px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-empty {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-empty {
   margin: 0;
   color: var(--rv-muted);
   line-height: 1.5;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-card {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-card {
   flex: none;
   min-height: 44px;
   display: flex;
@@ -1486,32 +1493,32 @@ body.mc-review #mc-stage[hidden] {
   border-radius: 6px;
   cursor: pointer;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-card:hover {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-card:hover {
   background: var(--rv-hover);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-card--selected {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-card--selected {
   border-color: var(--rv-accent);
   box-shadow: inset 3px 0 0 var(--rv-accent);
   background: var(--rv-hover);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-meta {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
   align-items: baseline;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-tc {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-tc {
   font: 600 14px/1.4 var(--rv-mono);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-id,
-:is(body.mc-video, body.mc-image) .mc-rv-kind,
-:is(body.mc-video, body.mc-image) .mc-rv-done {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-id,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-kind,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-done {
   font-size: 13px;
   line-height: 1.4;
   color: var(--rv-muted);
 }
 /* A note Marker marked done: the word with a dot, never colour alone. */
-:is(body.mc-video, body.mc-image) .mc-rv-done::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-done::before {
   content: '';
   display: inline-block;
   width: 8px;
@@ -1520,19 +1527,19 @@ body.mc-review #mc-stage[hidden] {
   border-radius: 50%;
   background: var(--rv-muted);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-text {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.45;
 }
 
 /* The pending range uses the band drawing in the accent. */
-:is(body.mc-video, body.mc-image) .mc-rv-pending {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pending {
   --rv-band: var(--rv-accent);
   background: color-mix(in srgb, var(--rv-accent) 30%, transparent);
 }
 /* In alone: the opening edge only. */
-:is(body.mc-video, body.mc-image) .mc-rv-pending--point {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pending--point {
   width: 14px;
   border-right: 0;
 }
@@ -1541,13 +1548,13 @@ body.mc-review #mc-stage[hidden] {
    picture; the studs and the pending ring are the only parts that take them. A
    stud is a 28px badge on a 44px target, ringed in the ground colour so it reads
    on any picture. */
-:is(body.mc-video, body.mc-image) .mc-rv-pins {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pins {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pin,
-:is(body.mc-video, body.mc-image) .mc-rv-ring {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pin,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring {
   position: absolute;
   isolation: isolate;
   width: 44px;
@@ -1563,8 +1570,8 @@ body.mc-review #mc-stage[hidden] {
   color: var(--rv-fg);
   cursor: pointer;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pin::before,
-:is(body.mc-video, body.mc-image) .mc-rv-ring::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pin::before,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring::before {
   content: '';
   position: absolute;
   z-index: -1;
@@ -1575,29 +1582,29 @@ body.mc-review #mc-stage[hidden] {
   background: var(--rv-bg);
   outline: 2px solid color-mix(in srgb, var(--rv-bg) 70%, transparent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pin {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pin {
   pointer-events: auto;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pin--selected,
-:is(body.mc-video, body.mc-image) .mc-rv-ring {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pin--selected,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring {
   color: var(--rv-bg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pin--selected::before,
-:is(body.mc-video, body.mc-image) .mc-rv-ring::before {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pin--selected::before,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring::before {
   border-color: var(--rv-accent);
   background: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-ring {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-ring {
   pointer-events: none;
   font-size: 16px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-pins button:focus-visible {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-pins button:focus-visible {
   outline: 2px solid var(--rv-accent);
   outline-offset: 2px;
 }
 
 /* Notes written in review mode: the card and its actions share one item. */
-:is(body.mc-video, body.mc-image) .mc-rv-item {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-item {
   position: relative;
   flex: none;
   display: flex;
@@ -1605,16 +1612,16 @@ body.mc-review #mc-stage[hidden] {
   gap: 0;
 }
 /* Delete sits in the selected card's header row, top right, on a 44px target. */
-:is(body.mc-video, body.mc-image) .mc-rv-actions {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-actions {
   position: absolute;
   top: -2px;
   right: 2px;
   display: flex;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-card--selected .mc-rv-meta {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-card--selected .mc-rv-meta {
   padding-right: 52px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-composer {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-composer {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -1624,24 +1631,24 @@ body.mc-review #mc-stage[hidden] {
   border-radius: 8px;
 }
 /* Neither row wraps: the range keys and the pending range, then play, the field, Send. */
-:is(body.mc-video, body.mc-image) .mc-rv-row {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-row {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-row .mc-rv-key {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-row .mc-rv-key {
   padding: 0 6px;
   gap: 4px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-row .mc-rv-ghost {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-row .mc-rv-ghost {
   flex: none;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-clear {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-clear {
   margin-left: auto;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-fpsnote {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-fpsnote {
   flex: none;
   margin: 0;
   padding: 8px 12px;
@@ -1650,7 +1657,7 @@ body.mc-review #mc-stage[hidden] {
   border-radius: 6px;
   background: var(--rv-bg);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-chip {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-chip {
   flex: 1 1 0;
   min-width: 0;
   font: 13px/1.4 var(--rv-mono);
@@ -1660,7 +1667,7 @@ body.mc-review #mc-stage[hidden] {
   text-overflow: ellipsis;
 }
 /* The field is 32px drawn inside a 44px row; its edge is held to 3:1. */
-:is(body.mc-video, body.mc-image) .mc-rv-field {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-field {
   flex: 1 1 120px;
   min-width: 0;
   height: 32px;
@@ -1673,20 +1680,20 @@ body.mc-review #mc-stage[hidden] {
   border: 1px solid var(--rv-edge);
   border-radius: 6px;
 }
-:is(body.mc-video, body.mc-image) .mc-rv-field::placeholder {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-field::placeholder {
   color: var(--rv-muted);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-field:focus-visible {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-field:focus-visible {
   outline: 2px solid var(--rv-accent);
   outline-offset: 1px;
   border-color: var(--rv-accent);
 }
-:is(body.mc-video, body.mc-image) .mc-rv-field:disabled {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-field:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 /* A note in flight: the draft stays visible but waits for the host's answer. */
-:is(body.mc-video, body.mc-image) .mc-rv-composer--busy .mc-rv-field:disabled {
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-composer--busy .mc-rv-field:disabled {
   cursor: progress;
 }
 
@@ -2369,6 +2376,45 @@ body.mc-editing-enabled #content a {
   font-size: 0.85em;
 }
 
+/* Audio Notes (clock mode of src/webview/videoReview.ts). The player's own toolbar is
+   the transport, so the review fills the page above it: the file's name and the
+   timeline with the notes as markers, and the panel beside them (below when narrow).
+   The viewer has no --mc-video-* tokens, so the review uses the page's. */
+body.mc-audio .mc-rv {
+  --rv-bg: var(--mc-bg);
+  --rv-fg: var(--mc-fg);
+  inset: 0 0 90px 0;
+}
+body.mc-audio #mc-audio-stage {
+  position: fixed;
+  inset: 0 0 90px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  box-sizing: border-box;
+}
+body.mc-audio.mc-review #mc-audio-stage {
+  position: relative;
+  inset: auto;
+  flex: 1 1 0;
+  min-height: 96px;
+  padding: 12px 0 0;
+}
+/* The review's timeline carries the notes, so it replaces the toolbar's own seek bar
+   and readout while notes are on. */
+body.mc-audio.mc-review #mc-seek,
+body.mc-audio.mc-review #mc-audio-time {
+  display: none;
+}
+body.mc-audio #mc-notes[aria-pressed='true'] {
+  border-color: var(--mc-accent);
+  color: var(--mc-accent);
+}
+
 /* A chart drawn as the table of its cached data. */
 .mc-docx-chart {
   margin: 12px 0;
@@ -2377,4 +2423,149 @@ body.mc-editing-enabled #content a {
 .mc-docx-chart figcaption {
   font-weight: 600;
   margin-bottom: 4px;
+}
+
+/* ---- Audio preview --------------------------------------------------------
+   Built by src/webview/audio.ts on the shared #mc-toolbar. The bar is centred
+   and wide enough for the seek slider, and its buttons are 32px square or more
+   for pointer use; colours come from the existing toolbar and --mc-* tokens. */
+body.mc-audio #mc-toolbar {
+  left: 18px;
+  right: 18px;
+  max-width: 760px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+body.mc-audio #mc-toolbar button {
+  min-width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+body.mc-audio #mc-toolbar button:focus-visible,
+body.mc-audio .mc-audio-open:focus-visible {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: 1px;
+}
+body.mc-audio #mc-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+body.mc-audio #mc-speed {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+body.mc-audio #mc-seek {
+  flex: 1 1 160px;
+  min-width: 120px;
+  height: 32px;
+  margin: 0 4px;
+  accent-color: var(--mc-accent);
+  cursor: pointer;
+}
+body.mc-audio .mc-audio-open {
+  font: inherit;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-pre-bg);
+  color: var(--mc-fg);
+  cursor: pointer;
+}
+body.mc-audio .mc-audio-open:hover {
+  border-color: var(--mc-accent);
+}
+
+/* ---- Audio waveform and details --------------------------------------------
+   The waveform is a pointer-only seek surface, 120px tall (a generous target);
+   the canvas colours are read from these same --mc-* tokens at draw time. The
+   details panel is a two-column grid; long tag values wrap. */
+body.mc-audio #mc-audio-stage {
+  justify-content: safe center;
+  overflow-y: auto;
+}
+body.mc-audio #mc-wave {
+  position: relative;
+  flex: none;
+  width: min(100%, 880px);
+  height: 120px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-pre-bg);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+body.mc-audio #mc-wave[hidden],
+body.mc-audio #mc-wave-canvas[hidden],
+body.mc-audio .mc-wave-status[hidden],
+body.mc-audio #mc-audio-details[hidden],
+body.mc-audio #mc-audio-details [hidden] {
+  display: none;
+}
+body.mc-audio #mc-wave-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+body.mc-audio #mc-wave-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--mc-muted-fg);
+  cursor: default;
+}
+body.mc-audio #mc-audio-details {
+  flex: none;
+  width: min(100%, 880px);
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-pre-bg);
+  text-align: left;
+  font-size: 12px;
+}
+body.mc-audio .mc-audio-details-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+body.mc-audio #mc-audio-details h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mc-muted-fg);
+}
+body.mc-audio .mc-audio-details-head h2 {
+  margin: 0;
+}
+body.mc-audio .mc-audio-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 16px;
+  margin: 6px 0 10px;
+}
+body.mc-audio .mc-audio-grid:last-child {
+  margin-bottom: 0;
+}
+body.mc-audio .mc-audio-grid dt {
+  color: var(--mc-muted-fg);
+}
+body.mc-audio .mc-audio-grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
 }

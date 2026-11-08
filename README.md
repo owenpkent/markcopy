@@ -25,18 +25,19 @@ Then open a Markdown or CSV file: its tab shows the rendered preview, and **Show
 
 ## What it opens
 
-| Format          | Files                                                            | Highlights                                                                                                                      |
-| --------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Markdown        | `.md`, `.markdown`, `.mdx`, and friends                          | GitHub styling, Mermaid, KaTeX math, footnotes, edit blocks in place, export to PDF/Word/PPTX                                   |
-| CSV and TSV     | `.csv`, `.tsv`, `.tab`                                           | A real grid with frozen headers; edit cells, insert and delete rows and columns                                                 |
-| Excel           | `.xlsx`, `.xlsm`                                                 | Sheet tabs, formatted values, merged cells; copy a sheet as rich text, Markdown, CSV, or TSV                                    |
-| Word            | `.docx`, `.docm`                                                 | Structured, readable text with lists, tables, footnotes, comments, and charts as tables                                         |
-| PowerPoint      | `.pptx`, `.pptm`                                                 | The whole deck in one scrollable column, ready to copy or re-export                                                             |
-| PDF             | `.pdf`                                                           | Selectable text, pinned comments, copy a page as PNG                                                                            |
-| LaTeX           | `.tex`, `.ltx`, `.latex`                                         | Compiled with your installed TeX engine and shown in the PDF viewer                                                             |
-| Images and GIFs | `.png`, `.jpg`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg`, `.gif` | Copy as PNG, Markdown, or HTML; step through a folder; pin notes to areas of a picture; pause a GIF and step through its frames |
-| Video           | `.mov`, `.mp4`, `.mkv`, `.webm`, and more                        | Plays inline; timecoded video notes; copy the current frame as PNG for a bug report                                             |
-| STL             | `.stl`                                                           | 3D viewer with orbit, wireframe, and dimensions                                                                                 |
+| Format          | Files                                                            | Highlights                                                                                                                                                                           |
+| --------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Markdown        | `.md`, `.markdown`, `.mdx`, and friends                          | GitHub styling, Mermaid, KaTeX math, footnotes, edit blocks in place, export to PDF/Word/PPTX                                                                                        |
+| CSV and TSV     | `.csv`, `.tsv`, `.tab`                                           | A real grid with frozen headers; edit cells, insert and delete rows and columns                                                                                                      |
+| Excel           | `.xlsx`, `.xlsm`                                                 | Sheet tabs, formatted values, merged cells; copy a sheet as rich text, Markdown, CSV, or TSV                                                                                         |
+| Word            | `.docx`, `.docm`                                                 | Structured, readable text with lists, tables, footnotes, comments, and charts as tables                                                                                              |
+| PowerPoint      | `.pptx`, `.pptm`                                                 | The whole deck in one scrollable column, ready to copy or re-export                                                                                                                  |
+| PDF             | `.pdf`                                                           | Selectable text, pinned comments, copy a page as PNG                                                                                                                                 |
+| LaTeX           | `.tex`, `.ltx`, `.latex`                                         | Compiled with your installed TeX engine and shown in the PDF viewer                                                                                                                  |
+| Images and GIFs | `.png`, `.jpg`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg`, `.gif` | Copy as PNG, Markdown, or HTML; step through a folder; pin notes to areas of a picture; pause a GIF and step through its frames                                                      |
+| Video           | `.mov`, `.mp4`, `.mkv`, `.webm`, and more                        | Plays inline; timecoded video notes; copy the current frame as PNG for a bug report                                                                                                  |
+| Audio           | `.mp3`, `.wav`, `.ogg`, `.opus`, `.flac`, `.m4a`, `.aac`         | Plays inline with a click-to-seek waveform, a details panel (codec, levels, tags), speed control and keyboard shortcuts; timestamped notes; step through the audio files in a folder |
+| STL             | `.stl`                                                           | 3D viewer with orbit, wireframe, and dimensions                                                                                                                                      |
 
 Previews of other people's files (Word, PowerPoint, Excel, PDF) are read-only by design and need no Office install.
 

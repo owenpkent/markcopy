@@ -260,6 +260,27 @@ Notes:
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply here either: there is no HTML document to serialize, only a `<video>` element.
 
+## Audio (.mp3 / .wav / .ogg / .oga / .opus / .flac / .m4a / .aac)
+
+The audio player's right-click menu has a **Copy** submenu with three actions; **Copy details** is also a button in the details panel. The notes panel's copy is there only once Audio Notes are on.
+
+| Action           | Clipboard flavor                    | Pastes cleanly into                |
+| ---------------- | ----------------------------------- | ---------------------------------- |
+| Copy details     | `text/plain` (Markdown bullet list) | Chat, an issue, a notes file, docs |
+| Copy > File Name | `text/plain`                        | Anywhere                           |
+| Copy > Full Path | `text/plain`                        | A terminal, a file dialog, chat    |
+
+Copy details writes `## file name`, then `- **Label:** value` lines for the details rows, then `### Tags` and the tag lines only when the file has tags and **Show Tags** is on (it is off by default, so the tags are left out until it is turned on). A multi-line tag value is joined onto one line. It is copied from the page (`navigator.clipboard`), not the host.
+
+| Action                             | Clipboard flavor                  | Pastes cleanly into                                 |
+| ---------------------------------- | --------------------------------- | --------------------------------------------------- |
+| **Copy as Markdown** (notes panel) | `text/plain` (also writes a file) | A chat, an issue, an editor, an agent in the folder |
+
+Notes:
+
+- **Copy as Markdown is plain text only**, written by the host like the video's and the image's. It saves the same text as `<name>.review.md` beside the file (`song.mp3.review.md`) without a dialog, shows "Copied 3 notes, saved song.mp3.review.md", and the file is rewritten after every note edit. It is disabled while there is no `<name>.review.yaml`. A notes file that is invalid, another version, or a video's or an image's is refused with an error and nothing is written.
+- **The format is the okstudio-video-kit's `export_markdown` for audio:** a `# Review notes: song.mp3` heading, an `audio, status none` line, then a heading per note with its wall-clock time and kind (`## n1  00:01:12.500 to 00:01:15.000  note`, milliseconds rounded half up) and its text.
+
 ## GIF (.gif)
 
 Like the video player, the GIF viewer's menu has one thing worth putting on a clipboard: the frame you are looking at.

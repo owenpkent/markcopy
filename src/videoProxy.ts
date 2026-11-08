@@ -810,7 +810,7 @@ interface RunOptions {
  * passing an argument vector means a path with a space, a quote, or a `&` in it
  * is data, and never something a shell could reinterpret.
  */
-function run(
+export function run(
   command: string,
   args: string[],
   { signal, stallMs, onStdout }: RunOptions,

@@ -1,0 +1,23 @@
+version: 1
+id: dddddddddddd
+source: empty.mp3
+media: audio
+next_note_id: 2
+asset:
+  rating: 0
+  status: none
+  keywords: []
+  notes: ''
+notes:
+- id: n1
+  target: source
+  at: 2.0
+  kind: note
+  text: 'yes: no # not a comment [x] {y} - "q" ''z''
+
+    Second line: Café ☃ 😀'
+  done: false
+  applied_op: null
+  checkpoint: null
+  drawing: []
+  created: '2026-01-02T03:04:05'

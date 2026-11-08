@@ -41,6 +41,7 @@ import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { GifEditorProvider } from './gifEditor';
 import { ImageEditorProvider } from './imageEditor';
+import { AudioEditorProvider } from './audioEditor';
 import { sweepProxyDir } from './videoProxy';
 import { TexEditorProvider, recompileActiveTex, texPanelFor } from './texEditor';
 import { sweepTexRoot } from './texCompile';
@@ -211,6 +212,20 @@ export function activate(context: vscode.ExtensionContext): void {
         supportsMultipleEditorsPerDocument: true,
         // Without this, switching tabs tears the webview down and the file is
         // read and decoded again on the way back.
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Audio files open in the MarkCopy audio preview (a read-only custom editor).
+    vscode.window.registerCustomEditorProvider(
+      AudioEditorProvider.viewType,
+      new AudioEditorProvider(context),
+      {
+        // Each panel is an independent read-only view, so Back or Next onto a
+        // file open in another group does not move that group's tab here.
+        supportsMultipleEditorsPerDocument: true,
+        // Without this, switching tabs tears the webview down and playback
+        // restarts from zero on the way back.
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),

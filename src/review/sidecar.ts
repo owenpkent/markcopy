@@ -19,11 +19,11 @@ export function reviewStem(videoName: string): string {
 
 /**
  * The part of the file name the sidecar is named after: the stem for a video, the
- * whole name for an image (`photo.png` gives `photo.png.review.yaml`), as the
- * kit's `review_path(keep_suffix=True)` does.
+ * whole name for an image or audio file (`photo.png` gives `photo.png.review.yaml`,
+ * `song.mp3` gives `song.mp3.review.yaml`), as the kit's `review_path` does.
  */
 const nameBase = (name: string, media: ReviewMedia): string =>
-  media === 'image' ? name : reviewStem(name);
+  media === 'video' ? reviewStem(name) : name;
 
 export function sidecarName(name: string, media: ReviewMedia = 'video'): string {
   return `${nameBase(name, media)}.review.yaml`;
@@ -38,15 +38,15 @@ export interface SidecarLoad {
   /** The validated content, or undefined when it failed to parse or validate. */
   file?: ReviewFile;
   /**
-   * The notes as the page shows them. A video's are `ReviewNote`s and an image's
-   * `ImageNote`s: see `media`.
+   * The notes as the page shows them. A video's and an audio file's are
+   * `ReviewNote`s and an image's `ImageNote`s: see `media`.
    */
   notes: SidecarNote[];
   /** Why the sidecar cannot be edited, or null when it is a valid version 1 file. */
   readOnly: string | null;
   /** The file's own `fps`, when it is a positive number. */
   fps?: number;
-  /** `image` when the file says `media: image`, else `video`; undefined when it did not parse. */
+  /** `image` or `audio` when the file says so, else `video`; undefined when it did not parse. */
   media?: ReviewMedia;
 }
 
@@ -57,6 +57,12 @@ export type SidecarNote = ReviewNote | ImageNote;
 const YAML_OPTS = { version: '1.1' } as const;
 
 const KINDS = ['note', 'keep', 'reject'];
+const MEDIA = ['video', 'image', 'audio'];
+
+/** `media` as the file says it; a missing or unknown value reads as video. */
+function mediaOf(data: Record<string, unknown>): ReviewMedia {
+  return data.media === 'image' || data.media === 'audio' ? data.media : 'video';
+}
 const STATUSES = ['none', 'needs_review', 'in_progress', 'approved', 'rejected'];
 const TOOLS = ['arrow', 'line', 'box', 'free'];
 
@@ -91,6 +97,7 @@ function noteError(note: unknown, index: number, media: ReviewMedia): string | n
     return `${at} has an unknown field "${extra}"`;
   }
   const image = media === 'image';
+  const audio = media === 'audio';
   for (const key of image
     ? ['id', 'target', 'kind', 'done', 'created']
     : ['id', 'target', 'at', 'kind', 'done', 'created']) {
@@ -115,6 +122,9 @@ function noteError(note: unknown, index: number, media: ReviewMedia): string | n
       }
     }
   } else {
+    if (audio && note.target !== 'source') {
+      return `${at}.target must be source in an audio review`;
+    }
     if (!isNumber(note.at) || note.at < 0) {
       return `${at}.at must be a number of seconds, 0 or more`;
     }
@@ -145,6 +155,16 @@ function noteError(note: unknown, index: number, media: ReviewMedia): string | n
   for (const key of ['applied_op', 'checkpoint']) {
     if (key in note && note[key] !== null && !isString(note[key])) {
       return `${at}.${key} must be a string or null`;
+    }
+  }
+  if (audio) {
+    for (const key of ['point', 'region']) {
+      if (key in note) {
+        return `${at} has "${key}", which an audio review does not use`;
+      }
+    }
+    if (Array.isArray(note.drawing) && note.drawing.length > 0) {
+      return `${at} has a drawing, which an audio review does not use`;
     }
   }
   if ('point' in note && !isPair(note.point)) {
@@ -197,12 +217,12 @@ export function reviewFileError(data: unknown): string | null {
   if (extra) {
     return `Unknown field "${extra}"`;
   }
-  if ('media' in data && data.media !== 'video' && data.media !== 'image') {
-    return '"media" must be video or image';
+  if ('media' in data && !MEDIA.includes(data.media as string)) {
+    return '"media" must be video, image or audio';
   }
-  const media: ReviewMedia = data.media === 'image' ? 'image' : 'video';
-  // An image has no frame rate, so only a video must name one.
-  for (const key of media === 'image' ? ['version', 'source'] : ['version', 'source', 'fps']) {
+  const media = mediaOf(data);
+  // An image or an audio file has no frame rate, so only a video must name one.
+  for (const key of media === 'video' ? ['version', 'source', 'fps'] : ['version', 'source']) {
     if (!(key in data)) {
       return `Missing "${key}"`;
     }
@@ -337,11 +357,7 @@ export function loadSidecar(text: string): SidecarLoad {
     return { notes: [], readOnly: `Not valid YAML (${message.split('\n')[0]})` };
   }
   const fps = isObject(data) && isNumber(data.fps) && data.fps > 0 ? data.fps : undefined;
-  const media: ReviewMedia | undefined = isObject(data)
-    ? data.media === 'image'
-      ? 'image'
-      : 'video'
-    : undefined;
+  const media: ReviewMedia | undefined = isObject(data) ? mediaOf(data) : undefined;
   const error = reviewFileError(data);
   if (error) {
     return { notes: lenientNotes(data, media ?? 'video'), readOnly: error, fps, media };
@@ -670,7 +686,7 @@ export function pyString(value: string, prefix: number, indent: number): string 
 /** The fields of a note MarkCopy creates; the rest are fixed. */
 export interface NewNote {
   id: string;
-  /** Seconds. A video's only: an image note has no time. */
+  /** Seconds. A video's or audio file's only: an image note has no time. */
   at?: number;
   out?: number;
   text: string;
@@ -718,7 +734,8 @@ export function cleanRegion(
 
 /**
  * One note exactly as `Review.add_note` and `safe_dump` write it, LF line ends.
- * An image note has no `at`, so that line is left out.
+ * An image note has no `at`, so that line is left out. An audio note is a video
+ * note's lines (the kit writes both from the same `add_note`).
  */
 export function noteYaml(note: NewNote, media: ReviewMedia = 'video'): string {
   const lines = [
@@ -779,6 +796,11 @@ export function newImageSidecarText(source: string, id: string): string {
     'notes: []',
     '',
   ].join('\n');
+}
+
+/** What `Review.new(..., media="audio")` followed by `save` writes: no `fps`, `media` after `source`. */
+export function newAudioSidecarText(source: string, id: string): string {
+  return newImageSidecarText(source, id).replace('media: image', 'media: audio');
 }
 
 /** Twelve lowercase hex characters, as `uuid.uuid4().hex[:12]`. */
@@ -927,12 +949,7 @@ export function addNoteText(
   const id = `n${n}`;
   const bumped = setTopLevel(text, 'next_note_id', String(n + 1));
   return {
-    text: insertNote(
-      bumped,
-      noteYaml({ ...note, id }, file.media === 'image' ? 'image' : 'video'),
-      Infinity,
-      true,
-    ),
+    text: insertNote(bumped, noteYaml({ ...note, id }, file.media ?? 'video'), Infinity, true),
     id,
   };
 }

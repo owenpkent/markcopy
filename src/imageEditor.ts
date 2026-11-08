@@ -3,6 +3,7 @@ import { revealInOs, openInDefaultApp } from './revealInOs';
 import { getNonce } from './previewShell';
 import { applyMarkcopySetting } from './settingsScope';
 import { basename, saveFrame } from './videoEditor';
+import { hasExtension, listFolderFiles, navigateFolder, sortedFiles, stepFile } from './folderNav';
 import { ImageReviewSession } from './imageReview';
 import { parseImageMessage } from './messages/image';
 import { IMAGE_BACKGROUNDS, THEMES, isImageSetting } from './messages/settings';
@@ -24,33 +25,16 @@ const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'ico', 'avif', 's
 
 /** True when a file name ends in one of the extensions the viewer opens. */
 export function isViewerImage(name: string): boolean {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 && IMAGE_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+  return hasExtension(name, IMAGE_EXTENSIONS);
 }
 
-// Explorer-like order: case-insensitive, with digit runs compared as numbers, so
-// photo2 comes before photo10.
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-
-/**
- * The viewer's images among a folder's file names, in Explorer order. The
- * current file is always included, even if the listing missed it.
- */
+/** The folder's images among a folder's file names, in Explorer order. */
 export function sortedImages(names: readonly string[], current: string): string[] {
-  const set = new Set(names.filter(isViewerImage));
-  set.add(current);
-  return [...set].sort((a, b) => collator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0));
+  return sortedFiles(names, current, isViewerImage);
 }
 
 /** The file `step` places from `current`, wrapping round at either end. */
-export function stepImage(images: readonly string[], current: string, step: number): string {
-  const index = images.indexOf(current);
-  if (index < 0 || images.length === 0) {
-    return current;
-  }
-  const n = images.length;
-  return images[(((index + step) % n) + n) % n];
-}
+export const stepImage = stepFile;
 
 // The allow-list lives with the message parsers; re-exported for the tests.
 export { isImageSetting };
@@ -151,7 +135,13 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
           if (!navigating) {
             navigating = true;
             try {
-              await this.navigate(document.uri, panel, msg.step);
+              await navigateFolder(
+                document.uri,
+                panel,
+                ImageEditorProvider.viewType,
+                isViewerImage,
+                msg.step,
+              );
             } finally {
               navigating = false;
             }
@@ -225,60 +215,11 @@ export class ImageEditorProvider implements vscode.CustomReadonlyEditorProvider 
     return vscode.workspace.getConfiguration('markcopy', uri).get<string>(key, fallback);
   }
 
-  /** The folder's images in Explorer order; just this one if it cannot be read. */
-  private async folderImages(uri: vscode.Uri): Promise<string[]> {
-    const name = basename(uri);
-    try {
-      const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(uri, '..'));
-      const files = entries
-        .filter(([, type]) => (type & vscode.FileType.File) !== 0)
-        .map(([entry]) => entry);
-      return sortedImages(files, name);
-    } catch {
-      return [name];
-    }
-  }
-
-  /**
-   * Show the previous or next image of the folder in this tab's place: open it
-   * with this editor in the same group, then close the tab it replaces. The
-   * folder is listed afresh, so files added since the panel opened count.
-   */
-  private async navigate(uri: vscode.Uri, panel: vscode.WebviewPanel, step: number) {
-    const name = basename(uri);
-    const target = stepImage(await this.folderImages(uri), name, step);
-    if (target === name) {
-      return;
-    }
-    const findTab = () =>
-      vscode.window.tabGroups.all
-        .flatMap((group) => group.tabs)
-        .find(
-          (tab) =>
-            tab.input instanceof vscode.TabInputCustom &&
-            tab.input.viewType === ImageEditorProvider.viewType &&
-            tab.input.uri.toString() === uri.toString() &&
-            tab.group.viewColumn === panel.viewColumn,
-        );
-    const before = findTab();
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      vscode.Uri.joinPath(uri, '..', target),
-      ImageEditorProvider.viewType,
-      { viewColumn: panel.viewColumn, preview: before?.isPreview ?? false },
-    );
-    // A preview tab is replaced by the new one; a pinned tab is still there.
-    const after = findTab();
-    if (after) {
-      await vscode.window.tabGroups.close(after, true);
-    }
-  }
-
   private async sendLoad(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
     const name = basename(uri);
     // Where this image sits among its folder's, for Back and Next. It goes out
     // with an error too, so a neighbour that cannot load still steps on.
-    const images = await this.folderImages(uri);
+    const images = await listFolderFiles(uri, isViewerImage);
     const position = { index: images.indexOf(name) + 1, count: images.length };
     try {
       // Size first, off stat, so a huge file is refused before it is read and

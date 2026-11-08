@@ -1,6 +1,10 @@
 // Review mode for the video preview (see docs/VIDEO-REVIEW-DESIGN.md, phases 1 to 3).
 //
-// Called from src/webview/video.ts. Once the host sends its first `review`
+// Called from src/webview/video.ts, and from src/webview/audio.ts in clock mode
+// (`ReviewDeps.clock`): the same panel, composer and timeline over an <audio>
+// element, with wall-clock times (`HH:MM:SS.mmm`) in place of frames and timecode.
+// Clock mode has no frame stepping, frame rate, pins or drawings, and the player's
+// own toolbar stays the transport. Once the host sends its first `review`
 // message the native controls give way to a transport, a scrubber carrying the
 // notes as markers, and a notes panel with a composer at its foot. Everything here
 // is a view of the host's sidecar: an edit is only ever a small message (add, done,
@@ -9,12 +13,13 @@
 // Layout and seek maths come from src/review/ (ports of Marker's timeline.js and
 // timecode.js), so a timecode or a marker position matches what Marker shows.
 import type {
+  AudioReviewStateMessage,
   FpsSource,
   ReviewNote,
   ReviewStateMessage,
   ReviewWebviewMessage,
 } from '../review/protocol';
-import { positionTimecode, secondsToTimecode } from '../review/timecode';
+import { positionTimecode, secondsToClock, secondsToTimecode } from '../review/timecode';
 import {
   DOT_HIT,
   bandGeometry,
@@ -34,8 +39,21 @@ import {
 import { isRestoringFocus, type MenuEntry } from './menu';
 
 export interface ReviewDeps {
-  video: HTMLVideoElement;
-  /** The element holding the video; review mode moves it into its own layout. */
+  /** The media element: a <video>, or an <audio> in clock mode. */
+  video: HTMLVideoElement | HTMLAudioElement;
+  /**
+   * Clock mode, for audio: times are wall-clock seconds (`secondsToClock`), the
+   * host sends no frame rate, and there is no frame stepping, pin, drawing,
+   * picture layout or render target. Absent or false is the video review.
+   */
+  clock?: boolean;
+  /** The `markcopy.*` key review mode writes when turned on or off. Default `video.review`. */
+  settingKey?: string;
+  /** Called when review mode comes on screen or goes away. */
+  onModeChange?(active: boolean): void;
+  /** Called after the notes or the pending range change, for a view that draws them (the audio waveform). */
+  onChange?(): void;
+  /** The element holding the media's page; review mode moves it into its own layout. */
   stage: HTMLDivElement;
   /** Anything the host handles: review messages and `updateSetting`. */
   post(msg: ReviewWebviewMessage | { type: 'updateSetting'; key: string; value: unknown }): void;
@@ -60,6 +78,21 @@ export interface ReviewController {
   onPicture(e: MouseEvent): boolean;
   /** "Open Video Notes" or "Close Video Notes", and the copy action, for the right-click menu. */
   menuEntries(): MenuEntry[];
+  /** Turn review mode on or off, as the menu entry does (the audio viewer's Notes button). */
+  toggle(): void;
+  /** What a view needs to draw the notes: the source-time notes, the selection and the pending range. */
+  overlay(): ReviewOverlay;
+  /** Select a note and seek to it, as pressing its marker does. */
+  selectNote(id: string): void;
+}
+
+/** Read-only view of the review for drawing; times are seconds, -1 when a pending end is unset. */
+export interface ReviewOverlay {
+  active: boolean;
+  notes: Array<{ id: string; at: number; out?: number }>;
+  selected: string;
+  pendingIn: number;
+  pendingOut: number;
 }
 
 // Playback rates the speed button walks, and the finer ladder J and L climb.
@@ -68,6 +101,8 @@ const SPEED_LADDER = [0.25, 0.5, 1, 1.5, 2];
 // The panel's width, and the least the video is given before the panel drops below it.
 const PANEL_W = 320;
 const MIN_VIDEO_W = 400;
+// An audio page has no picture to protect, only its name and the timeline.
+const MIN_AUDIO_W = 320;
 
 export type NoteSort = 'time' | 'newest';
 const SORTS: NoteSort[] = ['time', 'newest'];
@@ -200,8 +235,15 @@ function button(
 
 export function createReview(deps: ReviewDeps): ReviewController {
   const { video, stage, post, toast } = deps;
+  const clock = deps.clock === true;
+  const settingKey = deps.settingKey ?? 'video.review';
+  // What the notes are called in the panel's text.
+  const thing = clock ? 'audio file' : 'video';
+  const noun = clock ? 'audio' : 'video';
 
-  let state: ReviewStateMessage | undefined;
+  // Audio's state carries no frame rate, so those fields may be absent.
+  type State = AudioReviewStateMessage & { fps?: number; fpsSource?: FpsSource };
+  let state: State | undefined;
   let isActive = false;
   // Set when the reader turns review off from the menu: later `review` messages
   // (a sidecar change, fps resolving) must not pull them back in.
@@ -244,7 +286,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     });
   }
 
-  const fps = (): number => (state && state.fps > 0 ? state.fps : 30);
+  const fps = (): number => (state?.fps !== undefined && state.fps > 0 ? state.fps : 30);
+  /** A time as the page shows it: a frame timecode, or wall-clock in clock mode. */
+  const stamp = (seconds: number): string =>
+    clock ? secondsToClock(seconds) : secondsToTimecode(seconds, fps());
   const duration = (): number => (Number.isFinite(video.duration) ? video.duration : 0);
 
   // -------------------------------------------------------------------------
@@ -259,10 +304,17 @@ export function createReview(deps: ReviewDeps): ReviewController {
 
   /** Where a press on a note goes: half a frame into the frame the note names. */
   function noteSeekMs(note: ReviewNote): number {
+    if (clock) {
+      return note.at * 1000;
+    }
     return seekMsForFrame(Math.floor(note.at * fps() + 0.5), fps());
   }
 
   function step(direction: number): void {
+    // Audio has no frames; its own keys seek by seconds.
+    if (clock) {
+      return;
+    }
     if (!video.paused) {
       video.pause();
     }
@@ -306,6 +358,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     renderSelection();
     renderMarkers();
     renderPins(true);
+    deps.onChange?.();
     // The list scrolls inside the panel; keep the selected card (and its Delete) in view.
     scrollCardIntoView(id);
   }
@@ -333,11 +386,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
       setRate(nextCycleRate()),
     );
     speed.title = 'Playback speed (J, L)';
-    const readout = el('span', 'mc-rv-time', positionTimecode(0, 30));
+    const readout = el('span', 'mc-rv-time', clock ? secondsToClock(0) : positionTimecode(0, 30));
     readout.setAttribute('role', 'timer');
     const total = el('span', 'mc-rv-total');
     const rate = el('span', 'mc-rv-rate');
-    transport.append(play, back, forward, speed, readout, total, rate);
+    // The audio page's toolbar is the transport; here only the position is shown.
+    transport.append(
+      ...(clock ? [readout, total] : [play, back, forward, speed, readout, total, rate]),
+    );
 
     const timeline = el('div', 'mc-rv-timeline');
     const markers = el('div', 'mc-rv-markers');
@@ -353,7 +409,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     slider.value = '0';
     slider.setAttribute('aria-label', 'Seek');
     slider.addEventListener('input', () => {
-      seekMs(seekTarget(Number(slider.value) * 1000, fps(), duration()));
+      const ms = Number(slider.value) * 1000;
+      seekMs(clock ? ms : seekTarget(ms, fps(), duration()));
     });
     // The bands lie over the slider's own track, the full height of it.
     const track = el('div', 'mc-rv-track');
@@ -379,10 +436,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const close = button(
       'mc-rv-btn mc-rv-ghost mc-rv-tool mc-rv-close',
       '',
-      'Close video notes',
+      `Close ${noun} notes`,
       () => setReview(false),
     );
-    close.title = 'Close video notes';
+    close.title = `Close ${noun} notes`;
     face(close, 'close');
     const titleRow = el('div', 'mc-rv-titlerow');
     titleRow.append(count, close);
@@ -403,10 +460,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
     composer.setAttribute('aria-label', 'Write a note');
     const fpsNote = el('p', 'mc-rv-fpsnote', 'Frame rate unknown: notes will be saved at 30 fps');
     fpsNote.hidden = true;
-    const inBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Set In to this frame', setIn);
+    const spot = clock ? 'the playhead' : 'this frame';
+    const inBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', `Set In to ${spot}`, setIn);
     inBtn.title = 'Set In (I)';
     face(inBtn, 'bracketIn', 'In');
-    const outBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Set Out to this frame', setOut);
+    const outBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', `Set Out to ${spot}`, setOut);
     outBtn.title = 'Set Out (O)';
     face(outBtn, 'bracketOut', 'Out');
     const pinBtn = button('mc-rv-btn mc-rv-key mc-rv-point', '', 'Pin a spot', () =>
@@ -419,10 +477,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const clearBtn = button(
       'mc-rv-btn mc-rv-ghost mc-rv-quiet mc-rv-clear',
       '',
-      'Clear range and pin',
+      clock ? 'Clear range' : 'Clear range and pin',
       clearRange,
     );
-    clearBtn.title = 'Clear range and pin';
+    clearBtn.title = clock ? 'Clear range' : 'Clear range and pin';
     face(clearBtn, 'close');
     clearBtn.hidden = true;
     const cplay = button('mc-rv-btn mc-rv-ghost', '', 'Play', togglePlay);
@@ -433,8 +491,16 @@ export function createReview(deps: ReviewDeps): ReviewController {
     field.maxLength = 10000;
     field.placeholder = 'Write a note';
     field.setAttribute('aria-label', 'Note text');
-    const send = button('mc-rv-btn mc-rv-key mc-rv-send', '', 'Add note', sendNote);
-    face(send, 'send', 'Send');
+    const send = button(
+      'mc-rv-btn mc-rv-key mc-rv-send',
+      '',
+      clock ? 'Add note at the playhead' : 'Add note',
+      sendNote,
+    );
+    if (clock) {
+      send.title = 'Add note at the playhead, or over the In to Out range (Enter)';
+    }
+    face(send, 'send', clock ? 'Add note' : 'Send');
     // A press on these must not take focus from the field, or its blur would drop
     // the pending resume.
     for (const b of [inBtn, outBtn, pinBtn, clearBtn, send]) {
@@ -469,27 +535,34 @@ export function createReview(deps: ReviewDeps): ReviewController {
     });
     // The picture never takes focus, so a press on it keeps the note field (and its
     // pending resume) as they are while the pin moves.
-    video.addEventListener('mousedown', (e) => {
-      if (isActive && state?.readOnly === null) {
-        e.preventDefault();
-      }
-    });
+    if (!clock) {
+      video.addEventListener('mousedown', (e) => {
+        if (isActive && state?.readOnly === null) {
+          e.preventDefault();
+        }
+      });
+    }
+    // Clock mode builds the pin parts but never attaches them: no pin layer.
     const pins = el('div', 'mc-rv-pins');
     const ring = button('mc-rv-ring', '+', 'Pending pin, press the picture to move it', () =>
       ui?.field.focus(),
     );
     ring.hidden = true;
     pins.appendChild(ring);
-    stage.appendChild(pins);
+    if (!clock) {
+      stage.appendChild(pins);
+    }
 
     // Two rows that never wrap: the range keys with the pending range and Clear, then
     // play, the note field and Send.
     const keys = el('div', 'mc-rv-row');
-    keys.append(inBtn, outBtn, pinBtn, chip, clearBtn);
+    keys.append(
+      ...(clock ? [inBtn, outBtn, chip, clearBtn] : [inBtn, outBtn, pinBtn, chip, clearBtn]),
+    );
     const write = el('div', 'mc-rv-row');
     write.append(cplay, field, send);
     composer.append(keys, write);
-    panel.append(head, banner, restore, list, fpsNote, composer);
+    panel.append(head, banner, restore, list, ...(clock ? [] : [fpsNote]), composer);
 
     root.append(main, panel);
     document.body.appendChild(root);
@@ -497,7 +570,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const relayout = (): void => {
       root.classList.toggle(
         'mc-rv--narrow',
-        root.clientWidth > 0 && root.clientWidth < PANEL_W + MIN_VIDEO_W,
+        root.clientWidth > 0 && root.clientWidth < PANEL_W + (clock ? MIN_AUDIO_W : MIN_VIDEO_W),
       );
       renderMarkers();
       renderPins(true);
@@ -520,7 +593,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
       renderMarkers();
       renderPins(true);
     });
-    video.addEventListener('resize', () => renderPins(true));
+    if (!clock) {
+      video.addEventListener('resize', () => renderPins(true));
+    }
     video.addEventListener('play', () => {
       updateTransport();
       tick();
@@ -580,7 +655,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (!ui) {
       return;
     }
-    const code = positionTimecode(video.currentTime, fps());
+    const code = clock
+      ? secondsToClock(video.currentTime)
+      : positionTimecode(video.currentTime, fps());
     ui.readout.textContent = code;
     ui.slider.value = String(video.currentTime);
     ui.slider.setAttribute('aria-valuetext', code);
@@ -602,8 +679,11 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const r = Number(video.playbackRate.toFixed(2));
     ui.speed.textContent = `${r}x`;
     ui.speed.setAttribute('aria-label', `Playback speed ${r}x, press to change`);
-    ui.total.textContent = `/ ${secondsToTimecode(duration(), fps())}`;
-    ui.rate.textContent = state ? fpsLabel(state.fps, state.fpsSource) : '';
+    ui.total.textContent = `/ ${stamp(duration())}`;
+    ui.rate.textContent =
+      !clock && state?.fps !== undefined && state.fpsSource !== undefined
+        ? fpsLabel(state.fps, state.fpsSource)
+        : '';
     ui.slider.max = String(duration());
     updateTime();
   }
@@ -620,7 +700,6 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (!(width > 0) || !(dur > 0)) {
       return;
     }
-    const rate = fps();
     // Render notes sit on the output timeline, which this scrubber cannot place, so
     // they get no dot, band, or pin; their card still selects them.
     const sourceNotes = state.notes.filter((n) => n.target !== 'render');
@@ -628,7 +707,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       id: n.id,
       at: n.at,
       startMs: noteSeekMs(n),
-      tc: secondsToTimecode(n.at, rate),
+      tc: stamp(n.at),
       done: n.done,
     }));
     for (const dot of layoutDots(rows, dur, width)) {
@@ -722,7 +801,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
   /** The picture inside the video element's box (letterboxed), plus the box and stage. */
   function pictureRect(): Picture {
     const box = video.getBoundingClientRect();
-    const r = fitRect(box.width, box.height, video.videoWidth, video.videoHeight);
+    const { videoWidth, videoHeight } = video as HTMLVideoElement;
+    const r = fitRect(box.width, box.height, videoWidth, videoHeight);
     return { box, stage: stage.getBoundingClientRect(), ...r };
   }
 
@@ -734,7 +814,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function renderPins(force: boolean): void {
-    if (!ui) {
+    // Audio has no picture to pin to.
+    if (!ui || clock) {
       return;
     }
     const frame = frameIndex(video.currentTime * 1000, fps());
@@ -787,13 +868,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function onPicture(e: MouseEvent): boolean {
-    if (!isActive || !ui || !state || state.readOnly !== null || !pinMode) {
+    if (clock || !isActive || !ui || !state || state.readOnly !== null || !pinMode) {
       return false;
     }
     if (sending) {
       return true;
     }
-    if (!video.videoWidth) {
+    if (!(video as HTMLVideoElement).videoWidth) {
       return true;
     }
     const r = pictureRect();
@@ -852,12 +933,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function card(note: ReviewNote): HTMLElement {
-    const rate = fps();
-    const start = secondsToTimecode(note.at, rate);
+    const start = stamp(note.at);
     const when =
-      note.out !== undefined && note.out > note.at
-        ? `${start} to ${secondsToTimecode(note.out, rate)}`
-        : start;
+      note.out !== undefined && note.out > note.at ? `${start} to ${stamp(note.out)}` : start;
     const item = el('div', 'mc-rv-item');
     item.dataset.id = note.id;
     const b = el('button', 'mc-rv-card');
@@ -894,7 +972,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
   // Composer
   // -------------------------------------------------------------------------
   /** The start of the frame on screen, which is what a note stores. */
-  const here = (): number => frameStartSeconds(video.currentTime * 1000, fps());
+  const here = (): number =>
+    // Audio has no frames: the playhead to the millisecond, so the sidecar holds
+    // `12.346` and not a 15-digit float.
+    clock
+      ? Math.round(video.currentTime * 1000) / 1000
+      : frameStartSeconds(video.currentTime * 1000, fps());
 
   function setIn(): void {
     pendingIn = here();
@@ -928,7 +1011,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
 
   /** Turn pin mode on or off; off drops a pending pin. */
   function setPinMode(on: boolean): void {
-    if (!ui || !state || state.readOnly !== null || sending) {
+    if (clock || !ui || !state || state.readOnly !== null || sending) {
       return;
     }
     pinMode = on;
@@ -945,6 +1028,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const text = ui.field.value.trim();
     if (!text) {
       toast('Write the note first');
+      if (clock) {
+        ui.field.focus();
+      }
       return;
     }
     const at = pendingIn >= 0 ? pendingIn : here();
@@ -1008,12 +1094,12 @@ export function createReview(deps: ReviewDeps): ReviewController {
   }
 
   function renderPending(): void {
+    deps.onChange?.();
     if (!ui) {
       return;
     }
     const set = pendingIn >= 0;
     const any = set || pendingPoint !== null;
-    const rate = fps();
     ui.inBtn.setAttribute('aria-pressed', String(set));
     ui.outBtn.setAttribute('aria-pressed', String(pendingOut > pendingIn && set));
     ui.pinBtn.setAttribute('aria-pressed', String(pinMode));
@@ -1023,8 +1109,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const range = !set
       ? ''
       : pendingOut > pendingIn
-        ? `${secondsToTimecode(pendingIn, rate)} to ${secondsToTimecode(pendingOut, rate)}`
-        : secondsToTimecode(pendingIn, rate);
+        ? `${stamp(pendingIn)} to ${stamp(pendingOut)}`
+        : stamp(pendingIn);
     ui.chip.textContent = range;
     ui.chip.title = range;
     renderMarkers();
@@ -1070,7 +1156,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     ui.sortBtn.setAttribute('aria-label', `Sort: ${SORT_NAME[sort]}`);
     ui.sortBtn.title = `Sort: ${SORT_NAME[sort]}, press to change`;
     ui.copy.disabled = state.sidecar === null;
-    ui.copy.title = state.sidecar === null ? 'No notes file for this video yet' : '';
+    ui.copy.title = state.sidecar === null ? `No notes file for this ${thing} yet` : '';
     ui.banner.hidden = state.readOnly === null;
     ui.banner.textContent = state.readOnly === null ? '' : `Read-only: ${state.readOnly}`;
 
@@ -1082,7 +1168,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
           'p',
           'mc-rv-empty',
           state.sidecar === null
-            ? 'No notes yet. This video has no notes file.'
+            ? `No notes yet. This ${thing} has no notes file.`
             : `No notes yet in ${state.sidecar}.`,
         ),
       );
@@ -1100,6 +1186,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     renderPanel();
     renderMarkers();
     renderPins(true);
+    deps.onChange?.();
   }
 
   // -------------------------------------------------------------------------
@@ -1114,21 +1201,23 @@ export function createReview(deps: ReviewDeps): ReviewController {
     video.controls = false;
     isActive = true;
     tick();
+    deps.onModeChange?.(true);
   }
 
   function exit(): void {
     isActive = false;
     document.body.classList.remove('mc-review');
-    video.controls = true;
+    video.controls = clock ? false : true;
     renderPins(true);
     if (ui) {
       document.body.insertBefore(stage, ui.root);
       ui.root.hidden = true;
     }
+    deps.onModeChange?.(false);
   }
 
   function setReview(on: boolean): void {
-    post({ type: 'updateSetting', key: 'video.review', value: on });
+    post({ type: 'updateSetting', key: settingKey, value: on });
     if (on) {
       turnedOff = false;
       if (state) {
@@ -1140,6 +1229,35 @@ export function createReview(deps: ReviewDeps): ReviewController {
       turnedOff = true;
       exit();
     }
+  }
+
+  /**
+   * The keys clock mode adds to the audio viewer's own (Space, K, J, L, Left and
+   * Right, Home and End, Page Up and Down, which this leaves alone): I and O set the
+   * range, N goes to the note field. Each needs an editable sidecar.
+   */
+  function clockKeydown(e: KeyboardEvent): boolean {
+    if (!state || state.readOnly !== null) {
+      return false;
+    }
+    switch (e.key) {
+      case 'i':
+      case 'I':
+        setIn();
+        break;
+      case 'o':
+      case 'O':
+        setOut();
+        break;
+      case 'n':
+      case 'N':
+        ui?.field.focus();
+        break;
+      default:
+        return false;
+    }
+    e.preventDefault();
+    return true;
   }
 
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1215,6 +1333,9 @@ export function createReview(deps: ReviewDeps): ReviewController {
       if (!isActive || isTextEntry(e.target)) {
         return false;
       }
+      if (clock) {
+        return clockKeydown(e);
+      }
       switch (e.key) {
         case 'ArrowLeft':
         case ',':
@@ -1267,10 +1388,23 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return [
         {
           kind: 'item',
-          label: isActive ? 'Close Video Notes' : 'Open Video Notes',
+          label: `${isActive ? 'Close' : 'Open'} ${clock ? 'Audio' : 'Video'} Notes`,
           run: () => setReview(!isActive),
         },
       ];
     },
+    toggle: () => setReview(!isActive),
+    overlay: () => ({
+      active: isActive,
+      notes: isActive
+        ? (state?.notes ?? [])
+            .filter((n) => n.target !== 'render')
+            .map((n) => ({ id: n.id, at: n.at, out: n.out }))
+        : [],
+      selected,
+      pendingIn,
+      pendingOut,
+    }),
+    selectNote: (id) => select(id, true),
   };
 }

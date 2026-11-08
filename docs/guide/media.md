@@ -88,7 +88,7 @@ The first note on a video with no notes file creates `<stem>.review.yaml`, at th
 
 **Working alongside Marker.** Marker desktop does not re-read its notes before saving, so a note MarkCopy writes while Marker has the same video open is lost at Marker's next save. The panel then says "Notes were replaced by another program". Do not edit one video in both at once; the fix belongs in Marker (owenpkent/Marker#14).
 
-Unlike the PDF and STL viewers, the file is streamed rather than read: the webview is handed a resource URI and the player pulls ranges off disk as it plays, so a multi-gigabyte clip opens as fast as a small one and costs no more memory. Nothing is fetched over the network.
+Unlike the PDF and STL viewers, the file is streamed rather than read: the webview is handed a resource URI and the player pulls ranges off disk as it plays, so a multi-gigabyte clip opens as fast as a small one and costs no more memory. Nothing is fetched over the network (the page reads the file only through its own local webview address).
 
 **On codecs.** QuickTime is a container, not a codec. VS Code's Chromium decodes H.264 video, which covers screen recordings, phone footage, and most `.mov` files you are handed, but it has no AAC decoder: an ordinary H.264/AAC file plays its picture in silence, with no error to say why. It also cannot decode ProRes, DNxHD, or (on most builds) HEVC, which is what a `.mov` straight out of a professional camera or editor usually holds.
 
@@ -101,6 +101,48 @@ Unlike the PDF and STL viewers, the file is streamed rather than read: the webvi
 A clip with an **alpha channel** (a ProRes 4444 lower third, say) is laid over a transparency checkerboard rather than flattened onto black, because a 99%-transparent graphic composited onto black looks exactly like a clip that renders nothing. The status line says `alpha on checkerboard` in that case, which also tells you the board is baked into any frame you grab.
 
 Set `markcopy.video.transcode` to `ask` if you work with long 4K masters and would rather press a button than have an encode start on its own, or to `off` to keep the old behaviour: a message naming the likely cause and an **Open in Default App** button. With no ffmpeg installed you get that same message, plus a note that installing one would let MarkCopy play the file here.
+
+## Audio preview
+
+MarkCopy registers as the editor for `.mp3`, `.wav`, `.ogg`, `.oga`, `.opus`, `.flac`, `.m4a`, and `.aac`, so an audio file opens as a player. The page shows the file name and a line with its format, size, and duration, over one toolbar: Previous file, Back 5 s, Play or Pause, Forward 5 s, Next file, a `m:ss / m:ss` position readout (`h:mm:ss` from one hour), a seek slider, and the playback speed. The buttons are 32 px or larger.
+
+**Waveform.** Below the file name is a 120 px waveform of the whole file, one lane for mono and two for stereo (more channels show the first two). The part already played is in the accent colour, the rest is dimmer, and a line marks the playhead. Click anywhere on it to jump there, or drag to scrub; moving the pointer over it shows the time it would jump to. With Audio Notes on, the In to Out range you are setting is shaded, saved range notes are tinted, and each note has a small marker at the top that you click to select the note and jump to it. The waveform is a pointer control only: the keyboard seeks with the arrow keys and the toolbar slider, as below.
+
+MarkCopy decodes the file once in the page to find the peaks (the sound is not played or sent anywhere). Files over 150 MB are not decoded, and the waveform area says so instead. A file the page cannot decode, such as an AAC `.m4a` without a decoder, simply has no waveform, and the player carries on. While it decodes you see "Drawing waveform...".
+
+**Details.** A compact panel lists Format, Codec, Sample rate, Channels (with the layout, such as stereo), Bit depth (lossless files), Bitrate, Duration to the millisecond, File size, and three levels measured from the decoded audio: Peak and RMS in dBFS (a silent file reads "silent"), and Clipping, the count of samples at or above 0.999 of full scale. Below them, any tags the file carries are listed: title, artist, album, album artist, date, track, genre, and comment. Long values wrap. **Copy details** puts the panel on the clipboard as Markdown.
+
+The codec, bit depth, bitrate, layout and tags come from `ffprobe`, found the same way as for video (`markcopy.video.ffmpegPath`, then your PATH and the usual install folders). Without ffmpeg installed the panel still shows what the page itself knows (format from the extension, size, duration, channels, and the levels) and leaves the other rows out, with no error.
+
+Keys work wherever the focus is, except in a text field:
+
+- **Space** or **K** plays and pauses.
+- **Left** and **Right** seek 5 s back and forward; hold **Shift** for 30 s. With the seek slider focused they seek by the same amounts.
+- **Home** and **End** go to the start and the end.
+- **Page Up** and **Page Down** open the previous and next audio file in the same folder, in Explorer order, wrapping round at either end. The folder buttons and the Page keys are hidden or inactive when the folder holds only one audio file.
+- **J** and **L** step the speed down and up through 0.5x, 0.75x, 1x, 1.25x, 1.5x and 2x. The speed button cycles the same ladder.
+
+The file is streamed, not read: the player pulls ranges off disk as it plays, so a long recording costs no more memory than a short one, and a file outside the workspace plays as well. Nothing is fetched over the network. `markcopy.audio.autoplay` and `markcopy.audio.loop` (both off by default) start playback when a file opens and repeat it at the end.
+
+### Right-click menu
+
+Right-click the player for **Copy** (Details, File Name, Full Path), **Playback** (Loop, Autoplay, and the speed ladder), **Open Audio Notes** or **Close Audio Notes**, **View > Show Tags**, **Preferences > Theme**, **Open in Default App** and **Reveal in File Explorer**. The menu does not open over a text field, so a note's text keeps the native cut and paste menu.
+
+The file's tags (title, artist, album and the rest) are hidden by default. **Show Tags** adds them to the details panel and to **Copy details**, and saves `markcopy.audio.showTags`. Loop and Autoplay save `markcopy.audio.loop` and `markcopy.audio.autoplay` the same way.
+
+### Audio notes
+
+The **Notes** button on the toolbar opens a notes panel beside the page (below it in a narrow pane), and a timeline in place of the toolbar's seek bar with a marker for each note. Notes are saved in a review file beside the audio, named after the whole file name (`song.mp3.review.yaml`) so `song.mp3` and `song.mp4` never share one; it is the same OK Studio review format the video notes use, so the other tools that read it see these notes too. A file that already has one opens with notes on, and `markcopy.audio.review` turns them on for every file.
+
+- **Add note** saves the text in the field at the playhead, or over the range if you set one. **In** and **Out** mark the range from the playhead; **Clear** drops it.
+- Press a marker or a note in the list to jump there. Each note shows its time as `HH:MM:SS.mmm`.
+- **Delete** (on the selected note) removes a note, and **Restore** brings the last deleted one back.
+- **Copy as Markdown** copies the notes and saves them as `song.mp3.review.md` beside the file, with headings like `## n1  00:01:12.500 to 00:01:15.000  note`.
+- Keys, when the focus is not in the note field: **I** sets In, **O** sets Out, **N** goes to the note field. The player's keys (Space, arrows, Page Up and Page Down, and the rest) work as before.
+
+Audio notes have a time and an optional end, and nothing else: no pin, area or drawing.
+
+**On codecs.** VS Code's Chromium decodes MP3, WAV, Ogg Vorbis, Opus, and FLAC, but it has no AAC decoder. A `.m4a` or `.aac` file usually holds AAC, so it may not play; the preview then says which extension VS Code cannot decode and offers **Open in default player**. There is no ffmpeg conversion for audio.
 
 ## STL 3D preview
 

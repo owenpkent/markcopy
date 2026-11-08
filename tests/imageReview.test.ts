@@ -96,8 +96,8 @@ describe('image review files', () => {
     ]) {
       expect(loadSidecar(head).readOnly).toBe('Missing "fps"');
     }
-    expect(reviewFileError({ version: 1, source: 'v.mp4', media: 'audio', fps: 1 })).toBe(
-      '"media" must be video or image',
+    expect(reviewFileError({ version: 1, source: 'v.mp4', media: 'podcast', fps: 1 })).toBe(
+      '"media" must be video, image or audio',
     );
   });
 

@@ -75,3 +75,13 @@ export type ReviewWebviewMessage =
   | { type: 'reviewAdd'; at: number; out?: number; text: string; point?: [number, number] }
   | { type: 'reviewDelete'; id: string }
   | { type: 'reviewRestore' };
+
+/**
+ * Audio notes (src/audioReview.ts, `media: audio`): the same notes and edits as
+ * video review, in wall-clock seconds. The kit's audio sidecar has no frame rate, so
+ * the state carries none, and a note has no pin, area or drawing.
+ */
+export type AudioReviewStateMessage = Omit<ReviewStateMessage, 'fps' | 'fpsSource'>;
+
+/** An audio `reviewAdd`: a time or a range and the text, nothing else. */
+export type AudioReviewAddMessage = { type: 'reviewAdd'; at: number; out?: number; text: string };
