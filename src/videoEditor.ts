@@ -576,6 +576,11 @@ class ProxySession {
     // Named out here so the cleanup below can reach it: a cancelled or failed
     // encode has already written part of this file.
     let output: string | undefined;
+    // What to tell the webview once the cleanup has settled. Posted from the
+    // `finally` rather than the `catch` because the offer invites a retry, and a
+    // retry writes the same path: an offer made before the cancelled attempt's
+    // removal finished would have its own copy deleted by that removal.
+    let afterCleanup: (() => void) | undefined;
     try {
       const probe = await this.probe(tools.ffprobe);
       this.post({ state: 'running', seconds: 0, durationSec: probe.durationSec }, kind);
@@ -628,20 +633,18 @@ class ProxySession {
         // and may well want it again once they know how long it takes. The
         // probe is already in hand, so the offer still names the codec.
         const probe = await this.probe(tools.ffprobe);
-        if (kind === 'sound') {
-          this.post({ state: 'soundAsk', codec: audioCodecLabel(probe) }, 'sound');
-        } else {
-          this.post(this.askMessage(probe));
-        }
+        afterCleanup = () => {
+          if (kind === 'sound') {
+            this.post({ state: 'soundAsk', codec: audioCodecLabel(probe) }, 'sound');
+          } else {
+            this.post(this.askMessage(probe));
+          }
+        };
       } else {
-        this.post(
-          { state: 'failed', detail: err instanceof Error ? err.message : String(err) },
-          kind,
-        );
+        const detail = err instanceof Error ? err.message : String(err);
+        afterCleanup = () => this.post({ state: 'failed', detail }, kind);
       }
     } finally {
-      this.running = false;
-      this.abort = undefined;
       // Anything written but never claimed is scratch nothing will ever come
       // looking for: a cancelled encode, a failed one, or one whose panel closed
       // underneath it. Left here it would sit in the temp directory forever,
@@ -651,6 +654,12 @@ class ProxySession {
       if (output !== undefined && this.built?.path !== output) {
         await removeQuietly(output);
       }
+      // The lock opens only now. Every build of this panel writes the same path,
+      // so a retry let in before the removal settled would be writing the file
+      // the removal is about to delete.
+      this.running = false;
+      this.abort = undefined;
+      afterCleanup?.();
     }
   }
 
