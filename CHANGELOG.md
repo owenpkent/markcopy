@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dark pictures no longer vanish on the image preview's checkerboard.** The transparency grid was two greys mixed from the theme, which went near-black on a dark theme, so a black logo or icon with a transparent background all but disappeared. It is now white and light grey on every theme.
+
 ### Planned
 
 - PlantUML support.

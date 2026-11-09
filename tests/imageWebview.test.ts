@@ -3,6 +3,8 @@
 // images, so the <img> never fires load: the tests drive the menu, zoom keys and
 // host messages, which is everything that does not need a real Chromium (the
 // canvas copy is on the manual checklist in docs/TESTING.md).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_DATA_URI_BYTES } from '../src/webview/imageInfo';
 import { revealLabel } from '../src/webview/menu';
@@ -513,15 +515,22 @@ describe('image webview', () => {
       expect(scroller().classList.contains('mc-image-bg-dark')).toBe(false);
     });
 
-    it('uses quiet theme-mixed greys in 12px squares', async () => {
+    it('uses the fixed light checker pair in 12px squares, not theme greys', async () => {
       await boot();
       fromHost(loadMsg());
       const st = frame().style;
-      expect(st.backgroundImage).toContain('--mc-bg');
-      expect(st.backgroundImage).toContain('--mc-fg');
-      expect(st.backgroundColor).toContain('--mc-fg');
+      // Theme-mixed greys went near-black on a dark theme and hid dark pictures.
+      expect(st.backgroundImage).toContain('--mc-checker-dark');
+      expect(st.backgroundColor).toContain('--mc-checker-light');
+      expect(st.backgroundImage).not.toMatch(/--mc-bg|--mc-fg/);
       expect(st.backgroundSize).toBe('12px 12px');
-      expect(st.backgroundImage).not.toMatch(/#|rgb\(|black|white/);
+    });
+
+    it('defines the checker pair as white and light grey in the stylesheet', () => {
+      const css = readFileSync(join(process.cwd(), 'media', 'preview.css'), 'utf8');
+      const block = /body\.mc-image\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+      expect(block).toMatch(/--mc-checker-light:\s*#ffffff/);
+      expect(block).toMatch(/--mc-checker-dark:\s*#cccccc/);
     });
 
     it('puts the checkerboard on the frame and never on the scroller', async () => {

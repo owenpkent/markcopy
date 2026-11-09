@@ -1717,6 +1717,11 @@ body.mc-image {
   --rv-muted: color-mix(in srgb, var(--rv-fg) 72%, var(--rv-bg));
   --rv-accent: var(--mc-accent);
   --rv-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  /* The transparency grid: a fixed light pair on every theme, the image-editor
+     convention. Greys mixed from the theme went near-black on a dark theme and
+     hid dark pictures with transparency. */
+  --mc-checker-light: #ffffff;
+  --mc-checker-dark: #cccccc;
 }
 body.mc-image .mc-rv {
   --rv-bg: var(--mc-bg);
