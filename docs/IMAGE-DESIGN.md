@@ -96,7 +96,7 @@ not worth its weight for a copy menu.
 ## The viewer
 
 **Layout.** One `<img>` centred in a scroll container on a checkerboard (CSS gradient,
-two greys that follow the theme), a status line at the bottom in the GIF viewer's style:
+two mid greys on every theme), a status line at the bottom in the GIF viewer's style:
 `photo.webp · 1.2 MB · 1920 x 1080 · WebP`; for SVG, `viewBox 0 0 24 24` when the file
 gives one and no width. ICO shows the largest frame's size as Chromium picks it.
 

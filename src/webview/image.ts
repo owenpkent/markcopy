@@ -100,8 +100,9 @@ const contextMenu = createMenu(menuEl);
 type Background = 'checkerboard' | 'light' | 'dark' | 'theme';
 const BACKGROUNDS: Background[] = ['checkerboard', 'light', 'dark', 'theme'];
 
-const CHECKER_LIGHT = 'color-mix(in srgb, var(--mc-bg) 94%, var(--mc-fg))';
-const CHECKER_DARK = 'color-mix(in srgb, var(--mc-bg) 88%, var(--mc-fg))';
+// Two mid greys on every theme, set in media/preview.css.
+const CHECKER_LIGHT = 'var(--mc-checker-light)';
+const CHECKER_DARK = 'var(--mc-checker-dark)';
 const ZOOM_STEPS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800];
 const SVG_SCALES = [1, 2, 4];
 
@@ -206,10 +207,12 @@ function paintFrame(): void {
   s.backgroundSize = '';
   s.backgroundColor = '';
   if (checkerVisible()) {
-    // Two close greys mixed from the theme tokens: a faint texture, not a grid.
+    // Mid greys whatever the theme, so both black and white pixels show.
     s.backgroundColor = CHECKER_LIGHT;
     s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
-    s.backgroundSize = '12px 12px';
+    // The tile holds 2 x 2 squares, so a 16px tile draws 8px squares (the
+    // Photoshop and GIMP medium default).
+    s.backgroundSize = '16px 16px';
   }
   const grid = document.getElementById('mc-grid') as HTMLButtonElement | null;
   if (grid) {

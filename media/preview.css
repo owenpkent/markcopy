@@ -1717,6 +1717,11 @@ body.mc-image {
   --rv-muted: color-mix(in srgb, var(--rv-fg) 72%, var(--rv-bg));
   --rv-accent: var(--mc-accent);
   --rv-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  /* The transparency grid: two fixed mid greys on every theme (GIMP's default),
+     so both black and white artwork stand out. Greys mixed from the theme went
+     near-black on a dark theme and hid dark pictures with transparency. */
+  --mc-checker-light: #999999;
+  --mc-checker-dark: #666666;
 }
 body.mc-image .mc-rv {
   --rv-bg: var(--mc-bg);
