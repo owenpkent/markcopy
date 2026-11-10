@@ -515,7 +515,7 @@ describe('image webview', () => {
       expect(scroller().classList.contains('mc-image-bg-dark')).toBe(false);
     });
 
-    it('uses the fixed light checker pair in 12px squares, not theme greys', async () => {
+    it('uses the fixed mid-grey checker pair in 12px squares, not theme greys', async () => {
       await boot();
       fromHost(loadMsg());
       const st = frame().style;
@@ -526,11 +526,11 @@ describe('image webview', () => {
       expect(st.backgroundSize).toBe('12px 12px');
     });
 
-    it('defines the checker pair as white and light grey in the stylesheet', () => {
+    it('defines the checker pair as two mid greys in the stylesheet', () => {
       const css = readFileSync(join(process.cwd(), 'media', 'preview.css'), 'utf8');
       const block = /body\.mc-image\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-      expect(block).toMatch(/--mc-checker-light:\s*#ffffff/);
-      expect(block).toMatch(/--mc-checker-dark:\s*#cccccc/);
+      expect(block).toMatch(/--mc-checker-light:\s*#999999/);
+      expect(block).toMatch(/--mc-checker-dark:\s*#666666/);
     });
 
     it('puts the checkerboard on the frame and never on the scroller', async () => {

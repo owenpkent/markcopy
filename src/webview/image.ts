@@ -100,7 +100,7 @@ const contextMenu = createMenu(menuEl);
 type Background = 'checkerboard' | 'light' | 'dark' | 'theme';
 const BACKGROUNDS: Background[] = ['checkerboard', 'light', 'dark', 'theme'];
 
-// White and light grey on every theme, set in media/preview.css.
+// Two mid greys on every theme, set in media/preview.css.
 const CHECKER_LIGHT = 'var(--mc-checker-light)';
 const CHECKER_DARK = 'var(--mc-checker-dark)';
 const ZOOM_STEPS = [10, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800];
@@ -207,7 +207,7 @@ function paintFrame(): void {
   s.backgroundSize = '';
   s.backgroundColor = '';
   if (checkerVisible()) {
-    // White and light grey whatever the theme, so dark and light pixels both show.
+    // Mid greys whatever the theme, so both black and white pixels show.
     s.backgroundColor = CHECKER_LIGHT;
     s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
     s.backgroundSize = '12px 12px';

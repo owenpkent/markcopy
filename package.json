@@ -599,7 +599,7 @@
           ],
           "scope": "resource",
           "default": "checkerboard",
-          "markdownDescription": "What sits behind a picture in the MarkCopy image preview. The backdrop around the picture follows the theme ('checkerboard', 'theme'), or is flat 'light' or 'dark'. 'checkerboard' also draws white and light grey squares under the picture itself, on every theme, for formats that can be transparent (never a JPEG). Also changed from the preview's right-click menu under **Preferences**."
+          "markdownDescription": "What sits behind a picture in the MarkCopy image preview. The backdrop around the picture follows the theme ('checkerboard', 'theme'), or is flat 'light' or 'dark'. 'checkerboard' also draws two mid grey squares under the picture itself, on every theme, so black and white artwork both show, for formats that can be transparent (never a JPEG). Also changed from the preview's right-click menu under **Preferences**."
         },
         "markcopy.theme": {
           "type": "string",
