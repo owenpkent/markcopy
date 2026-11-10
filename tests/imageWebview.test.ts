@@ -515,7 +515,7 @@ describe('image webview', () => {
       expect(scroller().classList.contains('mc-image-bg-dark')).toBe(false);
     });
 
-    it('uses the fixed mid-grey checker pair in 12px squares, not theme greys', async () => {
+    it('uses the fixed mid-grey checker pair in 16px squares, not theme greys', async () => {
       await boot();
       fromHost(loadMsg());
       const st = frame().style;
@@ -523,7 +523,7 @@ describe('image webview', () => {
       expect(st.backgroundImage).toContain('--mc-checker-dark');
       expect(st.backgroundColor).toContain('--mc-checker-light');
       expect(st.backgroundImage).not.toMatch(/--mc-bg|--mc-fg/);
-      expect(st.backgroundSize).toBe('12px 12px');
+      expect(st.backgroundSize).toBe('16px 16px');
     });
 
     it('defines the checker pair as two mid greys in the stylesheet', () => {

@@ -210,7 +210,7 @@ function paintFrame(): void {
     // Mid greys whatever the theme, so both black and white pixels show.
     s.backgroundColor = CHECKER_LIGHT;
     s.backgroundImage = `conic-gradient(${CHECKER_DARK} 25%, transparent 0 50%, ${CHECKER_DARK} 0 75%, transparent 0)`;
-    s.backgroundSize = '12px 12px';
+    s.backgroundSize = '16px 16px';
   }
   const grid = document.getElementById('mc-grid') as HTMLButtonElement | null;
   if (grid) {
