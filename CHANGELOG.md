@@ -4,14 +4,16 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Fixed
-
-- **Dark pictures no longer vanish on the image preview's checkerboard.** The transparency grid was two greys mixed from the theme, which went near-black on a dark theme, so a black logo or icon with a transparent background all but disappeared. It is now two mid greys on every theme in 8 px squares, so black and white artwork both stand out; the toolbar's Transparency grid button still turns it off.
-
 ### Planned
 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
+
+## [1.3.1] - 2026-11-09
+
+### Fixed
+
+- **Dark pictures no longer vanish on the image preview's checkerboard.** The transparency grid was two greys mixed from the theme, which went near-black on a dark theme, so a black logo or icon with a transparent background all but disappeared. It is now two mid greys on every theme in 8 px squares, so black and white artwork both stand out; the toolbar's Transparency grid button still turns it off.
 
 ## [1.3.0] - 2026-11-08
 
@@ -599,7 +601,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/owenpkent/markcopy/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/owenpkent/markcopy/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/owenpkent/markcopy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/owenpkent/markcopy/compare/v1.0.2...v1.1.0
