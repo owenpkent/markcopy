@@ -6,7 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
-- **Dark pictures no longer vanish on the image preview's checkerboard.** The transparency grid was two greys mixed from the theme, which went near-black on a dark theme, so a black logo or icon with a transparent background all but disappeared. It is now two mid greys on every theme in 16 px squares, so black and white artwork both stand out; the toolbar's Transparency grid button still turns it off.
+- **Dark pictures no longer vanish on the image preview's checkerboard.** The transparency grid was two greys mixed from the theme, which went near-black on a dark theme, so a black logo or icon with a transparent background all but disappeared. It is now two mid greys on every theme in 8 px squares, so black and white artwork both stand out; the toolbar's Transparency grid button still turns it off.
 
 ### Planned
 

@@ -515,7 +515,7 @@ describe('image webview', () => {
       expect(scroller().classList.contains('mc-image-bg-dark')).toBe(false);
     });
 
-    it('uses the fixed mid-grey checker pair in 16px squares, not theme greys', async () => {
+    it('uses the fixed mid-grey checker pair in 8px squares (a 16px tile), not theme greys', async () => {
       await boot();
       fromHost(loadMsg());
       const st = frame().style;
