@@ -12,6 +12,9 @@ export function isViewerSetting(key: string, value: unknown): boolean {
   if (key === 'theme') {
     return isTheme(value);
   }
+  if (key === 'video.volume') {
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 100;
+  }
   return (
     (key === 'video.loop' || key === 'video.autoplay' || key === 'video.review') &&
     typeof value === 'boolean'

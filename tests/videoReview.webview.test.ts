@@ -11,7 +11,7 @@ import type { ReviewNote, ReviewStateMessage } from '../src/review/protocol';
 import { arrangeNotes, fpsLabel } from '../src/webview/videoReview';
 
 const BODY = `
-  <div id="mc-stage"><video id="mc-video" controls></video></div>
+  <div id="mc-stage"><video id="mc-video"></video></div>
   <div id="mc-error" hidden></div>
   <div id="mc-notice" hidden></div>
   <div id="mc-status"></div>
@@ -162,12 +162,14 @@ describe('render-targeted notes', () => {
 });
 
 describe('review mode', () => {
-  it('builds cards and markers and turns the native controls off', async () => {
+  it('builds cards and markers and swaps the control bar for the transport', async () => {
     const video = await open();
-    expect(video.controls).toBe(true);
+    expect(video.controls).toBe(false);
+    expect(document.body.classList.contains('mc-review')).toBe(false);
     fromHost(review());
 
     expect(video.controls).toBe(false);
+    expect(document.body.classList.contains('mc-review')).toBe(true);
     expect(cards()).toHaveLength(3);
     expect(markers()).toHaveLength(3);
     expect(root().querySelector('.mc-rv-count')?.textContent).toBe('3 notes');
@@ -679,34 +681,55 @@ describe('review shortcuts', () => {
   });
 });
 
+describe('review mode and the speaker', () => {
+  it('moves the speaker into the transport after play, and back on close', async () => {
+    await open();
+    const volume = document.querySelector('.mc-video-volume') as HTMLElement;
+    const bar = document.getElementById('mc-controls') as HTMLElement;
+    expect(volume.parentElement).toBe(bar);
+
+    fromHost(review());
+    const transport = root().querySelector('.mc-rv-transport') as HTMLElement;
+    expect(volume.parentElement).toBe(transport);
+    expect(volume.previousElementSibling).toBe(transport.querySelector('.mc-rv-hero'));
+
+    pressMenu('Close Video Notes');
+    expect(volume.parentElement).toBe(bar);
+    // Back at its old place, between the play button and the time readout.
+    expect(volume.previousElementSibling?.getAttribute('aria-label')).toMatch(/^(Play|Pause)/);
+    expect(volume.nextElementSibling?.className).toBe('mc-video-time');
+  });
+});
+
 describe('review toggle', () => {
-  it('turns off from the menu, restores controls and ignores later reviews', async () => {
+  it('turns off from the menu, brings the control bar back and ignores later reviews', async () => {
     const video = await open();
     fromHost(review());
-    expect(video.controls).toBe(false);
+    expect(document.body.classList.contains('mc-review')).toBe(true);
 
     const close = pressMenu('Close Video Notes');
     expect(close.getAttribute('role')).toBe('menuitem');
     expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: false });
-    expect(video.controls).toBe(true);
+    // The native controls stay off for good: the page's own bar is what returns.
+    expect(video.controls).toBe(false);
+    expect(document.body.classList.contains('mc-review')).toBe(false);
     expect(root().hidden).toBe(true);
 
     fromHost(review());
-    expect(video.controls).toBe(true);
     expect(root().hidden).toBe(true);
   });
 
   it('closes from the panel header like the menu does', async () => {
-    const video = await open();
+    await open();
     fromHost(review());
     byLabel('Close video notes')!.click();
     expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: false });
-    expect(video.controls).toBe(true);
+    expect(document.body.classList.contains('mc-review')).toBe(false);
     expect(root().hidden).toBe(true);
   });
 
   it('turns back on from the menu and asks the host', async () => {
-    const video = await open();
+    await open();
     fromHost(review());
     pressMenu('Close Video Notes');
     posted.length = 0;
@@ -714,7 +737,7 @@ describe('review toggle', () => {
     pressMenu('Open Video Notes');
     expect(posted).toContainEqual({ type: 'updateSetting', key: 'video.review', value: true });
     expect(posted).toContainEqual({ type: 'reviewEnable' });
-    expect(video.controls).toBe(false);
+    expect(document.body.classList.contains('mc-review')).toBe(true);
     fromHost(review());
     expect(root().hidden).toBe(false);
   });

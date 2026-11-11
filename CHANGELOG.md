@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Video volume controls.** The video preview now has its own control bar instead of the browser's: play and pause, a speaker button with a volume slider beside it (the icon shows muted, low or high), the time, a seek bar, and full screen, which fills the whole page so the bar stays usable. The browser's picture-in-picture and download entries are not offered. Under a light VS Code theme in Auto, the bar and readout are drawn light on the player's dark surround, so they stay readable. Right-click a video for a **Volume** submenu with the current level, Mute, and 100%, 75%, 50% and 25%. The mouse wheel over the picture or the speaker changes the volume 5% a notch, and **Up** and **Down** step it 10%; **Left** and **Right** seek 5 seconds. In review mode the speaker and slider sit beside the notes transport's play button. The level is remembered for the next video in the new `markcopy.video.volume` setting (0 to 100, default 100), whichever control set it; muting is not saved.
+
 ### Planned
 
 - PlantUML support.

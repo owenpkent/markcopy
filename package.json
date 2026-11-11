@@ -742,6 +742,13 @@
           "default": false,
           "description": "Repeat a video when it reaches the end. Also toggled from the preview's right-click Playback menu."
         },
+        "markcopy.video.volume": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Playback volume for video previews, as a percentage. Remembered from the preview's right-click Volume menu, the mouse wheel over the picture, the Up and Down arrow keys, and the player's own volume slider."
+        },
         "markcopy.video.review": {
           "type": "boolean",
           "default": false,

@@ -104,7 +104,7 @@ vi.mock('../src/videoProxy', async (importOriginal) => ({
   ...tools,
 }));
 
-import { isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
+import { clampVolume, isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
 import { loadSidecar } from '../src/videoReview';
 import { reviewMarkdown } from '../src/review/markdown';
 import type * as vscode from 'vscode';
@@ -203,6 +203,26 @@ describe('VideoEditorProvider sound copy', () => {
     expect(last?.proxyNote).toBe('ffmpeg copy · sound re-encoded to MP3');
     // The second `playable` is the spent offer, not a second encode.
     expect(tools.transcode).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws the Auto surround controls light under a light VS Code theme', async () => {
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: '/videos/clip.mp4',
+      fsPath: '/videos/clip.mp4',
+    } as vscode.Uri);
+    const { panel } = createPanel();
+    await provider.resolveCustomEditor(document, panel);
+    // Auto keeps the dark #1e1e1e surround whatever the VS Code theme, so its
+    // foreground must not be the light theme's own near-black text. Contrast
+    // itself is a layout fact jsdom cannot measure: docs/TESTING.md checks it.
+    const css = panel.webview.html.replace(/\s+/g, ' ');
+    expect(css).toContain('body.mc-video { --mc-video-bg: #1e1e1e;');
+    expect(css).toMatch(
+      /body\.mc-video\.vscode-light\[data-mc-theme='auto'\],\s*body\.mc-video\.vscode-high-contrast-light\[data-mc-theme='auto'\] \{ --mc-video-fg: #cccccc; \}/,
+    );
   });
 
   it('writes only the settings the viewer menus can send', async () => {
@@ -365,6 +385,27 @@ describe('isViewerSetting', () => {
     expect(isViewerSetting('video.review', 'true')).toBe(false);
     expect(isViewerSetting('video.review', 1)).toBe(false);
     expect(isViewerSetting('video.ffmpegPath', true)).toBe(false);
+  });
+
+  it('accepts video.volume as a whole percentage only', () => {
+    expect(isViewerSetting('video.volume', 0)).toBe(true);
+    expect(isViewerSetting('video.volume', 65)).toBe(true);
+    expect(isViewerSetting('video.volume', 100)).toBe(true);
+    expect(isViewerSetting('video.volume', 101)).toBe(false);
+    expect(isViewerSetting('video.volume', -1)).toBe(false);
+    expect(isViewerSetting('video.volume', 0.5)).toBe(false);
+    expect(isViewerSetting('video.volume', '50')).toBe(false);
+  });
+});
+
+describe('clampVolume', () => {
+  it('maps a hand-edited value back into 0 to 100', () => {
+    expect(clampVolume(40)).toBe(40);
+    expect(clampVolume(150)).toBe(100);
+    expect(clampVolume(-5)).toBe(0);
+    expect(clampVolume(33.6)).toBe(34);
+    expect(clampVolume('loud')).toBe(100);
+    expect(clampVolume(Number.NaN)).toBe(100);
   });
 });
 
