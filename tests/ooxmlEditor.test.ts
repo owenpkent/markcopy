@@ -61,6 +61,10 @@ vi.mock('vscode', () => {
 });
 
 import { OoxmlEditorProvider, batchMedia, type OoxmlSession } from '../src/ooxmlEditor';
+import { DocxEditorProvider } from '../src/docxEditor';
+import { PptxEditorProvider } from '../src/pptxEditor';
+import { XlsxEditorProvider } from '../src/xlsxEditor';
+import * as vsMock from 'vscode';
 import type * as vscode from 'vscode';
 
 /** A message handler captured off a fake webview, and the fake panel it came from. */
@@ -212,5 +216,59 @@ describe('batchMedia', () => {
 
   it('sends nothing for a file with no images', () => {
     expect(batchMedia([])).toEqual([]);
+  });
+});
+
+describe('OoxmlEditorProvider settings redraw', () => {
+  it('lists markcopy.wrapCode for the Word, PowerPoint and Excel previews', () => {
+    for (const Provider of [DocxEditorProvider, PptxEditorProvider, XlsxEditorProvider]) {
+      const provider = new Provider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+      expect((provider as unknown as { redrawSettings: string[] }).redrawSettings).toContain(
+        'markcopy.wrapCode',
+      );
+    }
+  });
+
+  it('posts a new render carrying the changed value when a listed setting changes', async () => {
+    const workspace = vi.mocked(vsMock.workspace);
+    let wrap = true;
+    workspace.getConfiguration.mockImplementation(
+      () =>
+        ({
+          get: (key: string, fallback: unknown) => (key === 'wrapCode' ? wrap : fallback),
+        }) as unknown as vscode.WorkspaceConfiguration,
+    );
+    let onConfig: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
+    workspace.onDidChangeConfiguration.mockImplementation(((
+      cb: (e: vscode.ConfigurationChangeEvent) => void,
+    ) => {
+      onConfig = cb;
+      return { dispose: () => undefined };
+    }) as never);
+
+    // The test provider's own list stands in for a real one's: what is pinned
+    // here is that a listed key leads to a fresh render with the new value.
+    const provider = new TestEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    (provider as unknown as { redrawSettings: string[] }).redrawSettings.push('markcopy.wrapCode');
+    const { panel, post } = createPanel();
+    await provider.resolveCustomEditor(fakeDocument, panel);
+    await post({ type: 'ready' });
+    const posted = vi.mocked(panel.webview.postMessage);
+    const renders = () =>
+      posted.mock.calls
+        .map(([msg]) => msg as { type: string; wrapCode?: boolean })
+        .filter((msg) => msg.type === 'render');
+    await vi.waitFor(() => expect(renders()).toHaveLength(1));
+    expect(renders()[0].wrapCode).toBe(true);
+
+    wrap = false;
+    onConfig?.({ affectsConfiguration: (key: string) => key === 'markcopy.wrapCode' });
+    await vi.waitFor(() => expect(renders()).toHaveLength(2));
+    expect(renders()[1].wrapCode).toBe(false);
+
+    // A key no surface draws from costs nothing.
+    onConfig?.({ affectsConfiguration: (key: string) => key === 'markcopy.csv.delimiter' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(renders()).toHaveLength(2);
   });
 });

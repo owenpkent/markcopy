@@ -104,6 +104,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] ★ Open `sample.md`; its tab shows the rendered preview (`markcopy.autoPreview`), in one editor group, with no split and no text editor left beside it.
 - [ ] Headings, lists, task lists, blockquotes, links, and footnotes render GitHub-style.
 - [ ] Fenced code blocks are syntax-highlighted.
+- [ ] A fenced code block with a 400-character line (and one with a long URL that has no spaces) wraps inside the block with no sideways scrollbar, keeps its indentation on the first line, and the highlighting is intact. Right-click > **Preferences** > **Wrap code lines** unticks, the block scrolls sideways again, and `markcopy.wrapCode` is `false` in settings. **Copy Block** pasted into Word and Gmail looks the same with the setting on and off.
 - [ ] Mermaid diagrams render and re-theme when the VS Code theme changes. A flowchart such as `flowchart LR; A[Alpha] -->|Edge| B[Beta]` shows its node text and the edge label, not empty boxes (the SVG passes through DOMPurify, which once stripped them).
 - [ ] With `"markcopy.mermaid": { "layout": "elk" }`, a flowchart still renders in the preview with no CSP errors in the webview developer tools (ELK loads as a separate chunk), and its edges are routed as orthogonal elbows rather than dagre's curves.
 - [ ] A `mindmap` diagram still renders with its radial layout (branches fanning out from the center), not a left-to-right tree.
@@ -476,7 +477,10 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 - [ ] ★ The file opens in MarkCopy's player, not as binary and not in VS Code's built-in preview, and the first frame is on screen.
 - [ ] ★ A `.mp4` copy of the same file also opens in MarkCopy's player, not the built-in one. (Both claim `.mp4`; MarkCopy's `"default"` priority is what wins, and only this check notices if that changes.)
 - [ ] The readout under the video gives the file name, `320x240`, `0:02`, and a size in KB.
-- [ ] Play, pause, seek, and volume all work from the control bar, and the tone is audible.
+- [ ] ★ The video has MarkCopy's own control bar and no browser controls: play, speaker with a volume slider, the time (`0:00 / 0:02`), a seek slider that fills the rest of the width, and a full screen button, in that order, in every theme (Auto, Light, Dark, Green), legible and not clipped. The bar is absent until the first frame is ready and while an error message is shown.
+- [ ] ★ With `markcopy.theme` on **Auto** and VS Code on **Light Modern** (and again on a light high-contrast theme), the surround stays dark and the play, speaker and full screen icons, the time, and the status line are light grey and easy to read, not dark grey on black. Forced MarkCopy **Light** still shows dark controls on its light surround.
+- [ ] ★ Narrow panes, with a clip over an hour long (so the readout is `0:00 / 1:02:05`): split the editor and drag the video pane to about 550, 350, 300 and 250 px. Below about 560 px the seek slider moves to its own row above the buttons and the picture shrinks to make room; below about 360 px the volume slider goes; below about 240 px the time goes. At every width play, the speaker, full screen and a usable seek track stay fully inside the pane, and nothing overlaps.
+- [ ] Play, pause, seek (drag the slider, and click along it), and volume all work from the control bar, and the tone is audible. The time and slider keep up during playback and do not fight a drag.
 - [ ] Clicking the picture itself toggles play/pause; clicking the control bar does not do it twice.
 - [ ] The video is letterboxed and fully visible at any pane width, and never pushes the controls off-screen. Try a very narrow split and a very short one.
 - [ ] Switching to another tab and back keeps the playback position instead of restarting.
@@ -484,9 +488,10 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 ### Keyboard
 
 - [ ] **Space** plays and pauses without first clicking a control.
-- [ ] ★ **Space** still toggles exactly once right after clicking the picture, which is when the video element itself holds the focus and binds Space too. Two handlers firing here would cancel each other out and look like a dead key.
+- [ ] ★ **Space** toggles exactly once right after clicking the picture, the play button, the speaker, the full screen button, and after dragging the seek slider. Two handlers firing here would cancel each other out and look like a dead key. With the focus put on a button by **Tab**, space presses that button instead.
 - [ ] **`,`** and **`.`** step backward and forward by about a frame while paused.
-- [ ] **m** mutes and unmutes; **f** enters fullscreen and **Esc** leaves it.
+- [ ] **m** mutes and unmutes; **f** enters fullscreen and **Esc** leaves it. In fullscreen the control bar is still there (click play and the slider), the status line is hidden, and the full screen button shows the exit icon; **f** and the button both leave it.
+- [ ] With the seek slider focused, **Left** and **Right** move the position and **Up** and **Down** do not change the volume; with the volume slider focused, the arrows change the level.
 
 ### Frame grabs
 
@@ -500,12 +505,16 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 
 - [ ] Right-click -> **Playback** -> **Loop** starts looping, shows a checkmark next time the menu opens, and persists to `markcopy.video.loop` in settings.
 - [ ] **Playback** -> a speed other than Normal changes the rate and shows the radio mark on reopening the menu.
+- [ ] ★ The speaker button sits right after the play button in the control bar, and in review mode right after the review transport's play button (and is back in the control bar when review closes), in every theme, legible and not clipped. Clicking it mutes (the icon shows a cross, the slider drops to 0) and clicking again restores the level; the icon shows one wave below 50% and two from 50% up. Dragging the slider changes the loudness and unmutes. After a click on the speaker, **space** still plays and pauses. A long file name ellipsizes in the status line under the bar.
+- [ ] Right-click -> **Volume**: the heading shows the current level, **Mute** toggles with a checkmark, and each level changes the loudness at once, unmutes, and shows a radio mark on reopening. The same works in review mode, whose speaker is in the notes transport.
+- [ ] The mouse wheel over the picture lowers (scroll down) and raises (scroll up) the volume with a **Volume N%** toast, and the wheel over the notes panel still scrolls the panel. **Up** and **Down** step 10% and the volume slider follows. Typing in a note does not change the volume.
+- [ ] After changing the volume by any control (menu, wheel, keys, volume slider), `markcopy.video.volume` holds the new percentage within a second, and the next video opens at that level. Muting is not saved.
 - [ ] Setting `markcopy.video.autoplay` to `true` and reopening starts playback immediately.
 - [ ] If autoplay started muted, a **Playing muted · click anywhere for sound** toast appears, and the first click or key press anywhere in the preview turns the sound on.
 - [ ] With autoplay starting muted, clicking the player's own mute button does not get overridden: the sound stays as the button left it.
 - [ ] Right-click -> **Playback** -> **Autoplay** toggles with a checkmark, shows an **Autoplay on** / **Autoplay off** toast, persists to `markcopy.video.autoplay`, and affects the next opened video without starting or stopping the current one.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
-- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
+- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Volume**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
 - [ ] While the video plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** paused. Do the same while paused: it does not start. Escape and clicking into the editor close the menu too. A plain click on the picture with no menu open still toggles playback.
 
 ### Bad input and codecs
@@ -539,7 +548,7 @@ ffmpeg -f lavfi -i "color=c=red@0.25:s=64x64:r=5:d=1,format=yuva420p" -c:v libvp
 - [ ] The VP8 `.webm`, the `.wmv`, and the `.mpg` get the full re-encode ("Building a playable copy… n%", status `ffmpeg preview copy`), not a repackage.
 - [ ] ★ Without ffmpeg, the `.mkv` and `.webm` say "VS Code's player opens only MP4 and QuickTime files, so sample.mkv needs your default player" plus the install-ffmpeg sentence, and **Open in Default App** works.
 - [ ] An `.mp4` VS Code _can_ play, with MP3 or no audio, opens instantly with no encode and no `ffmpeg` text in the status line.
-- [ ] After the swap to a copy with sound, the speaker icon in the video controls is enabled (not greyed). A greyed speaker means the element has no decodable audio.
+- [ ] After the swap to a copy with sound, the tone is audible and the speaker button mutes and unmutes it. (MarkCopy's speaker never greys out, so silence with the volume up means the element has no decodable audio.)
 - [ ] A truncated or garbage `.mov` (`node -e "require('fs').writeFileSync('bad.mov', Buffer.alloc(2048, 0xff))"`) reports that it cannot be played rather than hanging or showing nothing.
 - [ ] A video opened from outside the workspace (drag one in from Downloads) plays. This is the `localResourceRoots` case: inside the workspace it would work either way.
 - [ ] Right-click the tab -> **Reopen Editor With...** still reaches VS Code's own preview (for `.mp4`) and a text or hex editor.

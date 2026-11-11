@@ -12,6 +12,9 @@ export function isViewerSetting(key: string, value: unknown): boolean {
   if (key === 'theme') {
     return isTheme(value);
   }
+  if (key === 'video.volume') {
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 100;
+  }
   return (
     (key === 'video.loop' || key === 'video.autoplay' || key === 'video.review') &&
     typeof value === 'boolean'
@@ -57,14 +60,18 @@ export function isImageSetting(key: string, value: unknown): boolean {
 
 /**
  * The settings the Markdown, CSV, spreadsheet, deck and Word previews' Preferences
- * menu writes (src/webview/main.ts, buildSettingsEntries): the theme and four toggles.
+ * menu writes (src/webview/main.ts, buildSettingsEntries): the theme and five toggles.
  */
 export function isPreviewSetting(key: string, value: unknown): boolean {
   if (key === 'theme') {
     return isTheme(value);
   }
   return (
-    (key === 'syncScroll' || key === 'autoPreview' || key === 'math' || key === 'footnotes') &&
+    (key === 'syncScroll' ||
+      key === 'autoPreview' ||
+      key === 'math' ||
+      key === 'footnotes' ||
+      key === 'wrapCode') &&
     typeof value === 'boolean'
   );
 }

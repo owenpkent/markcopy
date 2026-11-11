@@ -560,7 +560,7 @@ describe('settings a page may write through updateSetting', () => {
     ['markdown', parseMarkdownMessage],
     ['ooxml', parseOoxmlMessage],
   ])('%s preview', (_name, parse) => {
-    it('accepts the theme and the four toggles', () => {
+    it('accepts the theme and the five toggles', () => {
       for (const [key, value] of [
         ['theme', 'auto'],
         ['theme', 'green'],
@@ -568,6 +568,7 @@ describe('settings a page may write through updateSetting', () => {
         ['autoPreview', true],
         ['math', true],
         ['footnotes', false],
+        ['wrapCode', false],
       ] as const) {
         expect(parse({ type: 'updateSetting', key, value })).toEqual({
           type: 'updateSetting',
@@ -589,6 +590,7 @@ describe('settings a page may write through updateSetting', () => {
         ['syncScroll', 'false'],
         ['math', 1],
         ['footnotes', null],
+        ['wrapCode', 'off'],
         // Video and GIF settings are not this surface's.
         ['video.loop', true],
       ] as const) {

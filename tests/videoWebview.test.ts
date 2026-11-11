@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const BODY = `
-  <div id="mc-stage" hidden><video id="mc-video" controls></video></div>
+  <div id="mc-stage" hidden><video id="mc-video"></video></div>
   <div id="mc-error" hidden></div>
   <div id="mc-notice" hidden></div>
   <div id="mc-status"></div>
@@ -21,6 +21,7 @@ const BODY = `
   <div id="mc-toast" hidden></div>`;
 
 const play = vi.fn(() => Promise.resolve());
+let posted = vi.fn();
 
 beforeEach(() => {
   vi.resetModules();
@@ -29,8 +30,9 @@ beforeEach(() => {
   document.body.dataset.mcProxySrc = 'https://file.test/proxy.mp4';
   document.body.innerHTML = BODY;
   play.mockClear();
+  posted = vi.fn();
   vi.stubGlobal('acquireVsCodeApi', () => ({
-    postMessage: vi.fn(),
+    postMessage: posted,
     getState: () => undefined,
     setState: vi.fn(),
   }));
@@ -163,7 +165,7 @@ describe('video webview autoplay', () => {
     video.dispatchEvent(new Event('loadedmetadata'));
     expect(play).toHaveBeenCalledTimes(1);
 
-    // The reader pauses (the native control, or Space) while the first play() is
+    // The reader pauses (the play button, or Space) while the first play() is
     // still waiting for frames, and the pause rejects that promise with
     // AbortError, as the spec requires. Paused on the element itself: modules
     // booted by earlier tests still listen on the shared document.
@@ -180,7 +182,7 @@ describe('video webview autoplay', () => {
     const video = await openAutoplay(refused);
     expect(video.muted).toBe(true);
 
-    // The reader presses the native control, which toggles muted and reports it.
+    // The reader presses the speaker, which toggles muted and reports it.
     video.muted = false;
     video.dispatchEvent(new Event('volumechange'));
     video.muted = true;
@@ -189,5 +191,324 @@ describe('video webview autoplay', () => {
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
     expect(video.muted).toBe(true);
+  });
+});
+
+describe('video webview volume', () => {
+  const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
+  const savedVolumes = () =>
+    posted.mock.calls
+      .map(([msg]) => msg as { type: string; key?: string; value?: unknown })
+      .filter((msg) => msg.type === 'updateSetting' && msg.key === 'video.volume')
+      .map((msg) => msg.value);
+
+  async function open(extra: Record<string, unknown> = {}): Promise<HTMLVideoElement> {
+    await import('../src/webview/video');
+    fromHost(load('file', extra));
+    return document.getElementById('mc-video') as HTMLVideoElement;
+  }
+
+  const key = (k: string) =>
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+  it('opens at the remembered level without saving it back', async () => {
+    const video = await open({ volume: 40 });
+    expect(video.volume).toBeCloseTo(0.4);
+    await tick(600);
+    expect(savedVolumes()).toEqual([]);
+  });
+
+  it('opens at full volume when the host sends no level', async () => {
+    const video = await open();
+    expect(video.volume).toBe(1);
+  });
+
+  it('steps 10% with Up and Down, unmutes, and saves the level once', async () => {
+    const video = await open({ volume: 50 });
+    video.muted = true;
+    key('ArrowUp');
+    key('ArrowUp');
+    expect(video.volume).toBeCloseTo(0.7);
+    expect(video.muted).toBe(false);
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Volume 70%');
+    key('ArrowDown');
+    await tick(600);
+    expect(savedVolumes()).toEqual([60]);
+  });
+
+  it('Left and Right seek five seconds outside review mode', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'duration', { value: 20, configurable: true });
+    video.currentTime = 8;
+    key('ArrowRight');
+    expect(video.currentTime).toBe(13);
+    key('ArrowLeft');
+    key('ArrowLeft');
+    expect(video.currentTime).toBe(3);
+  });
+
+  it('clamps at the ends', async () => {
+    const video = await open({ volume: 95 });
+    key('ArrowUp');
+    expect(video.volume).toBe(1);
+    video.volume = 0.05;
+    key('ArrowDown');
+    expect(video.volume).toBe(0);
+  });
+
+  it('turns the wheel over the picture into volume, 5% a notch', async () => {
+    const video = await open({ volume: 50 });
+    const down = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    video.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(video.volume).toBeCloseTo(0.45);
+    video.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true, cancelable: true }));
+    expect(video.volume).toBeCloseTo(0.55);
+  });
+
+  it('leaves the wheel alone off the picture', async () => {
+    const video = await open({ volume: 50 });
+    const stage = document.getElementById('mc-stage') as HTMLDivElement;
+    const wheel = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    stage.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(video.volume).toBe(0.5);
+  });
+
+  it('the speaker button mutes and unmutes, and its icon and label follow', async () => {
+    const video = await open({ volume: 60 });
+    const speaker = document.querySelector('.mc-video-speaker') as HTMLButtonElement;
+    const slider = document.querySelector('.mc-video-volume-slider') as HTMLInputElement;
+    await tick();
+    expect(speaker.getAttribute('aria-label')).toBe('Mute (m)');
+    expect(slider.value).toBe('60');
+    speaker.click();
+    await tick();
+    expect(video.muted).toBe(true);
+    expect(speaker.getAttribute('aria-pressed')).toBe('true');
+    expect(speaker.getAttribute('aria-label')).toBe('Unmute (m)');
+    expect(slider.value).toBe('0');
+    speaker.click();
+    await tick();
+    expect(video.muted).toBe(false);
+    expect(slider.value).toBe('60');
+  });
+
+  it('the slider sets the level and unmutes', async () => {
+    const video = await open({ volume: 60 });
+    const slider = document.querySelector('.mc-video-volume-slider') as HTMLInputElement;
+    video.muted = true;
+    slider.value = '25';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(video.volume).toBeCloseTo(0.25);
+    expect(video.muted).toBe(false);
+    await tick(600);
+    expect(savedVolumes()).toEqual([25]);
+  });
+
+  it('keeps the status line to the file readout', async () => {
+    await open();
+    const status = document.getElementById('mc-status') as HTMLDivElement;
+    expect(status.textContent).toContain('clip.mp4');
+    expect(status.querySelector('.mc-video-speaker')).toBeNull();
+  });
+
+  it('m mutes without touching the saved level', async () => {
+    const video = await open({ volume: 80 });
+    key('m');
+    expect(video.muted).toBe(true);
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Muted');
+    await tick(600);
+    expect(savedVolumes()).toEqual([]);
+  });
+});
+
+describe('video webview control bar', () => {
+  const bar = () => document.getElementById('mc-controls') as HTMLDivElement;
+  const playBtn = () => bar().querySelector('button') as HTMLButtonElement;
+  const timeEl = () => bar().querySelector('.mc-video-time') as HTMLElement;
+  const seek = () => bar().querySelector('.mc-video-seek') as HTMLInputElement;
+  const key = (k: string, target: Element = document.body) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+  async function open(): Promise<HTMLVideoElement> {
+    await import('../src/webview/video');
+    fromHost(load('file'));
+    return document.getElementById('mc-video') as HTMLVideoElement;
+  }
+
+  /** Give the element the facts a media engine would: its length, place and play state. */
+  function fake(
+    video: HTMLVideoElement,
+    state: { duration: number; time: number; paused: boolean },
+  ): void {
+    Object.defineProperty(video, 'duration', { value: state.duration, configurable: true });
+    Object.defineProperty(video, 'currentTime', {
+      value: state.time,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(video, 'paused', { value: state.paused, configurable: true });
+  }
+
+  it('has no native controls', async () => {
+    const video = await open();
+    expect(video.hasAttribute('controls')).toBe(false);
+    expect(video.controls).toBe(false);
+  });
+
+  it('is hidden until metadata arrives, and again when the file fails', async () => {
+    const video = await open();
+    expect(bar().hidden).toBe(true);
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(bar().hidden).toBe(false);
+    fromHost({ type: 'error', message: 'broken' });
+    expect(bar().hidden).toBe(true);
+  });
+
+  it('holds play, the speaker, the time, the seek slider and fullscreen in that order', async () => {
+    await open();
+    const parts = [...bar().children].map((el) => el.className);
+    expect(parts).toEqual([
+      'mc-video-ctl',
+      'mc-video-volume',
+      'mc-video-time',
+      'mc-video-seek',
+      'mc-video-ctl mc-video-fullscreen',
+    ]);
+    expect(bar().querySelector('.mc-video-volume .mc-video-speaker')).not.toBeNull();
+  });
+
+  it('the play button toggles playback and its label follows', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 0, paused: true });
+    video.dispatchEvent(new Event('pause'));
+    expect(playBtn().getAttribute('aria-label')).toBe('Play (space)');
+    expect(playBtn().title).toBe('Play (space)');
+
+    playBtn().click();
+    expect(play).toHaveBeenCalledTimes(1);
+
+    fake(video, { duration: 100, time: 0, paused: false });
+    video.dispatchEvent(new Event('play'));
+    expect(playBtn().getAttribute('aria-label')).toBe('Pause (space)');
+    playBtn().click();
+    expect(video.pause).toHaveBeenCalled();
+
+    fake(video, { duration: 100, time: 100, paused: true });
+    video.dispatchEvent(new Event('ended'));
+    expect(playBtn().getAttribute('aria-label')).toBe('Play (space)');
+  });
+
+  it('the time readout and seek slider follow the video', async () => {
+    const video = await open();
+    fake(video, { duration: 3725, time: 65, paused: false });
+    video.dispatchEvent(new Event('durationchange'));
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(timeEl().textContent).toBe('1:05 / 1:02:05');
+    expect(seek().max).toBe('3725');
+    expect(seek().value).toBe('65');
+    expect(seek().disabled).toBe(false);
+
+    (video as { currentTime: number }).currentTime = 90;
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(seek().value).toBe('90');
+  });
+
+  it('leaves the thumb alone while it is being dragged', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 10, paused: false });
+    video.dispatchEvent(new Event('durationchange'));
+    video.dispatchEvent(new Event('timeupdate'));
+    seek().dispatchEvent(new Event('pointerdown'));
+    seek().value = '50';
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(seek().value).toBe('50');
+    seek().dispatchEvent(new Event('pointerup'));
+    expect(seek().value).toBe('10');
+  });
+
+  it('dragging the slider seeks', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 0, paused: true });
+    video.dispatchEvent(new Event('durationchange'));
+    seek().value = '42';
+    seek().dispatchEvent(new Event('input', { bubbles: true }));
+    expect(video.currentTime).toBe(42);
+    expect(timeEl().textContent).toBe('0:42 / 1:40');
+  });
+
+  it('space plays from the page, the picture and a slider, but not from a button', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 0, paused: true });
+    // Counted on this element: modules booted by earlier tests still hear the key.
+    const started = vi.fn(() => Promise.resolve());
+    video.play = started;
+    key(' ');
+    expect(started).toHaveBeenCalledTimes(1);
+    key(' ', video);
+    expect(started).toHaveBeenCalledTimes(2);
+    key(' ', seek());
+    expect(started).toHaveBeenCalledTimes(3);
+    // A button takes Space as its own click, so the page must not also toggle.
+    key(' ', playBtn());
+    expect(started).toHaveBeenCalledTimes(3);
+  });
+
+  it('lets go of focus after a pointer click so space still plays', async () => {
+    const video = await open();
+    // A hidden bar cannot take focus, even in jsdom.
+    video.dispatchEvent(new Event('loadedmetadata'));
+    const speaker = document.querySelector('.mc-video-speaker') as HTMLButtonElement;
+    for (const button of [playBtn(), speaker]) {
+      button.focus();
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(document.activeElement).not.toBe(button);
+    }
+    // A keyboard press (detail 0) keeps focus where the reader put it.
+    playBtn().focus();
+    playBtn().click();
+    expect(document.activeElement).toBe(playBtn());
+  });
+
+  it('keeps the arrow keys of the sliders to the sliders', async () => {
+    const video = await open();
+    video.volume = 0.5;
+    seek().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(video.volume).toBe(0.5);
+    key('ArrowUp');
+    expect(video.volume).toBeCloseTo(0.6);
+  });
+
+  it('fullscreens the page, so the bar comes along, from the button and the f key', async () => {
+    await open();
+    const request = vi.fn(() => Promise.resolve());
+    document.documentElement.requestFullscreen = request;
+    const fullscreen = bar().lastElementChild as HTMLButtonElement;
+    expect(fullscreen.getAttribute('aria-label')).toBe('Full screen (f)');
+    fullscreen.click();
+    expect(request).toHaveBeenCalledTimes(1);
+    request.mockClear();
+    // Modules booted by earlier tests hear the key too, so only a floor is checked.
+    key('f');
+    expect(request).toHaveBeenCalled();
+
+    Object.defineProperty(document, 'fullscreenElement', {
+      value: document.documentElement,
+      configurable: true,
+    });
+    document.dispatchEvent(new Event('fullscreenchange'));
+    expect(fullscreen.getAttribute('aria-label')).toBe('Exit full screen (f)');
+    expect(document.body.classList.contains('mc-fullscreen')).toBe(true);
+
+    const exit = vi.fn(() => Promise.resolve());
+    document.exitFullscreen = exit;
+    key('f');
+    expect(exit).toHaveBeenCalled();
+
+    Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+    document.dispatchEvent(new Event('fullscreenchange'));
+    expect(fullscreen.getAttribute('aria-label')).toBe('Full screen (f)');
+    expect(document.body.classList.contains('mc-fullscreen')).toBe(false);
   });
 });

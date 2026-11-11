@@ -18,6 +18,8 @@ Styling is GitHub-accurate, for output that pastes cleanly into docs and email.
 
 `[^note]` references render as numbered links to their definitions, with return links back to the prose. A definition with no reference stays in place as plain text rather than disappearing. Toggle with `markcopy.footnotes` (on by default, turn it off for documents that use literal `[^...]` text).
 
+A long line in a fenced code block wraps to the preview's width rather than scrolling the block sideways, so the whole line is in view. Only the display changes: the line breaks in the source, and what **Copy Block** puts on the clipboard, stay as they are. Turn it off with `markcopy.wrapCode` or **Preferences → Wrap code lines** in the right-click menu.
+
 ## Light and dark themes
 
 ![The MarkCopy preview and copy menu in a dark VS Code theme](../media/context-menu-dark.png)

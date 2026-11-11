@@ -64,6 +64,7 @@ const RENDER_DEFAULTS = {
   autoPreview: true,
   math: true,
   footnotes: true,
+  wrapCode: true,
   theme: 'auto',
   styleProfile: 'github',
   mermaidConfig: {},
@@ -92,6 +93,7 @@ export interface RenderOptions {
   ackEdit?: number;
   math?: boolean;
   footnotes?: boolean;
+  wrapCode?: boolean;
   /** The id a Word or PowerPoint render's `media` messages carry to match it. */
   mediaSet?: string;
 }
