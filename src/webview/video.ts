@@ -923,7 +923,7 @@ seekSlider.disabled = true;
 seekSlider.setAttribute('aria-label', 'Seek');
 const fullscreenBtn = document.createElement('button');
 fullscreenBtn.type = 'button';
-fullscreenBtn.className = 'mc-video-ctl';
+fullscreenBtn.className = 'mc-video-ctl mc-video-fullscreen';
 controlBar.append(playBtn, volumeBox, timeEl, seekSlider, fullscreenBtn);
 document.body.insertBefore(controlBar, statusEl);
 

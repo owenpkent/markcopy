@@ -333,7 +333,10 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   }
   #mc-controls[hidden], body.mc-review #mc-controls { display: none; }
   .mc-video-time {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 0 6px;
     font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
@@ -373,7 +376,20 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     accent-color: var(--mc-accent, #4493f8);
     cursor: pointer;
   }
-  @media (max-width: 480px) { .mc-video-volume-slider { width: 56px; } }
+  /* A narrow pane. One row needs about 500px before the seek slider is usable,
+     and the bar cannot scroll (the page is overflow: hidden), so below that the
+     slider takes a row of its own over the buttons and the bar doubles in height.
+     Narrower still, the volume slider goes (the speaker, the wheel and Up/Down
+     remain), then the time readout (the slider still shows the position), so
+     play, the speaker and full screen always fit. */
+  @media (max-width: 560px) {
+    body.mc-video { --mc-bar-h: 76px; }
+    #mc-controls { flex-wrap: wrap; align-content: center; row-gap: 0; }
+    .mc-video-seek { order: -1; flex: 1 0 100%; margin: 0; height: 28px; }
+    .mc-video-fullscreen { margin-left: auto; }
+  }
+  @media (max-width: 360px) { .mc-video-volume-slider { display: none; } }
+  @media (max-width: 240px) { .mc-video-time { display: none; } }
   #mc-error {
     position: fixed;
     inset: 0;

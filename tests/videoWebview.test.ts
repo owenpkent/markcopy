@@ -374,7 +374,7 @@ describe('video webview control bar', () => {
       'mc-video-volume',
       'mc-video-time',
       'mc-video-seek',
-      'mc-video-ctl',
+      'mc-video-ctl mc-video-fullscreen',
     ]);
     expect(bar().querySelector('.mc-video-volume .mc-video-speaker')).not.toBeNull();
   });
