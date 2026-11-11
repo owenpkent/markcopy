@@ -43,6 +43,26 @@ const noticeEl = document.getElementById('mc-notice') as HTMLDivElement;
 
 const contextMenu = createMenu(menuEl);
 
+// The status line holds the readout on the left and the speaker on the right: a
+// button that mutes and a slider for the level, so the sound is always one click
+// away, in review mode too, where the native controls (and their slider) are gone.
+const statusText = document.createElement('span');
+statusText.className = 'mc-video-status-text';
+const volumeBox = document.createElement('div');
+volumeBox.className = 'mc-video-volume';
+const speakerBtn = document.createElement('button');
+speakerBtn.type = 'button';
+speakerBtn.className = 'mc-video-speaker';
+const volumeSlider = document.createElement('input');
+volumeSlider.type = 'range';
+volumeSlider.className = 'mc-video-volume-slider';
+volumeSlider.min = '0';
+volumeSlider.max = '100';
+volumeSlider.step = '1';
+volumeSlider.setAttribute('aria-label', 'Volume');
+volumeBox.append(speakerBtn, volumeSlider);
+statusEl.replaceChildren(statusText, volumeBox);
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -136,7 +156,7 @@ function updateStatus(): void {
   if (proxyNote) {
     parts.push(proxyNote);
   }
-  statusEl.textContent = parts.join('  ·  ');
+  statusText.textContent = parts.join('  ·  ');
 }
 
 interface OverlayAction {
@@ -727,6 +747,75 @@ function saveVolumeSoon(): void {
 }
 video.addEventListener('volumechange', saveVolumeSoon);
 
+// The speaker glyph on the 24 grid, stroked in currentColor like the review
+// transport's icons: the cone, then no waves when muted or silent (a cross
+// instead), one below half volume, two from half up.
+const SPEAKER_CONE = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4z';
+const SPEAKER_PATHS = {
+  muted: [SPEAKER_CONE, 'M16 9.5l5 5', 'M21 9.5l-5 5'],
+  low: [SPEAKER_CONE, 'M15.5 9.5a3.5 3.5 0 0 1 0 5'],
+  high: [SPEAKER_CONE, 'M15.5 9.5a3.5 3.5 0 0 1 0 5', 'M18 7a7 7 0 0 1 0 10'],
+};
+const SVG_NS = 'http://www.w3.org/2000/svg';
+let speakerShown = '';
+
+/** Bring the speaker button and slider in line with the element. */
+function renderVolume(): void {
+  const silent = video.muted || video.volume === 0;
+  const glyph = silent ? 'muted' : video.volume < 0.5 ? 'low' : 'high';
+  if (glyph !== speakerShown) {
+    speakerShown = glyph;
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    for (const [name, value] of Object.entries({
+      viewBox: '0 0 24 24',
+      width: '18',
+      height: '18',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '1.8',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true',
+      focusable: 'false',
+    })) {
+      svg.setAttribute(name, value);
+    }
+    for (const d of SPEAKER_PATHS[glyph]) {
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+    }
+    speakerBtn.replaceChildren(svg);
+  }
+  const label = video.muted ? 'Unmute (m)' : 'Mute (m)';
+  speakerBtn.title = label;
+  speakerBtn.setAttribute('aria-label', label);
+  speakerBtn.setAttribute('aria-pressed', String(video.muted));
+  const level = video.muted ? 0 : volumePercent();
+  volumeSlider.value = String(level);
+  volumeSlider.title = `Volume ${level}%`;
+  volumeSlider.style.setProperty('--mc-volume', `${level}%`);
+}
+video.addEventListener('volumechange', renderVolume);
+renderVolume();
+
+speakerBtn.addEventListener('click', (e) => {
+  toggleMute();
+  // A pointer click should not leave the button holding focus, or the next
+  // Space would press it again (mute) instead of playing. A keyboard press keeps
+  // focus where the reader put it.
+  if (e.detail > 0) {
+    speakerBtn.blur();
+  }
+});
+
+volumeSlider.addEventListener('input', () => {
+  video.volume = Number(volumeSlider.value) / 100;
+  if (video.muted && video.volume > 0) {
+    video.muted = false;
+  }
+});
+
 function volumeToast(): void {
   toast(video.muted ? 'Muted' : `Volume ${volumePercent()}%`);
 }
@@ -824,21 +913,33 @@ stage.addEventListener('click', (e) => {
 // The wheel over the picture sets the level, as in most desktop players: 5% a
 // notch on a mouse, finer on a touchpad, whose deltas are smaller. There is
 // nothing to scroll in the stage, so the wheel has no other job here.
+// The same holds over the speaker and its slider.
+function onVolumeWheel(e: WheelEvent): void {
+  if (e.ctrlKey || e.deltaY === 0) {
+    return;
+  }
+  e.preventDefault();
+  const pixels = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
+  setVolume(video.volume - (pixels / 100) * 0.05);
+}
 stage.addEventListener(
   'wheel',
   (e) => {
-    if (e.target !== video || e.ctrlKey || e.deltaY === 0) {
-      return;
+    if (e.target === video) {
+      onVolumeWheel(e);
     }
-    e.preventDefault();
-    const pixels = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
-    setVolume(video.volume - (pixels / 100) * 0.05);
   },
   { passive: false },
 );
+volumeBox.addEventListener('wheel', onVolumeWheel, { passive: false });
 
 document.addEventListener('keydown', (e) => {
   if (contextMenu.isOpen() || e.ctrlKey || e.metaKey || e.altKey || isTextEntry(e.target)) {
+    return;
+  }
+  // The focused slider takes the arrows itself, and review mode's Left and Right
+  // frame step would otherwise ride along with them.
+  if (e.target === volumeSlider && e.key.startsWith('Arrow')) {
     return;
   }
   // Review mode adds Left and Right, J K L, and steps `,` and `.` at the real

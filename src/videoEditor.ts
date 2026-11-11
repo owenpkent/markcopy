@@ -279,7 +279,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     /* --mc-notice-h is the sound notice's height, set by the webview while it is
        up, so the notice pushes the video's own controls up rather than covering
        them. */
-    inset: 0 0 calc(30px + var(--mc-notice-h, 0px)) 0;
+    inset: 0 0 calc(40px + var(--mc-notice-h, 0px)) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -294,16 +294,46 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     left: 0;
     right: 0;
     bottom: 0;
-    height: 30px;
+    height: 40px;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    gap: 12px;
+    padding: 0 8px 0 12px;
     box-sizing: border-box;
     font-size: 11px;
+  }
+  .mc-video-status-text {
+    flex: 1 1 auto;
+    min-width: 0;
     opacity: 0.75;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The speaker: a 32px mute button and a slider for the level. */
+  .mc-video-volume { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+  .mc-video-speaker {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    opacity: 0.8;
+    cursor: pointer;
+  }
+  .mc-video-speaker:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .mc-video-speaker:focus-visible { outline: 2px solid var(--mc-accent, #4493f8); outline-offset: -2px; opacity: 1; }
+  .mc-video-volume-slider {
+    width: 88px;
+    height: 32px;
+    margin: 0;
+    accent-color: var(--mc-accent, #4493f8);
+    cursor: pointer;
   }
   #mc-error {
     position: fixed;
@@ -380,7 +410,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 30px;
+    bottom: 40px;
     display: flex;
     flex-wrap: wrap;
     align-items: center;

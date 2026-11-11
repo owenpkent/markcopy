@@ -6,7 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Added
 
-- **Video volume controls.** Right-click a video for a **Volume** submenu with the current level, Mute, and 100%, 75%, 50% and 25%. The mouse wheel over the picture changes the volume 5% a notch, and **Up** and **Down** step it 10%. These work in review mode too, which hides the native volume slider. The level is remembered for the next video in the new `markcopy.video.volume` setting (0 to 100, default 100), whichever control set it; muting is not saved.
+- **Video volume controls.** A speaker button at the right of the line under the video mutes and unmutes, with a volume slider beside it; its icon shows muted, low or high. Right-click a video for a **Volume** submenu with the current level, Mute, and 100%, 75%, 50% and 25%. The mouse wheel over the picture or the speaker changes the volume 5% a notch, and **Up** and **Down** step it 10%. These work in review mode too, which hides the native volume slider. The level is remembered for the next video in the new `markcopy.video.volume` setting (0 to 100, default 100), whichever control set it; muting is not saved.
 
 ### Planned
 

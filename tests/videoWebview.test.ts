@@ -264,6 +264,44 @@ describe('video webview volume', () => {
     expect(video.volume).toBe(0.5);
   });
 
+  it('the speaker button mutes and unmutes, and its icon and label follow', async () => {
+    const video = await open({ volume: 60 });
+    const speaker = document.querySelector('.mc-video-speaker') as HTMLButtonElement;
+    const slider = document.querySelector('.mc-video-volume-slider') as HTMLInputElement;
+    await tick();
+    expect(speaker.getAttribute('aria-label')).toBe('Mute (m)');
+    expect(slider.value).toBe('60');
+    speaker.click();
+    await tick();
+    expect(video.muted).toBe(true);
+    expect(speaker.getAttribute('aria-pressed')).toBe('true');
+    expect(speaker.getAttribute('aria-label')).toBe('Unmute (m)');
+    expect(slider.value).toBe('0');
+    speaker.click();
+    await tick();
+    expect(video.muted).toBe(false);
+    expect(slider.value).toBe('60');
+  });
+
+  it('the slider sets the level and unmutes', async () => {
+    const video = await open({ volume: 60 });
+    const slider = document.querySelector('.mc-video-volume-slider') as HTMLInputElement;
+    video.muted = true;
+    slider.value = '25';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(video.volume).toBeCloseTo(0.25);
+    expect(video.muted).toBe(false);
+    await tick(600);
+    expect(savedVolumes()).toEqual([25]);
+  });
+
+  it('keeps the file readout beside the speaker', async () => {
+    await open();
+    const status = document.getElementById('mc-status') as HTMLDivElement;
+    expect(status.querySelector('.mc-video-status-text')?.textContent).toContain('clip.mp4');
+    expect(status.querySelector('.mc-video-speaker')).not.toBeNull();
+  });
+
   it('m mutes without touching the saved level', async () => {
     const video = await open({ volume: 80 });
     key('m');
