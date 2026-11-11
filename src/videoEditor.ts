@@ -161,7 +161,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
           break;
         case 'updateSetting':
           // Persist a setting changed from the viewer's menu (theme, loop,
-          // autoplay) at the scope where it is defined, matching the other
+          // autoplay, volume) at the scope where it is defined, matching the other
           // previews. Only the keys the menu can send are written: the message
           // comes from a webview, and an unchecked key would let it set
           // `video.ffmpegPath`, which the host later executes.
@@ -220,6 +220,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
       size,
       autoplay: cfg.get<boolean>('video.autoplay', false),
       loop: cfg.get<boolean>('video.loop', false),
+      volume: clampVolume(cfg.get<number>('video.volume', 100)),
       proxyNote: built?.note,
     });
   }
@@ -781,4 +782,17 @@ export async function saveFrame(
 export function basename(uri: vscode.Uri): string {
   const p = uri.path;
   return p.substring(p.lastIndexOf('/') + 1);
+}
+
+/**
+ * The markcopy.video.volume setting as a whole percentage. settings.json is
+ * hand-editable, so a value outside the schema (a string, 150, 0.5) is mapped
+ * back into range rather than handed to the page, where `video.volume` throws
+ * on anything outside 0 to 1.
+ */
+export function clampVolume(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 100;
+  }
+  return Math.min(100, Math.max(0, Math.round(value)));
 }

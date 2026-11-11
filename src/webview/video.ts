@@ -310,6 +310,8 @@ interface LoadMessage {
   size: number;
   autoplay: boolean;
   loop: boolean;
+  /** The markcopy.video.volume setting, a whole percentage already clamped by the host. */
+  volume: number;
   /** Set when `src` is an ffmpeg-built copy rather than the file itself. */
   proxyNote?: string;
 }
@@ -353,6 +355,12 @@ function load(msg: LoadMessage): void {
   autoplayPending = !swap && msg.autoplay;
   if (!swap) {
     setMuted(false);
+    // The swap keeps the level the reader is listening at; an open starts from
+    // the remembered one. Recorded first, so the `volumechange` this write
+    // queues is not mistaken for a change worth saving.
+    // An older host sends no level, and `video.volume` throws outside 0 to 1.
+    savedVolume = Number.isFinite(msg.volume) ? Math.min(100, Math.max(0, msg.volume)) : 100;
+    video.volume = savedVolume / 100;
   }
   video.crossOrigin = 'anonymous';
   video.src = sourceUri;
@@ -693,6 +701,67 @@ function setSpeed(rate: number): void {
   toast(rate === 1 ? 'Normal speed' : `${rate}x speed`);
 }
 
+// The markcopy.video.volume setting as last written or loaded, as a whole
+// percentage, so a `volumechange` that leaves it where it was writes nothing.
+let savedVolume = 100;
+let volumeSaveTimer = 0;
+
+const volumePercent = (): number => Math.round(video.volume * 100);
+
+/**
+ * Remember the level for the next video, whichever control set it: the menu,
+ * the wheel, the arrow keys or the native slider. Debounced, because a wheel
+ * spin or a slider drag is dozens of changes and each write lands in
+ * settings.json. Muting is not saved: it is the autoplay fallback's state as
+ * often as the reader's.
+ */
+function saveVolumeSoon(): void {
+  window.clearTimeout(volumeSaveTimer);
+  volumeSaveTimer = window.setTimeout(() => {
+    const value = volumePercent();
+    if (value !== savedVolume) {
+      savedVolume = value;
+      vscode.postMessage({ type: 'updateSetting', key: 'video.volume', value });
+    }
+  }, 500);
+}
+video.addEventListener('volumechange', saveVolumeSoon);
+
+function volumeToast(): void {
+  toast(video.muted ? 'Muted' : `Volume ${volumePercent()}%`);
+}
+
+/** Set the level from 0 to 1. Any change of level is a request to hear it, so it unmutes. */
+function setVolume(level: number): void {
+  video.volume = Math.min(1, Math.max(0, level));
+  if (video.muted && video.volume > 0) {
+    video.muted = false;
+  }
+  volumeToast();
+}
+
+function toggleMute(): void {
+  video.muted = !video.muted;
+  volumeToast();
+}
+
+const VOLUMES = [100, 75, 50, 25];
+
+function volumeEntries(): MenuEntry[] {
+  const current = volumePercent();
+  return [
+    { kind: 'label', label: video.muted ? 'Muted' : `Volume ${current}%` },
+    { kind: 'checkbox', label: 'Mute', checked: video.muted, run: toggleMute },
+    { kind: 'divider' },
+    ...VOLUMES.map((level): MenuEntry => ({
+      kind: 'radio',
+      label: `${level}%`,
+      checked: !video.muted && current === level,
+      run: () => setVolume(level / 100),
+    })),
+  ];
+}
+
 function toggleLoop(): void {
   video.loop = !video.loop;
   // Persisted, not session-only: someone who loops one clip is looking at a
@@ -752,6 +821,22 @@ stage.addEventListener('click', (e) => {
   }
 });
 
+// The wheel over the picture sets the level, as in most desktop players: 5% a
+// notch on a mouse, finer on a touchpad, whose deltas are smaller. There is
+// nothing to scroll in the stage, so the wheel has no other job here.
+stage.addEventListener(
+  'wheel',
+  (e) => {
+    if (e.target !== video || e.ctrlKey || e.deltaY === 0) {
+      return;
+    }
+    e.preventDefault();
+    const pixels = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
+    setVolume(video.volume - (pixels / 100) * 0.05);
+  },
+  { passive: false },
+);
+
 document.addEventListener('keydown', (e) => {
   if (contextMenu.isOpen() || e.ctrlKey || e.metaKey || e.altKey || isTextEntry(e.target)) {
     return;
@@ -785,7 +870,14 @@ document.addEventListener('keydown', (e) => {
       nudge(1 / 30);
       break;
     case 'm':
-      video.muted = !video.muted;
+      toggleMute();
+      break;
+    case 'ArrowUp':
+    case 'ArrowDown':
+      // Prevented so the native controls, which take the arrows while the video
+      // has focus, do not step the level a second time.
+      e.preventDefault();
+      setVolume(video.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1));
       break;
     case 'f':
       if (document.fullscreenElement) {
@@ -850,6 +942,7 @@ document.addEventListener('contextmenu', (e) => {
         })),
       ],
     },
+    { kind: 'submenu', label: 'Volume', entries: volumeEntries() },
     { kind: 'divider' },
     ...review.menuEntries(),
     { kind: 'divider' },

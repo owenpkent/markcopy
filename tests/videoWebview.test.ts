@@ -21,6 +21,7 @@ const BODY = `
   <div id="mc-toast" hidden></div>`;
 
 const play = vi.fn(() => Promise.resolve());
+let posted = vi.fn();
 
 beforeEach(() => {
   vi.resetModules();
@@ -29,8 +30,9 @@ beforeEach(() => {
   document.body.dataset.mcProxySrc = 'https://file.test/proxy.mp4';
   document.body.innerHTML = BODY;
   play.mockClear();
+  posted = vi.fn();
   vi.stubGlobal('acquireVsCodeApi', () => ({
-    postMessage: vi.fn(),
+    postMessage: posted,
     getState: () => undefined,
     setState: vi.fn(),
   }));
@@ -189,5 +191,85 @@ describe('video webview autoplay', () => {
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await tick();
     expect(video.muted).toBe(true);
+  });
+});
+
+describe('video webview volume', () => {
+  const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
+  const savedVolumes = () =>
+    posted.mock.calls
+      .map(([msg]) => msg as { type: string; key?: string; value?: unknown })
+      .filter((msg) => msg.type === 'updateSetting' && msg.key === 'video.volume')
+      .map((msg) => msg.value);
+
+  async function open(extra: Record<string, unknown> = {}): Promise<HTMLVideoElement> {
+    await import('../src/webview/video');
+    fromHost(load('file', extra));
+    return document.getElementById('mc-video') as HTMLVideoElement;
+  }
+
+  const key = (k: string) =>
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+  it('opens at the remembered level without saving it back', async () => {
+    const video = await open({ volume: 40 });
+    expect(video.volume).toBeCloseTo(0.4);
+    await tick(600);
+    expect(savedVolumes()).toEqual([]);
+  });
+
+  it('opens at full volume when the host sends no level', async () => {
+    const video = await open();
+    expect(video.volume).toBe(1);
+  });
+
+  it('steps 10% with Up and Down, unmutes, and saves the level once', async () => {
+    const video = await open({ volume: 50 });
+    video.muted = true;
+    key('ArrowUp');
+    key('ArrowUp');
+    expect(video.volume).toBeCloseTo(0.7);
+    expect(video.muted).toBe(false);
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Volume 70%');
+    key('ArrowDown');
+    await tick(600);
+    expect(savedVolumes()).toEqual([60]);
+  });
+
+  it('clamps at the ends', async () => {
+    const video = await open({ volume: 95 });
+    key('ArrowUp');
+    expect(video.volume).toBe(1);
+    video.volume = 0.05;
+    key('ArrowDown');
+    expect(video.volume).toBe(0);
+  });
+
+  it('turns the wheel over the picture into volume, 5% a notch', async () => {
+    const video = await open({ volume: 50 });
+    const down = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    video.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(video.volume).toBeCloseTo(0.45);
+    video.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true, cancelable: true }));
+    expect(video.volume).toBeCloseTo(0.55);
+  });
+
+  it('leaves the wheel alone off the picture', async () => {
+    const video = await open({ volume: 50 });
+    const stage = document.getElementById('mc-stage') as HTMLDivElement;
+    const wheel = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    stage.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(video.volume).toBe(0.5);
+  });
+
+  it('m mutes without touching the saved level', async () => {
+    const video = await open({ volume: 80 });
+    key('m');
+    expect(video.muted).toBe(true);
+    expect(document.getElementById('mc-toast')?.textContent).toBe('Muted');
+    await tick(600);
+    expect(savedVolumes()).toEqual([]);
   });
 });

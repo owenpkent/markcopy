@@ -497,12 +497,15 @@ Open [sample.mov](../sample.mov). It is two seconds of moving test pattern with 
 
 - [ ] Right-click -> **Playback** -> **Loop** starts looping, shows a checkmark next time the menu opens, and persists to `markcopy.video.loop` in settings.
 - [ ] **Playback** -> a speed other than Normal changes the rate and shows the radio mark on reopening the menu.
+- [ ] Right-click -> **Volume**: the heading shows the current level, **Mute** toggles with a checkmark, and each level changes the loudness at once, unmutes, and shows a radio mark on reopening. The same works in review mode, which has no native volume slider.
+- [ ] The mouse wheel over the picture lowers (scroll down) and raises (scroll up) the volume with a **Volume N%** toast, and the wheel over the notes panel still scrolls the panel. **Up** and **Down** step 10% and the native slider follows. Typing in a note does not change the volume.
+- [ ] After changing the volume by any control (menu, wheel, keys, native slider), `markcopy.video.volume` holds the new percentage within a second, and the next video opens at that level. Muting is not saved.
 - [ ] Setting `markcopy.video.autoplay` to `true` and reopening starts playback immediately.
 - [ ] If autoplay started muted, a **Playing muted · click anywhere for sound** toast appears, and the first click or key press anywhere in the preview turns the sound on.
 - [ ] With autoplay starting muted, clicking the player's own mute button does not get overridden: the sound stays as the button left it.
 - [ ] Right-click -> **Playback** -> **Autoplay** toggles with a checkmark, shows an **Autoplay on** / **Autoplay off** toast, persists to `markcopy.video.autoplay`, and affects the next opened video without starting or stopping the current one.
 - [ ] ★ Right-click -> **Preferences** -> **Theme** re-tints the surround, and changing the theme from a Markdown or PDF preview re-tints an already-open video without reopening it.
-- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
+- [ ] Every video setting still applies from the menu: **Loop**, **Autoplay**, **Volume**, **Open Video Notes** (the `markcopy.video.review` setting) and **Theme** each take effect and persist, and none is refused.
 - [ ] While the video plays, right-click to open the menu, then click on the picture to dismiss it: the menu closes and playback is **not** paused. Do the same while paused: it does not start. Escape and clicking into the editor close the menu too. A plain click on the picture with no menu open still toggles playback.
 
 ### Bad input and codecs

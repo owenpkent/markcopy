@@ -104,7 +104,7 @@ vi.mock('../src/videoProxy', async (importOriginal) => ({
   ...tools,
 }));
 
-import { isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
+import { clampVolume, isViewerSetting, VideoEditorProvider } from '../src/videoEditor';
 import { loadSidecar } from '../src/videoReview';
 import { reviewMarkdown } from '../src/review/markdown';
 import type * as vscode from 'vscode';
@@ -365,6 +365,27 @@ describe('isViewerSetting', () => {
     expect(isViewerSetting('video.review', 'true')).toBe(false);
     expect(isViewerSetting('video.review', 1)).toBe(false);
     expect(isViewerSetting('video.ffmpegPath', true)).toBe(false);
+  });
+
+  it('accepts video.volume as a whole percentage only', () => {
+    expect(isViewerSetting('video.volume', 0)).toBe(true);
+    expect(isViewerSetting('video.volume', 65)).toBe(true);
+    expect(isViewerSetting('video.volume', 100)).toBe(true);
+    expect(isViewerSetting('video.volume', 101)).toBe(false);
+    expect(isViewerSetting('video.volume', -1)).toBe(false);
+    expect(isViewerSetting('video.volume', 0.5)).toBe(false);
+    expect(isViewerSetting('video.volume', '50')).toBe(false);
+  });
+});
+
+describe('clampVolume', () => {
+  it('maps a hand-edited value back into 0 to 100', () => {
+    expect(clampVolume(40)).toBe(40);
+    expect(clampVolume(150)).toBe(100);
+    expect(clampVolume(-5)).toBe(0);
+    expect(clampVolume(33.6)).toBe(34);
+    expect(clampVolume('loud')).toBe(100);
+    expect(clampVolume(Number.NaN)).toBe(100);
   });
 });
 

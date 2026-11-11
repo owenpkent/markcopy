@@ -63,7 +63,7 @@ The viewer uses the browser's WebCodecs `ImageDecoder`. Where that is missing, t
 
 MarkCopy registers as the editor for `.mov`, `.mp4`, `.m4v`, `.3gp`, `.mkv`, `.webm`, `.avi`, `.wmv`, `.flv`, `.mpg`, and `.mpeg`, so a video opens as a player instead of as binary. (`.ts`, `.mts`, and `.m2ts` are left alone: `.ts` is TypeScript.) VS Code's own player opens only the MP4 family, and nothing at all opens a QuickTime `.mov`, which is what a Mac screen recording, a phone clip, and most camera footage arrive as. Measured in VS Code's webview, `.webm` does not open either, despite VS Code's documentation: every container outside `.mp4`, `.mov`, `.m4v`, and `.3gp` is refused at once, even when it holds H.264 or VP9 that plays fine inside an MP4.
 
-The player has the standard transport controls plus a few shortcuts: **space** plays and pauses wherever the focus is, **`,`** and **`.`** step back and forward roughly a frame, **m** mutes, **f** goes fullscreen. A readout under the video gives the file name, pixel dimensions, duration, and size.
+The player has the standard transport controls plus a few shortcuts: **space** plays and pauses wherever the focus is, **`,`** and **`.`** step back and forward roughly a frame, **m** mutes, **f** goes fullscreen, and **Up** and **Down** raise and lower the volume by 10%. The mouse wheel over the picture changes the volume too, 5% a notch. The level is remembered for the next video (`markcopy.video.volume`, 100 by default), whichever control set it. A readout under the video gives the file name, pixel dimensions, duration, and size.
 
 Right-click for the copy actions:
 
@@ -71,6 +71,7 @@ Right-click for the copy actions:
 - **Save Frame as PNG…** writes it to disk, defaulting to the video's own folder with the timecode in the name (`clip-1m23.400s.png`), so successive grabs never overwrite each other.
 - **Copy as** gives the file name or full path.
 - **Playback** sets looping (persisted to `markcopy.video.loop`), speed from 0.25x to 2x, and autoplay.
+- **Volume** shows the current level, mutes, and sets 100%, 75%, 50% or 25%. It works in review mode too, where the native controls and their volume slider give way to the notes transport.
 - **Open Video Notes** turns review mode on (it reads **Close Video Notes** while it is on).
 - **Preferences → Theme** shares the setting with every other MarkCopy preview.
 
