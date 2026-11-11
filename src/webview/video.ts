@@ -6,6 +6,7 @@
 // does not need to be. The <video> element is handed a webview-resource URI and
 // streams the file straight off disk, seeking with range requests, so a 2 GB
 // clip costs the same in memory as a 2 MB one.
+import { positionReadout } from './audioInfo';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import {
   describeMediaError,
@@ -42,6 +43,23 @@ const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
 const noticeEl = document.getElementById('mc-notice') as HTMLDivElement;
 
 const contextMenu = createMenu(menuEl);
+
+// The speaker: a button that mutes and a slider for the level. It is built here
+// and placed by the control bar further down (and, in review mode, moved into the
+// review transport beside its play button), so the sound is always one click away.
+const volumeBox = document.createElement('div');
+volumeBox.className = 'mc-video-volume';
+const speakerBtn = document.createElement('button');
+speakerBtn.type = 'button';
+speakerBtn.className = 'mc-video-ctl mc-video-speaker';
+const volumeSlider = document.createElement('input');
+volumeSlider.type = 'range';
+volumeSlider.className = 'mc-video-volume-slider';
+volumeSlider.min = '0';
+volumeSlider.max = '100';
+volumeSlider.step = '1';
+volumeSlider.setAttribute('aria-label', 'Volume');
+volumeBox.append(speakerBtn, volumeSlider);
 
 // ---------------------------------------------------------------------------
 // State
@@ -168,6 +186,7 @@ function openExternalAction(): OverlayAction {
  */
 function showOverlay(message: string, actions: OverlayAction[], progress?: number): void {
   stage.hidden = true;
+  controlBar.hidden = true;
   errorEl.hidden = false;
   errorEl.textContent = '';
   overlayText = undefined;
@@ -248,8 +267,8 @@ function updateOverlay(message: string, fraction: number, actions: OverlayAction
 let noticeText: HTMLParagraphElement | undefined;
 let noticeFill: HTMLDivElement | undefined;
 
-// The notice sits where the <video> element draws its controls, so the stage
-// gives up exactly the notice's height while it is up. Observed rather than
+// The notice sits just above the status line, between it and the control bar, so
+// the stage gives up exactly the notice's height while it is up. Observed rather than
 // measured once, because the text wraps differently as the panel is resized.
 new ResizeObserver(() => {
   const height = noticeEl.hidden ? 0 : noticeEl.offsetHeight;
@@ -310,6 +329,8 @@ interface LoadMessage {
   size: number;
   autoplay: boolean;
   loop: boolean;
+  /** The markcopy.video.volume setting, a whole percentage already clamped by the host. */
+  volume: number;
   /** Set when `src` is an ffmpeg-built copy rather than the file itself. */
   proxyNote?: string;
 }
@@ -353,6 +374,12 @@ function load(msg: LoadMessage): void {
   autoplayPending = !swap && msg.autoplay;
   if (!swap) {
     setMuted(false);
+    // The swap keeps the level the reader is listening at; an open starts from
+    // the remembered one. Recorded first, so the `volumechange` this write
+    // queues is not mistaken for a change worth saving.
+    // An older host sends no level, and `video.volume` throws outside 0 to 1.
+    savedVolume = Number.isFinite(msg.volume) ? Math.min(100, Math.max(0, msg.volume)) : 100;
+    video.volume = savedVolume / 100;
   }
   video.crossOrigin = 'anonymous';
   video.src = sourceUri;
@@ -407,9 +434,9 @@ function startAutoplay(): void {
 }
 
 // Unmute on the first gesture, capture phase so nothing in the preview can stop
-// it. The unmute is deferred a tick and re-checked: a click on the native mute
+// it. The unmute is deferred a tick and re-checked: a click on the speaker
 // button would otherwise be unmuted on pointerdown and then re-muted by the
-// control itself. By the time the timeout runs the control's `volumechange` has
+// button itself. By the time the timeout runs its `volumechange` has
 // disarmed us, so the reader's choice stands.
 function onFirstGesture(event: Event): void {
   if (!unmuteArmed) {
@@ -430,6 +457,7 @@ document.addEventListener('keydown', onFirstGesture, true);
 
 video.addEventListener('loadedmetadata', () => {
   stage.hidden = false;
+  controlBar.hidden = false;
   errorEl.hidden = true;
   // The overlay's nodes go with it; leaving the handles set would let a late
   // progress tick write into a box nobody can see.
@@ -693,6 +721,136 @@ function setSpeed(rate: number): void {
   toast(rate === 1 ? 'Normal speed' : `${rate}x speed`);
 }
 
+// The markcopy.video.volume setting as last written or loaded, as a whole
+// percentage, so a `volumechange` that leaves it where it was writes nothing.
+let savedVolume = 100;
+let volumeSaveTimer = 0;
+
+const volumePercent = (): number => Math.round(video.volume * 100);
+
+/**
+ * Remember the level for the next video, whichever control set it: the menu,
+ * the wheel, the arrow keys or the volume slider. Debounced, because a wheel
+ * spin or a slider drag is dozens of changes and each write lands in
+ * settings.json. Muting is not saved: it is the autoplay fallback's state as
+ * often as the reader's.
+ */
+function saveVolumeSoon(): void {
+  window.clearTimeout(volumeSaveTimer);
+  volumeSaveTimer = window.setTimeout(() => {
+    const value = volumePercent();
+    if (value !== savedVolume) {
+      savedVolume = value;
+      vscode.postMessage({ type: 'updateSetting', key: 'video.volume', value });
+    }
+  }, 500);
+}
+video.addEventListener('volumechange', saveVolumeSoon);
+
+// The speaker glyph on the 24 grid, stroked in currentColor like the review
+// transport's icons: the cone, then no waves when muted or silent (a cross
+// instead), one below half volume, two from half up.
+const SPEAKER_CONE = 'M4 9.5h3.5L12 5.5v13l-4.5-4H4z';
+const SPEAKER_PATHS = {
+  muted: [SPEAKER_CONE, 'M16 9.5l5 5', 'M21 9.5l-5 5'],
+  low: [SPEAKER_CONE, 'M15.5 9.5a3.5 3.5 0 0 1 0 5'],
+  high: [SPEAKER_CONE, 'M15.5 9.5a3.5 3.5 0 0 1 0 5', 'M18 7a7 7 0 0 1 0 10'],
+};
+const SVG_NS = 'http://www.w3.org/2000/svg';
+let speakerShown = '';
+
+/**
+ * A 24-grid glyph, stroked in currentColor so it follows the button's colour in
+ * every theme. `filled` is for the solid play and pause shapes.
+ */
+function svgIcon(paths: string[], filled = false): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  for (const [name, value] of Object.entries({
+    viewBox: '0 0 24 24',
+    width: '18',
+    height: '18',
+    fill: filled ? 'currentColor' : 'none',
+    stroke: 'currentColor',
+    'stroke-width': '1.8',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  })) {
+    svg.setAttribute(name, value);
+  }
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/** Bring the speaker button and slider in line with the element. */
+function renderVolume(): void {
+  const silent = video.muted || video.volume === 0;
+  const glyph = silent ? 'muted' : video.volume < 0.5 ? 'low' : 'high';
+  if (glyph !== speakerShown) {
+    speakerShown = glyph;
+    speakerBtn.replaceChildren(svgIcon(SPEAKER_PATHS[glyph]));
+  }
+  const label = video.muted ? 'Unmute (m)' : 'Mute (m)';
+  speakerBtn.title = label;
+  speakerBtn.setAttribute('aria-label', label);
+  speakerBtn.setAttribute('aria-pressed', String(video.muted));
+  const level = video.muted ? 0 : volumePercent();
+  volumeSlider.value = String(level);
+  volumeSlider.title = `Volume ${level}%`;
+  volumeSlider.style.setProperty('--mc-volume', `${level}%`);
+}
+video.addEventListener('volumechange', renderVolume);
+renderVolume();
+
+onPress(speakerBtn, toggleMute);
+
+volumeSlider.addEventListener('input', () => {
+  video.volume = Number(volumeSlider.value) / 100;
+  if (video.muted && video.volume > 0) {
+    video.muted = false;
+  }
+});
+
+function volumeToast(): void {
+  toast(video.muted ? 'Muted' : `Volume ${volumePercent()}%`);
+}
+
+/** Set the level from 0 to 1. Any change of level is a request to hear it, so it unmutes. */
+function setVolume(level: number): void {
+  video.volume = Math.min(1, Math.max(0, level));
+  if (video.muted && video.volume > 0) {
+    video.muted = false;
+  }
+  volumeToast();
+}
+
+function toggleMute(): void {
+  video.muted = !video.muted;
+  volumeToast();
+}
+
+const VOLUMES = [100, 75, 50, 25];
+
+function volumeEntries(): MenuEntry[] {
+  const current = volumePercent();
+  return [
+    { kind: 'label', label: video.muted ? 'Muted' : `Volume ${current}%` },
+    { kind: 'checkbox', label: 'Mute', checked: video.muted, run: toggleMute },
+    { kind: 'divider' },
+    ...VOLUMES.map((level): MenuEntry => ({
+      kind: 'radio',
+      label: `${level}%`,
+      checked: !video.muted && current === level,
+      run: () => setVolume(level / 100),
+    })),
+  ];
+}
+
 function toggleLoop(): void {
   video.loop = !video.loop;
   // Persisted, not session-only: someone who loops one clip is looking at a
@@ -717,9 +875,133 @@ function togglePlay(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Control bar
+// ---------------------------------------------------------------------------
+// The native controls are off: the <video> element's bar cannot be extended, and
+// the speaker belongs next to Play. This bar replaces it, left to right: play, the
+// speaker, the time, the seek slider and fullscreen. It stays hidden with the stage
+// (before metadata, on an error) and under review mode, whose transport takes over.
+const PLAY_PATHS = ['M7 4.5v15l12-7.5z'];
+const PAUSE_PATHS = ['M7 5h3v14H7z', 'M14 5h3v14h-3z'];
+const FULLSCREEN_PATHS = ['M4 9V4h5', 'M15 4h5v5', 'M20 15v5h-5', 'M9 20H4v-5'];
+const EXIT_FULLSCREEN_PATHS = ['M9 4v5H4', 'M20 9h-5V4', 'M15 20v-5h5', 'M4 15h5v5'];
+
+/**
+ * Run `action` when the button is pressed, and after a pointer click let go of
+ * focus. A button that kept it would take the next Space as a press of itself
+ * instead of playing and pausing; a keyboard press (`detail` 0) keeps focus where
+ * the reader put it.
+ */
+function onPress(button: HTMLButtonElement, action: () => void): void {
+  button.addEventListener('click', (e) => {
+    action();
+    if (e.detail > 0) {
+      button.blur();
+    }
+  });
+}
+
+const controlBar = document.createElement('div');
+controlBar.id = 'mc-controls';
+controlBar.hidden = true;
+controlBar.setAttribute('role', 'toolbar');
+controlBar.setAttribute('aria-label', 'Video controls');
+const playBtn = document.createElement('button');
+playBtn.type = 'button';
+playBtn.className = 'mc-video-ctl';
+const timeEl = document.createElement('span');
+timeEl.className = 'mc-video-time';
+const seekSlider = document.createElement('input');
+seekSlider.type = 'range';
+seekSlider.className = 'mc-video-seek';
+seekSlider.min = '0';
+seekSlider.max = '0';
+seekSlider.step = 'any';
+seekSlider.value = '0';
+seekSlider.disabled = true;
+seekSlider.setAttribute('aria-label', 'Seek');
+const fullscreenBtn = document.createElement('button');
+fullscreenBtn.type = 'button';
+fullscreenBtn.className = 'mc-video-ctl mc-video-fullscreen';
+controlBar.append(playBtn, volumeBox, timeEl, seekSlider, fullscreenBtn);
+document.body.insertBefore(controlBar, statusEl);
+
+// True while the reader drags the seek slider, so a `timeupdate` does not pull the
+// thumb back out from under the pointer.
+let scrubbing = false;
+
+function refreshPlay(): void {
+  const playing = !video.paused && !video.ended;
+  const label = playing ? 'Pause (space)' : 'Play (space)';
+  playBtn.replaceChildren(svgIcon(playing ? PAUSE_PATHS : PLAY_PATHS, true));
+  playBtn.title = label;
+  playBtn.setAttribute('aria-label', label);
+}
+
+function refreshTime(): void {
+  const known = Number.isFinite(video.duration) && video.duration > 0;
+  const text = positionReadout(video.currentTime, video.duration);
+  timeEl.textContent = text;
+  seekSlider.max = known ? String(video.duration) : '0';
+  seekSlider.disabled = !known;
+  if (!scrubbing) {
+    seekSlider.value = String(video.currentTime);
+  }
+  seekSlider.setAttribute('aria-valuetext', text);
+}
+
+/** Fullscreen the whole page, not the <video>: the control bar has to come along. */
+function toggleFullscreen(): void {
+  if (document.fullscreenElement) {
+    void Promise.resolve(document.exitFullscreen?.()).catch(() => undefined);
+  } else {
+    void Promise.resolve(document.documentElement.requestFullscreen?.()).catch(() => undefined);
+  }
+}
+
+function refreshFullscreen(): void {
+  const on = Boolean(document.fullscreenElement);
+  // The status line steps aside in fullscreen, and the layout follows this class.
+  document.body.classList.toggle('mc-fullscreen', on);
+  const label = on ? 'Exit full screen (f)' : 'Full screen (f)';
+  fullscreenBtn.replaceChildren(svgIcon(on ? EXIT_FULLSCREEN_PATHS : FULLSCREEN_PATHS));
+  fullscreenBtn.title = label;
+  fullscreenBtn.setAttribute('aria-label', label);
+}
+
+onPress(playBtn, togglePlay);
+onPress(fullscreenBtn, toggleFullscreen);
+for (const name of ['play', 'pause', 'ended']) {
+  video.addEventListener(name, refreshPlay);
+}
+for (const name of ['timeupdate', 'seeked', 'durationchange', 'loadedmetadata']) {
+  video.addEventListener(name, refreshTime);
+}
+document.addEventListener('fullscreenchange', refreshFullscreen);
+seekSlider.addEventListener('pointerdown', () => (scrubbing = true));
+const endScrub = (): void => {
+  scrubbing = false;
+  refreshTime();
+};
+seekSlider.addEventListener('pointerup', endScrub);
+seekSlider.addEventListener('pointercancel', endScrub);
+seekSlider.addEventListener('input', () => {
+  const time = Number(seekSlider.value);
+  if (Number.isFinite(time)) {
+    video.currentTime = time;
+    timeEl.textContent = positionReadout(time, video.duration);
+  }
+});
+refreshPlay();
+refreshTime();
+refreshFullscreen();
+
 const review = createReview({
   video,
   stage,
+  // Review mode moves the speaker into its transport beside play, and back.
+  volume: volumeBox,
   post: (msg) => vscode.postMessage(msg),
   toast,
   viewState: { get: () => vscode.getState(), set: (value) => vscode.setState(value) },
@@ -744,16 +1026,45 @@ stage.addEventListener('click', (e) => {
     pressClosedMenu = false;
     return;
   }
-  // Clicks on the native control bar are the browser's; only the picture itself
-  // is a play/pause target.
+  // Only the picture itself is a play/pause target: the control bar is outside
+  // the stage and has its own buttons.
   // In review mode a press on the picture places a pin instead.
   if (e.target === video && !review.onPicture(e)) {
     togglePlay();
   }
 });
 
+// The wheel over the picture sets the level, as in most desktop players: 5% a
+// notch on a mouse, finer on a touchpad, whose deltas are smaller. There is
+// nothing to scroll in the stage, so the wheel has no other job here.
+// The same holds over the speaker and its slider.
+function onVolumeWheel(e: WheelEvent): void {
+  if (e.ctrlKey || e.deltaY === 0) {
+    return;
+  }
+  e.preventDefault();
+  const pixels = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 33 : e.deltaY;
+  setVolume(video.volume - (pixels / 100) * 0.05);
+}
+stage.addEventListener(
+  'wheel',
+  (e) => {
+    if (e.target === video) {
+      onVolumeWheel(e);
+    }
+  },
+  { passive: false },
+);
+volumeBox.addEventListener('wheel', onVolumeWheel, { passive: false });
+
 document.addEventListener('keydown', (e) => {
   if (contextMenu.isOpen() || e.ctrlKey || e.metaKey || e.altKey || isTextEntry(e.target)) {
+    return;
+  }
+  // A focused slider takes the arrows itself (the level, or the position), and
+  // review mode's Left and Right frame step or our own Up and Down volume would
+  // otherwise ride along with them.
+  if ((e.target === volumeSlider || e.target === seekSlider) && e.key.startsWith('Arrow')) {
     return;
   }
   // Review mode adds Left and Right, J K L, and steps `,` and `.` at the real
@@ -763,14 +1074,13 @@ document.addEventListener('keydown', (e) => {
   }
   switch (e.key) {
     case ' ': {
-      // Space is the browser's whenever it has somewhere of its own to go: the
-      // native controls bind it while the video element has focus (which a click
-      // on the picture hands them), and a button takes it as a click. Toggling
-      // on top of either would undo the first and double the second, so this
-      // covers only the case nothing else does, which is also the common one:
-      // the page itself holding focus.
+      // A focused button takes Space as a press of itself, and toggling here as
+      // well would double it (the speaker would mute and the video play at once).
+      // Everything else, the picture and the sliders included, has no use for
+      // Space, so it plays and pauses. Buttons let go of focus after a pointer
+      // click (see `onPress`), so the key keeps working after the mouse.
       const target = e.target as HTMLElement | null;
-      if (target === video || target?.tagName === 'BUTTON') {
+      if (target?.tagName === 'BUTTON') {
         break;
       }
       e.preventDefault();
@@ -785,14 +1095,23 @@ document.addEventListener('keydown', (e) => {
       nudge(1 / 30);
       break;
     case 'm':
-      video.muted = !video.muted;
+      toggleMute();
+      break;
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      // Five seconds, as in the audio player. Review mode has taken these keys
+      // for its frame step above, so this is the plain player only.
+      e.preventDefault();
+      nudge(e.key === 'ArrowRight' ? 5 : -5);
+      break;
+    case 'ArrowUp':
+    case 'ArrowDown':
+      // Prevented so the page does not scroll or move a focused control with it.
+      e.preventDefault();
+      setVolume(video.volume + (e.key === 'ArrowUp' ? 0.1 : -0.1));
       break;
     case 'f':
-      if (document.fullscreenElement) {
-        void document.exitFullscreen();
-      } else {
-        void video.requestFullscreen?.().catch(() => undefined);
-      }
+      toggleFullscreen();
       break;
     default:
       break;
@@ -850,6 +1169,7 @@ document.addEventListener('contextmenu', (e) => {
         })),
       ],
     },
+    { kind: 'submenu', label: 'Volume', entries: volumeEntries() },
     { kind: 'divider' },
     ...review.menuEntries(),
     { kind: 'divider' },

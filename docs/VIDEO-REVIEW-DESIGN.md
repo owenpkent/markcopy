@@ -227,7 +227,7 @@ markdown file is derived output and is never read back.
 - Resolve fps on the host and send it with `review`.
 - Review mode turns on automatically when a sidecar exists, and from a right-click menu
   item ("Review notes") otherwise. The choice is remembered as a `video.review` viewer
-  setting through `isViewerSetting`, like loop and autoplay. In review mode the native controls are replaced by a
+  setting through `isViewerSetting`, like loop and autoplay. In review mode the video's control bar is replaced by a
   custom transport: play, frame back, frame forward, speed cycle (0.5x, 1x, 2x), the
   timecode readout and the scrubber.
 - Note markers on the scrubber, one per note, clustered when closer than one target

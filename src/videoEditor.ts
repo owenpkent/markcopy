@@ -161,7 +161,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
           break;
         case 'updateSetting':
           // Persist a setting changed from the viewer's menu (theme, loop,
-          // autoplay) at the scope where it is defined, matching the other
+          // autoplay, volume) at the scope where it is defined, matching the other
           // previews. Only the keys the menu can send are written: the message
           // comes from a webview, and an unchecked key would let it set
           // `video.ffmpegPath`, which the host later executes.
@@ -220,6 +220,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
       size,
       autoplay: cfg.get<boolean>('video.autoplay', false),
       loop: cfg.get<boolean>('video.loop', false),
+      volume: clampVolume(cfg.get<number>('video.volume', 100)),
       proxyNote: built?.note,
     });
   }
@@ -260,7 +261,21 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
      across the Markdown, PDF, STL, and video previews. Video is letterboxed
      against it, so it stays deliberately dark by default: a white surround
      around a dark clip is the one thing a player should not do. */
-  body.mc-video { --mc-video-bg: #1e1e1e; --mc-video-fg: var(--vscode-foreground); }
+  body.mc-video {
+    --mc-video-bg: #1e1e1e;
+    --mc-video-fg: var(--vscode-foreground);
+    /* The layout from the bottom: the status line, the sound notice when it is up,
+       then the control bar, then the stage. Fullscreen drops the status line. */
+    --mc-status-h: 30px;
+    --mc-bar-h: 44px;
+  }
+  body.mc-video.mc-fullscreen { --mc-status-h: 0px; }
+  /* Auto keeps the dark surround under a light VS Code theme too, so the theme's own
+     foreground (#3b3b3b in Light Modern, about 1.4:1 on #1e1e1e) cannot be used
+     for the controls and readout drawn on it. VS Code's Dark Modern foreground
+     reads at about 10:1 here, and still over 7:1 at the buttons' 0.8 opacity. */
+  body.mc-video.vscode-light[data-mc-theme='auto'],
+  body.mc-video.vscode-high-contrast-light[data-mc-theme='auto'] { --mc-video-fg: #cccccc; }
   body.mc-video[data-mc-theme='light'] { --mc-video-bg: #f6f8fa; --mc-video-fg: #1f2328; }
   body.mc-video[data-mc-theme='dark'] { --mc-video-bg: #0d1117; --mc-video-fg: #e6edf3; }
   body.mc-video[data-mc-theme='green'] { --mc-video-bg: #000000; --mc-video-fg: #33ff33; }
@@ -276,9 +291,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   #mc-stage {
     position: fixed;
     /* --mc-notice-h is the sound notice's height, set by the webview while it is
-       up, so the notice pushes the video's own controls up rather than covering
-       them. */
-    inset: 0 0 calc(30px + var(--mc-notice-h, 0px)) 0;
+       up, so the notice pushes the control bar up rather than covering it. */
+    inset: 0 0 calc(var(--mc-status-h) + var(--mc-notice-h, 0px) + var(--mc-bar-h)) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -286,14 +300,14 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     box-sizing: border-box;
   }
   /* The element is sized by the box, not the file: a 4K clip must not push the
-     controls off-screen, and a 240p one must not be blown up to fill it. */
+     control bar off-screen, and a 240p one must not be blown up to fill it. */
   #mc-video { max-width: 100%; max-height: 100%; outline: none; }
   #mc-status {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 30px;
+    height: var(--mc-status-h);
     display: flex;
     align-items: center;
     padding: 0 12px;
@@ -304,6 +318,84 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  body.mc-fullscreen #mc-status { display: none; }
+
+  /* The control bar, built by src/webview/video.ts: play, the speaker, the time,
+     the seek slider and fullscreen. It sits above the notice and the status line,
+     and review mode's transport replaces it. Colours are the viewer's own tokens,
+     so it reads in all four themes. */
+  #mc-controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--mc-status-h) + var(--mc-notice-h, 0px));
+    height: var(--mc-bar-h);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    color: var(--mc-video-fg);
+  }
+  #mc-controls[hidden], body.mc-review #mc-controls { display: none; }
+  .mc-video-time {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 6px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .mc-video-seek {
+    flex: 1 1 80px;
+    min-width: 60px;
+    height: 32px;
+    margin: 0 4px;
+    accent-color: var(--mc-accent, #4493f8);
+    cursor: pointer;
+  }
+  .mc-video-seek:disabled { cursor: default; opacity: 0.45; }
+  /* The speaker: a 32px mute button and a slider for the level. */
+  .mc-video-volume { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+  .mc-video-ctl {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    opacity: 0.8;
+    cursor: pointer;
+  }
+  .mc-video-ctl:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .mc-video-ctl:focus-visible { outline: 2px solid var(--mc-accent, #4493f8); outline-offset: -2px; opacity: 1; }
+  .mc-video-volume-slider {
+    width: 88px;
+    height: 32px;
+    margin: 0;
+    accent-color: var(--mc-accent, #4493f8);
+    cursor: pointer;
+  }
+  /* A narrow pane. One row needs about 500px before the seek slider is usable,
+     and the bar cannot scroll (the page is overflow: hidden), so below that the
+     slider takes a row of its own over the buttons and the bar doubles in height.
+     Narrower still, the volume slider goes (the speaker, the wheel and Up/Down
+     remain), then the time readout (the slider still shows the position), so
+     play, the speaker and full screen always fit. */
+  @media (max-width: 560px) {
+    body.mc-video { --mc-bar-h: 76px; }
+    #mc-controls { flex-wrap: wrap; align-content: center; row-gap: 0; }
+    .mc-video-seek { order: -1; flex: 1 0 100%; margin: 0; height: 28px; }
+    .mc-video-fullscreen { margin-left: auto; }
+  }
+  @media (max-width: 360px) { .mc-video-volume-slider { display: none; } }
+  @media (max-width: 240px) { .mc-video-time { display: none; } }
   #mc-error {
     position: fixed;
     inset: 0;
@@ -369,7 +461,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
      neither one sets a display. */
   #mc-stage[hidden], #mc-error[hidden] { display: none; }
 
-  /* The sound-copy notice. A bar sitting on top of the status line, so it never
+  /* The sound-copy notice. A bar sitting on top of the status line, under the control bar, so it never
      hides the picture behind a blocking overlay. Colours come from VS Code's own
      widget tokens, which are defined for light, dark, and high-contrast themes
      alike; the fallbacks only matter outside VS Code. The top border picks up
@@ -379,7 +471,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 30px;
+    bottom: var(--mc-status-h);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -401,7 +493,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
 </head>
 <body class="mc-video" data-mc-theme="${theme}" data-mc-src="${escapeAttr(fileSrc)}" data-mc-proxy-src="${escapeAttr(proxySrc)}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="mc-stage" hidden>
-    <video id="mc-video" controls playsinline preload="metadata"></video>
+    <video id="mc-video" playsinline preload="metadata"></video>
   </div>
   <div id="mc-error" hidden></div>
   <div id="mc-notice" class="mc-video-notice" role="status" hidden></div>
@@ -781,4 +873,17 @@ export async function saveFrame(
 export function basename(uri: vscode.Uri): string {
   const p = uri.path;
   return p.substring(p.lastIndexOf('/') + 1);
+}
+
+/**
+ * The markcopy.video.volume setting as a whole percentage. settings.json is
+ * hand-editable, so a value outside the schema (a string, 150, 0.5) is mapped
+ * back into range rather than handed to the page, where `video.volume` throws
+ * on anything outside 0 to 1.
+ */
+export function clampVolume(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 100;
+  }
+  return Math.min(100, Math.max(0, Math.round(value)));
 }
