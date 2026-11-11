@@ -1040,9 +1040,10 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   color: var(--rv-fg);
   background: var(--rv-bg);
 }
-/* The video's status line is 40px, to fit the speaker's 32px button. */
+/* The video's status line is 30px, and gone in fullscreen. The review fills what
+   is left, with no room kept for the control bar: its transport replaces it. */
 body.mc-video .mc-rv {
-  inset: 0 0 calc(40px + var(--mc-notice-h, 0px)) 0;
+  inset: 0 0 calc(var(--mc-status-h, 30px) + var(--mc-notice-h, 0px)) 0;
 }
 /* The viewer is dark under a light VS Code theme in auto, so use the dark accent. */
 body.mc-video.vscode-light[data-mc-theme='auto'] .mc-rv {

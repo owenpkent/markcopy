@@ -5,7 +5,7 @@
 // element, with wall-clock times (`HH:MM:SS.mmm`) in place of frames and timecode.
 // Clock mode has no frame stepping, frame rate, pins or drawings, and the player's
 // own toolbar stays the transport. Once the host sends its first `review`
-// message the native controls give way to a transport, a scrubber carrying the
+// message the page's own control bar gives way to a transport, a scrubber carrying the
 // notes as markers, and a notes panel with a composer at its foot. Everything here
 // is a view of the host's sidecar: an edit is only ever a small message (add, done,
 // delete, restore) and the page waits for the host's next `review` to show it.
@@ -53,6 +53,14 @@ export interface ReviewDeps {
   onModeChange?(active: boolean): void;
   /** Called after the notes or the pending range change, for a view that draws them (the audio waveform). */
   onChange?(): void;
+  /**
+   * An element the page's own control bar holds (the video's speaker and volume
+   * slider), which review mode borrows: it sits right after the transport's play
+   * button while review is on, and goes back where it was when review closes. The
+   * review hides that bar, so without this the sound would have no control here.
+   * Absent for audio and images, whose pages have no such element.
+   */
+  volume?: HTMLElement;
   /** The element holding the media's page; review mode moves it into its own layout. */
   stage: HTMLDivElement;
   /** Anything the host handles: review messages and `updateSetting`. */
@@ -273,6 +281,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
   // The frame the pins were last drawn for, so playback redraws only on a new one.
   let pinFrame = -1;
   let ui: ReturnType<typeof build> | undefined;
+  // Where `deps.volume` lived before review borrowed it, so closing can return it.
+  let volumeHome: { parent: Node; next: Node | null } | undefined;
 
   const saved = (deps.viewState?.get() as { review?: { sort?: unknown } } | undefined)?.review;
   if (saved && SORTS.includes(saved.sort as NoteSort)) {
@@ -1195,10 +1205,13 @@ export function createReview(deps: ReviewDeps): ReviewController {
   function enter(): void {
     ui ??= build();
     ui.root.hidden = false;
+    if (deps.volume && !clock && !volumeHome && deps.volume.parentNode) {
+      volumeHome = { parent: deps.volume.parentNode, next: deps.volume.nextSibling };
+      ui.play.after(deps.volume);
+    }
     // The stage joins the layout in place of its fixed position over the page.
     ui.main.prepend(stage);
     document.body.classList.add('mc-review');
-    video.controls = false;
     isActive = true;
     tick();
     deps.onModeChange?.(true);
@@ -1207,7 +1220,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
   function exit(): void {
     isActive = false;
     document.body.classList.remove('mc-review');
-    video.controls = clock ? false : true;
+    if (deps.volume && volumeHome) {
+      volumeHome.parent.insertBefore(deps.volume, volumeHome.next);
+      volumeHome = undefined;
+    }
     renderPins(true);
     if (ui) {
       document.body.insertBefore(stage, ui.root);

@@ -261,7 +261,15 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
      across the Markdown, PDF, STL, and video previews. Video is letterboxed
      against it, so it stays deliberately dark by default: a white surround
      around a dark clip is the one thing a player should not do. */
-  body.mc-video { --mc-video-bg: #1e1e1e; --mc-video-fg: var(--vscode-foreground); }
+  body.mc-video {
+    --mc-video-bg: #1e1e1e;
+    --mc-video-fg: var(--vscode-foreground);
+    /* The layout from the bottom: the status line, the sound notice when it is up,
+       then the control bar, then the stage. Fullscreen drops the status line. */
+    --mc-status-h: 30px;
+    --mc-bar-h: 44px;
+  }
+  body.mc-video.mc-fullscreen { --mc-status-h: 0px; }
   body.mc-video[data-mc-theme='light'] { --mc-video-bg: #f6f8fa; --mc-video-fg: #1f2328; }
   body.mc-video[data-mc-theme='dark'] { --mc-video-bg: #0d1117; --mc-video-fg: #e6edf3; }
   body.mc-video[data-mc-theme='green'] { --mc-video-bg: #000000; --mc-video-fg: #33ff33; }
@@ -277,9 +285,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
   #mc-stage {
     position: fixed;
     /* --mc-notice-h is the sound notice's height, set by the webview while it is
-       up, so the notice pushes the video's own controls up rather than covering
-       them. */
-    inset: 0 0 calc(40px + var(--mc-notice-h, 0px)) 0;
+       up, so the notice pushes the control bar up rather than covering it. */
+    inset: 0 0 calc(var(--mc-status-h) + var(--mc-notice-h, 0px) + var(--mc-bar-h)) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -287,32 +294,63 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     box-sizing: border-box;
   }
   /* The element is sized by the box, not the file: a 4K clip must not push the
-     controls off-screen, and a 240p one must not be blown up to fill it. */
+     control bar off-screen, and a 240p one must not be blown up to fill it. */
   #mc-video { max-width: 100%; max-height: 100%; outline: none; }
   #mc-status {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 40px;
+    height: var(--mc-status-h);
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 0 8px 0 12px;
+    padding: 0 12px;
     box-sizing: border-box;
     font-size: 11px;
-  }
-  .mc-video-status-text {
-    flex: 1 1 auto;
-    min-width: 0;
     opacity: 0.75;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  body.mc-fullscreen #mc-status { display: none; }
+
+  /* The control bar, built by src/webview/video.ts: play, the speaker, the time,
+     the seek slider and fullscreen. It sits above the notice and the status line,
+     and review mode's transport replaces it. Colours are the viewer's own tokens,
+     so it reads in all four themes. */
+  #mc-controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--mc-status-h) + var(--mc-notice-h, 0px));
+    height: var(--mc-bar-h);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    color: var(--mc-video-fg);
+  }
+  #mc-controls[hidden], body.mc-review #mc-controls { display: none; }
+  .mc-video-time {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .mc-video-seek {
+    flex: 1 1 80px;
+    min-width: 60px;
+    height: 32px;
+    margin: 0 4px;
+    accent-color: var(--mc-accent, #4493f8);
+    cursor: pointer;
+  }
+  .mc-video-seek:disabled { cursor: default; opacity: 0.45; }
   /* The speaker: a 32px mute button and a slider for the level. */
   .mc-video-volume { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
-  .mc-video-speaker {
+  .mc-video-ctl {
     width: 32px;
     height: 32px;
     padding: 0;
@@ -326,8 +364,8 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     opacity: 0.8;
     cursor: pointer;
   }
-  .mc-video-speaker:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
-  .mc-video-speaker:focus-visible { outline: 2px solid var(--mc-accent, #4493f8); outline-offset: -2px; opacity: 1; }
+  .mc-video-ctl:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .mc-video-ctl:focus-visible { outline: 2px solid var(--mc-accent, #4493f8); outline-offset: -2px; opacity: 1; }
   .mc-video-volume-slider {
     width: 88px;
     height: 32px;
@@ -335,6 +373,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     accent-color: var(--mc-accent, #4493f8);
     cursor: pointer;
   }
+  @media (max-width: 480px) { .mc-video-volume-slider { width: 56px; } }
   #mc-error {
     position: fixed;
     inset: 0;
@@ -400,7 +439,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
      neither one sets a display. */
   #mc-stage[hidden], #mc-error[hidden] { display: none; }
 
-  /* The sound-copy notice. A bar sitting on top of the status line, so it never
+  /* The sound-copy notice. A bar sitting on top of the status line, under the control bar, so it never
      hides the picture behind a blocking overlay. Colours come from VS Code's own
      widget tokens, which are defined for light, dark, and high-contrast themes
      alike; the fallbacks only matter outside VS Code. The top border picks up
@@ -410,7 +449,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 40px;
+    bottom: var(--mc-status-h);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -432,7 +471,7 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
 </head>
 <body class="mc-video" data-mc-theme="${theme}" data-mc-src="${escapeAttr(fileSrc)}" data-mc-proxy-src="${escapeAttr(proxySrc)}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
   <div id="mc-stage" hidden>
-    <video id="mc-video" controls playsinline preload="metadata"></video>
+    <video id="mc-video" playsinline preload="metadata"></video>
   </div>
   <div id="mc-error" hidden></div>
   <div id="mc-notice" class="mc-video-notice" role="status" hidden></div>
