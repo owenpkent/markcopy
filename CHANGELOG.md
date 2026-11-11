@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.4.0] - 2026-11-11
+
 ### Added
 
 - **Video volume controls.** The video preview now has its own control bar instead of the browser's: play and pause, a speaker button with a volume slider beside it (the icon shows muted, low or high), the time, a seek bar, and full screen, which fills the whole page so the bar stays usable. The browser's picture-in-picture and download entries are not offered. Under a light VS Code theme in Auto, the bar and readout are drawn light on the player's dark surround, so they stay readable. Right-click a video for a **Volume** submenu with the current level, Mute, and 100%, 75%, 50% and 25%. The mouse wheel over the picture or the speaker changes the volume 5% a notch, and **Up** and **Down** step it 10%; **Left** and **Right** seek 5 seconds. In review mode the speaker and slider sit beside the notes transport's play button. The level is remembered for the next video in the new `markcopy.video.volume` setting (0 to 100, default 100), whichever control set it; muting is not saved.
@@ -15,11 +22,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Images keep their shape in a narrow pane.** An HTML image that gives both a width and a height was squashed when the pane was narrower than it; it now scales down in proportion.
 - **Long display equations wrap.** A `$$...$$` equation wider than the pane now breaks onto further lines after an `=`, `+` or similar operator, at full display size, instead of running off the edge and pushing the page sideways. An equation with nowhere to break, or one that needs KaTeX's display mode (`	ag`, `align`), scrolls inside its own box instead.
 - **Narrow panes get more room.** Below about 520 px the preview's side margins shrink from 40 px to 16 px, so a split pane has space for its content.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [1.3.1] - 2026-11-09
 
@@ -613,7 +615,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/owenpkent/markcopy/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/owenpkent/markcopy/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/owenpkent/markcopy/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/owenpkent/markcopy/compare/v1.1.0...v1.2.0
