@@ -67,6 +67,7 @@ export function createMarkdownIt(opts: MarkdownItOptions = {}): MarkdownItInstan
   }
   addSourceLineMapping(md);
   rewriteImageSrc(md);
+  rewriteHtmlImageSrc(md);
   return md;
 }
 
@@ -297,6 +298,49 @@ function rewriteImageSrc(md: MarkdownItInstance): void {
       ? original(tokens, idx, options, env, self)
       : self.renderToken(tokens, idx, options);
   };
+}
+
+// The same hook for an image written as raw HTML, `<img src="logo.png" width="200">`,
+// which is how a README sizes a picture. markdown-it passes raw HTML through as
+// html_block and html_inline tokens, so the image rule above never sees these, and
+// a relative src reached the sandboxed preview unresolved: a broken image.
+//
+// Only the `src` of an `<img>` tag is touched, and a src the resolver leaves as it
+// was (a remote URL, a data: URI) keeps its original text byte for byte. The value
+// is decoded before resolving, since `&amp;` in an attribute means `&`, and written
+// back escaped and double-quoted.
+const IMG_SRC = /(<img\b[^>]*?\ssrc\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+
+function decodeAttr(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/** Rewrite every `<img src>` in a chunk of raw HTML through `resolve`. */
+export function resolveHtmlImages(html: string, resolve: (src: string) => string): string {
+  return html.replace(IMG_SRC, (match, prefix: string, dq?: string, sq?: string, bare?: string) => {
+    const raw = dq ?? sq ?? bare ?? '';
+    const src = decodeAttr(raw);
+    const resolved = resolve(src);
+    return resolved === src ? match : `${prefix}"${escapeAttr(resolved)}"`;
+  });
+}
+
+function rewriteHtmlImageSrc(md: MarkdownItInstance): void {
+  for (const name of ['html_block', 'html_inline'] as const) {
+    const original = md.renderer.rules[name];
+    md.renderer.rules[name] = (tokens, idx, options, env, self) => {
+      const out = original
+        ? original(tokens, idx, options, env, self)
+        : self.renderToken(tokens, idx, options);
+      const resolve = env?.resolveImage as ((src: string) => string) | undefined;
+      return resolve ? resolveHtmlImages(out, resolve) : out;
+    };
+  }
 }
 
 // Tag top-level block tokens with data-source-line so the webview can sync scroll

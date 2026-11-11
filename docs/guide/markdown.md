@@ -40,7 +40,9 @@ Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-cl
 
 ## Local images
 
-Local images render in the preview. Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged.
+Local images render in the preview. Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged. The same goes for an image written as HTML, `<img src="docs/logo.png" width="200">`, which is how a README usually sizes one. An image that gives both a width and a height keeps its shape when a narrow pane shrinks it.
+
+A display equation too long for the pane scrolls sideways inside its own box, like a wide table, instead of pushing the page out.
 
 ## Edit mode
 

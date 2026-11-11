@@ -177,6 +177,42 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('src="webview:media/x.png"');
   });
 
+  it('routes a raw HTML <img> src through env.resolveImage too', () => {
+    const env = {
+      resolveImage: (src: string) => (src.startsWith('http') ? src : `webview:${src}`),
+    };
+    const block = md.render('<img src="docs/logo.png" width="200" height="50" alt="Logo">\n', env);
+    expect(block).toContain('<img src="webview:docs/logo.png" width="200" height="50" alt="Logo">');
+    const inline = md.render("Before <img alt='x' src='a b.png'> after.\n", env);
+    expect(inline).toContain('src="webview:a b.png"');
+    const bare = md.render('<p><img src=pic.png></p>\n', env);
+    expect(bare).toContain('<img src="webview:pic.png">');
+  });
+
+  it('decodes an HTML image src before resolving, and escapes the result', () => {
+    const seen: string[] = [];
+    const html = md.render('<img src="a&amp;b.png">\n', {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return `webview:${src}"x`;
+      },
+    });
+    expect(seen).toEqual(['a&b.png']);
+    expect(html).toContain('src="webview:a&amp;b.png&quot;x"');
+  });
+
+  it('leaves a remote HTML image, and other tags, byte for byte', () => {
+    const env = {
+      resolveImage: (src: string) => (src.startsWith('http') ? src : `webview:${src}`),
+    };
+    const source = `<img src='https://example.com/a.png?x=1&amp;y=2'>\n\n<video src="clip.mp4"></video>\n`;
+    expect(md.render(source, env)).toBe(md.render(source));
+  });
+
+  it('leaves an HTML image src unchanged when no resolver is supplied', () => {
+    expect(md.render('<img src="docs/logo.png">\n')).toContain('<img src="docs/logo.png">');
+  });
+
   it('leaves image src unchanged when no resolver is supplied', () => {
     const html = md.render('![alt](media/x.png)');
     expect(html).toContain('src="media/x.png"');

@@ -110,6 +110,9 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
 - [ ] `[^note]` footnote references and definitions render as a numbered footnotes section, with back-links to the prose; an unreferenced `[^orphan]:` definition stays visible as plain text instead of disappearing, and `^[...]` inline footnote shorthand stays literal. Turning `markcopy.footnotes` off shows literal `[^note]` text again.
 - [ ] Relative and absolute local images render; remote images still load.
+- [ ] A raw HTML `<img src="wide.png" width="1600" height="400">` with a relative path renders, not just its alt text. In a pane narrower than the image it shrinks and keeps its 4:1 shape instead of being squashed.
+- [ ] A `$$...$$` equation with 40 terms scrolls sideways inside its own box with nothing clipped top or bottom, and the page itself gets no sideways scrollbar.
+- [ ] In a pane narrower than about 520 px the page's side margins drop from 40 px to 16 px; a CSV or sheet preview keeps its own spacing.
 
 ### Edit mode
 

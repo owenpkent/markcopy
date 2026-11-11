@@ -113,6 +113,13 @@ body {
   color: var(--mc-fg);
   background: var(--mc-bg);
 }
+/* A narrow split. Forty pixels a side is a quarter of a 300px pane, which makes
+   code, tables and equations wrap or scroll far sooner than they need to. */
+@media (max-width: 520px) {
+  .markdown-body {
+    padding: 20px 16px 120px;
+  }
+}
 
 .markdown-body h1,
 .markdown-body h2 {
@@ -422,6 +429,24 @@ body.mc-csv-resizing {
 
 .markdown-body img {
   max-width: 100%;
+}
+/* An HTML image that states both its width and height (how a README sizes one)
+   keeps that shape when max-width shrinks it in a narrow pane: with height auto
+   the browser takes the ratio from the two attributes, so the picture scales
+   instead of being squashed, and still shows at its stated size when it fits.
+   An image with only one of the two is left to the browser, since height: auto
+   would throw away a height given on its own. */
+.markdown-body img[width][height] {
+  height: auto;
+}
+/* KaTeX keeps a display equation on one line. A long one would run past the page
+   edge and drag the whole preview sideways, so it scrolls inside its own box, as a
+   wide table does. The vertical padding keeps tall limits and superscripts clear of
+   the clip that overflow-x brings with it. */
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
 }
 .markdown-body a {
   color: var(--mc-link);

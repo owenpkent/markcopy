@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **HTML images with a relative path now show.** An image written as HTML, such as `<img src="docs/logo.png" width="200">` (how a README usually sizes one), showed only its alt text, because only Markdown `![](...)` images had their paths resolved for the preview. Both forms resolve now, and remote and `data:` images are untouched.
+- **Images keep their shape in a narrow pane.** An HTML image that gives both a width and a height was squashed when the pane was narrower than it; it now scales down in proportion.
+- **Long display equations no longer push the page sideways.** A `$$...$$` equation wider than the pane scrolls inside its own box, as a wide table does.
+- **Narrow panes get more room.** Below about 520 px the preview's side margins shrink from 40 px to 16 px, so a split pane has space for its content.
+
 ### Planned
 
 - PlantUML support.
