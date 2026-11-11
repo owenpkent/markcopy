@@ -16,6 +16,9 @@ const REDRAW_SETTINGS = [
   'markcopy.xlsx.maxRows',
   'markcopy.xlsx.maxColumns',
   'markcopy.styleProfile',
+  // No code blocks in a grid, but the shared Preferences menu shows the toggle,
+  // and its tick only follows the setting when a render carries it.
+  'markcopy.wrapCode',
 ];
 
 // A read-only custom editor for .xlsx / .xlsm workbooks, built on the shared

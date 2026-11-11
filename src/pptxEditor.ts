@@ -16,6 +16,9 @@ const REDRAW_SETTINGS = [
   'markcopy.pptx.maxSlides',
   'markcopy.pptx.showNotes',
   'markcopy.styleProfile',
+  // A deck rarely holds a code block, but the shared Preferences menu shows the
+  // toggle, and its tick only follows the setting when a render carries it.
+  'markcopy.wrapCode',
 ];
 
 // A read-only custom editor for .pptx / .pptm presentations, built on the

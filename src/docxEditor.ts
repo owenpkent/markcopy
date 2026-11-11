@@ -11,7 +11,13 @@ import {
 // The settings a document is drawn from. Anything outside this list cannot
 // change what the page looks like, so it must not cost a re-read and a
 // re-parse.
-const REDRAW_SETTINGS = ['markcopy.theme', 'markcopy.styleProfile', 'markcopy.math'];
+const REDRAW_SETTINGS = [
+  'markcopy.theme',
+  'markcopy.styleProfile',
+  'markcopy.math',
+  // Monospace paragraphs come out as <pre><code> (src/docx/read/blocks.ts).
+  'markcopy.wrapCode',
+];
 
 // A read-only custom editor for .docx / .docm Word documents, built on the same
 // OoxmlEditorProvider scaffold as the workbook and deck editors. The whole
