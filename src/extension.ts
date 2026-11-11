@@ -1024,6 +1024,7 @@ function update(state: PreviewState, ackEdit?: number): void {
     autoPreview: cfg.get<boolean>('autoPreview', true),
     math,
     footnotes,
+    wrapCode: cfg.get<boolean>('wrapCode', true),
   });
 }
 

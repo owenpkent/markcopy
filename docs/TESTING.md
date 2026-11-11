@@ -104,6 +104,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] ★ Open `sample.md`; its tab shows the rendered preview (`markcopy.autoPreview`), in one editor group, with no split and no text editor left beside it.
 - [ ] Headings, lists, task lists, blockquotes, links, and footnotes render GitHub-style.
 - [ ] Fenced code blocks are syntax-highlighted.
+- [ ] A fenced code block with a 400-character line (and one with a long URL that has no spaces) wraps inside the block with no sideways scrollbar, keeps its indentation on the first line, and the highlighting is intact. Right-click > **Preferences** > **Wrap code lines** unticks, the block scrolls sideways again, and `markcopy.wrapCode` is `false` in settings. **Copy Block** pasted into Word and Gmail looks the same with the setting on and off.
 - [ ] Mermaid diagrams render and re-theme when the VS Code theme changes. A flowchart such as `flowchart LR; A[Alpha] -->|Edge| B[Beta]` shows its node text and the edge label, not empty boxes (the SVG passes through DOMPurify, which once stripped them).
 - [ ] With `"markcopy.mermaid": { "layout": "elk" }`, a flowchart still renders in the preview with no CSP errors in the webview developer tools (ELK loads as a separate chunk), and its edges are routed as orthogonal elbows rather than dagre's curves.
 - [ ] A `mindmap` diagram still renders with its radial layout (branches fanning out from the center), not a left-to-right tree.

@@ -70,6 +70,7 @@ let currentSyncScroll = true;
 let currentAutoPreview = true;
 let currentMath = true;
 let currentFootnotes = true;
+let currentWrapCode = true;
 // The document version the grid on screen was drawn from. Only the context menu
 // reads it, and only while building itself, which is why a global is safe here
 // where the cell editor deliberately closes over its own render version instead:
@@ -156,6 +157,10 @@ let pendingRender: Record<string, unknown> | undefined;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
+  // Display only, so it is a class on the body rather than part of the render:
+  // the HTML is the same either way. An older host sends no value: wrap.
+  currentWrapCode = msg.wrapCode === undefined ? true : Boolean(msg.wrapCode);
+  document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
   void render(
@@ -1163,6 +1168,7 @@ function buildSettingsEntries(): MenuEntry[] {
     checkboxEntry('Auto-open preview', currentAutoPreview, 'autoPreview'),
     checkboxEntry('Math ($ LaTeX)', currentMath, 'math'),
     checkboxEntry('Footnotes ([^note])', currentFootnotes, 'footnotes'),
+    checkboxEntry('Wrap code lines', currentWrapCode, 'wrapCode'),
     { kind: 'divider' },
     {
       kind: 'item',

@@ -180,6 +180,7 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
         autoPreview: cfg.get<boolean>('autoPreview', true),
         math: cfg.get<boolean>('math', true),
         footnotes: cfg.get<boolean>('footnotes', true),
+        wrapCode: cfg.get<boolean>('wrapCode', true),
         // What this surface does, which is a different question from what the
         // user has enabled: this format has no TextDocument to reveal into,
         // so scroll sync never applies regardless of the setting above.

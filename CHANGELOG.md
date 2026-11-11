@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Code blocks wrap long lines.** A long line in a fenced code block now wraps to the preview's width instead of scrolling the block sideways, breaking inside a long URL or hash when it has to. Only the display changes: copying a code block gives the same result as before. Turn it off with the new `markcopy.wrapCode` setting (on by default) or **Preferences > Wrap code lines** in the preview's right-click menu.
+
 ### Planned
 
 - PlantUML support.
