@@ -205,6 +205,26 @@ describe('VideoEditorProvider sound copy', () => {
     expect(tools.transcode).toHaveBeenCalledTimes(1);
   });
 
+  it('draws the Auto surround controls light under a light VS Code theme', async () => {
+    const provider = new VideoEditorProvider({
+      extensionUri: { path: '/ext', fsPath: '/ext' },
+    } as unknown as vscode.ExtensionContext);
+    const document = provider.openCustomDocument({
+      path: '/videos/clip.mp4',
+      fsPath: '/videos/clip.mp4',
+    } as vscode.Uri);
+    const { panel } = createPanel();
+    await provider.resolveCustomEditor(document, panel);
+    // Auto keeps the dark #1e1e1e surround whatever the VS Code theme, so its
+    // foreground must not be the light theme's own near-black text. Contrast
+    // itself is a layout fact jsdom cannot measure: docs/TESTING.md checks it.
+    const css = panel.webview.html.replace(/\s+/g, ' ');
+    expect(css).toContain('body.mc-video { --mc-video-bg: #1e1e1e;');
+    expect(css).toMatch(
+      /body\.mc-video\.vscode-light\[data-mc-theme='auto'\],\s*body\.mc-video\.vscode-high-contrast-light\[data-mc-theme='auto'\] \{ --mc-video-fg: #cccccc; \}/,
+    );
+  });
+
   it('writes only the settings the viewer menus can send', async () => {
     const provider = new VideoEditorProvider({
       extensionUri: { path: '/ext', fsPath: '/ext' },

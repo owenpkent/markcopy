@@ -270,6 +270,12 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     --mc-bar-h: 44px;
   }
   body.mc-video.mc-fullscreen { --mc-status-h: 0px; }
+  /* Auto keeps the dark surround under a light VS Code theme too, so the theme's own
+     foreground (#3b3b3b in Light Modern, about 1.4:1 on #1e1e1e) cannot be used
+     for the controls and readout drawn on it. VS Code's Dark Modern foreground
+     reads at about 10:1 here, and still over 7:1 at the buttons' 0.8 opacity. */
+  body.mc-video.vscode-light[data-mc-theme='auto'],
+  body.mc-video.vscode-high-contrast-light[data-mc-theme='auto'] { --mc-video-fg: #cccccc; }
   body.mc-video[data-mc-theme='light'] { --mc-video-bg: #f6f8fa; --mc-video-fg: #1f2328; }
   body.mc-video[data-mc-theme='dark'] { --mc-video-bg: #0d1117; --mc-video-fg: #e6edf3; }
   body.mc-video[data-mc-theme='green'] { --mc-video-bg: #000000; --mc-video-fg: #33ff33; }
