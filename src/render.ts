@@ -318,18 +318,54 @@ function rewriteImageSrc(md: MarkdownItInstance): void {
 
 let entityUtils: MarkdownItInstance['utils'] | undefined;
 
+// The HTML standard's table for numeric references to the C1 controls, which a
+// page meant as their Windows-1252 characters. The five 0x80-0x9F codes it does
+// not list are kept as they are.
+const WINDOWS_1252: Record<number, number> = {
+  0x80: 0x20ac,
+  0x82: 0x201a,
+  0x83: 0x0192,
+  0x84: 0x201e,
+  0x85: 0x2026,
+  0x86: 0x2020,
+  0x87: 0x2021,
+  0x88: 0x02c6,
+  0x89: 0x2030,
+  0x8a: 0x0160,
+  0x8b: 0x2039,
+  0x8c: 0x0152,
+  0x8e: 0x017d,
+  0x91: 0x2018,
+  0x92: 0x2019,
+  0x93: 0x201c,
+  0x94: 0x201d,
+  0x95: 0x2022,
+  0x96: 0x2013,
+  0x97: 0x2014,
+  0x98: 0x02dc,
+  0x99: 0x2122,
+  0x9a: 0x0161,
+  0x9b: 0x203a,
+  0x9c: 0x0153,
+  0x9e: 0x017e,
+  0x9f: 0x0178,
+};
+
 /** One character reference, as an HTML attribute value means it. */
 function decodeReference(ref: string): string {
   if (ref[1] === '#') {
     const hex = ref[2] === 'x' || ref[2] === 'X';
     const digits = ref.slice(hex ? 3 : 2).replace(/;$/, '');
+    // The whole digit run is read before its value is looked at, leading zeros and
+    // all, as HTML does: `&#000000039;` is an apostrophe, not a null and a `39;`.
     const code = parseInt(digits, hex ? 16 : 10);
     // The HTML standard turns a null, a surrogate or anything past U+10FFFF into
-    // the replacement character rather than leaving the reference as text.
+    // the replacement character rather than leaving the reference as text, and
+    // reads 0x80 to 0x9F as the Windows-1252 characters they meant.
     if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
       return '�';
     }
-    return String.fromCodePoint(code);
+    return String.fromCodePoint(WINDOWS_1252[code] ?? code);
   }
   // Named references go through markdown-it's own table (the full HTML list).
   // The reference holds no backslash, so unescapeAll has only the entity to decode.
@@ -348,7 +384,7 @@ function decodeAttr(value: string): string {
     return value;
   }
   return value.replace(
-    /&(?:#[xX][0-9a-fA-F]{1,6};?|#[0-9]{1,7};?|[A-Za-z][A-Za-z0-9]{1,31};)/g,
+    /&(?:#[xX][0-9a-fA-F]+;?|#[0-9]+;?|[A-Za-z][A-Za-z0-9]{1,31};)/g,
     decodeReference,
   );
 }

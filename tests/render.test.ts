@@ -238,12 +238,21 @@ describe('createMarkdownIt', () => {
     expect(md.render('<img src="c&#x20;d.png">\n', env)).toContain('src="webview:c d.png"');
     // Decoded exactly once: `&amp;#58;` is the text `&#58;`, not a colon.
     md.render('<img src="e&amp;#58;f.png">\n', env);
+    // Zero-padded: the whole digit run is one reference, leading zeros and all.
+    md.render('<img src="g&#000000039;h.png">\n', env);
+    const padded = '<img src="https&#x0000003A;//example.com/c.png">\n';
+    expect(md.render(padded, env)).toBe(md.render(padded));
+    // A C1 code means its Windows-1252 character, as HTML reads it.
+    md.render('<img src="i&#150;j.png">\n', env);
     expect(seen).toEqual([
       'https://example.com/a.png',
       'https://example.com/b.png',
       'a b.png',
       'c d.png',
       'e&#58;f.png',
+      "g'h.png",
+      'https://example.com/c.png',
+      'i–j.png',
     ]);
   });
 
