@@ -209,6 +209,82 @@ describe('createMarkdownIt', () => {
     expect(md.render(source, env)).toBe(md.render(source));
   });
 
+  it('reads an <img> tag attribute by attribute, so src text inside alt is left alone', () => {
+    const seen: string[] = [];
+    const env = {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return src.startsWith('https:') ? src : `webview:${src}`;
+      },
+    };
+    const source = `<img alt="Example src='placeholder.png'" src="https://example.com/logo.png">\n`;
+    expect(md.render(source, env)).toBe(md.render(source));
+    expect(seen).toEqual(['https://example.com/logo.png']);
+  });
+
+  it('decodes numeric references once before classifying the src', () => {
+    const seen: string[] = [];
+    const env = {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return src.startsWith('https:') ? src : `webview:${src}`;
+      },
+    };
+    // A remote URL spelled with a reference stays exactly as written.
+    const remote =
+      '<img src="https&#58;//example.com/a.png"> <img src="https&#x3A;//example.com/b.png">\n';
+    expect(md.render(remote, env)).toBe(md.render(remote));
+    expect(md.render('<img src="a&#32;b.png">\n', env)).toContain('src="webview:a b.png"');
+    expect(md.render('<img src="c&#x20;d.png">\n', env)).toContain('src="webview:c d.png"');
+    // Decoded exactly once: `&amp;#58;` is the text `&#58;`, not a colon.
+    md.render('<img src="e&amp;#58;f.png">\n', env);
+    expect(seen).toEqual([
+      'https://example.com/a.png',
+      'https://example.com/b.png',
+      'a b.png',
+      'c d.png',
+      'e&#58;f.png',
+    ]);
+  });
+
+  it('skips comments and script bodies, and consumes each tag once', () => {
+    let calls = 0;
+    const env = {
+      resolveImage: (src: string) => {
+        calls++;
+        return `webview:${src}`;
+      },
+    };
+    const source =
+      '<!-- <img src="a.png"> --><script>"<img src=b.png>"</script><img src="c.png">\n';
+    const html = md.render(source, env);
+    expect(calls).toBe(1);
+    expect(html).toContain('<img src="a.png">');
+    expect(html).toContain('<img src="webview:c.png">');
+  });
+
+  it('stays linear on a file full of <img text', () => {
+    let calls = 0;
+    const env = {
+      resolveImage: (src: string) => {
+        calls++;
+        return src;
+      },
+    };
+    // About 320 KB each. The regex this replaced took over four seconds on the
+    // first; a linear scan takes milliseconds, so the bound is generous for CI.
+    for (const source of [
+      '<!-- ' + '<img '.repeat(64000) + ' -->\n',
+      '<div>' + '<img '.repeat(64000) + '\n',
+      '<div>' + '<img alt="'.repeat(32000) + '\n',
+    ]) {
+      const started = performance.now();
+      md.render(source, env);
+      expect(performance.now() - started).toBeLessThan(1000);
+    }
+    expect(calls).toBe(0);
+  });
+
   it('leaves an HTML image src unchanged when no resolver is supplied', () => {
     expect(md.render('<img src="docs/logo.png">\n')).toContain('<img src="docs/logo.png">');
   });

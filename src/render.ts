@@ -305,29 +305,166 @@ function rewriteImageSrc(md: MarkdownItInstance): void {
 // html_block and html_inline tokens, so the image rule above never sees these, and
 // a relative src reached the sandboxed preview unresolved: a broken image.
 //
-// Only the `src` of an `<img>` tag is touched, and a src the resolver leaves as it
-// was (a remote URL, a data: URI) keeps its original text byte for byte. The value
-// is decoded before resolving, since `&amp;` in an attribute means `&`, and written
-// back escaped and double-quoted.
-const IMG_SRC = /(<img\b[^>]*?\ssrc\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+// This runs on the extension host, synchronously, over HTML from an untrusted
+// file, so it is a single forward scan rather than a regular expression: each
+// character is looked at a bounded number of times, whatever the input. A regex
+// that can restart at every `<img` and search ahead for a `src` is quadratic on a
+// file full of `<img` text, and a few hundred kilobytes of it stalled the host for
+// seconds. The scan skips comments (and the bodies of script and style, which are
+// not markup), reads each tag's attributes the way a browser does, quote by quote,
+// so `src=` inside another attribute's value is just text, and changes nothing but
+// the value of an `<img>`'s own first `src`. A value the resolver leaves as it was
+// (a remote URL, a data: URI) keeps its original text byte for byte.
 
+let entityUtils: MarkdownItInstance['utils'] | undefined;
+
+/** One character reference, as an HTML attribute value means it. */
+function decodeReference(ref: string): string {
+  if (ref[1] === '#') {
+    const hex = ref[2] === 'x' || ref[2] === 'X';
+    const digits = ref.slice(hex ? 3 : 2).replace(/;$/, '');
+    const code = parseInt(digits, hex ? 16 : 10);
+    // The HTML standard turns a null, a surrogate or anything past U+10FFFF into
+    // the replacement character rather than leaving the reference as text.
+    if (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+      return '�';
+    }
+    return String.fromCodePoint(code);
+  }
+  // Named references go through markdown-it's own table (the full HTML list).
+  // The reference holds no backslash, so unescapeAll has only the entity to decode.
+  entityUtils ??= MarkdownIt().utils;
+  return entityUtils.unescapeAll(ref);
+}
+
+/**
+ * Decode an attribute value's character references, once: `&amp;#58;` is the
+ * text `&#58;`, not a colon. Numeric references may omit the semicolon, as HTML
+ * allows. Named ones need it: the handful of legacy names a browser accepts
+ * without one are rare enough in an image path to leave as text.
+ */
 function decodeAttr(value: string): string {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+  if (!value.includes('&')) {
+    return value;
+  }
+  return value.replace(
+    /&(?:#[xX][0-9a-fA-F]{1,6};?|#[0-9]{1,7};?|[A-Za-z][A-Za-z0-9]{1,31};)/g,
+    decodeReference,
+  );
+}
+
+const SPACE = /[\t\n\f\r ]/;
+
+interface TagScan {
+  /** Index just past the tag's `>`, or the end of the text for an unterminated tag. */
+  end: number;
+  /** The first `src` attribute's value: where its text starts and ends, quotes included. */
+  src?: { from: number; to: number; value: string };
+}
+
+/** Read one tag's attributes, from the end of its name to its `>`. */
+function scanTag(html: string, nameEnd: number): TagScan {
+  const n = html.length;
+  let i = nameEnd;
+  let src: TagScan['src'];
+  while (i < n) {
+    while (i < n && (SPACE.test(html[i]) || html[i] === '/')) {
+      i++;
+    }
+    if (i >= n || html[i] === '>') {
+      break;
+    }
+    // An attribute name runs to a space, `/`, `>` or `=`; a leading `=` is part of it.
+    const nameFrom = i;
+    i++;
+    while (i < n && !SPACE.test(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') {
+      i++;
+    }
+    const name = html.slice(nameFrom, i).toLowerCase();
+    let j = i;
+    while (j < n && SPACE.test(html[j])) {
+      j++;
+    }
+    if (html[j] !== '=') {
+      continue; // No value; the spaces are skipped at the top of the loop.
+    }
+    j++;
+    while (j < n && SPACE.test(html[j])) {
+      j++;
+    }
+    const from = j;
+    let value: string;
+    if (html[j] === '"' || html[j] === "'") {
+      const close = html.indexOf(html[j], j + 1);
+      const stop = close < 0 ? n : close;
+      value = html.slice(j + 1, stop);
+      j = close < 0 ? n : close + 1;
+    } else {
+      while (j < n && !SPACE.test(html[j]) && html[j] !== '>') {
+        j++;
+      }
+      value = html.slice(from, j);
+    }
+    if (name === 'src' && !src) {
+      src = { from, to: j, value };
+    }
+    i = j;
+  }
+  return { end: i < n ? i + 1 : n, src };
 }
 
 /** Rewrite every `<img src>` in a chunk of raw HTML through `resolve`. */
 export function resolveHtmlImages(html: string, resolve: (src: string) => string): string {
-  return html.replace(IMG_SRC, (match, prefix: string, dq?: string, sq?: string, bare?: string) => {
-    const raw = dq ?? sq ?? bare ?? '';
-    const src = decodeAttr(raw);
+  let out = '';
+  let copied = 0;
+  let i = 0;
+  const n = html.length;
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    if (lt < 0) {
+      break;
+    }
+    if (html.startsWith('<!--', lt)) {
+      const close = html.indexOf('-->', lt + 4);
+      if (close < 0) {
+        break;
+      }
+      i = close + 3;
+      continue;
+    }
+    // A tag name is ASCII letters and digits after `<` or `</`; anything else is text.
+    const nameFrom = html[lt + 1] === '/' ? lt + 2 : lt + 1;
+    let nameEnd = nameFrom;
+    while (nameEnd < n && /[A-Za-z0-9]/.test(html[nameEnd])) {
+      nameEnd++;
+    }
+    if (nameEnd === nameFrom || !/[A-Za-z]/.test(html[nameFrom])) {
+      i = lt + 1;
+      continue;
+    }
+    const name = html.slice(nameFrom, nameEnd).toLowerCase();
+    const tag = scanTag(html, nameEnd);
+    i = tag.end;
+    if (nameFrom === lt + 1 && (name === 'script' || name === 'style')) {
+      // Their bodies are not markup: an `<img` in a script's string is not an image.
+      // Searched from here on, so each body is read once.
+      const closer = name === 'script' ? /<\/script/gi : /<\/style/gi;
+      closer.lastIndex = i;
+      const close = closer.exec(html);
+      i = close ? close.index : n;
+      continue;
+    }
+    if (name !== 'img' || nameFrom !== lt + 1 || !tag.src) {
+      continue;
+    }
+    const src = decodeAttr(tag.src.value);
     const resolved = resolve(src);
-    return resolved === src ? match : `${prefix}"${escapeAttr(resolved)}"`;
-  });
+    if (resolved !== src) {
+      out += html.slice(copied, tag.src.from) + `"${escapeAttr(resolved)}"`;
+      copied = tag.src.to;
+    }
+  }
+  return copied === 0 ? html : out + html.slice(copied);
 }
 
 function rewriteHtmlImageSrc(md: MarkdownItInstance): void {
