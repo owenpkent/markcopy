@@ -338,9 +338,16 @@ function buildCsvHarness(theme) {
 // real webview bundle, in a card like the Markdown shots.
 // ---------------------------------------------------------------------------
 function buildDocxHarness(theme) {
+  const docx = renderDocxHtml(fs.readFileSync(path.join(root, 'sample.docx')));
+  // A picture's bytes follow the render in a `media` message, as the host sends
+  // them (src/ooxmlEditor.ts), keyed to the render's mediaSet. Without it every
+  // image in the sample shows as its alt text.
+  const mediaSet = 'screenshot-docx#1';
+  const media = { type: 'media', docKey: 'screenshot-docx', mediaSet, items: docx.media };
   const message = {
     type: 'render',
-    html: renderDocxHtml(fs.readFileSync(path.join(root, 'sample.docx'))).html,
+    html: docx.html,
+    mediaSet,
     source: '',
     kind: 'docx',
     styleProfile: 'github',
@@ -368,6 +375,7 @@ function buildDocxHarness(theme) {
   <script type="module" src="/media/webview.js"></script>
   <script type="module">
     window.postMessage(${JSON.stringify(message)}, '*');
+    window.postMessage(${JSON.stringify(media)}, '*');
   </script>
 </body></html>`;
 }
