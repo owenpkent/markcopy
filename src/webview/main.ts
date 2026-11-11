@@ -381,6 +381,29 @@ async function renderKatex(): Promise<void> {
     const tex = el.textContent ?? '';
     el.dataset.tex = tex;
     const displayMode = el.dataset.display === '1';
+    el.classList.remove('mc-math-wrap');
+    // KaTeX never breaks a line in display mode, so a long equation could only
+    // scroll. Inline mode does break, after a top-level relation or operator
+    // (`=`, `+`, ...), and `\displaystyle` keeps the display size and limits, so a
+    // display equation is tried that way first and wraps to the pane. Anything
+    // inline mode refuses (`	ag`, the display-only environments such as `align`,
+    // or a plain mistake, since this attempt throws) falls through to the true
+    // display render below, which scrolls when it is too wide and reports errors
+    // as before. The prefix is not wrapped in braces: a group is one atom, and an
+    // atom has nowhere to break.
+    if (displayMode) {
+      try {
+        katex.render(`\\displaystyle ${tex}`, el, {
+          displayMode: false,
+          throwOnError: true,
+          output: 'htmlAndMathml',
+        });
+        el.classList.add('mc-math-wrap');
+        return;
+      } catch {
+        // Display mode below.
+      }
+    }
     try {
       katex.render(tex, el, { displayMode, throwOnError: false, output: 'htmlAndMathml' });
     } catch (err) {

@@ -177,6 +177,127 @@ describe('createMarkdownIt', () => {
     expect(html).toContain('src="webview:media/x.png"');
   });
 
+  it('routes a raw HTML <img> src through env.resolveImage too', () => {
+    const env = {
+      resolveImage: (src: string) => (src.startsWith('http') ? src : `webview:${src}`),
+    };
+    const block = md.render('<img src="docs/logo.png" width="200" height="50" alt="Logo">\n', env);
+    expect(block).toContain('<img src="webview:docs/logo.png" width="200" height="50" alt="Logo">');
+    const inline = md.render("Before <img alt='x' src='a b.png'> after.\n", env);
+    expect(inline).toContain('src="webview:a b.png"');
+    const bare = md.render('<p><img src=pic.png></p>\n', env);
+    expect(bare).toContain('<img src="webview:pic.png">');
+  });
+
+  it('decodes an HTML image src before resolving, and escapes the result', () => {
+    const seen: string[] = [];
+    const html = md.render('<img src="a&amp;b.png">\n', {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return `webview:${src}"x`;
+      },
+    });
+    expect(seen).toEqual(['a&b.png']);
+    expect(html).toContain('src="webview:a&amp;b.png&quot;x"');
+  });
+
+  it('leaves a remote HTML image, and other tags, byte for byte', () => {
+    const env = {
+      resolveImage: (src: string) => (src.startsWith('http') ? src : `webview:${src}`),
+    };
+    const source = `<img src='https://example.com/a.png?x=1&amp;y=2'>\n\n<video src="clip.mp4"></video>\n`;
+    expect(md.render(source, env)).toBe(md.render(source));
+  });
+
+  it('reads an <img> tag attribute by attribute, so src text inside alt is left alone', () => {
+    const seen: string[] = [];
+    const env = {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return src.startsWith('https:') ? src : `webview:${src}`;
+      },
+    };
+    const source = `<img alt="Example src='placeholder.png'" src="https://example.com/logo.png">\n`;
+    expect(md.render(source, env)).toBe(md.render(source));
+    expect(seen).toEqual(['https://example.com/logo.png']);
+  });
+
+  it('decodes numeric references once before classifying the src', () => {
+    const seen: string[] = [];
+    const env = {
+      resolveImage: (src: string) => {
+        seen.push(src);
+        return src.startsWith('https:') ? src : `webview:${src}`;
+      },
+    };
+    // A remote URL spelled with a reference stays exactly as written.
+    const remote =
+      '<img src="https&#58;//example.com/a.png"> <img src="https&#x3A;//example.com/b.png">\n';
+    expect(md.render(remote, env)).toBe(md.render(remote));
+    expect(md.render('<img src="a&#32;b.png">\n', env)).toContain('src="webview:a b.png"');
+    expect(md.render('<img src="c&#x20;d.png">\n', env)).toContain('src="webview:c d.png"');
+    // Decoded exactly once: `&amp;#58;` is the text `&#58;`, not a colon.
+    md.render('<img src="e&amp;#58;f.png">\n', env);
+    // Zero-padded: the whole digit run is one reference, leading zeros and all.
+    md.render('<img src="g&#000000039;h.png">\n', env);
+    const padded = '<img src="https&#x0000003A;//example.com/c.png">\n';
+    expect(md.render(padded, env)).toBe(md.render(padded));
+    // A C1 code means its Windows-1252 character, as HTML reads it.
+    md.render('<img src="i&#150;j.png">\n', env);
+    expect(seen).toEqual([
+      'https://example.com/a.png',
+      'https://example.com/b.png',
+      'a b.png',
+      'c d.png',
+      'e&#58;f.png',
+      "g'h.png",
+      'https://example.com/c.png',
+      'i–j.png',
+    ]);
+  });
+
+  it('skips comments and script bodies, and consumes each tag once', () => {
+    let calls = 0;
+    const env = {
+      resolveImage: (src: string) => {
+        calls++;
+        return `webview:${src}`;
+      },
+    };
+    const source =
+      '<!-- <img src="a.png"> --><script>"<img src=b.png>"</script><img src="c.png">\n';
+    const html = md.render(source, env);
+    expect(calls).toBe(1);
+    expect(html).toContain('<img src="a.png">');
+    expect(html).toContain('<img src="webview:c.png">');
+  });
+
+  it('stays linear on a file full of <img text', () => {
+    let calls = 0;
+    const env = {
+      resolveImage: (src: string) => {
+        calls++;
+        return src;
+      },
+    };
+    // About 320 KB each. The regex this replaced took over four seconds on the
+    // first; a linear scan takes milliseconds, so the bound is generous for CI.
+    for (const source of [
+      '<!-- ' + '<img '.repeat(64000) + ' -->\n',
+      '<div>' + '<img '.repeat(64000) + '\n',
+      '<div>' + '<img alt="'.repeat(32000) + '\n',
+    ]) {
+      const started = performance.now();
+      md.render(source, env);
+      expect(performance.now() - started).toBeLessThan(1000);
+    }
+    expect(calls).toBe(0);
+  });
+
+  it('leaves an HTML image src unchanged when no resolver is supplied', () => {
+    expect(md.render('<img src="docs/logo.png">\n')).toContain('<img src="docs/logo.png">');
+  });
+
   it('leaves image src unchanged when no resolver is supplied', () => {
     const html = md.render('![alt](media/x.png)');
     expect(html).toContain('src="media/x.png"');
