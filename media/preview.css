@@ -150,6 +150,17 @@ body {
   padding: 0;
   font-size: 100%;
 }
+/* markcopy.wrapCode (on by default): a long line in a code block wraps to the
+   preview's width instead of scrolling the block sideways. `anywhere` breaks a
+   token that has no space in it (a URL, a hash) rather than letting it overflow.
+   Display only: an element being copied carries mc-force-light while its styles
+   are read into the clipboard HTML (inlineStyledClone in src/webview/main.ts),
+   and the rule skips it, so rich text and image copies come out exactly as they
+   did before the setting existed. PDF export wraps on its own (src/pdfExport.ts). */
+body.mc-wrap-code .markdown-body pre:not(.mc-force-light, .mc-force-light *) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .markdown-body blockquote {
   color: var(--mc-quote-fg);
   border-left: 0.25em solid var(--mc-border);
