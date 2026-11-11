@@ -439,10 +439,26 @@ body.mc-csv-resizing {
 .markdown-body img[width][height] {
   height: auto;
 }
-/* KaTeX keeps a display equation on one line. A long one would run past the page
-   edge and drag the whole preview sideways, so it scrolls inside its own box, as a
-   wide table does. The vertical padding keeps tall limits and superscripts clear of
-   the clip that overflow-x brings with it. */
+/* A display equation is rendered in KaTeX's inline mode with \displaystyle when it
+   can be (renderKatex in src/webview/main.ts), which lets it wrap after an
+   operator. This puts it back on a centred block of its own, spaced as KaTeX's own
+   display mode spaces it, with a little more line height so a wrapped line's
+   superscripts clear the limits of the line below.
+   KaTeX's true display mode, used for 	ag and align-style environments, keeps
+   an equation on one line. A long one of those, or one with nowhere to break,
+   would run past the page edge and drag the whole preview sideways, so both kinds
+   scroll inside their own box as a last resort, as a wide table does. The vertical
+   padding keeps tall limits and superscripts clear of the clip that overflow-x
+   brings with it. */
+.markdown-body .mc-math-wrap {
+  display: block;
+  margin: 1em 0;
+  text-align: center;
+  line-height: 2.2;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}
 .markdown-body .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
