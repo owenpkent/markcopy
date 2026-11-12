@@ -9,6 +9,11 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Maintenance
+
+- Dependencies: markdown-it-anchor 10.1.0, plus the development dependency group: jsdom 31.0.0, mermaid 12.3.0 and ovsx 1.4.0 (#224, #223). `npm audit` reports no vulnerabilities.
+- CI: `github/codeql-action` 4.39.3 for both the `init` and `analyze` steps, and Dependabot now groups the two into one pull request, since separate bumps leave them on different versions and fail the Analyze job (#222).
+
 ## [1.4.0] - 2026-11-11
 
 ### Added
