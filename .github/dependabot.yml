@@ -48,3 +48,9 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    groups:
+      # init and analyze must run the same CodeQL version: separate PRs each
+      # leave the workflow mismatched and fail the Analyze job.
+      codeql-action:
+        patterns:
+          - 'github/codeql-action*'
