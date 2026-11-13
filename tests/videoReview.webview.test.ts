@@ -538,6 +538,23 @@ describe('composer', () => {
     expect(pause).not.toHaveBeenCalled();
   });
 
+  it('pauses on a press of the scrubber and stays paused after the drag', async () => {
+    const video = await open();
+    Object.defineProperty(video, 'paused', { value: false, configurable: true });
+    fromHost(review());
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    play.mockClear();
+    pause.mockClear();
+    const slider = document.querySelector('.mc-rv-slider') as HTMLInputElement;
+    slider.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }));
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(slider.classList.contains('mc-seek-active')).toBe(true);
+    document.dispatchEvent(new MouseEvent('pointerup', { button: 0, bubbles: true }));
+    expect(slider.classList.contains('mc-seek-active')).toBe(false);
+    expect(play).not.toHaveBeenCalled();
+  });
+
   it('leaves a paused video paused after a send', async () => {
     const video = await open();
     Object.defineProperty(video, 'paused', { value: true, configurable: true });
@@ -695,9 +712,9 @@ describe('review mode and the speaker', () => {
 
     pressMenu('Close Video Notes');
     expect(volume.parentElement).toBe(bar);
-    // Back at its old place, between the play button and the time readout.
+    // Back at its old place, between the play button and the time, seek and time left group.
     expect(volume.previousElementSibling?.getAttribute('aria-label')).toMatch(/^(Play|Pause)/);
-    expect(volume.nextElementSibling?.className).toBe('mc-video-time');
+    expect(volume.nextElementSibling?.className).toBe('mc-video-scrub');
   });
 });
 

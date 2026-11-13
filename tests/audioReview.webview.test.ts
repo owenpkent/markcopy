@@ -137,6 +137,7 @@ describe('Audio Notes webview', () => {
     expect(document.querySelector('.mc-rv-rate')).toBeNull();
     expect(document.querySelector('.mc-rv-time')?.textContent).toBe('00:00:00.000');
     expect(document.querySelector('.mc-rv-total')?.textContent).toBe('/ 00:02:00.000');
+    expect(document.querySelector('.mc-rv-remain')?.textContent).toBe('-00:02:00.000');
     expect(document.querySelector('.mc-rv-count')?.textContent).toBe('3 notes');
     const when = cards().map((c) => c.querySelector('.mc-rv-tc')?.textContent);
     expect(when).toEqual(['00:00:01.500', '00:01:00.000', '00:01:40.000 to 00:01:50.000']);

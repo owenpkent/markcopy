@@ -109,6 +109,7 @@ describe('gif webview fallback', () => {
     expect(status).toContain('2 frames');
     expect(status).toContain('700 ms');
     expect(status).toContain('loops forever');
+    expect((document.getElementById('mc-controls') as HTMLDivElement).hidden).toBe(true);
   });
 
   it('says so for data that is not a GIF', async () => {
@@ -230,5 +231,85 @@ describe('gif webview playback', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(draws).toBe(2);
     expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
+  });
+
+  describe('control bar', () => {
+    const bar = () => document.getElementById('mc-controls') as HTMLDivElement;
+    const slider = () => bar().querySelector('input[type=range]') as HTMLInputElement;
+    const playBtn = () => bar().querySelector('button') as HTMLButtonElement;
+    const spans = () => Array.from(bar().querySelectorAll('.mc-gif-time')) as HTMLElement[];
+
+    it('is hidden before load, then shown in order: play, time, slider, time left', async () => {
+      await import('../src/webview/gif');
+      expect(bar().hidden).toBe(true);
+      fromHost({ type: 'load', name: 'a.gif', path: '/p/a.gif', size: 1, data: gifBase64() });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bar().hidden).toBe(false);
+      expect(bar().nextElementSibling?.id).toBe('mc-status');
+      const kinds = Array.from(bar().querySelectorAll('button, .mc-gif-time, input')).map((el) =>
+        el.tagName === 'BUTTON' ? 'play' : el.tagName === 'INPUT' ? 'slider' : 'time',
+      );
+      expect(kinds).toEqual(['play', 'time', 'slider', 'time']);
+    });
+
+    it('labels the play button and keeps it in step with playing', async () => {
+      await loadAndPlay();
+      expect(playBtn().title).toBe('Pause (space)');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      expect(playBtn().title).toBe('Play (space)');
+      expect(playBtn().getAttribute('aria-label')).toBe('Play (space)');
+      playBtn().click();
+      expect(playBtn().title).toBe('Pause (space)');
+    });
+
+    it('runs the slider over the total time and shows the times', async () => {
+      await loadAndPlay();
+      // Delays are 200 and 500 ms.
+      expect(slider().max).toBe('0.7');
+      expect(spans()[0].textContent).toBe('0:00.0');
+      expect(spans()[1].textContent).toBe('-0:00.7');
+    });
+
+    it('shows the frame at the slider value and pauses there', async () => {
+      await loadAndPlay();
+      slider().value = '0.5';
+      slider().dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 2');
+      expect(playBtn().title).toBe('Play (space)');
+      expect(spans()[0].textContent).toBe('0:00.2');
+      expect(spans()[1].textContent).toBe('-0:00.5');
+      slider().value = '0.1';
+      slider().dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
+    });
+
+    it('pauses on a press of the slider and stays paused', async () => {
+      await loadAndPlay();
+      expect(playBtn().title).toBe('Pause (space)');
+      slider().dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      expect(playBtn().title).toBe('Play (space)');
+      document.dispatchEvent(new Event('pointerup', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(playBtn().title).toBe('Play (space)');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('toggles exactly once on Space after a pointer click of the button', async () => {
+      await loadAndPlay();
+      playBtn().focus();
+      playBtn().dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(playBtn().title).toBe('Play (space)');
+      expect(document.activeElement).not.toBe(playBtn());
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      expect(playBtn().title).toBe('Pause (space)');
+    });
+
+    it('hides for an error', async () => {
+      await loadAndPlay();
+      fromHost({ type: 'error', message: 'nope' });
+      expect(bar().hidden).toBe(true);
+    });
   });
 });

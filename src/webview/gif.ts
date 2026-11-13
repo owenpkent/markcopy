@@ -9,7 +9,18 @@
 // and only the actions that do not need a frame are left.
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { fromHost } from './fromHost';
-import { base64ToBytes, frameFileName, parseGif, statusLine, type GifInfo } from './gifInfo';
+import {
+  base64ToBytes,
+  formatTimeline,
+  frameAtTime,
+  frameFileName,
+  frameStartTimes,
+  parseGif,
+  statusLine,
+  totalSeconds,
+  type GifInfo,
+} from './gifInfo';
+import { attachSeekBar, setSeekFill } from './seekBar';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -78,10 +89,16 @@ function updateStatus(): void {
     frame: decoder ? frameIndex : null,
     loop: loopForever,
   });
+  refreshBar();
 }
 
 function showError(message: string): void {
   stopTimer();
+  playing = false;
+  generation += 1;
+  decoder?.close();
+  decoder = undefined;
+  refreshBar();
   stage.hidden = true;
   errorEl.hidden = false;
   errorEl.textContent = message;
@@ -102,6 +119,8 @@ function resetPlayer(): void {
   generation += 1;
   stopTimer();
   playing = false;
+  starts = [];
+  controlBar.hidden = true;
   passes = 0;
   frameIndex = 0;
   frameCount = 0;
@@ -149,6 +168,8 @@ async function load(msg: LoadMessage): Promise<void> {
     canvas.height = info.height;
     canvas.hidden = false;
     img.hidden = true;
+    starts = frameStartTimes(info.delays);
+    seekSlider.max = String(totalSeconds(info.delays));
     await show(0, mine);
     if (mine === generation) {
       play();
@@ -158,6 +179,7 @@ async function load(msg: LoadMessage): Promise<void> {
     // manage it as an image, so degrade rather than fail.
     decoder?.close();
     decoder = undefined;
+    starts = [];
     showFallback(bytes);
   }
 }
@@ -204,6 +226,7 @@ async function show(index: number, mine: number): Promise<boolean> {
   } catch {
     if (mine === generation) {
       playing = false;
+      refreshBar();
       toast('Could not decode this frame');
     }
     return false;
@@ -259,10 +282,12 @@ function play(): void {
     generation += 1;
     void show(0, generation).then((ok) => ok && scheduleNext());
     playing = true;
+    refreshBar();
     return;
   }
   playing = true;
   scheduleNext();
+  refreshBar();
 }
 
 function pause(): void {
@@ -271,6 +296,7 @@ function pause(): void {
   // from painting a frame after playback has stopped.
   generation += 1;
   stopTimer();
+  refreshBar();
 }
 
 function togglePlay(): void {
@@ -312,6 +338,143 @@ function toggleLoop(): void {
   updateStatus();
   toast(loopForever ? 'Looping' : 'Looping off');
 }
+
+// ---------------------------------------------------------------------------
+// Control bar
+// ---------------------------------------------------------------------------
+// Below the picture: play and pause, then the time, a slider over the clip's
+// time (not its frames) and the time left. Hidden until a multi-frame GIF is
+// decoded, so a still, the <img> fallback and an error never show a dead bar.
+const PLAY_PATHS = ['M7 4.5v15l12-7.5z'];
+const PAUSE_PATHS = ['M7 5h3v14H7z', 'M14 5h3v14h-3z'];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// The seek thumb's width in px, matching `.mc-range` in media/preview.css.
+const SEEK_THUMB = 12;
+
+// Start time in seconds of each frame at speed 1; empty without a decoder.
+let starts: number[] = [];
+
+function icon(paths: string[]): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  for (const [name, value] of Object.entries({
+    viewBox: '0 0 24 24',
+    width: '18',
+    height: '18',
+    fill: 'currentColor',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  })) {
+    svg.setAttribute(name, value);
+  }
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+const controlBar = document.createElement('div');
+controlBar.id = 'mc-controls';
+controlBar.hidden = true;
+controlBar.setAttribute('role', 'toolbar');
+controlBar.setAttribute('aria-label', 'GIF controls');
+const playBtn = document.createElement('button');
+playBtn.type = 'button';
+playBtn.className = 'mc-gif-ctl';
+const timeEl = document.createElement('span');
+timeEl.className = 'mc-gif-time';
+const seekSlider = document.createElement('input');
+seekSlider.type = 'range';
+seekSlider.className = 'mc-gif-seek mc-range';
+seekSlider.min = '0';
+seekSlider.max = '0';
+seekSlider.step = 'any';
+seekSlider.value = '0';
+seekSlider.setAttribute('aria-label', 'Seek');
+const remainEl = document.createElement('span');
+remainEl.className = 'mc-gif-time mc-gif-remain';
+remainEl.title = 'Time left';
+const scrubBox = document.createElement('div');
+scrubBox.className = 'mc-gif-scrub';
+scrubBox.append(timeEl, seekSlider, remainEl);
+controlBar.append(playBtn, scrubBox);
+document.body.insertBefore(controlBar, statusEl);
+
+/** Run `action` on a press, and after a pointer click let go of focus so Space still toggles once. */
+function onPress(button: HTMLButtonElement, action: () => void): void {
+  button.addEventListener('click', (e) => {
+    action();
+    if (e.detail > 0) {
+      button.blur();
+    }
+  });
+}
+
+// True while the reader drags the slider, so the shown frame does not pull the
+// thumb out from under the pointer.
+let scrubbing = false;
+
+function showTimes(seconds: number): void {
+  const total = totalSeconds(info?.delays ?? []);
+  timeEl.textContent = formatTimeline(seconds);
+  remainEl.textContent = `-${formatTimeline(Math.max(0, total - seconds))}`;
+  setSeekFill(seekSlider, seconds, total);
+  seekSlider.setAttribute(
+    'aria-valuetext',
+    `${formatTimeline(seconds)} of ${formatTimeline(total)}`,
+  );
+}
+
+/** Bring the bar in line with the player: visibility, button, thumb and times. */
+function refreshBar(): void {
+  const usable = Boolean(decoder) && frameCount > 1 && starts.length > 1 && errorEl.hidden;
+  controlBar.hidden = !usable;
+  stage.classList.toggle('mc-has-bar', usable);
+  const label = playing ? 'Pause (space)' : 'Play (space)';
+  playBtn.replaceChildren(icon(playing ? PAUSE_PATHS : PLAY_PATHS));
+  playBtn.title = label;
+  playBtn.setAttribute('aria-label', label);
+  if (!usable) {
+    return;
+  }
+  const at = starts[Math.min(frameIndex, starts.length - 1)] ?? 0;
+  if (!scrubbing) {
+    seekSlider.value = String(at);
+    showTimes(at);
+  }
+}
+
+onPress(playBtn, togglePlay);
+seekSlider.addEventListener('pointerdown', () => (scrubbing = true));
+const endScrub = (): void => {
+  scrubbing = false;
+  refreshBar();
+};
+seekSlider.addEventListener('pointerup', endScrub);
+seekSlider.addEventListener('pointercancel', endScrub);
+seekSlider.addEventListener('input', () => {
+  const time = Number(seekSlider.value);
+  if (!Number.isFinite(time)) {
+    return;
+  }
+  showTimes(time);
+  void seek(frameAtTime(starts, time));
+});
+// A press pauses, and the GIF stays paused on the frame the drag ends on. The
+// adapter answers for the viewer: `playing` is its state, `pause()` its own.
+attachSeekBar({
+  slider: seekSlider,
+  media: {
+    get paused() {
+      return !playing;
+    },
+    pause,
+  },
+  thumb: SEEK_THUMB,
+  duration: () => totalSeconds(info?.delays ?? []),
+  format: formatTimeline,
+});
 
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 

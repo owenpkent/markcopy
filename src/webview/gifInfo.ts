@@ -254,3 +254,48 @@ export function statusLine(args: {
   }
   return parts.filter(Boolean).join('  ·  ');
 }
+
+/** A position on the control bar's timeline: `0:01.2`, one decimal, minutes unpadded. */
+export function formatTimeline(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '0:00.0';
+  }
+  const tenths = Math.round(seconds * 10);
+  const minutes = Math.floor(tenths / 600);
+  const rest = tenths - minutes * 600;
+  const whole = Math.floor(rest / 10);
+  return `${minutes}:${String(whole).padStart(2, '0')}.${rest % 10}`;
+}
+
+/** Start time of each frame in seconds, at speed 1: the running sum of the delays before it. */
+export function frameStartTimes(delaysMs: readonly number[]): number[] {
+  const starts: number[] = [];
+  let at = 0;
+  for (const delay of delaysMs) {
+    starts.push(at / 1000);
+    at += delay;
+  }
+  return starts;
+}
+
+/** Total length in seconds of a clip with these frame delays, at speed 1. */
+export function totalSeconds(delaysMs: readonly number[]): number {
+  return delaysMs.reduce((a, b) => a + b, 0) / 1000;
+}
+
+/** The frame on screen at `seconds`: the last whose start is at or before it. */
+export function frameAtTime(starts: readonly number[], seconds: number): number {
+  if (starts.length === 0 || !Number.isFinite(seconds)) {
+    return 0;
+  }
+  // A tiny epsilon keeps a value that round-tripped through a string on its own frame.
+  let found = 0;
+  for (let i = 0; i < starts.length; i += 1) {
+    if (starts[i] <= seconds + 1e-9) {
+      found = i;
+    } else {
+      break;
+    }
+  }
+  return found;
+}

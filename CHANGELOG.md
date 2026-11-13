@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Seek bars pause on a press and show the time under the pointer.** Pressing or dragging the video player's seek bar or the Video Notes scrubber now pauses playback, and it stays paused on the frame where the drag ends instead of playing on. Audio keeps playing while you drag, so you still hear where you are. Hovering any seek bar shows the time under the pointer in a small frosted pill (a timecode on the Video Notes scrubber).
+- **A new seek bar look.** The video and audio seek bars, the video volume slider, and the Video Notes and Audio Notes scrubbers are a thin line filled in the accent colour up to the playhead. Under the pointer the line thickens, a round thumb shows, and on a seek bar the stretch from the playhead to the pointer is lightly shaded. The Notes scrubbers' always-on playhead line is replaced by the end of the fill and a dot under the pointer. A click no longer leaves the browser's orange focus ring on a slider; keyboard focus still shows one.
+- **Time and time left at the ends of the bar.** The video and audio players show the time and the time left (`1:05` and `-2:15`) at the two ends of the seek bar, in place of the `1:05 / 3:20` readout before it, and both stay visible in a narrow pane. The Video Notes and Audio Notes scrubbers show the timecode and the time left at their ends too.
+- **GIF control bar.** The GIF preview gets a bar with a play button, a seek slider over the clip's time (not its frames), and the time and time left (`0:01.2`, `-0:02.3`), with the same pause on a press and hover tip. It shows for any GIF with more than one frame.
+
 ### Planned
 
 - PlantUML support.

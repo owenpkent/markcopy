@@ -239,6 +239,28 @@ describe('waveform', () => {
   });
 });
 
+describe('toolbar seek bar', () => {
+  it('shows the time and the time left at its ends, and a press keeps playing', async () => {
+    const { audio, clock } = await boot();
+    clock.time = 65;
+    Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+    audio.dispatchEvent(new Event('durationchange'));
+    audio.dispatchEvent(new Event('timeupdate'));
+    expect(document.getElementById('mc-audio-time')?.textContent).toBe('1:05');
+    expect(document.getElementById('mc-audio-remain')?.textContent).toBe('-0:55');
+    const seek = document.getElementById('mc-seek') as HTMLInputElement;
+    expect(seek.style.getPropertyValue('--mc-seek-frac')).toBe(String(65 / 120));
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    pause.mockClear();
+    seek.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true }));
+    expect(pause).not.toHaveBeenCalled();
+    seek.value = '90';
+    seek.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(document.getElementById('mc-audio-time')?.textContent).toBe('1:30');
+    expect(document.getElementById('mc-audio-remain')?.textContent).toBe('-0:30');
+  });
+});
+
 describe('details panel', () => {
   const details = {
     format: 'MP3',
