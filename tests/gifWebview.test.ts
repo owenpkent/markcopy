@@ -285,6 +285,31 @@ describe('gif webview playback', () => {
       expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
     });
 
+    it('steps whole frames with the slider arrow keys, with no press first', async () => {
+      await loadAndPlay();
+      slider().focus();
+      const press = (key: string) => {
+        const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        slider().dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      // Each frame (200 and 500 ms) is far longer than a native 1% step (7 ms).
+      expect(press('ArrowRight')).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 2');
+      expect(slider().value).toBe('0.2');
+      expect(playBtn().title).toBe('Play (space)');
+      expect(press('ArrowLeft')).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 1');
+      expect(press('ArrowUp')).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(document.getElementById('mc-status')?.textContent).toContain('frame 2');
+      expect(press('ArrowDown')).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slider().value).toBe('0');
+    });
+
     it('pauses on a press of the slider and stays paused', async () => {
       await loadAndPlay();
       expect(playBtn().title).toBe('Pause (space)');

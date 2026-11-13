@@ -1328,6 +1328,7 @@ body.mc-review #mc-stage[hidden] {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
+  container: mc-rv-timeline / inline-size;
 }
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers {
   grid-column: 2;
@@ -1358,6 +1359,20 @@ body.mc-review #mc-stage[hidden] {
   grid-column: 3;
   margin-left: -14px;
   color: var(--rv-muted);
+}
+/* A narrow timeline. Two timecodes take about 150px, which below about 420px would
+   leave the scrubber little or no travel past its 44px thumb, so the times move to
+   a row under it, each under its end of the drawn bar, and the scrubber spans the
+   full width again. */
+@container mc-rv-timeline (max-width: 420px) {
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers,
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-track {
+    grid-column: 1 / -1;
+  }
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-end {
+    grid-row: 3;
+    margin: -12px 22px 4px;
+  }
 }
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers {
   position: relative;

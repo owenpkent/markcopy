@@ -461,6 +461,20 @@ seekSlider.addEventListener('input', () => {
   showTimes(time);
   void seek(frameAtTime(starts, time));
 });
+// The slider's own arrow keys step whole frames. Left to the browser, a step is
+// 1% of the clip, shorter than most frames, so the frame-start refresh after each
+// seek would put the thumb straight back and the keys would never get anywhere.
+// Home and End reach the document's handler, which jumps to the ends.
+seekSlider.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) {
+    return;
+  }
+  const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+  if (step !== undefined) {
+    e.preventDefault();
+    void seek(frameIndex + step);
+  }
+});
 // A press pauses, and the GIF stays paused on the frame the drag ends on. The
 // adapter answers for the viewer: `playing` is its state, `pause()` its own.
 attachSeekBar({
