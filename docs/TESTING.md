@@ -434,13 +434,13 @@ The guards here are what stop a crafted file hanging the window, so these are wo
 
 Automated tests cover the keys, folder stepping, error message, peak and level maths, ffprobe shaping, the details panel and click-to-seek on jsdom; real playback, real decoding and how the waveform looks need a real VS Code window.
 
-- [ ] Open an `.mp3`, `.wav`, `.ogg`, `.opus` and `.flac` file: each plays, the position readout and seek slider advance, and the info line shows format, size and duration.
+- [ ] Open an `.mp3`, `.wav`, `.ogg`, `.opus` and `.flac` file: each plays, the time, the seek slider and the time left advance, and the info line shows format, size and duration.
 - [ ] Open a file from outside the workspace (Downloads, or a drag onto the window): it plays.
 - [ ] Space and K play and pause; Left and Right seek 5 s, Shift+Left and Shift+Right 30 s; Home and End jump to the ends. With the slider focused, one arrow press moves exactly 5 s.
 - [ ] J and L change the speed through 0.5x to 2x, and the speed button cycles it.
-- [ ] Drag the seek slider: the sound follows and the readout updates. A file over one hour reads `h:mm:ss`.
+- [ ] Drag the seek slider while playing: it keeps playing, the sound follows, and the time and time left update. Hover it: a pill gives the time under the pointer, and the slider has the video seek bar's look (thin accent line, thumb on hover, no orange ring after a click). A file over one hour reads `h:mm:ss`.
 - [ ] In a folder with several audio files, Previous, Next, Page Up and Page Down open the neighbours in Explorer order in the same tab, wrapping at both ends. In a folder with one audio file, the Previous and Next buttons are hidden.
-- [ ] Theme: `auto`, `light`, `dark` and `green` each keep the toolbar, readout and slider legible, and the focus ring is visible on every button.
+- [ ] Theme: `auto`, `light`, `dark` and `green` each keep the toolbar, both times and the slider legible, and the focus ring is visible on every button.
 - [ ] With `markcopy.audio.autoplay` on, a file starts playing on open (or waits for Play if VS Code blocks it); with `markcopy.audio.loop` on, it repeats.
 - [ ] Right-click the player: the menu lists Copy, Playback, Audio Notes, View, Preferences, Open in Default App and Reveal. **Show Tags** starts unchecked and the details panel has no Tags section; checking it shows the tags (and Copy details then includes them) and survives reopening the file (`markcopy.audio.showTags`). Loop and Autoplay checkmarks match the settings. Right-click inside the note text field: the native menu appears, not this one.
 - [ ] An unplayable `.m4a` (AAC): the preview shows a message naming `.m4a` and saying VS Code cannot decode it, the player controls are disabled, and **Open in default player** opens the file in the OS player.
@@ -457,7 +457,7 @@ Automated tests cover the keys, folder stepping, error message, peak and level m
 
 Automated tests cover the sidecar bytes, the Markdown, the host session and the jsdom wiring; layout and real playback need a real VS Code window.
 
-- [ ] Press **Notes**: the panel appears beside the page, the toolbar's seek bar is replaced by the notes timeline, and the toolbar buttons (Back 5 s, Play, Forward 5 s, speed, Previous and Next) still work.
+- [ ] Press **Notes**: the panel appears beside the page, the toolbar's seek bar and its two times are replaced by the notes timeline (with the time and time left at its ends; dragging it keeps playing), and the toolbar buttons (Back 5 s, Play, Forward 5 s, speed, Previous and Next) still work.
 - [ ] Play, pause in the middle of a phrase, type a note and press **Add note**: `song.mp3.review.yaml` and `song.mp3.review.md` appear beside the file, the marker lands under the playhead, and the card shows `HH:MM:SS.mmm`.
 - [ ] **In**, move on, **Out**, then **Add note**: the card and marker show a range. **Clear** drops it.
 - [ ] Press a marker and a card: the sound jumps there. Two notes close together share one marker that cycles through them.
@@ -587,7 +587,7 @@ Review mode. Make a clip whose frames are numbered so a step that lands on the w
 - [ ] ★ **Re-open in Marker**: close the video in MarkCopy and open the same video in Marker after adding, deleting and pinning notes in MarkCopy. Marker lists exactly those notes with the right times and pins in the same place, and loads without an error; saving from Marker changes nothing else in the file.
 - [ ] ★ **External edit**: reopen the video in MarkCopy and leave it open, then add a note to the sidecar in Marker (or a text editor, then save). The panel and markers update without reopening the tab. Delete the sidecar: the notes clear and **Copy as Markdown** greys out.
 - [ ] ★ **First note, no notes file**: with the sidecar deleted, add a note. The file is created beside the video with `version: 1`, a 12-character `id`, the video's name as `source`, `next_note_id: 2` and the note. With ffmpeg available and a 25 fps clip it says `fps: 25.0`; without ffmpeg a line above the composer reads "Frame rate unknown: notes will be saved at 30 fps" and the file says `fps: 30.0`. **Send** is not accepted until a rate is known.
-- [ ] **Scrubber alignment**: with review mode on, the grey scrubber bar spans only the playhead's travel, so no bar shows before the playhead at 0:00 or after it at the end. Seek to the start and to the end: the playhead line sits on the bar's end each time, and a marker at 0:00 sits on the bar, not outside it.
+- [ ] **Scrubber alignment**: with review mode on, the grey scrubber bar spans only the playhead's travel, so no bar shows before the playhead at 0:00 or after it at the end. Seek to the start and to the end: the end of the blue fill, and the dot under the pointer, sit on the bar's end each time, and a marker at 0:00 sits on the bar, not outside it.
 - [ ] ★ **Themes**: in Auto (both a light and a dark VS Code theme), Light, Dark and Green, the panel, cards, selected card, markers, range bands and caps, pin studs, banner and transport are all legible, including the focus ring on a button.
 
 ## GIF viewer
