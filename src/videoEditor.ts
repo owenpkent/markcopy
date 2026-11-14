@@ -338,25 +338,31 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     color: var(--mc-video-fg);
   }
   #mc-controls[hidden], body.mc-review #mc-controls { display: none; }
-  .mc-video-time {
-    flex: 0 1 auto;
+  /* The time, the seek slider and the time left, one group that takes the room
+     between the speaker and full screen. Both times always show. */
+  .mc-video-scrub {
+    flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 0 6px;
+    display: flex;
+    align-items: center;
+  }
+  .mc-video-time {
+    flex: none;
+    padding: 0 4px;
     font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  /* The seek bar's look (.mc-range) is in media/preview.css; here only its place.
+     Its thumb is 12px wide, SEEK_THUMB in src/webview/video.ts. */
   .mc-video-seek {
     flex: 1 1 80px;
     min-width: 60px;
     height: 32px;
     margin: 0 4px;
-    accent-color: var(--mc-accent, #4493f8);
-    cursor: pointer;
   }
-  .mc-video-seek:disabled { cursor: default; opacity: 0.45; }
+  /* The time left, a step quieter than the position. */
+  .mc-video-remain { opacity: 0.7; }
   /* The speaker: a 32px mute button and a slider for the level. */
   .mc-video-volume { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
   .mc-video-ctl {
@@ -379,23 +385,20 @@ export class VideoEditorProvider implements vscode.CustomReadonlyEditorProvider 
     width: 88px;
     height: 32px;
     margin: 0;
-    accent-color: var(--mc-accent, #4493f8);
-    cursor: pointer;
   }
   /* A narrow pane. One row needs about 500px before the seek slider is usable,
      and the bar cannot scroll (the page is overflow: hidden), so below that the
-     slider takes a row of its own over the buttons and the bar doubles in height.
-     Narrower still, the volume slider goes (the speaker, the wheel and Up/Down
-     remain), then the time readout (the slider still shows the position), so
-     play, the speaker and full screen always fit. */
+     slider and its two times take a row of their own over the buttons and the bar
+     doubles in height. Narrower still, the volume slider goes (the speaker, the
+     wheel and Up/Down remain), so play, the speaker and full screen always fit. */
   @media (max-width: 560px) {
     body.mc-video { --mc-bar-h: 76px; }
     #mc-controls { flex-wrap: wrap; align-content: center; row-gap: 0; }
-    .mc-video-seek { order: -1; flex: 1 0 100%; margin: 0; height: 28px; }
+    .mc-video-scrub { order: -1; flex: 1 0 100%; }
+    .mc-video-seek { margin: 0 4px; height: 28px; }
     .mc-video-fullscreen { margin-left: auto; }
   }
   @media (max-width: 360px) { .mc-video-volume-slider { display: none; } }
-  @media (max-width: 240px) { .mc-video-time { display: none; } }
   #mc-error {
     position: fixed;
     inset: 0;

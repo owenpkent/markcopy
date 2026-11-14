@@ -36,6 +36,7 @@ import {
   stepTarget,
   type DotRow,
 } from '../review/timeline';
+import { attachSeekBar, setSeekFill } from './seekBar';
 import { isRestoringFocus, type MenuEntry } from './menu';
 
 export interface ReviewDeps {
@@ -425,7 +426,24 @@ export function createReview(deps: ReviewDeps): ReviewController {
     // The bands lie over the slider's own track, the full height of it.
     const track = el('div', 'mc-rv-track');
     track.append(slider, bands);
-    timeline.append(markers, track);
+    // The time on the left end of the scrubber and the time left on the right.
+    const elapsed = el('span', 'mc-rv-end mc-rv-elapsed');
+    elapsed.setAttribute('aria-hidden', 'true');
+    const remain = el('span', 'mc-rv-end mc-rv-remain');
+    remain.title = 'Time left';
+    // A press pauses a video and it stays paused after the drag; a deliberate pause
+    // also drops a resume a note was holding, as the play button does.
+    attachSeekBar({
+      slider,
+      media: video,
+      thumb: 44,
+      duration,
+      format: stamp,
+      onPause: () => (resumeAfterNote = false),
+      // Audio keeps playing, as the player's own seek bar does.
+      pauseOnPress: !clock,
+    });
+    timeline.append(markers, elapsed, track, remain);
 
     main.append(stage, transport, timeline);
 
@@ -621,6 +639,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
       speed,
       readout,
       total,
+      elapsed,
+      remain,
       rate,
       slider,
       markers,
@@ -670,7 +690,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
       : positionTimecode(video.currentTime, fps());
     ui.readout.textContent = code;
     ui.slider.value = String(video.currentTime);
+    setSeekFill(ui.slider, video.currentTime, duration());
     ui.slider.setAttribute('aria-valuetext', code);
+    ui.elapsed.textContent = code;
+    ui.remain.textContent = `-${stamp(Math.max(0, duration() - video.currentTime))}`;
     renderPins(false);
   }
 

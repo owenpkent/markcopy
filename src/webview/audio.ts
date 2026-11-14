@@ -34,6 +34,8 @@ import {
 import type { AudioDetails } from '../messages/audioDetails';
 import { createReview, isTextEntry } from './videoReview';
 import { fromHost } from './fromHost';
+import { attachSeekBar, setSeekFill } from './seekBar';
+import { formatDuration } from './videoInfo';
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -168,8 +170,9 @@ toolbarEl.innerHTML =
   `<button type="button" id="mc-fwd" data-act="fwd" aria-label="Forward ${SEEK_STEP} seconds" title="Forward ${SEEK_STEP} s (Right arrow)">+${SEEK_STEP}s</button>` +
   `<button type="button" id="mc-next" data-act="next" aria-label="Next audio file" title="Next audio file in folder (Page Down)" style="${ICON_BUTTON_CSS}">${NEXT_ICON}</button>` +
   '<span id="mc-nav-sep" class="mc-toolbar-sep" aria-hidden="true"></span>' +
-  '<span id="mc-audio-time" style="padding:0 6px;font-size:12px;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;">--:-- / --:--</span>' +
-  '<input type="range" id="mc-seek" min="0" max="0" step="0.1" value="0" aria-label="Seek" />' +
+  '<span id="mc-audio-time" class="mc-audio-time">0:00</span>' +
+  '<input type="range" id="mc-seek" class="mc-range" min="0" max="0" step="0.1" value="0" aria-label="Seek" />' +
+  '<span id="mc-audio-remain" class="mc-audio-time" title="Time left"></span>' +
   `<button type="button" id="mc-speed" data-act="speed" aria-label="Playback speed 1x, press to change" title="Playback speed (J slower, L faster)">1x</button>` +
   '<button type="button" id="mc-notes" data-act="notes" aria-pressed="false" aria-label="Audio notes" title="Timestamped notes: add at the playhead, set In and Out, copy as Markdown">Notes</button>';
 
@@ -179,6 +182,7 @@ const fwdBtn = document.getElementById('mc-fwd') as HTMLButtonElement;
 const speedBtn = document.getElementById('mc-speed') as HTMLButtonElement;
 const timeEl = document.getElementById('mc-audio-time') as HTMLSpanElement;
 const seekEl = document.getElementById('mc-seek') as HTMLInputElement;
+const remainEl = document.getElementById('mc-audio-remain') as HTMLSpanElement;
 const notesBtn = document.getElementById('mc-notes') as HTMLButtonElement;
 
 // Audio Notes: the video review's panel and timeline in clock mode, over this
@@ -249,12 +253,21 @@ function duration(): number {
   return audio.duration;
 }
 
+/** The time on the seek bar's left end and the time left on its right. */
+function showTimes(time: number): void {
+  const dur = duration();
+  timeEl.textContent = formatDuration(time);
+  remainEl.textContent =
+    Number.isFinite(dur) && dur > 0 ? `-${formatDuration(Math.max(0, dur - time))}` : '';
+}
+
 function refreshTime(): void {
   const dur = duration();
   const time = audio.currentTime;
-  timeEl.textContent = positionReadout(time, dur);
+  showTimes(time);
   if (!scrubbing) {
     seekEl.value = String(time);
+    setSeekFill(seekEl, time, dur);
   }
   seekEl.setAttribute('aria-valuetext', positionReadout(time, dur));
 }
@@ -355,8 +368,17 @@ seekEl.addEventListener('input', () => {
   const time = Number(seekEl.value);
   if (Number.isFinite(time)) {
     audio.currentTime = time;
-    timeEl.textContent = positionReadout(time, duration());
+    showTimes(time);
+    setSeekFill(seekEl, time, duration());
   }
+});
+attachSeekBar({
+  slider: seekEl,
+  media: audio,
+  thumb: 12,
+  duration: () => (Number.isFinite(duration()) ? duration() : 0),
+  format: formatDuration,
+  pauseOnPress: false,
 });
 
 toolbarEl.addEventListener('pointerdown', (e) => e.stopPropagation());

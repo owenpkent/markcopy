@@ -366,15 +366,20 @@ describe('video webview control bar', () => {
     expect(bar().hidden).toBe(true);
   });
 
-  it('holds play, the speaker, the time, the seek slider and fullscreen in that order', async () => {
+  it('holds play, the speaker, the time, the seek slider, the time left and fullscreen in that order', async () => {
     await open();
     const parts = [...bar().children].map((el) => el.className);
     expect(parts).toEqual([
       'mc-video-ctl',
       'mc-video-volume',
-      'mc-video-time',
-      'mc-video-seek',
+      'mc-video-scrub',
       'mc-video-ctl mc-video-fullscreen',
+    ]);
+    const scrub = [...bar().querySelector('.mc-video-scrub')!.children].map((el) => el.className);
+    expect(scrub).toEqual([
+      'mc-video-time',
+      'mc-video-seek mc-range',
+      'mc-video-time mc-video-remain',
     ]);
     expect(bar().querySelector('.mc-video-volume .mc-video-speaker')).not.toBeNull();
   });
@@ -405,7 +410,8 @@ describe('video webview control bar', () => {
     fake(video, { duration: 3725, time: 65, paused: false });
     video.dispatchEvent(new Event('durationchange'));
     video.dispatchEvent(new Event('timeupdate'));
-    expect(timeEl().textContent).toBe('1:05 / 1:02:05');
+    expect(timeEl().textContent).toBe('1:05');
+    expect(bar().querySelector('.mc-video-remain')?.textContent).toBe('-1:01:00');
     expect(seek().max).toBe('3725');
     expect(seek().value).toBe('65');
     expect(seek().disabled).toBe(false);
@@ -435,7 +441,60 @@ describe('video webview control bar', () => {
     seek().value = '42';
     seek().dispatchEvent(new Event('input', { bubbles: true }));
     expect(video.currentTime).toBe(42);
-    expect(timeEl().textContent).toBe('0:42 / 1:40');
+    expect(timeEl().textContent).toBe('0:42');
+    expect(bar().querySelector('.mc-video-remain')?.textContent).toBe('-0:58');
+  });
+
+  it('a press on the slider pauses, and playback stays paused after the drag', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 10, paused: false });
+    video.dispatchEvent(new Event('durationchange'));
+    const pause = vi.fn();
+    video.pause = pause;
+    seek().dispatchEvent(new MouseEvent('pointerdown', { button: 0 }));
+    expect(pause).toHaveBeenCalledTimes(1);
+    seek().value = '60';
+    seek().dispatchEvent(new Event('input', { bubbles: true }));
+    document.dispatchEvent(new MouseEvent('pointerup', { button: 0 }));
+    expect(play).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(60);
+  });
+
+  it('a press while paused, or with another button, does not pause', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 10, paused: true });
+    const pause = vi.fn();
+    video.pause = pause;
+    seek().dispatchEvent(new MouseEvent('pointerdown', { button: 0 }));
+    fake(video, { duration: 100, time: 10, paused: false });
+    seek().dispatchEvent(new MouseEvent('pointerdown', { button: 2 }));
+    expect(pause).not.toHaveBeenCalled();
+  });
+
+  it('fills the track up to the playhead', async () => {
+    const video = await open();
+    fake(video, { duration: 200, time: 50, paused: true });
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(seek().style.getPropertyValue('--mc-seek-frac')).toBe('0.25');
+    seek().value = '150';
+    seek().dispatchEvent(new Event('input', { bubbles: true }));
+    expect(seek().style.getPropertyValue('--mc-seek-frac')).toBe('0.75');
+  });
+
+  it('shows the time under the pointer while hovering the slider', async () => {
+    const video = await open();
+    fake(video, { duration: 100, time: 0, paused: true });
+    video.dispatchEvent(new Event('durationchange'));
+    seek().getBoundingClientRect = () =>
+      ({ left: 100, width: 212, top: 0, bottom: 32, right: 312, height: 32 }) as DOMRect;
+    const tip = document.querySelector('.mc-seek-tip') as HTMLElement;
+    expect(tip.hidden).toBe(true);
+    // 6px in is 0, 6px short of the end is 100: x = 100 + 6 + 200 * 0.65.
+    seek().dispatchEvent(new MouseEvent('pointermove', { clientX: 236 }));
+    expect(tip.hidden).toBe(false);
+    expect(tip.textContent).toBe('1:05');
+    seek().dispatchEvent(new MouseEvent('pointerleave'));
+    expect(tip.hidden).toBe(true);
   });
 
   it('space plays from the page, the picture and a slider, but not from a button', async () => {
