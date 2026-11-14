@@ -930,7 +930,7 @@
     "ovsx": "^1.4.0",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.72.2",
     "vitest": "^4.1.12"
   }
 }
