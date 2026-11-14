@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.5.0] - 2026-11-13
+
 ### Changed
 
 - **Seek bars pause on a press and show the time under the pointer.** Pressing or dragging the video player's seek bar or the Video Notes scrubber now pauses playback, and it stays paused on the frame where the drag ends instead of playing on. Audio keeps playing while you drag, so you still hear where you are. Hovering any seek bar shows the time under the pointer in a small frosted pill (a timecode on the Video Notes scrubber).
@@ -11,14 +18,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Time and time left at the ends of the bar.** The video and audio players show the time and the time left (`1:05` and `-2:15`) at the two ends of the seek bar, in place of the `1:05 / 3:20` readout before it, and both stay visible in a narrow pane. The Video Notes and Audio Notes scrubbers show the timecode and the time left at their ends too, or on a row under the scrubber when the timeline is narrower than about 420 px.
 - **GIF control bar.** The GIF preview gets a bar with a play button, a seek slider over the clip's time (not its frames), and the time and time left (`0:01.2`, `-0:02.3`), with the same pause on a press and hover tip. It shows for any GIF with more than one frame. With the slider focused, the arrow keys step one frame.
 
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
-
 ### Maintenance
 
-- Dependencies: markdown-it-anchor 10.1.0, plus the development dependency group: jsdom 31.0.0, mermaid 12.3.0 and ovsx 1.4.0 (#224, #223). `npm audit` reports no vulnerabilities.
+- Dependencies: markdown-it-anchor 10.1.0, plus the development dependency group: jsdom 31.0.0, mermaid 12.3.0, ovsx 1.4.0 and typescript-eslint 8.72.2 (#224, #223, #225). `npm audit` reports no vulnerabilities.
 - CI: `github/codeql-action` 4.39.3 for both the `init` and `analyze` steps, and Dependabot now groups the two into one pull request, since separate bumps leave them on different versions and fail the Analyze job (#222).
 
 ## [1.4.0] - 2026-11-11
@@ -627,7 +629,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/owenpkent/markcopy/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/owenpkent/markcopy/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/owenpkent/markcopy/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/owenpkent/markcopy/compare/v1.2.0...v1.3.0
