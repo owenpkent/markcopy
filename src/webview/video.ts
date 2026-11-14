@@ -7,6 +7,7 @@
 // streams the file straight off disk, seeking with range requests, so a 2 GB
 // clip costs the same in memory as a 2 MB one.
 import { positionReadout } from './audioInfo';
+import { attachSeekBar, setSeekFill } from './seekBar';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import {
   describeMediaError,
@@ -54,7 +55,7 @@ speakerBtn.type = 'button';
 speakerBtn.className = 'mc-video-ctl mc-video-speaker';
 const volumeSlider = document.createElement('input');
 volumeSlider.type = 'range';
-volumeSlider.className = 'mc-video-volume-slider';
+volumeSlider.className = 'mc-video-volume-slider mc-range';
 volumeSlider.min = '0';
 volumeSlider.max = '100';
 volumeSlider.step = '1';
@@ -802,7 +803,7 @@ function renderVolume(): void {
   const level = video.muted ? 0 : volumePercent();
   volumeSlider.value = String(level);
   volumeSlider.title = `Volume ${level}%`;
-  volumeSlider.style.setProperty('--mc-volume', `${level}%`);
+  setSeekFill(volumeSlider, level, 100);
 }
 video.addEventListener('volumechange', renderVolume);
 renderVolume();
@@ -914,18 +915,30 @@ const timeEl = document.createElement('span');
 timeEl.className = 'mc-video-time';
 const seekSlider = document.createElement('input');
 seekSlider.type = 'range';
-seekSlider.className = 'mc-video-seek';
+seekSlider.className = 'mc-video-seek mc-range';
 seekSlider.min = '0';
 seekSlider.max = '0';
 seekSlider.step = 'any';
 seekSlider.value = '0';
 seekSlider.disabled = true;
 seekSlider.setAttribute('aria-label', 'Seek');
+// The time left, on the right end of the seek slider: `-2:15`.
+const remainEl = document.createElement('span');
+remainEl.className = 'mc-video-time mc-video-remain';
+remainEl.title = 'Time left';
 const fullscreenBtn = document.createElement('button');
 fullscreenBtn.type = 'button';
 fullscreenBtn.className = 'mc-video-ctl mc-video-fullscreen';
-controlBar.append(playBtn, volumeBox, timeEl, seekSlider, fullscreenBtn);
+// The time on the left end of the seek slider and the time left on the right,
+// kept together so a narrow pane moves all three to their own row.
+const scrubBox = document.createElement('div');
+scrubBox.className = 'mc-video-scrub';
+scrubBox.append(timeEl, seekSlider, remainEl);
+controlBar.append(playBtn, volumeBox, scrubBox, fullscreenBtn);
 document.body.insertBefore(controlBar, statusEl);
+
+// The seek thumb's width in px, matching `.mc-video-seek` in src/videoEditor.ts.
+const SEEK_THUMB = 12;
 
 // True while the reader drags the seek slider, so a `timeupdate` does not pull the
 // thumb back out from under the pointer.
@@ -942,13 +955,20 @@ function refreshPlay(): void {
 function refreshTime(): void {
   const known = Number.isFinite(video.duration) && video.duration > 0;
   const text = positionReadout(video.currentTime, video.duration);
-  timeEl.textContent = text;
+  timeEl.textContent = formatDuration(video.currentTime);
   seekSlider.max = known ? String(video.duration) : '0';
   seekSlider.disabled = !known;
+  showRemaining(video.currentTime);
   if (!scrubbing) {
     seekSlider.value = String(video.currentTime);
+    setSeekFill(seekSlider, video.currentTime, video.duration);
   }
   seekSlider.setAttribute('aria-valuetext', text);
+}
+
+function showRemaining(time: number): void {
+  const known = Number.isFinite(video.duration) && video.duration > 0;
+  remainEl.textContent = known ? `-${formatDuration(Math.max(0, video.duration - time))}` : '';
 }
 
 /** Fullscreen the whole page, not the <video>: the control bar has to come along. */
@@ -990,8 +1010,18 @@ seekSlider.addEventListener('input', () => {
   const time = Number(seekSlider.value);
   if (Number.isFinite(time)) {
     video.currentTime = time;
-    timeEl.textContent = positionReadout(time, video.duration);
+    timeEl.textContent = formatDuration(time);
+    showRemaining(time);
+    setSeekFill(seekSlider, time, video.duration);
   }
+});
+// A press pauses, and the video stays paused on the frame the drag ends on.
+attachSeekBar({
+  slider: seekSlider,
+  media: video,
+  thumb: SEEK_THUMB,
+  duration: () => (Number.isFinite(video.duration) ? video.duration : 0),
+  format: formatDuration,
 });
 refreshPlay();
 refreshTime();

@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkCopy video seek bar: look options</title>
+    <!--
+      A design comparison for the video player's seek bar (src/webview/video.ts and
+      src/webview/videoReview.ts). Standalone: open it in a browser. Colours are the
+      repo's Primer --mc-* tokens from media/preview.css. Every option is live: it
+      plays, pauses on a press of the bar and stays paused after the drag, and shows
+      the time under the pointer.
+    -->
+    <style>
+      :root {
+        --mc-bg: #0d1117;
+        --mc-fg: #e6edf3;
+        --mc-muted-fg: #7d8590;
+        --mc-accent: #4493f8;
+        --mc-line: #30363d;
+        --mc-surface: #161b22;
+        --video-bg: #000;
+        color-scheme: dark;
+      }
+      body.light {
+        --mc-bg: #ffffff;
+        --mc-fg: #1f2328;
+        --mc-muted-fg: #59636e;
+        --mc-accent: #0969da;
+        --mc-line: #d0d7de;
+        --mc-surface: #f6f8fa;
+        --video-bg: #f6f8fa;
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--mc-bg);
+        color: var(--mc-fg);
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          'Noto Sans',
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        flex: 1 1 auto;
+      }
+      .lead {
+        color: var(--mc-muted-fg);
+        margin: 0 0 20px;
+        max-width: 70ch;
+      }
+      .btn {
+        min-height: 36px;
+        padding: 0 14px;
+        border-radius: 6px;
+        border: 1px solid var(--mc-line);
+        background: var(--mc-surface);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .btn:hover {
+        border-color: var(--mc-muted-fg);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+        gap: 20px;
+      }
+      .card {
+        border: 1px solid var(--mc-line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--mc-surface);
+      }
+      .card h2 {
+        margin: 0;
+        font-size: 15px;
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+      }
+      .card h2 .letter {
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        background: var(--mc-accent);
+        color: #fff;
+        font-size: 14px;
+      }
+      .card .about {
+        padding: 12px 14px 14px;
+      }
+      .card p {
+        margin: 6px 0 0;
+        color: var(--mc-muted-fg);
+        font-size: 13px;
+      }
+
+      /* ---- The fake player shared by every option ------------------------ */
+      .player {
+        position: relative;
+        background: var(--video-bg);
+        user-select: none;
+        --fg: #e6edf3;
+        color: var(--fg);
+      }
+      body.light .player {
+        --fg: #1f2328;
+      }
+      .picture {
+        aspect-ratio: 16 / 9;
+        background:
+          radial-gradient(circle at 30% 40%, #3b5b8a 0, transparent 45%),
+          radial-gradient(circle at 75% 65%, #6b4b8a 0, transparent 40%),
+          linear-gradient(135deg, #10151d, #1c2430);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+      .picture::after {
+        content: attr(data-state);
+        font-size: 12px;
+        color: #ffffffaa;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 8px;
+        height: 44px;
+      }
+      .ctl {
+        width: 32px;
+        height: 32px;
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        background: none;
+        border: 0;
+        border-radius: 6px;
+        color: inherit;
+        opacity: 0.85;
+        cursor: pointer;
+      }
+      .ctl:hover {
+        opacity: 1;
+        background: color-mix(in srgb, currentColor 12%, transparent);
+      }
+      .ctl svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+      }
+      .time {
+        font:
+          12px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        padding: 0 6px;
+      }
+      .seek {
+        position: relative;
+        flex: 1 1 auto;
+        height: 32px;
+        cursor: pointer;
+        touch-action: none;
+        --frac: 0;
+        --hover: 0;
+      }
+      .rail,
+      .fill,
+      .ghost {
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+      }
+      .rail {
+        right: 0;
+      }
+      .fill {
+        width: calc(100% * var(--frac));
+      }
+      .ghost {
+        width: calc(100% * var(--hover));
+        opacity: 0;
+      }
+      .knob {
+        position: absolute;
+        top: 50%;
+        left: calc(100% * var(--frac));
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      .tip {
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: calc(100% * var(--hover));
+        transform: translateX(-50%);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font:
+          12px ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.1s;
+      }
+      .seek:hover .tip,
+      .seek.drag .tip {
+        opacity: 1;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .player * {
+          transition: none !important;
+        }
+      }
+
+      /* ---- A: what the branch has now ------------------------------------ */
+      .opt-a .rail {
+        height: 4px;
+        border-radius: 3px;
+        background: color-mix(in srgb, currentColor 28%, transparent);
+        transition: height 0.1s;
+      }
+      .opt-a .fill {
+        height: 4px;
+        border-radius: 3px;
+        background: var(--mc-accent);
+        transition: height 0.1s;
+      }
+      .opt-a .knob {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--mc-accent);
+        transform: translate(-50%, -50%) scale(0.75);
+        transition: transform 0.1s;
+      }
+      .opt-a .seek:hover .rail,
+      .opt-a .seek:hover .fill,
+      .opt-a .seek.drag .rail,
+      .opt-a .seek.drag .fill {
+        height: 6px;
+      }
+      .opt-a .seek:hover .knob,
+      .opt-a .seek.drag .knob {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .opt-a .tip {
+        background: var(--fg);
+        color: var(--video-bg);
+      }
+
+      /* ---- B: neutral hairline, no colour ---------------------------------- */
+      .opt-b .rail,
+      .opt-b .fill,
+      .opt-b .ghost {
+        height: 3px;
+        border-radius: 2px;
+        transition: height 0.12s;
+      }
+      .opt-b .rail {
+        background: color-mix(in srgb, currentColor 22%, transparent);
+      }
+      .opt-b .ghost {
+        background: color-mix(in srgb, currentColor 22%, transparent);
+      }
+      .opt-b .fill {
+        background: currentColor;
+      }
+      .opt-b .knob {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 1px 3px #0006;
+        transform: translate(-50%, -50%) scale(0);
+        transition: transform 0.12s;
+      }
+      .opt-b .seek:hover :is(.rail, .fill, .ghost),
+      .opt-b .seek.drag :is(.rail, .fill, .ghost) {
+        height: 5px;
+      }
+      .opt-b .seek:hover .ghost {
+        opacity: 1;
+      }
+      .opt-b .seek:hover .knob,
+      .opt-b .seek.drag .knob {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .opt-b .tip {
+        background: color-mix(in srgb, var(--video-bg) 85%, transparent);
+        color: var(--fg);
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 999px;
+        padding: 2px 8px;
+        backdrop-filter: blur(6px);
+      }
+
+      /* ---- C: floating glass overlay over the picture ---------------------- */
+      .opt-c .player,
+      body.light .opt-c .player {
+        --fg: #ffffff;
+      }
+      .opt-c .overlay {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        border-radius: 12px;
+        padding: 6px 8px 2px;
+        background: rgba(13, 17, 23, 0.55);
+        backdrop-filter: blur(14px) saturate(1.4);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        transition:
+          opacity 0.25s,
+          transform 0.25s;
+      }
+      .opt-c .player.idle .overlay {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      .opt-c .overlay .seek {
+        display: block;
+        height: 20px;
+        margin: 0 6px;
+      }
+      .opt-c .overlay .bar {
+        height: 36px;
+        padding: 0;
+      }
+      .opt-c .rail,
+      .opt-c .fill,
+      .opt-c .ghost {
+        height: 4px;
+        border-radius: 2px;
+        transition: height 0.12s;
+      }
+      .opt-c .rail {
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .opt-c .ghost {
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .opt-c .fill {
+        background: #fff;
+      }
+      .opt-c .seek:hover :is(.rail, .fill, .ghost),
+      .opt-c .seek.drag :is(.rail, .fill, .ghost) {
+        height: 6px;
+      }
+      .opt-c .seek:hover .ghost {
+        opacity: 1;
+      }
+      .opt-c .knob {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #fff;
+        transform: translate(-50%, -50%) scale(0);
+        transition: transform 0.12s;
+      }
+      .opt-c .seek:hover .knob,
+      .opt-c .seek.drag .knob {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .opt-c .tip {
+        background: #fff;
+        color: #0d1117;
+        border-radius: 6px;
+        bottom: calc(100% + 6px);
+      }
+      .opt-c .spacer {
+        flex: 1;
+      }
+
+      /* ---- D: thick capsule, Apple style ----------------------------------- */
+      .opt-d .rail,
+      .opt-d .fill {
+        height: 8px;
+        border-radius: 999px;
+        transition: height 0.15s;
+      }
+      .opt-d .rail {
+        background: color-mix(in srgb, currentColor 18%, transparent);
+        overflow: hidden;
+      }
+      .opt-d .fill {
+        background: color-mix(in srgb, currentColor 85%, transparent);
+        min-width: 8px;
+      }
+      .opt-d .seek.drag :is(.rail, .fill) {
+        height: 14px;
+      }
+      .opt-d .seek:hover:not(.drag) :is(.rail, .fill) {
+        height: 10px;
+      }
+      .opt-d .knob {
+        display: none;
+      }
+      .opt-d .tip {
+        background: var(--fg);
+        color: var(--video-bg);
+        border-radius: 999px;
+        padding: 2px 8px;
+      }
+      .opt-d .time.end {
+        color: color-mix(in srgb, currentColor 65%, transparent);
+      }
+
+      /* ---- E: hover preview line and big readout --------------------------- */
+      .opt-e .bar {
+        height: 52px;
+      }
+      .opt-e .rail,
+      .opt-e .fill,
+      .opt-e .ghost {
+        height: 6px;
+        border-radius: 1px;
+      }
+      .opt-e .rail {
+        background: color-mix(in srgb, currentColor 16%, transparent);
+      }
+      .opt-e .ghost {
+        background: color-mix(in srgb, var(--mc-accent) 30%, transparent);
+      }
+      .opt-e .seek:hover .ghost {
+        opacity: 1;
+      }
+      .opt-e .fill {
+        background: var(--mc-accent);
+      }
+      .opt-e .knob {
+        width: 2px;
+        height: 22px;
+        border-radius: 1px;
+        background: var(--fg);
+      }
+      .opt-e .hoverline {
+        position: absolute;
+        top: 50%;
+        left: calc(100% * var(--hover));
+        width: 1px;
+        height: 18px;
+        transform: translate(-50%, -50%);
+        background: color-mix(in srgb, currentColor 55%, transparent);
+        pointer-events: none;
+        opacity: 0;
+      }
+      .opt-e .seek:hover .hoverline {
+        opacity: 1;
+      }
+      .opt-e .tip {
+        background: var(--mc-surface);
+        color: var(--mc-fg);
+        border: 1px solid var(--mc-line);
+      }
+      .opt-e .time {
+        font-size: 14px;
+      }
+      .opt-e .time .now {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .opt-e .time .total {
+        color: color-mix(in srgb, currentColor 60%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Video seek bar: look options</h1>
+      <button class="btn" id="theme" type="button">Light theme</button>
+    </header>
+    <p class="lead">
+      Chosen: A's blue fill with B's details (thin line, thumb and preview shading on hover, frosted
+      pill tip), built in PR #227 as <code>.mc-range</code> in media/preview.css. Each player is
+      live. Press play, then hover and drag its seek bar: a press pauses and it stays paused after
+      the drag. None of them has the orange ring that showed after a click (that was the browser's
+      focus outline; it is now off for pointer clicks and kept for the keyboard).
+    </p>
+    <div class="grid" id="grid"></div>
+
+    <template id="icons">
+      <svg data-icon="play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" /></svg>
+      <svg data-icon="pause" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z" /></svg>
+      <svg data-icon="vol" viewBox="0 0 24 24">
+        <path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.2-1.2a3.3 3.3 0 0 0 0-4.6z" />
+      </svg>
+      <svg data-icon="full" viewBox="0 0 24 24">
+        <path d="M4 4h6v2H6v4H4zM14 4h6v6h-2V6h-4zM20 14v6h-6v-2h4v-4zM10 20H4v-6h2v4h4z" />
+      </svg>
+    </template>
+
+    <script>
+      const OPTIONS = [
+        {
+          key: 'a',
+          name: 'Blue line',
+          about:
+            'Thin track filled in the blue accent; it thickens and shows a round thumb under the pointer. Tip: solid label.',
+        },
+        {
+          key: 'b',
+          name: 'Neutral hairline',
+          about:
+            'No colour: a 3px line filled in the text colour, 5px under the pointer, with a faint preview fill up to the hover point. The thumb appears only on hover. Tip: a frosted pill.',
+        },
+        {
+          key: 'c',
+          name: 'Floating glass overlay',
+          about:
+            'The bar floats over the bottom of the picture in a frosted panel that fades out after two idle seconds while playing. Full-width white track above the buttons. The most "modern player" look; it covers part of the frame.',
+        },
+        {
+          key: 'd',
+          name: 'Capsule',
+          about:
+            'A thick rounded capsule with no thumb, Apple style. It swells while dragged. Elapsed time on the left, time remaining on the right.',
+        },
+        {
+          key: 'e',
+          name: 'Editor timeline',
+          about:
+            'Built for review: a square 6px track in the accent, a thin playhead line, a hover line with a faint preview fill, and a larger readout. Closest to an editing tool.',
+        },
+      ];
+      const DURATION = 200;
+      const icons = document.getElementById('icons').content;
+      const icon = (name) => icons.querySelector(`[data-icon="${name}"]`).cloneNode(true);
+      const fmt = (s) => {
+        s = Math.max(0, Math.floor(s));
+        return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      };
+
+      function seekEl() {
+        const seek = document.createElement('div');
+        seek.className = 'seek';
+        seek.setAttribute('role', 'slider');
+        seek.setAttribute('aria-label', 'Seek');
+        seek.tabIndex = 0;
+        seek.innerHTML =
+          '<div class="rail"></div><div class="ghost"></div><div class="fill"></div>' +
+          '<div class="hoverline"></div><div class="knob"></div><div class="tip"></div>';
+        return seek;
+      }
+
+      function build(opt) {
+        const card = document.createElement('section');
+        card.className = `card opt-${opt.key}`;
+        const player = document.createElement('div');
+        player.className = 'player';
+        const picture = document.createElement('div');
+        picture.className = 'picture';
+        player.append(picture);
+
+        const play = document.createElement('button');
+        play.className = 'ctl';
+        play.type = 'button';
+        const vol = document.createElement('button');
+        vol.className = 'ctl';
+        vol.type = 'button';
+        vol.append(icon('vol'));
+        const full = document.createElement('button');
+        full.className = 'ctl';
+        full.type = 'button';
+        full.append(icon('full'));
+        const time = document.createElement('span');
+        time.className = 'time';
+        const end = document.createElement('span');
+        end.className = 'time end';
+        const seek = seekEl();
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+
+        if (opt.key === 'c') {
+          const overlay = document.createElement('div');
+          overlay.className = 'overlay';
+          const spacer = document.createElement('span');
+          spacer.className = 'spacer';
+          bar.append(play, vol, time, spacer, full);
+          overlay.append(seek, bar);
+          player.append(overlay);
+        } else if (opt.key === 'd') {
+          bar.append(play, vol, time, seek, end, full);
+          player.append(bar);
+        } else {
+          bar.append(play, vol, time, seek, full);
+          player.append(bar);
+        }
+
+        const about = document.createElement('div');
+        about.className = 'about';
+        about.innerHTML = `<h2><span class="letter">${opt.key.toUpperCase()}</span>${opt.name}</h2><p>${opt.about}</p>`;
+        card.append(player, about);
+
+        // State
+        let t = 42;
+        let playing = false;
+        let dragging = false;
+        let last = 0;
+        let idleTimer = 0;
+
+        function render() {
+          seek.style.setProperty('--frac', String(t / DURATION));
+          play.replaceChildren(icon(playing ? 'pause' : 'play'));
+          play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+          picture.dataset.state = playing ? 'playing' : 'paused';
+          if (opt.key === 'd') {
+            time.textContent = fmt(t);
+            end.textContent = `-${fmt(DURATION - t)}`;
+          } else if (opt.key === 'e') {
+            time.innerHTML = `<span class="now">${fmt(t)}</span> <span class="total">/ ${fmt(DURATION)}</span>`;
+          } else {
+            time.textContent = `${fmt(t)} / ${fmt(DURATION)}`;
+          }
+          seek.setAttribute('aria-valuetext', fmt(t));
+        }
+        function tick(now) {
+          if (playing) {
+            if (last) t = Math.min(DURATION, t + (now - last) / 1000);
+            last = now;
+            if (t >= DURATION) playing = false;
+            render();
+            requestAnimationFrame(tick);
+          } else {
+            last = 0;
+          }
+        }
+        function setPlaying(on) {
+          playing = on;
+          render();
+          if (on) requestAnimationFrame(tick);
+          wake();
+        }
+        function wake() {
+          player.classList.remove('idle');
+          clearTimeout(idleTimer);
+          if (opt.key === 'c' && playing) {
+            idleTimer = setTimeout(() => {
+              if (playing && !dragging) player.classList.add('idle');
+            }, 2000);
+          }
+        }
+
+        play.addEventListener('click', () => setPlaying(!playing));
+        picture.addEventListener('click', () => setPlaying(!playing));
+        player.addEventListener('pointermove', wake);
+
+        const frac = (e) => {
+          const r = seek.getBoundingClientRect();
+          return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+        };
+        const hover = (f) => {
+          seek.style.setProperty('--hover', String(f));
+          seek.querySelector('.tip').textContent = fmt(f * DURATION);
+        };
+        seek.addEventListener('pointerdown', (e) => {
+          if (e.button > 0) return;
+          dragging = true;
+          seek.classList.add('drag');
+          seek.setPointerCapture(e.pointerId);
+          // A press pauses, and the video stays paused after the drag.
+          if (playing) setPlaying(false);
+          t = frac(e) * DURATION;
+          hover(t / DURATION);
+          render();
+        });
+        seek.addEventListener('pointermove', (e) => {
+          const f = frac(e);
+          if (dragging) {
+            t = f * DURATION;
+            render();
+          }
+          hover(f);
+        });
+        const stop = () => {
+          dragging = false;
+          seek.classList.remove('drag');
+        };
+        seek.addEventListener('pointerup', stop);
+        seek.addEventListener('pointercancel', stop);
+        seek.addEventListener('keydown', (e) => {
+          const step = { ArrowLeft: -5, ArrowRight: 5 }[e.key];
+          if (step) {
+            e.preventDefault();
+            t = Math.min(DURATION, Math.max(0, t + step));
+            render();
+          }
+        });
+
+        render();
+        return card;
+      }
+
+      const grid = document.getElementById('grid');
+      for (const opt of OPTIONS) grid.append(build(opt));
+
+      const themeBtn = document.getElementById('theme');
+      themeBtn.addEventListener('click', () => {
+        const light = document.body.classList.toggle('light');
+        themeBtn.textContent = light ? 'Dark theme' : 'Light theme';
+      });
+    </script>
+  </body>
+</html>

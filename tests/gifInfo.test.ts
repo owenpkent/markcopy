@@ -3,10 +3,14 @@ import {
   base64ToBytes,
   describeLoop,
   formatClip,
+  formatTimeline,
+  frameAtTime,
   frameDelayMs,
   frameFileName,
+  frameStartTimes,
   parseGif,
   statusLine,
+  totalSeconds,
 } from '../src/webview/gifInfo';
 
 interface FrameSpec {
@@ -184,5 +188,41 @@ describe('formatters', () => {
     expect(Array.from(base64ToBytes('R0lG'))).toEqual([0x47, 0x49, 0x46]);
     expect(base64ToBytes('not base64!!').length).toBe(0);
     expect(base64ToBytes(42).length).toBe(0);
+  });
+});
+
+describe('timeline maths', () => {
+  it('formats m:ss.s with one decimal', () => {
+    expect(formatTimeline(0)).toBe('0:00.0');
+    expect(formatTimeline(1.2)).toBe('0:01.2');
+    expect(formatTimeline(2.34)).toBe('0:02.3');
+    expect(formatTimeline(59.96)).toBe('1:00.0');
+    expect(formatTimeline(125.5)).toBe('2:05.5');
+    expect(formatTimeline(-1)).toBe('0:00.0');
+    expect(formatTimeline(Number.NaN)).toBe('0:00.0');
+  });
+
+  it('maps frame delays to start times and a total', () => {
+    expect(frameStartTimes([200, 500, 100])).toEqual([0, 0.2, 0.7]);
+    expect(totalSeconds([200, 500, 100])).toBe(0.8);
+    expect(frameStartTimes([])).toEqual([]);
+    expect(totalSeconds([])).toBe(0);
+  });
+
+  it('picks the last frame starting at or before a time', () => {
+    const starts = [0, 0.2, 0.7];
+    expect(frameAtTime(starts, 0)).toBe(0);
+    expect(frameAtTime(starts, 0.19)).toBe(0);
+    expect(frameAtTime(starts, 0.2)).toBe(1);
+    expect(frameAtTime(starts, 0.69)).toBe(1);
+    expect(frameAtTime(starts, 0.7)).toBe(2);
+    expect(frameAtTime(starts, 99)).toBe(2);
+    expect(frameAtTime(starts, -1)).toBe(0);
+    expect(frameAtTime([], 1)).toBe(0);
+  });
+
+  it('round-trips each start time to its own frame', () => {
+    const starts = frameStartTimes([30, 70, 10, 90]);
+    starts.forEach((t, i) => expect(frameAtTime(starts, Number(String(t)))).toBe(i));
   });
 });

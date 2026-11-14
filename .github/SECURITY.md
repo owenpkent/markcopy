@@ -11,14 +11,15 @@ pushes to main, pull requests and weekly. Findings appear under the repository's
 tab (Code scanning). Generated bundles and vendored assets are excluded in
 `.github/codeql/codeql-config.yml`.
 
-`npm audit` is clean as of the move to `@vscode/vsce` 4 and `ovsx` 1.3 on Node 22.
+`npm audit` is clean as of the move to `@vscode/vsce` 4 and `ovsx` 1.3 on Node 22,
+and again after `ovsx` 1.4 and jsdom 31 (2026-11-12).
 That removed the only advisory with no fixed release, `braces`
 (GHSA-vfj7-8cjw-p6xm), which vsce 3 reached through `secretlint`, `globby`,
 `fast-glob` and `micromatch` and which `ovsx` 1.2 pulled in again through its
 nested vsce 3. None of that chain was ever bundled into the extension. Check
 `npm audit` again after any dependency change.
 
-Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together.
+Every GitHub Action in the workflows is pinned by full commit SHA with its version in a trailing comment, so a moved tag cannot change what CI runs. Dependabot's `github-actions` ecosystem opens weekly pull requests that update the SHA and the comment together. The `github/codeql-action` steps are grouped into one pull request, because `init` and `analyze` must run the same CodeQL version.
 
 The `package.json` overrides for `@vscode/test-cli` replace vulnerable versions of
 `diff` and `serialize-javascript` used by its nested Mocha 11 dependency. Remove

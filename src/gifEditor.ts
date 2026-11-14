@@ -153,7 +153,19 @@ export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
      The palette matches media/preview.css so a forced theme looks the same
      across the previews. Deliberately dark by default like the video viewer:
      most GIFs are clips, and a white surround makes them glare. */
-  body.mc-gif { --mc-gif-bg: #1e1e1e; --mc-gif-fg: var(--vscode-foreground); }
+  body.mc-gif {
+    --mc-gif-bg: #1e1e1e;
+    --mc-gif-fg: var(--vscode-foreground);
+    --mc-status-h: 30px;
+    --mc-bar-h: 44px;
+    /* The shared hover tip in preview.css reads the video viewer's token names. */
+    --mc-video-bg: var(--mc-gif-bg);
+    --mc-video-fg: var(--mc-gif-fg);
+  }
+  /* Auto keeps the dark surround under a light VS Code theme, so the theme's own
+     foreground cannot be used on it (same as the video viewer). */
+  body.mc-gif.vscode-light[data-mc-theme='auto'],
+  body.mc-gif.vscode-high-contrast-light[data-mc-theme='auto'] { --mc-gif-fg: #cccccc; }
   body.mc-gif[data-mc-theme='light'] { --mc-gif-bg: #f6f8fa; --mc-gif-fg: #1f2328; }
   body.mc-gif[data-mc-theme='dark'] { --mc-gif-bg: #0d1117; --mc-gif-fg: #e6edf3; }
   body.mc-gif[data-mc-theme='green'] { --mc-gif-bg: #000000; --mc-gif-fg: #33ff33; }
@@ -168,7 +180,7 @@ export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
   #mc-stage {
     position: fixed;
-    inset: 0 0 30px 0;
+    inset: 0 0 var(--mc-status-h) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -184,7 +196,7 @@ export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
     left: 0;
     right: 0;
     bottom: 0;
-    height: 30px;
+    height: var(--mc-status-h);
     display: flex;
     align-items: center;
     padding: 0 12px;
@@ -194,6 +206,70 @@ export class GifEditorProvider implements vscode.CustomReadonlyEditorProvider {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  #mc-stage.mc-has-bar { inset: 0 0 calc(var(--mc-status-h) + var(--mc-bar-h)) 0; }
+  /* The control bar, built by src/webview/gif.ts: play, then the time, the seek
+     slider and the time left. Same look as the video viewer's, in this page's
+     own tokens so it reads in all four themes. */
+  #mc-controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--mc-status-h);
+    height: var(--mc-bar-h);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    color: var(--mc-gif-fg);
+  }
+  #mc-controls[hidden] { display: none; }
+  .mc-gif-scrub {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+  }
+  .mc-gif-time {
+    flex: none;
+    padding: 0 4px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  /* The seek bar's look (.mc-range) is in media/preview.css; here only its place.
+     Its thumb is 12px wide, SEEK_THUMB in src/webview/gif.ts. */
+  .mc-gif-seek {
+    flex: 1 1 80px;
+    min-width: 60px;
+    height: 32px;
+    margin: 0 4px;
+  }
+  .mc-gif-remain { opacity: 0.7; }
+  .mc-gif-ctl {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    opacity: 0.8;
+    cursor: pointer;
+  }
+  .mc-gif-ctl:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .mc-gif-ctl:focus-visible { outline: 2px solid var(--mc-accent, #4493f8); outline-offset: -2px; opacity: 1; }
+  /* A narrow pane: the slider and its two times take a row of their own over the button. */
+  @media (max-width: 560px) {
+    body.mc-gif { --mc-bar-h: 76px; }
+    #mc-controls { flex-wrap: wrap; align-content: center; row-gap: 0; }
+    .mc-gif-scrub { order: -1; flex: 1 0 100%; }
+    .mc-gif-seek { margin: 0 4px; height: 28px; }
   }
   #mc-error {
     position: fixed;

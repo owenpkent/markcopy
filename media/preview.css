@@ -1298,6 +1298,9 @@ body.mc-review #mc-stage[hidden] {
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-send:active:not(:disabled)::before {
   background: color-mix(in srgb, var(--rv-accent) 78%, var(--rv-bg));
 }
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:focus {
+  outline: none;
+}
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv button:focus-visible,
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:focus-visible {
   outline: 2px solid var(--rv-accent);
@@ -1320,6 +1323,69 @@ body.mc-review #mc-stage[hidden] {
 /* Scrubber and markers. */
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-timeline {
   flex: none;
+  /* The markers over the scrubber in the middle column; the time and the time
+     left at the scrubber's two ends, always shown. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  container: mc-rv-timeline / inline-size;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers {
+  grid-column: 2;
+  grid-row: 1;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-track {
+  grid-column: 2;
+  grid-row: 2;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-end {
+  grid-row: 2;
+  font: 13px/1 var(--rv-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The slider's 44px thumb leaves 22px of target past each end of the drawn bar;
+   the times reach 14px into it so they sit close to the bar, and let presses
+   through to the slider. */
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-end {
+  pointer-events: none;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-elapsed {
+  grid-column: 1;
+  margin-right: -14px;
+  color: var(--rv-fg);
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-remain {
+  grid-column: 3;
+  margin-left: -14px;
+  color: var(--rv-muted);
+}
+/* A narrow timeline. Two timecodes take about 150px, which below about 420px would
+   leave the scrubber little or no travel past its 44px thumb, so the times move to
+   a row under it, one at each end, and the scrubber spans the full width again. */
+@container mc-rv-timeline (max-width: 420px) {
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers,
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-track {
+    grid-column: 1 / -1;
+  }
+  /* Both times span every column too, so neither gives a side column a width
+     (which would push the scrubber past the pane); each keeps to its half. */
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-end {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    max-width: 50%;
+    min-width: 0;
+    margin: -12px 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+  }
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-elapsed {
+    justify-self: start;
+  }
+  :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-remain {
+    justify-self: end;
+  }
 }
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-markers {
   position: relative;
@@ -1446,21 +1512,167 @@ body.mc-review #mc-stage[hidden] {
   appearance: none;
   cursor: pointer;
 }
-/* The thumb's line is its centre, so it travels from 22px in to 22px short of
-   the end. The track keeps its full width (the thumb's travel depends on it),
-   but draws only that span, so 0:00 sits on the start of the bar. */
+/* The thumb is a 44px target whose centre is the playhead, so it travels from 22px
+   in to 22px short of the end. The track keeps its full width (the thumb's travel
+   depends on it) but draws only that span, so 0:00 sits on the start of the bar.
+   The same look as the player's seek bar: a 3px line filled in the accent up to the
+   playhead (--mc-seek-frac, set by src/webview/seekBar.ts), 5px under the pointer
+   with a faint preview up to it (--mc-seek-hover) and a 12px dot drawn in the
+   middle of the target. At rest there is no dot, only the end of the fill. */
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider {
+  --rv-seek-rest: color-mix(in srgb, var(--rv-fg) 22%, transparent);
+  --rv-seek-preview: color-mix(in srgb, var(--rv-fg) 40%, transparent);
+}
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  background: linear-gradient(var(--rv-edge), var(--rv-edge)) center / calc(100% - 44px) 100%
-    no-repeat;
+  height: 3px;
+  background:
+    linear-gradient(var(--rv-accent), var(--rv-accent)) 22px center /
+      calc((100% - 44px) * var(--mc-seek-frac, 0)) 100% no-repeat,
+    linear-gradient(var(--rv-seek-rest), var(--rv-seek-rest)) center / calc(100% - 44px) 100%
+      no-repeat;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:hover::-webkit-slider-runnable-track,
+:is(body.mc-video, body.mc-image, body.mc-audio)
+  .mc-rv-slider.mc-seek-active::-webkit-slider-runnable-track {
+  height: 5px;
+  background:
+    linear-gradient(var(--rv-accent), var(--rv-accent)) 22px center /
+      calc((100% - 44px) * var(--mc-seek-frac, 0)) 100% no-repeat,
+    linear-gradient(var(--rv-seek-preview), var(--rv-seek-preview)) 22px center /
+      calc((100% - 44px) * var(--mc-seek-hover, 0)) 100% no-repeat,
+    linear-gradient(var(--rv-seek-rest), var(--rv-seek-rest)) center / calc(100% - 44px) 100%
+      no-repeat;
 }
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 44px;
   height: 44px;
-  margin-top: -20px;
+  margin-top: -20.5px;
   border: 0;
-  background: linear-gradient(var(--rv-accent), var(--rv-accent)) center / 3px 100% no-repeat;
+  background: transparent;
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:hover::-webkit-slider-thumb,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider.mc-seek-active::-webkit-slider-thumb,
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:focus-visible::-webkit-slider-thumb {
+  background: radial-gradient(circle, var(--rv-accent) 0 6px, transparent 6.5px);
+}
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-slider:hover::-webkit-slider-thumb,
+:is(body.mc-video, body.mc-image, body.mc-audio)
+  .mc-rv-slider.mc-seek-active::-webkit-slider-thumb {
+  margin-top: -19.5px;
+}
+
+/* The slim range: the video seek bar and volume slider and the audio seek bar.
+   A 3px line, 5px under the pointer, filled in the accent up to the thumb's centre
+   (--mc-seek-frac, 0 to 1, set by src/webview/seekBar.ts), and on a seek bar a
+   faint preview from there to the pointer (--mc-seek-hover; unset, it collapses).
+   The thumb is 12px wide, so its centre travels from 6px in to 6px short of the
+   end, and both stops follow the same span. It shows only under the pointer,
+   while dragging and with keyboard focus. A click leaves the slider focused, and
+   the webview's default :focus ring (an orange -webkit-focus-ring-color) would
+   stay round it, so only the keyboard gets a ring. */
+.mc-range {
+  color: inherit;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  --mc-range-accent: var(--mc-accent, #4493f8);
+  --mc-range-rest: color-mix(in srgb, currentColor 22%, transparent);
+  --mc-range-preview: color-mix(in srgb, currentColor 40%, transparent);
+  --mc-seek-stop: calc(6px + (100% - 12px) * var(--mc-seek-frac, 0));
+  --mc-seek-hover-stop: calc(6px + (100% - 12px) * var(--mc-seek-hover, 0));
+}
+.mc-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--mc-range-accent) var(--mc-seek-stop),
+    var(--mc-range-rest) var(--mc-seek-stop)
+  );
+  transition: height 0.12s;
+}
+.mc-range:hover:not(:disabled)::-webkit-slider-runnable-track,
+.mc-range.mc-seek-active::-webkit-slider-runnable-track {
+  height: 5px;
+  background: linear-gradient(
+    to right,
+    var(--mc-range-accent) var(--mc-seek-stop),
+    var(--mc-range-preview) var(--mc-seek-stop),
+    var(--mc-range-preview) var(--mc-seek-hover-stop),
+    var(--mc-range-rest) var(--mc-seek-hover-stop)
+  );
+}
+.mc-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mc-range-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transform: scale(0);
+  transition: transform 0.12s;
+}
+.mc-range:hover:not(:disabled)::-webkit-slider-thumb,
+.mc-range.mc-seek-active::-webkit-slider-thumb,
+.mc-range:focus-visible::-webkit-slider-thumb {
+  transform: scale(1);
+}
+.mc-range:hover:not(:disabled)::-webkit-slider-thumb,
+.mc-range.mc-seek-active::-webkit-slider-thumb {
+  margin-top: -3.5px;
+}
+.mc-range:focus {
+  outline: none;
+}
+.mc-range:focus-visible {
+  outline: 2px solid var(--mc-range-accent);
+  outline-offset: 2px;
+}
+.mc-range:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-range::-webkit-slider-runnable-track,
+  .mc-range::-webkit-slider-thumb {
+    transition: none;
+  }
+}
+
+/* The time under the pointer, over a seek bar: the viewer's control bar and the
+   review scrubber (src/webview/seekBar.ts). Fixed on the page, its foot at the
+   slider's top edge and centred on the pointer, and never a target itself. */
+body.mc-video .mc-seek-tip,
+body.mc-audio .mc-seek-tip,
+body.mc-gif .mc-seek-tip {
+  position: fixed;
+  z-index: 20;
+  transform: translate(-50%, calc(-100% + 4px));
+  padding: 2px 8px;
+  border-radius: 999px;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--mc-video-fg, var(--mc-fg, #cccccc));
+  background: color-mix(in srgb, var(--mc-video-bg, var(--mc-bg, #1e1e1e)) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc-video-fg, var(--mc-fg, #cccccc)) 25%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+body.mc-video .mc-seek-tip[hidden],
+body.mc-audio .mc-seek-tip[hidden],
+body.mc-gif .mc-seek-tip[hidden] {
+  display: none;
 }
 
 /* The notes panel. */
@@ -2469,7 +2681,8 @@ body.mc-audio.mc-review #mc-audio-stage {
 /* The review's timeline carries the notes, so it replaces the toolbar's own seek bar
    and readout while notes are on. */
 body.mc-audio.mc-review #mc-seek,
-body.mc-audio.mc-review #mc-audio-time {
+body.mc-audio.mc-review #mc-audio-time,
+body.mc-audio.mc-review #mc-audio-remain {
   display: none;
 }
 body.mc-audio #mc-notes[aria-pressed='true'] {
@@ -2524,8 +2737,21 @@ body.mc-audio #mc-seek {
   min-width: 120px;
   height: 32px;
   margin: 0 4px;
-  accent-color: var(--mc-accent);
-  cursor: pointer;
+}
+/* The time and the time left at the seek bar's two ends; the left one is quieter. */
+body.mc-audio .mc-audio-time {
+  padding: 0 4px;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+body.mc-audio #mc-audio-remain {
+  opacity: 0.7;
 }
 body.mc-audio .mc-audio-open {
   font: inherit;
