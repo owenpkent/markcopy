@@ -1674,8 +1674,9 @@ body.mc-audio .mc-seek-tip[hidden],
 body.mc-gif .mc-seek-tip[hidden] {
   display: none;
 }
-/* With the frame under the pointer over the time: a card, the time under it. */
-body.mc-video .mc-seek-tip.mc-seek-tip-frame {
+/* With the frame under the pointer over the time: a card, the time under it.
+   Only while shown: this would otherwise outrank the [hidden] rule above. */
+body.mc-video .mc-seek-tip.mc-seek-tip-frame:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: center;

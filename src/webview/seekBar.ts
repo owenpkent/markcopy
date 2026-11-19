@@ -48,6 +48,12 @@ export interface SeekBarOptions {
   pauseOnPress?: boolean;
   /** The source to draw hover frames from (a video's `currentSrc`); '' for none. */
   frames?: () => string;
+  /**
+   * The time a hover at `seconds` stands for, when the bar works in whole frames:
+   * the tip's label and its frame both use it, so they name the frame a seek
+   * there would land on.
+   */
+  snap?: (seconds: number) => number;
 }
 
 /** The box a hover frame fits in, in CSS px. */
@@ -89,6 +95,10 @@ export function createFramePeek(
   let failed = false;
   let busy = false;
   let want: number | undefined;
+  // Bumped by clear(): a seek started for an earlier hover must not draw when it
+  // lands, or the next hover would open on its stale frame.
+  let hover = 0;
+  let seekHover = 0;
 
   function draw(): void {
     if (!peek || peek.readyState < 2) {
@@ -124,6 +134,7 @@ export function createFramePeek(
       return;
     }
     busy = true;
+    seekHover = hover;
     peek.currentTime = t;
   }
 
@@ -136,7 +147,9 @@ export function createFramePeek(
       peek.addEventListener('loadedmetadata', pump);
       peek.addEventListener('seeked', () => {
         busy = false;
-        draw();
+        if (seekHover === hover) {
+          draw();
+        }
         pump();
       });
       // No frames for a source the page cannot decode: the tip keeps its time.
@@ -174,6 +187,7 @@ export function createFramePeek(
     },
     clear() {
       want = undefined;
+      hover += 1;
       canvas.hidden = true;
     },
   };
@@ -221,7 +235,12 @@ export function attachSeekBar(opts: SeekBarOptions): void {
 
   function hide(): void {
     tip.hidden = true;
+    tip.classList.remove('mc-seek-tip-frame');
     peek?.clear();
+  }
+
+  function snapped(seconds: number): number {
+    return opts.snap ? opts.snap(seconds) : seconds;
   }
 
   function fromPointer(e: PointerEvent): void {
@@ -237,7 +256,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
     slider.style.setProperty('--mc-seek-hover', String(frac));
     const seconds = dragging ? Number(slider.value) : frac * dur;
     const x = dragging ? rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur) : e.clientX;
-    show(x, seconds);
+    show(x, snapped(seconds));
   }
 
   slider.addEventListener('pointerdown', (e) => {
@@ -281,7 +300,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
       const seconds = Number(slider.value);
       if (dur > 0 && Number.isFinite(seconds)) {
         const rect = slider.getBoundingClientRect();
-        show(rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur), seconds);
+        show(rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur), snapped(seconds));
       }
     }
   });
