@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.6.0] - 2026-11-19
+
 ### Added
 
 - **Frame preview on the video seek bars.** Hovering or dragging the video player's seek bar or the Video Notes scrubber shows the frame at that time in the tip, above the time. A second, muted copy of the video seeks in the background and only the latest position is fetched, so sweeping fast does not queue seeks, and the playing picture is not touched. Audio and GIF seek bars keep the time-only tip.
@@ -11,11 +18,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 ### Fixed
 
 - **A long note no longer runs out of sight while you type it.** The note field in Video, Audio and Image Notes wraps and grows with the text, up to six lines, and then scrolls, instead of scrolling the start of the note away on one line. **Enter** still sends, and a note stays one line: a line break pasted in becomes a space.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [1.5.0] - 2026-11-13
 
@@ -637,7 +639,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/owenpkent/markcopy/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/owenpkent/markcopy/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/owenpkent/markcopy/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/owenpkent/markcopy/compare/v1.3.0...v1.3.1
