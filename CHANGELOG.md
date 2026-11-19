@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Frame preview on the video seek bars.** Hovering or dragging the video player's seek bar or the Video Notes scrubber shows the frame at that time in the tip, above the time. A second, muted copy of the video seeks in the background and only the latest position is fetched, so sweeping fast does not queue seeks, and the playing picture is not touched. Audio and GIF seek bars keep the time-only tip.
+
 ### Fixed
 
 - **A long note no longer runs out of sight while you type it.** The note field in Video, Audio and Image Notes wraps and grows with the text, up to six lines, and then scrolls, instead of scrolling the start of the note away on one line. **Enter** still sends, and a note stays one line: a line break pasted in becomes a space.
