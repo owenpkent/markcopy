@@ -1674,6 +1674,23 @@ body.mc-audio .mc-seek-tip[hidden],
 body.mc-gif .mc-seek-tip[hidden] {
   display: none;
 }
+/* With the frame under the pointer over the time: a card, the time under it. */
+body.mc-video .mc-seek-tip.mc-seek-tip-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 2px;
+  border-radius: 8px;
+}
+body.mc-video .mc-seek-frame {
+  display: block;
+  border-radius: 4px;
+  background: #000;
+}
+body.mc-video .mc-seek-frame[hidden] {
+  display: none;
+}
 
 /* The notes panel. */
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-panel {

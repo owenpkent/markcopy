@@ -1022,6 +1022,8 @@ attachSeekBar({
   thumb: SEEK_THUMB,
   duration: () => (Number.isFinite(video.duration) ? video.duration : 0),
   format: formatDuration,
+  // The frame under the pointer, from the source the picture is playing.
+  frames: () => video.currentSrc,
 });
 refreshPlay();
 refreshTime();

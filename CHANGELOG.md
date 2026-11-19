@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Frame preview on the video seek bars.** Hovering or dragging the video player's seek bar or the Video Notes scrubber shows the frame at that time in the tip, above the time. A second, muted copy of the video seeks in the background and only the latest position is fetched, so sweeping fast does not queue seeks, and the playing picture is not touched. Audio and GIF seek bars keep the time-only tip.
+
 ### Planned
 
 - PlantUML support.

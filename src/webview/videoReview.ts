@@ -442,6 +442,8 @@ export function createReview(deps: ReviewDeps): ReviewController {
       onPause: () => (resumeAfterNote = false),
       // Audio keeps playing, as the player's own seek bar does.
       pauseOnPress: !clock,
+      // A video shows the frame under the pointer; audio has none.
+      frames: clock ? undefined : () => video.currentSrc,
     });
     timeline.append(markers, elapsed, track, remain);
 
