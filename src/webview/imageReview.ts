@@ -18,7 +18,7 @@ import type {
   ImageReviewWebviewMessage,
 } from '../review/imageProtocol';
 import type { MenuEntry } from './menu';
-import { createNoteField, fitNoteField } from './noteField';
+import { createNoteField, fitNoteField, oneLine } from './noteField';
 
 export interface ImageReviewDeps {
   /** The picture's frame: exactly the rendered picture, the overlay's parent. */
@@ -815,7 +815,7 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
     if (!ui || !state || readOnly()) {
       return;
     }
-    const text = ui.field.value.trim();
+    const text = oneLine(ui.field.value).trim();
     // One note in flight at a time, as in Video Notes, so a failed save always
     // has its own draft to give back.
     if ((!text && !pending) || sent) {

@@ -5,7 +5,12 @@
 // scrolls, so a long note stays readable while it is typed. It was a one-line
 // <input>, which scrolled the start of a long note out of sight. A note is still
 // one line, as the sidecar has always stored it: Enter sends (the callers' own
-// keydown), and a line break pasted in becomes a space.
+// keydown), a line break pasted in becomes a space, and the callers send
+// `oneLine` of the text, so a break that slips in some other way is not kept.
+//
+// The paste is rewritten before it lands, through an insertion the browser
+// records, never by assigning `value` afterwards: that would leave Undo and Redo
+// replaying an edit the field no longer holds.
 
 /** Build the note field. */
 export function createNoteField(): HTMLTextAreaElement {
@@ -16,14 +21,20 @@ export function createNoteField(): HTMLTextAreaElement {
   field.placeholder = 'Write a note';
   field.setAttribute('aria-label', 'Note text');
   field.spellcheck = true;
-  field.addEventListener('input', () => {
-    if (/[\r\n]/.test(field.value)) {
-      const at = field.selectionStart;
-      field.value = oneLine(field.value);
-      field.setSelectionRange(at, at);
+  field.addEventListener('paste', (e) => {
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    if (/[\r\n]/.test(text)) {
+      e.preventDefault();
+      insertText(field, oneLine(text));
     }
-    fitNoteField(field);
   });
+  // Shift+Enter and the like: a note has no second line.
+  field.addEventListener('beforeinput', (e) => {
+    if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
+      e.preventDefault();
+    }
+  });
+  field.addEventListener('input', () => fitNoteField(field));
   // A wider or narrower pane rewraps the text: fit again when the width changes.
   if (typeof ResizeObserver === 'function') {
     let width = -1;
@@ -35,6 +46,20 @@ export function createNoteField(): HTMLTextAreaElement {
     }).observe(field);
   }
   return field;
+}
+
+/** Type `text` over the selection as one undoable edit, as a paste would have. */
+function insertText(field: HTMLTextAreaElement, text: string): void {
+  // execCommand is the one insertion Chromium puts on the field's undo stack.
+  if (
+    typeof document.execCommand === 'function' &&
+    document.execCommand('insertText', false, text)
+  ) {
+    return;
+  }
+  // Without it (a test DOM), the text still goes in; there is no undo stack to keep.
+  field.setRangeText(text, field.selectionStart, field.selectionEnd, 'end');
+  field.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 /** A note's text with every line break turned into a space. */

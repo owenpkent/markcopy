@@ -8,6 +8,13 @@ describe('oneLine', () => {
   });
 });
 
+/** A paste event carrying `text`, as jsdom has no ClipboardEvent data. */
+function paste(text: string): Event {
+  const e = new Event('paste', { cancelable: true });
+  Object.defineProperty(e, 'clipboardData', { value: { getData: () => text } });
+  return e;
+}
+
 describe('createNoteField', () => {
   it('is a one-row textarea that wraps instead of scrolling sideways', () => {
     const field = createNoteField();
@@ -18,14 +25,34 @@ describe('createNoteField', () => {
     expect(field.getAttribute('aria-label')).toBe('Note text');
   });
 
-  it('keeps a note on one line when a break is pasted in', () => {
+  it('pastes a multi-line text as one line, over the selection', () => {
     const field = createNoteField();
     document.body.append(field);
-    field.value = 'first line\nsecond line';
-    field.setSelectionRange(11, 11);
-    field.dispatchEvent(new Event('input'));
-    expect(field.value).toBe('first line second line');
-    expect(field.selectionStart).toBe(11);
+    field.value = 'draft  end';
+    field.setSelectionRange(6, 6);
+    const e = paste('line one\r\nline two');
+    field.dispatchEvent(e);
+    // The browser's own paste is replaced, not patched up after it landed.
+    expect(e.defaultPrevented).toBe(true);
+    expect(field.value).toBe('draft line one line two end');
+    expect(field.selectionStart).toBe(23);
     field.remove();
+  });
+
+  it('leaves a one-line paste to the browser', () => {
+    const field = createNoteField();
+    const e = paste('plain');
+    field.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it('refuses a typed line break but not typed text', () => {
+    const field = createNoteField();
+    const brk = new InputEvent('beforeinput', { inputType: 'insertLineBreak', cancelable: true });
+    field.dispatchEvent(brk);
+    expect(brk.defaultPrevented).toBe(true);
+    const typed = new InputEvent('beforeinput', { inputType: 'insertText', cancelable: true });
+    field.dispatchEvent(typed);
+    expect(typed.defaultPrevented).toBe(false);
   });
 });

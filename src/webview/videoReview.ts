@@ -37,7 +37,7 @@ import {
   type DotRow,
 } from '../review/timeline';
 import { attachSeekBar, setSeekFill } from './seekBar';
-import { createNoteField, fitNoteField } from './noteField';
+import { createNoteField, fitNoteField, oneLine } from './noteField';
 import { isRestoringFocus, type MenuEntry } from './menu';
 
 export interface ReviewDeps {
@@ -1055,7 +1055,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     if (!ui || !state || state.readOnly !== null || state.fpsSource === 'pending' || sending) {
       return;
     }
-    const text = ui.field.value.trim();
+    const text = oneLine(ui.field.value).trim();
     if (!text) {
       toast('Write the note first');
       if (clock) {
