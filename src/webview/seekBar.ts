@@ -6,7 +6,10 @@
 //   The audio player opts out: there the sound following the drag is the point.
 // - The played part of the track is filled: `--mc-seek-frac` (0 to 1) on the
 //   slider, which each bar's CSS turns into a gradient stop at the thumb's centre.
-// - Hovering shows the time under the pointer in a small tip above the bar.
+// - Hovering shows the time under the pointer in a small tip above the bar, and
+//   on a video, the frame at that time over it (a second, muted <video> of the
+//   same source seeks there and is drawn to a canvas, so the playing picture is
+//   never disturbed).
 
 /** Where a pointer at `x` falls on a range input, 0 to 1, given its thumb width. */
 export function seekFraction(x: number, left: number, width: number, thumb: number): number {
@@ -43,6 +46,151 @@ export interface SeekBarOptions {
   onPause?: () => void;
   /** Whether a press pauses. Audio keeps playing, so the reader hears the drag. */
   pauseOnPress?: boolean;
+  /** The source to draw hover frames from (a video's `currentSrc`); '' for none. */
+  frames?: () => string;
+  /**
+   * The time a hover at `seconds` stands for, when the bar works in whole frames:
+   * the tip's label and its frame both use it, so they name the frame a seek
+   * there would land on.
+   */
+  snap?: (seconds: number) => number;
+}
+
+/** The box a hover frame fits in, in CSS px. */
+const FRAME_WIDTH = 160;
+const FRAME_HEIGHT = 90;
+
+/** A hover frame's size in CSS px for a picture of `w` by `h`: within 160 by 90. */
+export function frameSize(w: number, h: number): { width: number; height: number } {
+  if (!(w > 0) || !(h > 0)) {
+    return { width: 0, height: 0 };
+  }
+  const scale = Math.min(FRAME_WIDTH / w, FRAME_HEIGHT / h);
+  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+}
+
+export interface FramePeek {
+  readonly canvas: HTMLCanvasElement;
+  /** Draw the frame at `seconds` when it is ready; a newer request replaces it. */
+  request(seconds: number): void;
+  /** Blank the canvas, so the next hover does not open on a stale frame. */
+  clear(): void;
+}
+
+/**
+ * Frames for the hover tip, off a hidden video of the same source. One seek is in
+ * flight at a time and only the latest wanted time is kept, so a fast sweep over
+ * the bar costs a seek per frame drawn rather than one per pointer event.
+ */
+export function createFramePeek(
+  source: () => string,
+  onDraw: () => void,
+  make: () => HTMLVideoElement = () => document.createElement('video'),
+): FramePeek {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'mc-seek-frame';
+  canvas.hidden = true;
+  let peek: HTMLVideoElement | undefined;
+  let src = '';
+  let failed = false;
+  let busy = false;
+  let want: number | undefined;
+  // Bumped by clear(): a seek started for an earlier hover must not draw when it
+  // lands, or the next hover would open on its stale frame.
+  let hover = 0;
+  let seekHover = 0;
+
+  function draw(): void {
+    if (!peek || peek.readyState < 2) {
+      return;
+    }
+    const { width, height } = frameSize(peek.videoWidth, peek.videoHeight);
+    const ctx = width > 0 ? canvas.getContext('2d') : null;
+    if (!ctx) {
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const pw = Math.round(width * dpr);
+    const ph = Math.round(height * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.drawImage(peek, 0, 0, pw, ph);
+    canvas.hidden = false;
+    onDraw();
+  }
+
+  function pump(): void {
+    if (!peek || busy || want === undefined || peek.readyState < 1) {
+      return;
+    }
+    const t = want;
+    want = undefined;
+    if (Math.abs(peek.currentTime - t) < 0.001 && peek.readyState >= 2) {
+      draw();
+      return;
+    }
+    busy = true;
+    seekHover = hover;
+    peek.currentTime = t;
+  }
+
+  function open(next: string): void {
+    if (!peek) {
+      peek = make();
+      peek.muted = true;
+      peek.preload = 'metadata';
+      peek.setAttribute('playsinline', '');
+      peek.addEventListener('loadedmetadata', pump);
+      peek.addEventListener('seeked', () => {
+        busy = false;
+        if (seekHover === hover) {
+          draw();
+        }
+        pump();
+      });
+      // No frames for a source the page cannot decode: the tip keeps its time.
+      peek.addEventListener('error', () => {
+        failed = true;
+        busy = false;
+        want = undefined;
+        canvas.hidden = true;
+      });
+    }
+    src = next;
+    failed = false;
+    busy = false;
+    canvas.hidden = true;
+    peek.src = next;
+  }
+
+  return {
+    canvas,
+    request(seconds) {
+      const next = source();
+      if (!next || !Number.isFinite(seconds)) {
+        canvas.hidden = true;
+        return;
+      }
+      // A proxy or sound copy replacing the file brings a new source.
+      if (next !== src) {
+        open(next);
+      }
+      if (failed) {
+        return;
+      }
+      want = Math.max(0, seconds);
+      pump();
+    },
+    clear() {
+      want = undefined;
+      hover += 1;
+      canvas.hidden = true;
+    },
+  };
 }
 
 /** Wire the pause-on-press and hover tip onto a seek slider. */
@@ -52,24 +200,53 @@ export function attachSeekBar(opts: SeekBarOptions): void {
   tip.className = 'mc-seek-tip';
   tip.setAttribute('aria-hidden', 'true');
   tip.hidden = true;
+  const label = document.createElement('span');
+  label.className = 'mc-seek-time';
+  // Place again once a frame lands: the tip is wider then, and must stay in the pane.
+  const peek = opts.frames ? createFramePeek(opts.frames, () => place()) : undefined;
+  if (peek) {
+    tip.append(peek.canvas);
+  }
+  tip.append(label);
   // On the body, fixed: inside a bar it would count among the bar's controls.
   document.body.append(tip);
   let dragging = false;
+  let lastX = 0;
 
-  function show(clientX: number, seconds: number): void {
-    tip.textContent = opts.format(seconds);
-    tip.hidden = false;
+  function place(): void {
+    if (tip.hidden) {
+      return;
+    }
+    tip.classList.toggle('mc-seek-tip-frame', peek !== undefined && !peek.canvas.hidden);
     const half = tip.offsetWidth / 2;
     const room = document.documentElement.clientWidth;
-    const left = room > 0 ? Math.min(Math.max(clientX, half), room - half) : clientX;
+    const left = room > 0 ? Math.min(Math.max(lastX, half), room - half) : lastX;
     tip.style.left = `${left}px`;
     tip.style.top = `${slider.getBoundingClientRect().top}px`;
+  }
+
+  function show(clientX: number, seconds: number): void {
+    label.textContent = opts.format(seconds);
+    tip.hidden = false;
+    lastX = clientX;
+    peek?.request(seconds);
+    place();
+  }
+
+  function hide(): void {
+    tip.hidden = true;
+    tip.classList.remove('mc-seek-tip-frame');
+    peek?.clear();
+  }
+
+  function snapped(seconds: number): number {
+    return opts.snap ? opts.snap(seconds) : seconds;
   }
 
   function fromPointer(e: PointerEvent): void {
     const dur = opts.duration();
     if (slider.disabled || !(dur > 0)) {
-      tip.hidden = true;
+      hide();
       return;
     }
     const rect = slider.getBoundingClientRect();
@@ -79,7 +256,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
     slider.style.setProperty('--mc-seek-hover', String(frac));
     const seconds = dragging ? Number(slider.value) : frac * dur;
     const x = dragging ? rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur) : e.clientX;
-    show(x, seconds);
+    show(x, snapped(seconds));
   }
 
   slider.addEventListener('pointerdown', (e) => {
@@ -105,7 +282,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
     const over =
       e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (!over) {
-      tip.hidden = true;
+      hide();
     }
   };
   slider.addEventListener('pointercancel', end);
@@ -114,7 +291,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
   slider.addEventListener('pointerenter', fromPointer);
   slider.addEventListener('pointerleave', () => {
     if (!dragging) {
-      tip.hidden = true;
+      hide();
     }
   });
   slider.addEventListener('input', () => {
@@ -123,7 +300,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
       const seconds = Number(slider.value);
       if (dur > 0 && Number.isFinite(seconds)) {
         const rect = slider.getBoundingClientRect();
-        show(rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur), seconds);
+        show(rect.left + thumb / 2 + (rect.width - thumb) * (seconds / dur), snapped(seconds));
       }
     }
   });

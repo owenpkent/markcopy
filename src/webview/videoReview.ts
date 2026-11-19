@@ -438,10 +438,15 @@ export function createReview(deps: ReviewDeps): ReviewController {
       media: video,
       thumb: 44,
       duration,
-      format: stamp,
+      // The hover names the frame a seek there lands on, as the readout does: the
+      // containing frame, not the nearest (note times keep their own rounding).
+      format: clock ? stamp : (seconds) => positionTimecode(seconds, fps()),
+      snap: clock ? undefined : (seconds) => seekTarget(seconds * 1000, fps(), duration()) / 1000,
       onPause: () => (resumeAfterNote = false),
       // Audio keeps playing, as the player's own seek bar does.
       pauseOnPress: !clock,
+      // A video shows the frame under the pointer; audio has none.
+      frames: clock ? undefined : () => video.currentSrc,
     });
     timeline.append(markers, elapsed, track, remain);
 
