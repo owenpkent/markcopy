@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A long note no longer runs out of sight while you type it.** The note field in Video, Audio and Image Notes wraps and grows with the text, up to six lines, and then scrolls, instead of scrolling the start of the note away on one line. **Enter** still sends, and a note stays one line: a line break pasted in becomes a space.
+
 ### Planned
 
 - PlantUML support.

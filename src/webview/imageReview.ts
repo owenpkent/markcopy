@@ -18,6 +18,7 @@ import type {
   ImageReviewWebviewMessage,
 } from '../review/imageProtocol';
 import type { MenuEntry } from './menu';
+import { createNoteField, fitNoteField } from './noteField';
 
 export interface ImageReviewDeps {
   /** The picture's frame: exactly the rendered picture, the overlay's parent. */
@@ -266,11 +267,7 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
     );
     face(clearBtn, 'close');
     clearBtn.hidden = true;
-    const field = el('input', 'mc-rv-field');
-    field.type = 'text';
-    field.maxLength = 10000;
-    field.placeholder = 'Write a note';
-    field.setAttribute('aria-label', 'Note text');
+    const field = createNoteField();
     const send = button('mc-rv-btn mc-rv-key mc-rv-send', 'Send', sendNote, 'Add note (Enter)');
     face(send, 'send', 'Send');
     // A press on these must not take focus from the field.
@@ -290,7 +287,7 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
 
     const keys = el('div', 'mc-rv-row');
     keys.append(areaBtn, pinBtn, clearBtn);
-    const write = el('div', 'mc-rv-row');
+    const write = el('div', 'mc-rv-row mc-rv-write');
     write.append(field, send);
     composer.append(keys, chip, write);
     panel.append(head, banner, restore, list, composer);
@@ -837,6 +834,7 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
     post(msg);
     // The field keeps focus so the next note can follow; Escape hands the keyboard back.
     ui.field.value = '';
+    fitNoteField(ui.field);
     mode = 'none';
     pending = null;
     renderComposer();
@@ -851,6 +849,7 @@ export function createImageReview(deps: ImageReviewDeps): ImageReviewController 
     sent = null;
     if (ui.field.value === '' && !pending && mode === 'none') {
       ui.field.value = draft.text;
+      fitNoteField(ui.field);
       pending = draft.anchor;
       mode = draft.mode;
       renderComposer();

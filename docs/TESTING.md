@@ -461,6 +461,7 @@ Automated tests cover the sidecar bytes, the Markdown, the host session and the 
 - [ ] Play, pause in the middle of a phrase, type a note and press **Add note**: `song.mp3.review.yaml` and `song.mp3.review.md` appear beside the file, the marker lands under the playhead, and the card shows `HH:MM:SS.mmm`.
 - [ ] **In**, move on, **Out**, then **Add note**: the card and marker show a range. **Clear** drops it.
 - [ ] Press a marker and a card: the sound jumps there. Two notes close together share one marker that cycles through them.
+- [ ] Type a note longer than the field, in Video, Audio and Image Notes: it wraps onto a second line and the field grows, to six lines and then scrolls; the play and Send buttons stay level with the last line. Paste two lines: they join with a space. Send: the field shrinks back to one line. Widen and narrow the pane with a long draft: it rewraps.
 - [ ] **I**, **O** and **N** set In, set Out and focus the note field; Left, Right, Page Up and Page Down still seek 5 s and change file when the focus is not in the field.
 - [ ] **Delete** then **Restore** bring the file back to the same bytes; **Copy as Markdown** puts the text on the clipboard and says "Copied 2 notes, saved song.mp3.review.md".
 - [ ] Open the sidecar in okstudio-video-kit (`Review.load` then `validate`, and `export_markdown`): it loads and the Markdown matches the one MarkCopy saved.

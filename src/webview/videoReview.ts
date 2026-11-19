@@ -37,6 +37,7 @@ import {
   type DotRow,
 } from '../review/timeline';
 import { attachSeekBar, setSeekFill } from './seekBar';
+import { createNoteField, fitNoteField } from './noteField';
 import { isRestoringFocus, type MenuEntry } from './menu';
 
 export interface ReviewDeps {
@@ -514,11 +515,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     const cplay = button('mc-rv-btn mc-rv-ghost', '', 'Play', togglePlay);
     cplay.title = 'Play (Space)';
     face(cplay, 'play');
-    const field = el('input', 'mc-rv-field');
-    field.type = 'text';
-    field.maxLength = 10000;
-    field.placeholder = 'Write a note';
-    field.setAttribute('aria-label', 'Note text');
+    const field = createNoteField();
     const send = button(
       'mc-rv-btn mc-rv-key mc-rv-send',
       '',
@@ -587,7 +584,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     keys.append(
       ...(clock ? [inBtn, outBtn, chip, clearBtn] : [inBtn, outBtn, pinBtn, chip, clearBtn]),
     );
-    const write = el('div', 'mc-rv-row');
+    const write = el('div', 'mc-rv-row mc-rv-write');
     write.append(cplay, field, send);
     composer.append(keys, write);
     panel.append(head, banner, restore, list, ...(clock ? [] : [fpsNote]), composer);
@@ -1106,6 +1103,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
     pendingPoint = null;
     pinMode = false;
     ui.field.value = '';
+    fitNoteField(ui.field);
     renderComposer();
     if (resume) {
       void video.play().catch(() => toast('Playback was blocked, press play again'));
@@ -1118,6 +1116,7 @@ export function createReview(deps: ReviewDeps): ReviewController {
       return;
     }
     ui.field.value = sending.text;
+    fitNoteField(ui.field);
     pendingIn = sending.in;
     pendingOut = sending.out;
     pendingPoint = sending.point;

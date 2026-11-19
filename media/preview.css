@@ -1935,15 +1935,26 @@ body.mc-gif .mc-seek-tip[hidden] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The field is 32px drawn inside a 44px row; its edge is held to 3:1. */
+/* The field is 32px drawn inside a 44px row; its edge is held to 3:1. It wraps
+   and grows with the note (src/webview/noteField.ts) to six lines, then scrolls,
+   and the buttons beside it stay on its last line. */
+:is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-write {
+  align-items: flex-end;
+}
 :is(body.mc-video, body.mc-image, body.mc-audio) .mc-rv-field {
   flex: 1 1 120px;
   min-width: 0;
   height: 32px;
+  min-height: 32px;
+  max-height: calc(6 * 18px + 14px);
   margin: 6px 0;
-  padding: 0 12px;
+  padding: 6px 11px;
   box-sizing: border-box;
   font: inherit;
+  line-height: 18px;
+  resize: none;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   color: var(--rv-fg);
   background: var(--rv-bg);
   border: 1px solid var(--rv-edge);
