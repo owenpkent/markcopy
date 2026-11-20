@@ -133,14 +133,14 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
    Open a Markdown file, a CSV, and a PDF; confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. This is a quick re-check of the packaged artifact, not the full manual pass: that already happened in the [pre-release checklist](#pre-release-checklist) (the ★ rows in [docs/TESTING.md](TESTING.md) are the minimum here).
 
-   To check the artifact without replacing the copy in your own profile, install it into a throwaway one instead, and open files with the same two flags (0.14.0 was checked this way; 1.5.0 was published without this check, at the maintainer's choice; 1.6.0 was installed into a throwaway profile, which listed `owenpkent.markcopy@1.6.0`, but no file was opened in it):
+   To check the artifact without replacing the copy in your own profile, install it into a throwaway one instead, and open files with the same two flags (0.14.0 was checked this way; 1.5.0 was published without this check, at the maintainer's choice; 1.6.0 and 1.6.1 were installed into a throwaway profile, which listed `owenpkent.markcopy@1.6.0` and `owenpkent.markcopy@1.6.1`, but no file was opened in it):
 
    ```bash
    code --extensions-dir <tmp>/ext --user-data-dir <tmp>/ud --install-extension markcopy-<version>.vsix
    code --extensions-dir <tmp>/ext --user-data-dir <tmp>/ud sample.md
    ```
 
-   Glance at the file count and size `vsce` prints while packaging, too: 0.14.0 was 185 files and 3.54 MB, 0.21.0 and 0.22.0 were 187 files and 3.65 MB, 1.0.0 was 187 files and 3.63 MB, and 1.0.1, 1.0.2 and 1.1.0 were the same, 187 files and 3.63 MB, 1.2.0 was 187 files and 3.65 MB, 1.3.0 was 188 files and 3.67 MB, 1.5.0 was 189 files and 3.7 MB, and 1.6.0 was 189 files and 3.71 MB. A jump of hundreds of files that no dependency change explains means old build output is being packaged (see [A VSIX much larger than the last one](#a-vsix-much-larger-than-the-last-one)).
+   Glance at the file count and size `vsce` prints while packaging, too: 0.14.0 was 185 files and 3.54 MB, 0.21.0 and 0.22.0 were 187 files and 3.65 MB, 1.0.0 was 187 files and 3.63 MB, and 1.0.1, 1.0.2 and 1.1.0 were the same, 187 files and 3.63 MB, 1.2.0 was 187 files and 3.65 MB, 1.3.0 was 188 files and 3.67 MB, 1.5.0 was 189 files and 3.7 MB, and 1.6.0 and 1.6.1 were 189 files and 3.71 MB. A jump of hundreds of files that no dependency change explains means old build output is being packaged (see [A VSIX much larger than the last one](#a-vsix-much-larger-than-the-last-one)).
 
 8. Load your tokens (see [Publishing secrets](#publishing-secrets-env)): `set -a; source .env; set +a` (PowerShell users: use the loader in that section). Then check both before publishing; each answers in seconds and neither publishes anything: `npx vsce verify-pat OwenPKent` and `npx ovsx verify-pat OwenPKent`.
 9. Publish the tested artifact to the Marketplace: `npm run publish:vsce -- --packagePath markcopy-<version>.vsix` (reads `VSCE_PAT`). The public listing page can 404 for a few minutes to an hour after a publish while it indexes; that is normal. If this step times out, hangs, or seems not to have taken, see [Troubleshooting Phase 2](#troubleshooting-phase-2) before retrying. Confirm the new version through the registry in step 12.
