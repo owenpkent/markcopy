@@ -41,10 +41,12 @@ describe('setSeekFill', () => {
 });
 
 describe('frameSize', () => {
-  it('fits the picture in 160 by 90, keeping its shape', () => {
+  it('keeps the shape, the longest side within 160 and the area within 160 by 90', () => {
     expect(frameSize(1920, 1080)).toEqual({ width: 160, height: 90 });
-    expect(frameSize(1080, 1920)).toEqual({ width: 51, height: 90 });
-    expect(frameSize(640, 480)).toEqual({ width: 120, height: 90 });
+    // A vertical clip stands up rather than shrinking to a 51 by 90 sliver.
+    expect(frameSize(1080, 1920)).toEqual({ width: 90, height: 160 });
+    expect(frameSize(1080, 1080)).toEqual({ width: 120, height: 120 });
+    expect(frameSize(640, 480)).toEqual({ width: 139, height: 104 });
     expect(frameSize(0, 0)).toEqual({ width: 0, height: 0 });
   });
 });
@@ -170,6 +172,23 @@ describe('attachSeekBar', () => {
     const tips = document.querySelectorAll<HTMLElement>('.mc-seek-tip');
     return { slider, tip: tips[tips.length - 1] };
   }
+
+  it('seeks to a press beside the playhead, on the thumb too, and follows a small drag', () => {
+    const { slider } = bar();
+    slider.value = '1';
+    const seen: number[] = [];
+    slider.addEventListener('input', () => seen.push(Number(slider.value)));
+    // The thumb is centred at 107 px; a press 3 px right of it lands there.
+    slider.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 110 }));
+    expect(seen).toEqual([1.03]);
+    // A drag of one more px moves it again.
+    slider.dispatchEvent(new MouseEvent('pointermove', { clientX: 111 }));
+    expect(seen).toEqual([1.03, 1.04]);
+    document.dispatchEvent(new MouseEvent('pointerup', { clientX: 111 }));
+    // Once let go, a hover no longer seeks.
+    slider.dispatchEvent(new MouseEvent('pointermove', { clientX: 150 }));
+    expect(seen).toEqual([1.03, 1.04]);
+  });
 
   it('labels the snapped time, so the tip names the frame a seek lands on', () => {
     // A 1 fps clip: a hover at 0.75 s is in frame 0, whose middle is 0.5 s.

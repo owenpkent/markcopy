@@ -9,6 +9,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+### Fixed
+
+- **Small seeks near the playhead now land.** A press on a seek bar puts the playhead under the pointer and a drag follows it, even on the thumb. Before, a press within about 22 px of the playhead on the Video Notes scrubber (whose thumb is a 44 px target) grabbed the thumb and did not move it. This applies to the video, audio and GIF seek bars too.
+- **Vertical videos get a full-size frame preview.** The hover frame keeps its longest side at 160 px, so a 9:16 clip shows a 90 by 160 frame instead of a 51 by 90 sliver. Square clips show 120 by 120.
+- **Video Notes keeps the notes panel beside a vertical video.** A vertical clip needs only 280 px beside the 320 px panel instead of 400 px, so the panel stays to its side in panes down to 600 px wide, where it used to drop below and take 40% of the height a tall picture needs. The layout is decided again once the video's size is known.
+
 ## [1.6.0] - 2026-11-19
 
 ### Added
