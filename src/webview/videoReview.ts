@@ -113,6 +113,23 @@ const PANEL_W = 320;
 const MIN_VIDEO_W = 400;
 // An audio page has no picture to protect, only its name and the timeline.
 const MIN_AUDIO_W = 320;
+// A vertical video is tall and thin, so beside the panel it keeps its height,
+// while under it the panel takes 40% of that height. It needs only the room the
+// transport and timeline wrap into.
+const MIN_PORTRAIT_W = 280;
+
+/**
+ * Whether the notes panel drops below the stage in a review `width` px wide.
+ * Pass the picture's size for a video, nothing for audio.
+ */
+export function reviewNarrow(width: number, picture?: { w: number; h: number }): boolean {
+  if (!(width > 0)) {
+    return false;
+  }
+  const portrait = picture !== undefined && picture.h > picture.w && picture.w > 0;
+  const min = picture === undefined ? MIN_AUDIO_W : portrait ? MIN_PORTRAIT_W : MIN_VIDEO_W;
+  return width < PANEL_W + min;
+}
 
 export type NoteSort = 'time' | 'newest';
 const SORTS: NoteSort[] = ['time', 'newest'];
@@ -598,9 +615,10 @@ export function createReview(deps: ReviewDeps): ReviewController {
     document.body.appendChild(root);
 
     const relayout = (): void => {
+      const { videoWidth = 0, videoHeight = 0 } = video as HTMLVideoElement;
       root.classList.toggle(
         'mc-rv--narrow',
-        root.clientWidth > 0 && root.clientWidth < PANEL_W + (clock ? MIN_AUDIO_W : MIN_VIDEO_W),
+        reviewNarrow(root.clientWidth, clock ? undefined : { w: videoWidth, h: videoHeight }),
       );
       renderMarkers();
       renderPins(true);
@@ -618,13 +636,14 @@ export function createReview(deps: ReviewDeps): ReviewController {
     });
     // Pins laid out before the picture size was known, or before a source switch
     // changed it, need placing again even though the frame has not moved.
+    // The picture's shape also decides whether the panel fits beside it, so the
+    // layout is worked out again too (which places the markers and pins).
     video.addEventListener('loadedmetadata', () => {
       updateTransport();
-      renderMarkers();
-      renderPins(true);
+      relayout();
     });
     if (!clock) {
-      video.addEventListener('resize', () => renderPins(true));
+      video.addEventListener('resize', relayout);
     }
     video.addEventListener('play', () => {
       updateTransport();
