@@ -9,11 +9,17 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - PlantUML support.
 - An email-safe export profile (table-based layout, fully inlined).
 
+## [1.6.1] - 2026-11-20
+
 ### Fixed
 
 - **Small seeks near the playhead now land.** A press on a seek bar puts the playhead under the pointer and a drag follows it, even on the thumb. Before, a press within about 22 px of the playhead on the Video Notes scrubber (whose thumb is a 44 px target) grabbed the thumb and did not move it. This applies to the video, audio and GIF seek bars too.
 - **Vertical videos get a full-size frame preview.** The hover frame keeps its longest side at 160 px, so a 9:16 clip shows a 90 by 160 frame instead of a 51 by 90 sliver. Square clips show 120 by 120.
 - **Video Notes keeps the notes panel beside a vertical video.** A vertical clip needs only 280 px beside the 320 px panel instead of 400 px, so the panel stays to its side in panes down to 600 px wide, where it used to drop below and take 40% of the height a tall picture needs. The layout is decided again once the video's size is known.
+
+### Maintenance
+
+- Dependencies: dompurify 3.4.18 and numfmt 4.1.4, plus the development dependency group: @vscode/vsce 4.1.1, eslint 10.15.0, jsdom 31.0.1, prettier 3.10.1 and typescript-eslint 8.73.0 (#231, #235). `npm audit` reports no vulnerabilities.
 
 ## [1.6.0] - 2026-11-19
 
@@ -645,7 +651,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/owenpkent/markcopy/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/owenpkent/markcopy/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/owenpkent/markcopy/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/owenpkent/markcopy/compare/v1.3.1...v1.4.0
