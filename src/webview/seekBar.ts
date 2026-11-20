@@ -10,6 +10,10 @@
 //   on a video, the frame at that time over it (a second, muted <video> of the
 //   same source seeks there and is drawn to a canvas, so the playing picture is
 //   never disturbed).
+// - A press lands the playhead exactly under the pointer and a drag follows it,
+//   even on the thumb. The native slider leaves the thumb where it is when it is
+//   pressed, and the review bar's thumb is a 44px target, so a press a few px off
+//   the playhead used to do nothing at all.
 
 /** Where a pointer at `x` falls on a range input, 0 to 1, given its thumb width. */
 export function seekFraction(x: number, left: number, width: number, thumb: number): number {
@@ -56,16 +60,20 @@ export interface SeekBarOptions {
   snap?: (seconds: number) => number;
 }
 
-/** The box a hover frame fits in, in CSS px. */
-const FRAME_WIDTH = 160;
-const FRAME_HEIGHT = 90;
+/** A hover frame's longest side, and the area a landscape 16:9 frame takes, in CSS px. */
+const FRAME_SIDE = 160;
+const FRAME_AREA = 160 * 90;
 
-/** A hover frame's size in CSS px for a picture of `w` by `h`: within 160 by 90. */
+/**
+ * A hover frame's size in CSS px for a picture of `w` by `h`. Its longest side is
+ * at most 160 and its area at most a 160 by 90 frame's, so a vertical clip gets a
+ * 90 by 160 frame rather than a 51 by 90 sliver, and a square one is 120 by 120.
+ */
 export function frameSize(w: number, h: number): { width: number; height: number } {
   if (!(w > 0) || !(h > 0)) {
     return { width: 0, height: 0 };
   }
-  const scale = Math.min(FRAME_WIDTH / w, FRAME_HEIGHT / h);
+  const scale = Math.min(FRAME_SIDE / Math.max(w, h), Math.sqrt(FRAME_AREA / (w * h)));
   return { width: Math.round(w * scale), height: Math.round(h * scale) };
 }
 
@@ -259,8 +267,26 @@ export function attachSeekBar(opts: SeekBarOptions): void {
     show(x, snapped(seconds));
   }
 
+  /** Put the value under the pointer and tell the bar's owner, as a drag would. */
+  function seekTo(e: PointerEvent): void {
+    const dur = opts.duration();
+    if (slider.disabled || !(dur > 0)) {
+      return;
+    }
+    const rect = slider.getBoundingClientRect();
+    // A bar with no room laid out has nowhere to point at.
+    if (!(rect.width > thumb)) {
+      return;
+    }
+    const next = seekFraction(e.clientX, rect.left, rect.width, thumb) * dur;
+    if (Number(slider.value) !== next) {
+      slider.value = String(next);
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
   slider.addEventListener('pointerdown', (e) => {
-    if (e.button > 0) {
+    if (e.button > 0 || slider.disabled) {
       return;
     }
     dragging = true;
@@ -269,6 +295,16 @@ export function attachSeekBar(opts: SeekBarOptions): void {
       opts.onPause?.();
       media.pause();
     }
+    // The bar drives the drag itself, so the native one must not start; the press
+    // still focuses it, for the arrow keys.
+    e.preventDefault();
+    slider.focus({ preventScroll: true });
+    try {
+      slider.setPointerCapture(e.pointerId);
+    } catch {
+      // No capture for a synthetic pointer; the document still hears the release.
+    }
+    seekTo(e);
   });
   // Let go over the bar, the tip stays for the hover; let go off it, it goes. The
   // document hears a release the slider may not, when the pointer left it mid-drag.
@@ -278,6 +314,7 @@ export function attachSeekBar(opts: SeekBarOptions): void {
     }
     dragging = false;
     slider.classList.remove('mc-seek-active');
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
     const r = slider.getBoundingClientRect();
     const over =
       e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
@@ -287,7 +324,12 @@ export function attachSeekBar(opts: SeekBarOptions): void {
   };
   slider.addEventListener('pointercancel', end);
   document.addEventListener('pointerup', end);
-  slider.addEventListener('pointermove', fromPointer);
+  slider.addEventListener('pointermove', (e) => {
+    if (dragging) {
+      seekTo(e);
+    }
+    fromPointer(e);
+  });
   slider.addEventListener('pointerenter', fromPointer);
   slider.addEventListener('pointerleave', () => {
     if (!dragging) {
