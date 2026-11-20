@@ -8,7 +8,7 @@
 // their own panels, so queries go to the newest `.mc-rv`, which is this test's.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewNote, ReviewStateMessage } from '../src/review/protocol';
-import { arrangeNotes, fpsLabel } from '../src/webview/videoReview';
+import { arrangeNotes, fpsLabel, reviewNarrow } from '../src/webview/videoReview';
 
 const BODY = `
   <div id="mc-stage"><video id="mc-video"></video></div>
@@ -126,6 +126,22 @@ function pressMenu(label: string): HTMLElement {
   row!.click();
   return row!;
 }
+
+describe('reviewNarrow', () => {
+  it('keeps the panel beside a vertical video in a pane too narrow for a landscape one', () => {
+    const landscape = { w: 1920, h: 1080 };
+    const vertical = { w: 1080, h: 1920 };
+    expect(reviewNarrow(700, landscape)).toBe(true);
+    expect(reviewNarrow(720, landscape)).toBe(false);
+    expect(reviewNarrow(700, vertical)).toBe(false);
+    expect(reviewNarrow(590, vertical)).toBe(true);
+    // Before the metadata, a video is treated as landscape.
+    expect(reviewNarrow(700, { w: 0, h: 0 })).toBe(true);
+    // Audio has its own floor, and a pane not laid out yet is never narrow.
+    expect(reviewNarrow(650)).toBe(false);
+    expect(reviewNarrow(0, landscape)).toBe(false);
+  });
+});
 
 describe('render-targeted notes', () => {
   it('do not seek to their raw timestamp and say why', async () => {
