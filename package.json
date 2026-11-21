@@ -49,6 +49,8 @@
     "tsv",
     "stl",
     "stl viewer",
+    "3mf",
+    "3mf viewer",
     "3d",
     "mesh",
     "three.js",
@@ -277,13 +279,19 @@
       },
       {
         "viewType": "markcopy.stlPreview",
-        "displayName": "MarkCopy STL Preview",
+        "displayName": "MarkCopy 3D Preview",
         "selector": [
           {
             "filenamePattern": "*.stl"
           },
           {
             "filenamePattern": "*.STL"
+          },
+          {
+            "filenamePattern": "*.3mf"
+          },
+          {
+            "filenamePattern": "*.3MF"
           }
         ],
         "priority": "default"
@@ -710,12 +718,12 @@
         "markcopy.stl.showGrid": {
           "type": "boolean",
           "default": true,
-          "description": "Show a grid under the model in the STL preview."
+          "description": "Show a grid under the model in the STL and 3MF preview."
         },
         "markcopy.stl.meshColor": {
           "type": "string",
           "default": "#8ab4f8",
-          "description": "Color of the mesh material in the STL preview."
+          "description": "Color of the mesh material in the STL and 3MF preview. A 3MF file that colors its own faces keeps those colors; this fills in the faces it leaves uncolored."
         },
         "markcopy.audio.autoplay": {
           "type": "boolean",

@@ -85,13 +85,13 @@ function createPanel() {
   };
 }
 
-async function open() {
+async function open(file = '/models/part.stl') {
   const provider = new StlEditorProvider({
     extensionUri: { path: '/ext', fsPath: '/ext' },
   } as unknown as vscode.ExtensionContext);
   const document = provider.openCustomDocument({
-    path: '/models/part.stl',
-    fsPath: '/models/part.stl',
+    path: file,
+    fsPath: file,
   } as vscode.Uri);
   const harness = createPanel();
   await provider.resolveCustomEditor(document, harness.panel);
@@ -132,6 +132,7 @@ describe('StlEditorProvider', () => {
     await send({ type: 'ready' });
     expect(posted.find((m) => m.type === 'load')).toEqual({
       type: 'load',
+      format: 'stl',
       name: 'part.stl',
       path: '/models/part.stl',
       bytes: Buffer.from(TRIANGLE).toString('base64'),
@@ -160,6 +161,33 @@ describe('StlEditorProvider', () => {
       name: 'part.stl',
       path: '/models/part.stl',
     });
+  });
+
+  it('sends a 3MF as a 3MF, leaving the unpacking to the webview', async () => {
+    const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    readFile.mockResolvedValue(zip);
+    stat.mockResolvedValue({ size: zip.length });
+    const { send, posted } = await open('/models/part.3MF');
+    await send({ type: 'ready' });
+    expect(posted.find((m) => m.type === 'load')).toMatchObject({
+      format: '3mf',
+      name: 'part.3MF',
+      bytes: Buffer.from(zip).toString('base64'),
+    });
+  });
+
+  it('refuses a 3MF that is not a zip, naming it', async () => {
+    const { send, posted } = await open('/models/part.3mf');
+    await send({ type: 'ready' });
+    expect(posted.find((m) => m.type === 'load')).toBeUndefined();
+    expect(posted.find((m) => m.type === 'error')?.message).toContain('not a 3MF package');
+  });
+
+  it('names 3MF in the size refusal for a 3MF', async () => {
+    stat.mockResolvedValue({ size: 300 * 1024 * 1024 });
+    const { send, posted } = await open('/models/part.3mf');
+    await send({ type: 'ready' });
+    expect(posted.find((m) => m.type === 'error')?.message).toContain('limit for 3MF previews');
   });
 
   it('names the file in the error when it cannot be read', async () => {

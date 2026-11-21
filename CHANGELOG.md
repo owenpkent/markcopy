@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **3MF preview.** A `.3mf` file now opens in the STL viewer, renamed MarkCopy 3D Preview. It reads meshes, components, build items and transforms, including the Production extension's separate object parts that Bambu Studio, PrusaSlicer and OrcaSlicer write, and draws Materials-extension colors (base materials and color groups, per object or per face). Faces with no color use `markcopy.stl.meshColor`. The model is turned upright (3MF is Z-up), and the overlay and **Copy as > Dimensions** include the file's unit, for example `25.00 × 10.00 × 10.00 mm`. A sliced `.gcode.3mf` holds no model, so it shows a message asking for the project `.3mf` it was sliced from. The package is read in the webview with the shared zip and XML limits; an instancing bomb, a component cycle, a non-zip file and a malformed model are refused with a message. Not supported: textures, beam lattices, slicer paint colors, plate thumbnails and plate selection. Measured on 2026-11-20 (parse only, Node, not the webview render): 7 real slicer project files from Printables and MakerWorld, 2,824 to 2,649,754 triangles, all read; the 2.6M-triangle file in about 4.1 s and a 1.0M one in about 1.4 s; two `.gcode.3mf` files got the sliced-print-file message. `sample.3mf` is a two-cube sample for manual checks.
+
 ### Planned
 
 - PlantUML support.
