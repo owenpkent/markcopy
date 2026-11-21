@@ -1,6 +1,13 @@
 // Browser-side 3D viewer for the MarkCopy STL and 3MF previews. Bundled on its
 // own into media/stl.js (see esbuild.web.js) so Three.js only loads when an .stl
 // or .3mf file is opened, never for the Markdown, CSV, or PDF previews.
+//
+// Every model stays in its file's own coordinates. One group, `modelRoot`,
+// carries the turn that makes the file's up axis the viewer's and the shift that
+// stands the model on the grid. That is what lets the rest speak in the file's
+// numbers: a section is "Z = 12" as the design has it, the grid lines fall on
+// the file's whole millimetres, a second model overlays the first where their
+// coordinates agree, and a sliced print sits where the bed puts it.
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -14,16 +21,36 @@ import {
   viewFileName,
   type ViewPreset,
 } from './stlInfo';
-import { ThreeMfError, UNIT_LABELS, parse3mf } from './threeMf';
+import { ThreeMfError, UNIT_LABELS, read3mf } from './threeMf';
+import { formatDuration, parseGcode, readSliceInfo, type Toolpath } from './gcode';
+import {
+  AXIS_NAMES,
+  bounds,
+  fitsBed,
+  fmt,
+  formatSectionReport,
+  gridStep,
+  lineSpans,
+  parseBedSize,
+  planeAxes,
+  sectionSegments,
+  spanEdges,
+  unionBounds,
+  type Axis,
+  type Bounds,
+} from './meshSection';
+import { createSectionView, type SectionOutline } from './stlSection';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
 }
 
+type Format = 'stl' | '3mf';
+
 interface LoadMessage {
   type: 'load';
   // Absent from an older host: STL.
-  format?: 'stl' | '3mf';
+  format?: Format;
   name: string;
   // The full file system path, for the menu's Copy as > Full Path.
   path: string;
@@ -32,6 +59,19 @@ interface LoadMessage {
   bytes: unknown;
   showGrid: boolean;
   meshColor: string;
+  upAxis?: string;
+  showBed?: boolean;
+  bedSize?: string;
+  // The models the host offers under Compare with, as the labels to show.
+  siblings?: unknown;
+}
+
+// A second model to lay over the first (Compare with).
+interface CompareMessage {
+  type: 'compare';
+  format?: Format;
+  name: string;
+  bytes: unknown;
 }
 
 interface ThemeMessage {
@@ -50,27 +90,42 @@ interface ErrorMessage {
   path?: string;
 }
 
-// The host's confirmation after Save View as PNG writes the file.
+// The host's confirmation after Save View as PNG writes the file, or its reason
+// for refusing a model to compare.
 interface ToastMessage {
   type: 'toast';
   message: string;
 }
 
-type HostMessage = LoadMessage | ThemeMessage | ErrorMessage | ToastMessage;
+type HostMessage = LoadMessage | CompareMessage | ThemeMessage | ErrorMessage | ToastMessage;
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
 const vscode = acquireVsCodeApi();
 
-const viewportEl = document.getElementById('viewport') as HTMLDivElement;
-const statsEl = document.getElementById('stats') as HTMLDivElement;
-const btnFit = document.getElementById('btn-fit') as HTMLButtonElement;
-const btnWireframe = document.getElementById('btn-wireframe') as HTMLButtonElement;
-const btnGrid = document.getElementById('btn-grid') as HTMLButtonElement;
-const menuEl = document.getElementById('mc-menu') as HTMLDivElement;
-const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
+const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const viewportEl = byId<HTMLDivElement>('viewport');
+const statsEl = byId<HTMLDivElement>('stats');
+const btnFit = byId<HTMLButtonElement>('btn-fit');
+const btnWireframe = byId<HTMLButtonElement>('btn-wireframe');
+const btnGrid = byId<HTMLButtonElement>('btn-grid');
+const btnSection = byId<HTMLButtonElement>('btn-section');
+const menuEl = byId<HTMLDivElement>('mc-menu');
+const toastEl = byId<HTMLDivElement>('mc-toast');
+const sectionEl = byId<HTMLDivElement>('section');
+const sectionCanvas = byId<HTMLCanvasElement>('section-canvas');
+const sectionRange = byId<HTMLInputElement>('section-range');
+const sectionNumber = byId<HTMLInputElement>('section-value');
+const sectionAxisButtons = ['section-x', 'section-y', 'section-z'].map((id) =>
+  byId<HTMLButtonElement>(id),
+);
+const layersEl = byId<HTMLDivElement>('layers');
+const layerRange = byId<HTMLInputElement>('layer-range');
+const layerLabel = byId<HTMLSpanElement>('layer-label');
+const layerOnly = byId<HTMLInputElement>('layer-only');
 
 const contextMenu = createMenu(menuEl);
+const sectionView = createSectionView(sectionCanvas, byId<HTMLDivElement>('section-readout'));
 
 // Set by anything that changes what a frame would look like. The render loop
 // otherwise repaints an unchanging scene forever, which on a laptop is a GPU
@@ -91,6 +146,8 @@ camera.position.set(1, 1, 1);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio || 1);
 renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
+// The section cut clips each model's own material, not the grid or the bed.
+renderer.localClippingEnabled = true;
 viewportEl.appendChild(renderer.domElement);
 syncBackground();
 
@@ -107,16 +164,72 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
 dirLight.position.set(1, 2, 1.5);
 scene.add(dirLight);
 
-let gridHelper: THREE.GridHelper | null = null;
-let mesh: THREE.Mesh | null = null;
-let boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1);
+// Holds the models in file coordinates; see the note at the top of the file.
+const modelRoot = new THREE.Group();
+scene.add(modelRoot);
+// Grid and bed outline, in viewer coordinates on the y = 0 plane.
+const floor = new THREE.Group();
+scene.add(floor);
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+interface Model {
+  name: string;
+  kind: 'mesh' | 'toolpath';
+  object: THREE.Mesh | THREE.LineSegments;
+  // A mesh's triangles, nine floats each, in file coordinates: what the section
+  // tool cuts. Empty for a toolpath.
+  positions: Float32Array;
+  box: Bounds;
+  // The model's size along its file's X, Y and Z, in its file's unit, as shown.
+  // Taken when the file is read: a compared model is rescaled to the first
+  // model's unit afterwards, and its readout should still be its own.
+  dims: string;
+  triangles: number;
+  // The unit as shown ('mm'), or '' when the format has none (STL).
+  unit: string;
+  mmPerUnit: number;
+  // 3MF and G-code are Z-up by definition; an STL follows markcopy.stl.upAxis.
+  fixedZUp: boolean;
+  // CSS color that stands for this model in the readouts and the section.
+  swatch: string;
+  toolpath?: Toolpath;
+  // The slicer's print summary, a line per fact, for a sliced print file.
+  summary?: string[];
+}
+
+type Built = Model | string;
+
+const MM_PER_UNIT: Record<string, number> = {
+  micron: 0.001,
+  millimeter: 1,
+  centimeter: 10,
+  inch: 25.4,
+  foot: 304.8,
+  meter: 1000,
+};
+
+// The second model of a comparison, picked to stand apart from the default
+// mesh blue and from most colors a 3MF brings.
+const OTHER_COLOR = '#f0883e';
+const SECTION_COLOR = 0xffd33d;
+
+let primary: Model | null = null;
+let other: Model | null = null;
+let siblings: string[] = [];
 let showGridSetting = true;
+let showBedSetting = false;
+let bedSizeSetting = '256x256x256';
+let upAxis: 'z' | 'y' = 'z';
 let wireframeActive = false;
 let fileName = '';
 let filePath = '';
 let currentTheme = document.body.dataset.mcTheme || 'auto';
-let dimensionsText = '';
-let triangleCount = 0;
+// The model's size once turned upright, in viewer axes (y is up).
+const worldSize = new THREE.Vector3(1, 1, 1);
+const boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1);
+let floorNote = '';
 
 let toastTimer = 0;
 function toast(text: string, ms = 1600): void {
@@ -134,14 +247,18 @@ function aspect(): number {
 // PDF previews do: the host writes the setting to body[data-mc-theme], the
 // stylesheet in stlEditor.ts maps it to --mc-stl-bg, and 'auto' resolves that to
 // the VS Code editor background.
-function syncBackground(): void {
+function backgroundColor(): string {
   const styles = getComputedStyle(document.body);
-  const bg =
+  return (
     styles.getPropertyValue('--mc-stl-bg').trim() ||
     styles.getPropertyValue('--vscode-editor-background').trim() ||
-    '#1e1e1e';
+    '#1e1e1e'
+  );
+}
+
+function syncBackground(): void {
   try {
-    renderer.setClearColor(new THREE.Color(bg), 1);
+    renderer.setClearColor(new THREE.Color(backgroundColor()), 1);
   } catch {
     // An unparseable color would otherwise leave the canvas mid-render; fall
     // back rather than lose the model over a theme value.
@@ -150,32 +267,350 @@ function syncBackground(): void {
   invalidate();
 }
 
-function setGridVisible(visible: boolean): void {
-  if (gridHelper) {
-    gridHelper.visible = visible;
+// Guard against malformed/malicious STL before allocating: a binary header can
+// over-claim its triangle count and make STLLoader allocate tens of GB.
+function buildStl(name: string, raw: Uint8Array, color: THREE.Color, swatch: string): Built {
+  const check = checkStl(raw);
+  if (!check.ok) {
+    return check.reason ?? 'Could not load this STL file.';
   }
-  btnGrid.classList.toggle('active', visible);
+  const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+  try {
+    // STL carries no unit, so the readout gives none; the grid and the bed
+    // take it as millimetres, as every slicer does.
+    const geometry = new STLLoader().parse(buffer);
+    const positions = geometry.getAttribute('position').array as Float32Array;
+    // Never the file's own colors: an STL can carry a color attribute (a Magics
+    // header makes the loader add one), and an STL has always been drawn in
+    // markcopy.stl.meshColor.
+    return meshModel(name, geometry, positions, color, swatch, {
+      unit: '',
+      mmPerUnit: 1,
+      fixedZUp: false,
+      colored: false,
+    });
+  } catch (err) {
+    return `Could not parse this STL file (${String(err)}).`;
+  }
+}
+
+// read3mf bounds every allocation itself (see threeMf.ts). A sliced print file
+// comes back as G-code rather than a model, and is drawn as its toolpaths.
+function build3mf(name: string, raw: Uint8Array, color: THREE.Color, swatch: string): Built {
+  try {
+    const content = read3mf(raw, { fallbackColor: [color.r, color.g, color.b] });
+    if (content.kind === 'sliced') {
+      return toolpathModel(name, content.gcode, content.plates, content.sliceInfo);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(content.positions, 3));
+    if (content.colors) {
+      geometry.setAttribute('color', new THREE.BufferAttribute(content.colors, 3));
+    }
+    return meshModel(name, geometry, content.positions, color, swatch, {
+      unit: UNIT_LABELS[content.unit] ?? content.unit,
+      mmPerUnit: MM_PER_UNIT[content.unit] ?? 1,
+      fixedZUp: true,
+      colored: content.colors !== null,
+    });
+  } catch (err) {
+    return err instanceof ThreeMfError
+      ? err.message
+      : `Could not read this 3MF file (${String(err)}).`;
+  }
+}
+
+function meshModel(
+  name: string,
+  geometry: THREE.BufferGeometry,
+  // The geometry's own triangles, nine floats each, in file coordinates.
+  positions: Float32Array,
+  color: THREE.Color,
+  swatch: string,
+  // `colored`: whether the geometry's per-vertex colors are the file's own and
+  // are to be drawn.
+  about: { unit: string; mmPerUnit: number; fixedZUp: boolean; colored: boolean },
+): Model {
+  const { unit, mmPerUnit, fixedZUp, colored: vertexColors } = about;
+  geometry.computeVertexNormals();
+  // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
+  // already filled in where the file gives none, so the material stays white.
+  const material = new THREE.MeshStandardMaterial({
+    color: vertexColors ? new THREE.Color(0xffffff) : color,
+    vertexColors,
+    metalness: 0.1,
+    roughness: 0.7,
+    wireframe: wireframeActive,
+  });
+  return {
+    name,
+    kind: 'mesh',
+    object: new THREE.Mesh(geometry, material),
+    positions,
+    box: bounds(positions),
+    triangles: Math.floor(positions.length / 9),
+    unit,
+    mmPerUnit,
+    fixedZUp,
+    swatch,
+    dims: sizeText(bounds(positions), unit),
+  };
+}
+
+// Colors for the slicer's feature names, close to the ones Bambu Studio and
+// OrcaSlicer use for the same lines. First match wins, so the more specific
+// name comes first.
+const FEATURE_COLORS: Array<[RegExp, number]> = [
+  [/support interface/i, 0x1f8a3b],
+  [/support/i, 0x3fd65b],
+  [/overhang/i, 0x4f6bed],
+  [/outer|external/i, 0xff7d38],
+  [/inner|perimeter|wall/i, 0xf2c94c],
+  [/top/i, 0xf04a4a],
+  [/bottom/i, 0x7a6ff0],
+  [/internal solid|solid infill/i, 0xa35ad6],
+  [/bridge/i, 0x4d9ad9],
+  [/gap/i, 0x9aa0a6],
+  [/infill/i, 0xc0453a],
+  [/skirt|brim/i, 0x00a085],
+  [/prime|wipe/i, 0x8fd18a],
+];
+
+function toolpathModel(
+  name: string,
+  gcode: string,
+  plates: number,
+  sliceInfo: string | undefined,
+): Built {
+  const path = parseGcode(gcode);
+  if (path.segments === 0) {
+    return 'This sliced print file has no extrusion moves to show.';
+  }
+  const palette = path.features.map((feature) => {
+    const match = FEATURE_COLORS.find(([pattern]) => pattern.test(feature));
+    return new THREE.Color(match ? match[1] : 0x8a8f98);
+  });
+  // Two vertices per segment, both the color of the segment's feature.
+  const colors = new Float32Array(path.segments * 6);
+  for (let i = 0; i < path.segments; i++) {
+    const c = palette[path.feature[i]] ?? palette[0];
+    colors.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(path.positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const info = sliceInfo === undefined ? { filaments: [] } : readSliceInfo(sliceInfo);
+  const facts: string[] = [];
+  if (info.printSeconds !== undefined) {
+    facts.push(formatDuration(info.printSeconds));
+  }
+  if (info.weightGrams !== undefined) {
+    facts.push(`${fmt(info.weightGrams)} g`);
+  }
+  const materials = [...new Set(info.filaments.map((f) => f.type).filter(Boolean))];
+  if (materials.length > 0) {
+    facts.push(materials.join(', '));
+  }
+  const summary = [`Sliced print${plates > 1 ? `, plate 1 of ${plates}` : ''}`];
+  if (facts.length > 0) {
+    summary.push(facts.join(' · '));
+  }
+  summary.push(
+    `${path.layerEnd.length.toLocaleString()} layers, ${path.segments.toLocaleString()} moves` +
+      (path.truncated ? ' (more than the preview draws; the rest is left out)' : ''),
+  );
+  return {
+    name,
+    kind: 'toolpath',
+    object: new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true })),
+    positions: new Float32Array(0),
+    box: { min: path.min, max: path.max },
+    dims: sizeText({ min: path.min, max: path.max }, 'mm'),
+    triangles: 0,
+    unit: 'mm',
+    mmPerUnit: 1,
+    fixedZUp: true,
+    swatch: '#ff7d38',
+    toolpath: path,
+    summary,
+  };
+}
+
+function build(format: Format | undefined, name: string, raw: Uint8Array, css: string): Built {
+  let color: THREE.Color;
+  try {
+    color = new THREE.Color(css);
+  } catch {
+    color = new THREE.Color('#8ab4f8');
+  }
+  return format === '3mf' ? build3mf(name, raw, color, css) : buildStl(name, raw, color, css);
+}
+
+function disposeModel(model: Model): void {
+  modelRoot.remove(model.object);
+  model.object.geometry.dispose();
+  (model.object.material as THREE.Material).dispose();
+}
+
+function meshMaterial(model: Model): THREE.MeshStandardMaterial | null {
+  return model.kind === 'mesh' ? (model.object.material as THREE.MeshStandardMaterial) : null;
+}
+
+function models(): Model[] {
+  return [primary, other].filter((m): m is Model => m !== null);
+}
+
+// ---------------------------------------------------------------------------
+// Placement, grid and bed
+// ---------------------------------------------------------------------------
+function zUp(): boolean {
+  return primary?.fixedZUp === true || upAxis === 'z';
+}
+
+function sceneBox(): Bounds {
+  if (!primary) {
+    return { min: [0, 0, 0], max: [1, 1, 1] };
+  }
+  return other ? unionBounds(primary.box, other.box) : primary.box;
+}
+
+// Turn the file's up axis to the viewer's (+Y), centre the models over the
+// origin and rest their lowest point on y = 0, where the grid is drawn.
+function place(): void {
+  const { min, max } = sceneBox();
+  const cx = (min[0] + max[0]) / 2;
+  if (zUp()) {
+    // A quarter turn about X takes file (x, y, z) to viewer (x, z, -y).
+    modelRoot.rotation.set(-Math.PI / 2, 0, 0);
+    modelRoot.position.set(-cx, -min[2], (min[1] + max[1]) / 2);
+    worldSize.set(max[0] - min[0], max[2] - min[2], max[1] - min[1]);
+  } else {
+    modelRoot.rotation.set(0, 0, 0);
+    modelRoot.position.set(-cx, -min[1], -(min[2] + max[2]) / 2);
+    worldSize.set(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  }
+  modelRoot.updateMatrixWorld(true);
+  boundingSphere.center.set(0, worldSize.y / 2, 0);
+  boundingSphere.radius = Math.max(worldSize.length() / 2, 1e-6);
+  rebuildFloor();
+  applySection();
   invalidate();
 }
 
-function rebuildGrid(footprint: number): void {
-  if (gridHelper) {
-    scene.remove(gridHelper);
-    gridHelper.dispose();
+function lineSet(points: number[], color: number, opacity: number): THREE.LineSegments {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(points), 3));
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  return new THREE.LineSegments(geometry, material);
+}
+
+// The grid is ruled in the file's own units at a fixed spacing (1, 5, 10 ...),
+// a heavier line every tenth, and its lines fall on the file's whole numbers,
+// so a square of it is a known size and the origin sits on a crossing. The bed
+// outline is the printer's build area at true size.
+function rebuildFloor(): void {
+  for (const child of [...floor.children]) {
+    floor.remove(child);
+    const lines = child as THREE.LineSegments;
+    lines.geometry.dispose();
+    (lines.material as THREE.Material).dispose();
   }
-  const size = Math.max(footprint * 2, 0.01);
-  const divisions = 20;
-  gridHelper = new THREE.GridHelper(size, divisions);
-  gridHelper.position.set(boundingSphere.center.x, 0, boundingSphere.center.z);
-  scene.add(gridHelper);
-  setGridVisible(showGridSetting);
+  floorNote = '';
+  if (!primary) {
+    return;
+  }
+  const unit = primary.unit ? ` ${primary.unit}` : '';
+  const ox = modelRoot.position.x;
+  const oz = modelRoot.position.z;
+  const foot = Math.max(worldSize.x, worldSize.z, 1e-6);
+  let x0 = -worldSize.x / 2 - foot / 4;
+  let x1 = worldSize.x / 2 + foot / 4;
+  let z0 = -worldSize.z / 2 - foot / 4;
+  let z1 = worldSize.z / 2 + foot / 4;
+
+  const bedMm = showBedSetting ? parseBedSize(bedSizeSetting) : null;
+  let bedNote = '';
+  if (bedMm) {
+    const scale = primary.mmPerUnit;
+    const w = bedMm[0] / scale;
+    const d = bedMm[1] / scale;
+    const h = bedMm[2] / scale;
+    // A sliced print has a real place on the bed (its coordinates are the
+    // bed's); a model has none yet, so the bed is centred under it.
+    const sliced = primary.kind === 'toolpath';
+    const bx0 = sliced ? ox : -w / 2;
+    const bz1 = sliced ? oz : d / 2;
+    const bx1 = bx0 + w;
+    const bz0 = bz1 - d;
+    const { min, max } = primary.box;
+    const fits = sliced
+      ? min[0] >= -1e-6 && min[1] >= -1e-6 && max[0] <= w && max[1] <= d && max[2] <= h
+      : fitsBed(
+          [worldSize.x * scale, worldSize.z * scale, worldSize.y * scale],
+          [bedMm[0], bedMm[1], bedMm[2]],
+        );
+    const color = fits ? 0x58a6ff : 0xf85149;
+    const rect = (y: number) => [
+      ...[bx0, y, bz0, bx1, y, bz0],
+      ...[bx1, y, bz0, bx1, y, bz1],
+      ...[bx1, y, bz1, bx0, y, bz1],
+      ...[bx0, y, bz1, bx0, y, bz0],
+    ];
+    floor.add(lineSet(rect(0), color, 0.95));
+    if (Number.isFinite(h)) {
+      const posts = [
+        ...[bx0, 0, bz0, bx0, h, bz0],
+        ...[bx1, 0, bz0, bx1, h, bz0],
+        ...[bx1, 0, bz1, bx1, h, bz1],
+        ...[bx0, 0, bz1, bx0, h, bz1],
+      ];
+      floor.add(lineSet([...rect(h), ...posts], color, 0.3));
+    }
+    x0 = Math.min(x0, bx0);
+    x1 = Math.max(x1, bx1);
+    z0 = Math.min(z0, bz0);
+    z1 = Math.max(z1, bz1);
+    const size = bedMm.filter(Number.isFinite).map(String).join(' × ');
+    bedNote = `Bed ${size} mm: ${fits ? 'fits' : 'does not fit'}`;
+  }
+
+  const step = gridStep(Math.max(x1 - x0, z1 - z0), 40);
+  const major = step * 10;
+  // Out to the next heavy line on each side, counted from the file's origin.
+  x0 = ox + Math.floor((x0 - ox) / major) * major;
+  x1 = ox + Math.ceil((x1 - ox) / major) * major;
+  z0 = oz + Math.floor((z0 - oz) / major) * major;
+  z1 = oz + Math.ceil((z1 - oz) / major) * major;
+  const nx = Math.round((x1 - x0) / step);
+  const nz = Math.round((z1 - z0) / step);
+  if (showGridSetting && nx <= 2000 && nz <= 2000) {
+    const minor: number[] = [];
+    const heavy: number[] = [];
+    for (let k = 0; k <= nx; k++) {
+      (k % 10 === 0 ? heavy : minor).push(x0 + k * step, 0, z0, x0 + k * step, 0, z1);
+    }
+    for (let k = 0; k <= nz; k++) {
+      (k % 10 === 0 ? heavy : minor).push(x0, 0, z0 + k * step, x1, 0, z0 + k * step);
+    }
+    floor.add(lineSet(minor, 0x808080, 0.22));
+    floor.add(lineSet(heavy, 0x808080, 0.6));
+    floorNote = `Grid ${step}${unit}`;
+  }
+  if (bedNote) {
+    floorNote = floorNote ? `${floorNote} · ${bedNote}` : bedNote;
+  }
+  btnGrid.classList.toggle('active', showGridSetting);
 }
 
 // Frames the model from `preset`'s direction at the distance that fits its
 // bounding sphere. 'isometric' is the angle a freshly loaded model opens at.
 function fitView(preset: ViewPreset = 'isometric'): void {
   const fovRadians = (camera.fov * Math.PI) / 180;
-  const distance = (boundingSphere.radius * 1.6) / Math.sin(fovRadians / 2);
+  // A narrow viewport (the section panel open beside it) needs more distance
+  // for the same sphere than a wide one.
+  const narrow = Math.max(Math.min(1, aspect()), 0.2);
+  const distance = (boundingSphere.radius * 1.6) / Math.sin(fovRadians / 2) / narrow;
   const [dx, dy, dz] = VIEW_PRESETS[preset];
   const direction = new THREE.Vector3(dx, dy, dz).normalize();
   camera.position.copy(boundingSphere.center).addScaledVector(direction, distance);
@@ -192,8 +627,11 @@ function fitView(preset: ViewPreset = 'isometric'): void {
 function setWireframe(on: boolean): void {
   wireframeActive = on;
   btnWireframe.classList.toggle('active', on);
-  if (mesh) {
-    (mesh.material as THREE.MeshStandardMaterial).wireframe = on;
+  for (const model of models()) {
+    const material = meshMaterial(model);
+    if (material) {
+      material.wireframe = on;
+    }
   }
   invalidate();
 }
@@ -204,8 +642,35 @@ function toggleWireframe(): void {
 
 function toggleGrid(): void {
   showGridSetting = !showGridSetting;
-  setGridVisible(showGridSetting);
+  rebuildFloor();
+  renderStats();
+  invalidate();
 }
+
+function toggleBed(): void {
+  showBedSetting = !showBedSetting;
+  if (showBedSetting && !parseBedSize(bedSizeSetting)) {
+    toast('markcopy.stl.bedSize is not a size such as 256x256x256', 3200);
+  }
+  rebuildFloor();
+  renderStats();
+  invalidate();
+}
+
+function setUpAxis(value: 'z' | 'y'): void {
+  upAxis = value;
+  vscode.postMessage({ type: 'updateSetting', key: 'stl.upAxis', value });
+  if (primary) {
+    place();
+    fitView();
+    renderStats();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Readout
+// ---------------------------------------------------------------------------
+type StatLine = string | { swatch: string; text: string };
 
 function showError(message: string): void {
   statsEl.textContent = message;
@@ -215,15 +680,71 @@ function showError(message: string): void {
   statsEl.style.maxWidth = 'calc(100vw - 32px)';
 }
 
-function showStats(text: string): void {
-  statsEl.textContent = text;
+function showStats(lines: StatLine[]): void {
+  statsEl.textContent = '';
   statsEl.style.whiteSpace = 'pre';
   statsEl.style.maxWidth = '';
+  lines.forEach((line, i) => {
+    if (i > 0) {
+      statsEl.append('\n');
+    }
+    if (typeof line === 'string') {
+      statsEl.append(line);
+      return;
+    }
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = line.swatch;
+    statsEl.append(swatch, line.text);
+  });
 }
 
+/** The model's size along the file's own X, Y and Z, with its unit when it has one. */
+function dimensions(model: Model): string {
+  return model.dims;
+}
+
+function sizeText({ min, max }: Bounds, unit: string): string {
+  const size = [0, 1, 2].map((a) => fmt(max[a] - min[a])).join(' × ');
+  return unit ? `${size} ${unit}` : size;
+}
+
+function renderStats(): void {
+  if (!primary) {
+    return;
+  }
+  const lines: StatLine[] = [];
+  if (primary.kind === 'toolpath') {
+    lines.push(...(primary.summary ?? []), dimensions(primary));
+  } else if (other) {
+    for (const model of [primary, other]) {
+      lines.push({
+        swatch: model.swatch,
+        text: `${model.name}  ${model.triangles.toLocaleString()} triangles  ${dimensions(model)}`,
+      });
+    }
+  } else {
+    lines.push(`${primary.triangles.toLocaleString()} triangles`, dimensions(primary));
+  }
+  if (floorNote) {
+    lines.push(floorNote);
+  }
+  showStats(lines);
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
 function loadModel(msg: LoadMessage): void {
   fileName = msg.name;
   filePath = msg.path ?? '';
+  showGridSetting = msg.showGrid !== false;
+  showBedSetting = msg.showBed === true;
+  bedSizeSetting = typeof msg.bedSize === 'string' ? msg.bedSize : '256x256x256';
+  upAxis = msg.upAxis === 'y' ? 'y' : 'z';
+  siblings = Array.isArray(msg.siblings)
+    ? msg.siblings.filter((s): s is string => typeof s === 'string').slice(0, 20)
+    : [];
   const raw = toBytes(msg.bytes);
 
   // An empty payload means the file never made it across, which is a different
@@ -235,128 +756,368 @@ function loadModel(msg: LoadMessage): void {
     return;
   }
 
-  const meshColor = new THREE.Color(msg.meshColor || '#8ab4f8');
+  const css = msg.meshColor || '#8ab4f8';
   if (msg.format !== '3mf') {
-    showModel(msg, meshColor, readStl(raw));
+    showPrimary(build(msg.format, msg.name, raw, css));
     return;
   }
   // Unpacking and reading a slicer project runs to seconds for a few million
   // triangles, all on this thread. Say so first, and give the browser a frame
   // to paint it before the parse holds the thread.
-  showStats(`Reading ${msg.name}…`);
-  window.setTimeout(() => showModel(msg, meshColor, read3mf(raw, meshColor)), 16);
+  showStats([`Reading ${msg.name}…`]);
+  window.setTimeout(() => showPrimary(build('3mf', msg.name, raw, css)), 16);
 }
 
-interface Parsed {
-  geometry: THREE.BufferGeometry;
-  // The unit as shown ('mm'), or '' when the format has none (STL).
-  unit: string;
-  // Whether the geometry was turned from the file's Z-up to the viewer's Y-up.
-  turned: boolean;
-  // Whether the file's own per-vertex colors are drawn. Only a 3MF's are: an
-  // STL can carry a color attribute too (a Magics header makes STLLoader add
-  // one), and an STL has always been drawn in markcopy.stl.meshColor.
-  colored: boolean;
-}
-
-function showModel(msg: LoadMessage, meshColor: THREE.Color, parsed: Parsed | null): void {
-  if (!parsed) {
+function showPrimary(built: Built): void {
+  if (typeof built === 'string') {
+    showError(built);
     return;
   }
-  const { geometry, unit, turned, colored: vertexColors } = parsed;
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox as THREE.Box3;
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  // Center the model in X/Z and rest its bottom on the y = 0 plane, so the
-  // grid drawn at y = 0 always sits directly under the model.
-  geometry.translate(-center.x, -box.min.y, -center.z);
-  geometry.computeBoundingSphere();
-  geometry.computeVertexNormals();
-
-  if (mesh) {
-    scene.remove(mesh);
-    mesh.geometry.dispose();
-    (mesh.material as THREE.Material).dispose();
+  closeSection();
+  for (const model of models()) {
+    disposeModel(model);
   }
+  other = null;
+  primary = built;
+  modelRoot.add(built.object);
 
-  // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
-  // already filled in where the file gives none, so the material stays white.
-  const material = new THREE.MeshStandardMaterial({
-    color: vertexColors ? new THREE.Color(0xffffff) : meshColor,
-    vertexColors,
-    metalness: 0.1,
-    roughness: 0.7,
-    wireframe: wireframeActive,
-  });
-  mesh = new THREE.Mesh(geometry, material);
-  scene.add(mesh);
-
-  boundingSphere = (geometry.boundingSphere as THREE.Sphere).clone();
-  showGridSetting = msg.showGrid !== false;
-  rebuildGrid(Math.max(size.x, size.z));
+  const sliced = built.kind === 'toolpath';
+  // A sliced print is a position on a bed, so the bed is part of the picture.
+  showBedSetting = showBedSetting || sliced;
+  btnWireframe.disabled = sliced;
+  btnSection.disabled = sliced;
+  layersEl.hidden = !sliced;
+  if (built.toolpath) {
+    layerRange.max = String(built.toolpath.layerEnd.length);
+    layerOnly.checked = false;
+    setLayer(built.toolpath.layerEnd.length);
+  }
+  place();
   fitView();
+  renderStats();
+}
 
-  triangleCount = geometry.attributes.position.count / 3;
-  // The file's own X, Y and Z: for a turned model the viewer's Y is the file's
-  // Z and the viewer's Z the file's Y.
-  const [dx, dy, dz] = turned ? [size.x, size.z, size.y] : [size.x, size.y, size.z];
-  dimensionsText = `${dx.toFixed(2)} × ${dy.toFixed(2)} × ${dz.toFixed(2)}${unit ? ` ${unit}` : ''}`;
-  showStats(`${triangleCount.toLocaleString()} triangles\n${dimensionsText}`);
+function loadCompare(msg: CompareMessage): void {
+  if (!primary || primary.kind !== 'mesh') {
+    toast('Open a model first to compare against');
+    return;
+  }
+  const raw = toBytes(msg.bytes);
+  toast(`Reading ${msg.name}…`, 60000);
+  window.setTimeout(() => {
+    const built = build(msg.format, msg.name, raw, OTHER_COLOR);
+    if (typeof built === 'string') {
+      toast(built, 5000);
+      return;
+    }
+    if (built.kind !== 'mesh') {
+      built.object.geometry.dispose();
+      toast('A sliced print file has no model to compare', 4000);
+      return;
+    }
+    setOther(built);
+    toast(`Comparing with ${msg.name}`);
+  }, 16);
+}
+
+function setOther(model: Model | null): void {
+  if (other) {
+    disposeModel(other);
+  }
+  other = model;
+  if (model && primary) {
+    // Both models share one coordinate group, and the section and its numbers
+    // read both position arrays in the first model's unit. A part exported in
+    // centimetres beside the same part in millimetres would otherwise sit at a
+    // tenth of the size and show as a difference that is not there.
+    const ratio = model.mmPerUnit / primary.mmPerUnit;
+    if (Number.isFinite(ratio) && ratio > 0 && ratio !== 1) {
+      // Scales the position attribute in place, which is model.positions.
+      model.object.geometry.scale(ratio, ratio, ratio);
+      model.box = bounds(model.positions);
+    }
+    // Where the two models share a surface, the first one shows; the second is
+    // pushed a hair back so the pair does not flicker.
+    const material = model.object.material as THREE.MeshStandardMaterial;
+    // One flat color, the one its swatch and its section outline have. A 3MF's
+    // own colors would leave two versions of a part looking the same.
+    material.vertexColors = false;
+    material.color.set(OTHER_COLOR);
+    material.needsUpdate = true;
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = 1;
+    material.polygonOffsetUnits = 2;
+    material.wireframe = wireframeActive;
+    modelRoot.add(model.object);
+  }
+  if (primary) {
+    primary.object.visible = true;
+    place();
+    fitView();
+    renderStats();
+  }
+}
+
+function toggleVisible(model: Model): void {
+  model.object.visible = !model.object.visible;
+  applySection();
   invalidate();
 }
 
-// Guard against malformed/malicious STL before allocating: a binary header can
-// over-claim its triangle count and make STLLoader allocate tens of GB.
-function readStl(raw: Uint8Array): Parsed | null {
-  const check = checkStl(raw);
-  if (!check.ok) {
-    showError(check.reason ?? 'Could not load this STL file.');
-    return null;
+// ---------------------------------------------------------------------------
+// Sliced prints: layer slider
+// ---------------------------------------------------------------------------
+let layer = 1;
+
+function setLayer(value: number): void {
+  const path = primary?.toolpath;
+  if (!primary || !path) {
+    return;
   }
-  const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-  try {
-    // STL carries no unit, so the readout gives none.
-    return { geometry: new STLLoader().parse(buffer), unit: '', turned: false, colored: false };
-  } catch (err) {
-    showError(`Could not parse this STL file (${String(err)}).`);
-    return null;
+  const count = path.layerEnd.length;
+  layer = Math.min(Math.max(Math.round(value) || 1, 1), count);
+  layerRange.value = String(layer);
+  const end = path.layerEnd[layer - 1];
+  const start = layerOnly.checked && layer > 1 ? path.layerEnd[layer - 2] : 0;
+  // Two vertices per segment.
+  primary.object.geometry.setDrawRange(start * 2, (end - start) * 2);
+  layerLabel.textContent = `Layer ${layer} / ${count} · Z ${fmt(path.layerZ[layer - 1])} mm`;
+  invalidate();
+}
+
+layerRange.addEventListener('input', () => setLayer(Number(layerRange.value)));
+layerOnly.addEventListener('change', () => setLayer(layer));
+byId('layer-down').addEventListener('click', () => setLayer(layer - 1));
+byId('layer-up').addEventListener('click', () => setLayer(layer + 1));
+
+// ---------------------------------------------------------------------------
+// Section
+// ---------------------------------------------------------------------------
+// The cut is a plane across one of the file's axes. The 3D view clips the model
+// at it and traces the cut; the panel beside it draws the cut flat and measures
+// it (stlSection.ts). Both are recomputed from the triangles each time the
+// plane moves, which for a few million triangles is tens of milliseconds, so
+// the slider only marks the section stale and the render loop does the work.
+let sectionOn = false;
+let sectionAxis: Axis = 2;
+let sectionValue = 0;
+let sectionStale = false;
+let sectionOutlines: SectionOutline[] = [];
+const clipPlane = new THREE.Plane();
+const sectionLines = new THREE.Group();
+modelRoot.add(sectionLines);
+
+function sectionRangeOf(axis: Axis): [number, number] {
+  const { min, max } = sceneBox();
+  return [min[axis], max[axis]];
+}
+
+// One click of the minus and plus buttons: a round step a few hundred of which
+// span the model (0.1 on a 20 mm part, 1 on a 250 mm one).
+function sectionStep(): number {
+  const [lo, hi] = sectionRangeOf(sectionAxis);
+  return gridStep(hi - lo, 250);
+}
+
+function openSection(): void {
+  if (!primary || primary.kind !== 'mesh') {
+    toast('No model to section');
+    return;
+  }
+  sectionOn = true;
+  document.body.classList.add('mc-section');
+  sectionEl.hidden = false;
+  btnSection.classList.add('active');
+  onResize();
+  // Across the up axis first: the cut a slicer's layer view shows.
+  setSectionAxis(zUp() ? 2 : 1);
+  fitView();
+}
+
+function closeSection(): void {
+  if (!sectionOn) {
+    return;
+  }
+  sectionOn = false;
+  document.body.classList.remove('mc-section');
+  sectionEl.hidden = true;
+  btnSection.classList.remove('active');
+  clearSectionLines();
+  sectionOutlines = [];
+  sectionView.setData(null);
+  for (const model of models()) {
+    const material = meshMaterial(model);
+    if (material) {
+      material.clippingPlanes = null;
+      material.side = THREE.FrontSide;
+      material.needsUpdate = true;
+    }
+  }
+  onResize();
+  if (primary) {
+    fitView();
   }
 }
 
-// parse3mf bounds every allocation itself (see threeMf.ts). 3MF is Z-up by
-// specification, with the build plate in XY; the viewer is Y-up with the grid
-// in XZ, so the model is turned upright to stand on the grid as it would on the
-// plate.
-function read3mf(raw: Uint8Array, meshColor: THREE.Color): Parsed | null {
-  try {
-    const model = parse3mf(raw, { fallbackColor: [meshColor.r, meshColor.g, meshColor.b] });
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3));
-    if (model.colors) {
-      geometry.setAttribute('color', new THREE.BufferAttribute(model.colors, 3));
-    }
-    geometry.rotateX(-Math.PI / 2);
-    const unit = UNIT_LABELS[model.unit] ?? model.unit;
-    return { geometry, unit, turned: true, colored: model.colors !== null };
-  } catch (err) {
-    showError(
-      err instanceof ThreeMfError ? err.message : `Could not read this 3MF file (${String(err)}).`,
-    );
-    return null;
+function toggleSection(): void {
+  if (sectionOn) {
+    closeSection();
+  } else {
+    openSection();
   }
 }
+
+function setSectionAxis(axis: Axis): void {
+  sectionAxis = axis;
+  const [lo, hi] = sectionRangeOf(axis);
+  sectionValue = (lo + hi) / 2;
+  applySection();
+}
+
+function setSectionValue(value: number): void {
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  const [lo, hi] = sectionRangeOf(sectionAxis);
+  sectionValue = Math.min(Math.max(value, lo), hi);
+  sectionStale = true;
+  invalidate();
+}
+
+function clearSectionLines(): void {
+  for (const child of [...sectionLines.children]) {
+    sectionLines.remove(child);
+    const lines = child as THREE.LineSegments;
+    lines.geometry.dispose();
+    (lines.material as THREE.Material).dispose();
+  }
+}
+
+function applySection(): void {
+  sectionStale = false;
+  if (!sectionOn || !primary) {
+    return;
+  }
+  const [lo, hi] = sectionRangeOf(sectionAxis);
+  sectionValue = Math.min(Math.max(sectionValue, lo), hi);
+  sectionRange.min = String(lo);
+  sectionRange.max = String(hi);
+  sectionRange.value = String(sectionValue);
+  sectionNumber.step = String(sectionStep());
+  // Not while it is being typed in: rewriting the field mid-number moves the
+  // caret and eats the digit just entered.
+  if (document.activeElement !== sectionNumber) {
+    sectionNumber.value = fmt(sectionValue);
+  }
+  sectionAxisButtons.forEach((button, i) => button.classList.toggle('active', i === sectionAxis));
+
+  // Keep what is below the plane. Clipping planes are in viewer coordinates, so
+  // the file-space plane goes through the same transform as the models.
+  const normal = new THREE.Vector3(0, 0, 0).setComponent(sectionAxis, -1);
+  clipPlane.set(normal, sectionValue);
+  clipPlane.applyMatrix4(modelRoot.matrixWorld);
+
+  const [ua, va] = planeAxes(sectionAxis);
+  clearSectionLines();
+  sectionOutlines = [];
+  for (const model of models()) {
+    const material = meshMaterial(model);
+    if (!material) {
+      continue;
+    }
+    if (!material.clippingPlanes) {
+      material.clippingPlanes = [clipPlane];
+      // The cut opens the model, so its inside faces have to draw too.
+      material.side = THREE.DoubleSide;
+      material.needsUpdate = true;
+    }
+    if (!model.object.visible) {
+      continue;
+    }
+    const segments = sectionSegments(model.positions, sectionAxis, sectionValue);
+    sectionOutlines.push({ label: model.name, color: model.swatch, segments });
+
+    // The same outline in 3D, on the cut. Drawn over the model (no depth test)
+    // so it reads from any angle.
+    const points = new Float32Array((segments.length / 4) * 6);
+    for (let i = 0, o = 0; i + 3 < segments.length; i += 4, o += 6) {
+      points[o + sectionAxis] = points[o + 3 + sectionAxis] = sectionValue;
+      points[o + ua] = segments[i];
+      points[o + va] = segments[i + 1];
+      points[o + 3 + ua] = segments[i + 2];
+      points[o + 3 + va] = segments[i + 3];
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(points, 3));
+    const lines = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: model === primary ? SECTION_COLOR : new THREE.Color(model.swatch),
+        depthTest: false,
+      }),
+    );
+    lines.renderOrder = 2;
+    sectionLines.add(lines);
+  }
+
+  const { min, max } = sceneBox();
+  sectionView.setData({
+    outlines: sectionOutlines,
+    u: [min[ua], max[ua]],
+    v: [min[va], max[va]],
+    uName: AXIS_NAMES[ua],
+    vName: AXIS_NAMES[va],
+  });
+  invalidate();
+}
+
+// What Copy as > Section Measurements writes: the crossings along the two lines
+// of the crosshair (or through the middle of the model when nothing is pointed
+// at), for each model on screen.
+function sectionReport(): string {
+  const [ua, va] = planeAxes(sectionAxis);
+  const { min, max } = sceneBox();
+  const at = sectionView.point() ?? { u: (min[ua] + max[ua]) / 2, v: (min[va] + max[va]) / 2 };
+  const unit = primary?.unit ?? '';
+  return sectionOutlines
+    .map((outline) =>
+      formatSectionReport(outline.label, sectionAxis, sectionValue, unit, [
+        { fixed: 'v', value: at.v, crossings: spanEdges(lineSpans(outline.segments, 'v', at.v)) },
+        { fixed: 'u', value: at.u, crossings: spanEdges(lineSpans(outline.segments, 'u', at.u)) },
+      ]),
+    )
+    .join('\n\n');
+}
+
+sectionRange.addEventListener('input', () => setSectionValue(Number(sectionRange.value)));
+sectionNumber.addEventListener('input', () => {
+  if (sectionNumber.value.trim() !== '') {
+    setSectionValue(Number(sectionNumber.value));
+  }
+});
+sectionNumber.addEventListener('blur', () => (sectionNumber.value = fmt(sectionValue)));
+byId('section-down').addEventListener('click', () => {
+  // Onto the step's own multiples, so repeated clicks read 12.0, 11.9, 11.8.
+  const step = sectionStep();
+  setSectionValue((Math.ceil(sectionValue / step - 1e-6) - 1) * step);
+});
+byId('section-up').addEventListener('click', () => {
+  const step = sectionStep();
+  setSectionValue((Math.floor(sectionValue / step + 1e-6) + 1) * step);
+});
+byId('section-close').addEventListener('click', closeSection);
+sectionAxisButtons.forEach((button, i) =>
+  button.addEventListener('click', () => setSectionAxis(i as Axis)),
+);
 
 btnFit.addEventListener('click', () => {
-  if (mesh) {
+  if (primary) {
     fitView();
   }
 });
-
 btnWireframe.addEventListener('click', toggleWireframe);
 btnGrid.addEventListener('click', toggleGrid);
+btnSection.addEventListener('click', toggleSection);
 
 // ---------------------------------------------------------------------------
 // Copy and save actions
@@ -370,26 +1131,51 @@ function snapshotBlob(): Promise<Blob | null> {
   return new Promise((resolve) => renderer.domElement.toBlob(resolve, 'image/png'));
 }
 
+async function copyPng(blob: Blob | null, done: string): Promise<void> {
+  if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    toast(done);
+  } else {
+    toast('PNG copy not supported here');
+  }
+}
+
 async function copyViewPng(): Promise<void> {
-  if (!mesh) {
+  if (!primary) {
     toast('No model to copy');
     return;
   }
   try {
-    const blob = await snapshotBlob();
-    if (blob && navigator.clipboard && 'write' in navigator.clipboard) {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      toast('Copied view as PNG');
-    } else {
-      toast('PNG copy not supported here');
-    }
+    await copyPng(await snapshotBlob(), 'Copied view as PNG');
   } catch {
     toast('Could not read the current view');
   }
 }
 
+// The section canvas is transparent over the panel, so the copy gets the
+// panel's background painted under it rather than a see-through PNG.
+async function copySectionPng(): Promise<void> {
+  try {
+    const flat = document.createElement('canvas');
+    flat.width = sectionCanvas.width;
+    flat.height = sectionCanvas.height;
+    const ctx = flat.getContext('2d');
+    if (!ctx) {
+      toast('PNG copy not supported here');
+      return;
+    }
+    ctx.fillStyle = backgroundColor();
+    ctx.fillRect(0, 0, flat.width, flat.height);
+    ctx.drawImage(sectionCanvas, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
+    await copyPng(blob, 'Copied section as PNG');
+  } catch {
+    toast('Could not read the section');
+  }
+}
+
 function saveViewPng(): void {
-  if (!mesh) {
+  if (!primary) {
     toast('No model to save');
     return;
   }
@@ -439,49 +1225,133 @@ const VIEW_LABELS: Array<[string, ViewPreset]> = [
   ['Isometric', 'isometric'],
 ];
 
+function copyAsEntries(): MenuEntry[] {
+  const noModel = !primary;
+  const entries: MenuEntry[] = [
+    { kind: 'item', label: 'File Name', run: () => copyText(fileName, 'Copied file name') },
+    { kind: 'item', label: 'Full Path', run: () => copyText(filePath, 'Copied path') },
+    {
+      kind: 'item',
+      label: 'Dimensions',
+      run: () => copyText(primary ? dimensions(primary) : '', 'Copied dimensions'),
+      disabled: noModel,
+    },
+  ];
+  if (primary?.kind === 'toolpath') {
+    const summary = [fileName, ...(primary.summary ?? []), dimensions(primary)].join('\n');
+    entries.push({
+      kind: 'item',
+      label: 'Print Summary',
+      run: () => copyText(summary, 'Copied print summary'),
+    });
+  } else {
+    entries.push({
+      kind: 'item',
+      label: 'Triangle Count',
+      run: () => copyText(String(primary?.triangles ?? ''), 'Copied triangle count'),
+      disabled: noModel,
+    });
+  }
+  if (sectionOn) {
+    entries.push({
+      kind: 'item',
+      label: 'Section Measurements',
+      run: () => copyText(sectionReport(), 'Copied section measurements'),
+    });
+  }
+  return entries;
+}
+
+// The models the host found beside this one, likeliest previous version first,
+// then a file picker for anything else. The host opens only names it offered.
+function compareEntries(): MenuEntry[] {
+  const entries: MenuEntry[] = siblings.map((name) => ({
+    kind: 'radio',
+    label: name,
+    checked: other?.name === name,
+    run: () => vscode.postMessage({ type: 'compare', name }),
+  }));
+  if (entries.length > 0) {
+    entries.push({ kind: 'divider' });
+  }
+  entries.push({
+    kind: 'item',
+    label: 'Browse…',
+    run: () => vscode.postMessage({ type: 'compareBrowse' }),
+  });
+  if (primary && other) {
+    const shown = (model: Model): MenuEntry => ({
+      kind: 'checkbox',
+      label: `Show ${model.name}`,
+      checked: model.object.visible,
+      run: () => toggleVisible(model),
+    });
+    entries.push({ kind: 'divider' }, shown(primary), shown(other), {
+      kind: 'item',
+      label: 'Stop Comparing',
+      run: () => setOther(null),
+    });
+  }
+  return entries;
+}
+
+function viewEntries(): MenuEntry[] {
+  const noModel = !primary;
+  const entries: MenuEntry[] = [
+    { kind: 'item', label: 'Fit View', run: () => fitView(), disabled: noModel },
+    ...VIEW_LABELS.map(([label, preset]): MenuEntry => ({
+      kind: 'item',
+      label,
+      run: () => fitView(preset),
+      disabled: noModel,
+    })),
+    { kind: 'divider' },
+  ];
+  if (primary?.kind !== 'toolpath') {
+    entries.push(
+      { kind: 'checkbox', label: 'Wireframe', checked: wireframeActive, run: toggleWireframe },
+      { kind: 'checkbox', label: 'Section', checked: sectionOn, run: toggleSection },
+    );
+  }
+  entries.push(
+    { kind: 'checkbox', label: 'Grid', checked: showGridSetting, run: toggleGrid },
+    { kind: 'checkbox', label: 'Print Bed', checked: showBedSetting, run: toggleBed },
+  );
+  // Only an STL leaves the question open; 3MF and G-code are Z-up by definition.
+  if (primary && !primary.fixedZUp) {
+    const axis = (label: string, value: 'z' | 'y'): MenuEntry => ({
+      kind: 'radio',
+      label,
+      checked: upAxis === value,
+      run: () => setUpAxis(value),
+    });
+    entries.push(
+      { kind: 'divider' },
+      { kind: 'submenu', label: 'Up Axis', entries: [axis('Z', 'z'), axis('Y', 'y')] },
+    );
+  }
+  return entries;
+}
+
 function buildMenu(): MenuEntry[] {
-  const noModel = !mesh;
-  return [
+  const noModel = !primary;
+  const menu: MenuEntry[] = [
     { kind: 'item', label: 'Copy View as PNG', run: () => void copyViewPng(), disabled: noModel },
     { kind: 'item', label: 'Save View as PNG…', run: saveViewPng, disabled: noModel },
+  ];
+  if (sectionOn) {
+    menu.push({ kind: 'item', label: 'Copy Section as PNG', run: () => void copySectionPng() });
+  }
+  menu.push(
     { kind: 'divider' },
-    {
-      kind: 'submenu',
-      label: 'Copy as',
-      entries: [
-        { kind: 'item', label: 'File Name', run: () => copyText(fileName, 'Copied file name') },
-        { kind: 'item', label: 'Full Path', run: () => copyText(filePath, 'Copied path') },
-        {
-          kind: 'item',
-          label: 'Dimensions',
-          run: () => copyText(dimensionsText, 'Copied dimensions'),
-          disabled: noModel,
-        },
-        {
-          kind: 'item',
-          label: 'Triangle Count',
-          run: () => copyText(String(triangleCount), 'Copied triangle count'),
-          disabled: noModel,
-        },
-      ],
-    },
+    { kind: 'submenu', label: 'Copy as', entries: copyAsEntries() },
     { kind: 'divider' },
-    {
-      kind: 'submenu',
-      label: 'View',
-      entries: [
-        { kind: 'item', label: 'Fit View', run: () => fitView(), disabled: noModel },
-        ...VIEW_LABELS.map(([label, preset]): MenuEntry => ({
-          kind: 'item',
-          label,
-          run: () => fitView(preset),
-          disabled: noModel,
-        })),
-        { kind: 'divider' },
-        { kind: 'checkbox', label: 'Wireframe', checked: wireframeActive, run: toggleWireframe },
-        { kind: 'checkbox', label: 'Grid', checked: showGridSetting, run: toggleGrid },
-      ],
-    },
+    { kind: 'submenu', label: 'View', entries: viewEntries() },
+  );
+  if (primary?.kind === 'mesh') {
+    menu.push({ kind: 'submenu', label: 'Compare with', entries: compareEntries() });
+  }
+  menu.push(
     { kind: 'divider' },
     { kind: 'submenu', label: 'Preferences', entries: themeItems() },
     { kind: 'divider' },
@@ -495,7 +1365,8 @@ function buildMenu(): MenuEntry[] {
       label: revealLabel(),
       run: () => vscode.postMessage({ type: 'revealInOS' }),
     },
-  ];
+  );
+  return menu;
 }
 
 // OrbitControls pans on a right-button drag, and `contextmenu` fires at mouseup
@@ -521,6 +1392,22 @@ viewportEl.addEventListener(
     }
     if (e.button === 2) {
       rightClick.down(e.clientX, e.clientY);
+    }
+  },
+  true,
+);
+
+// The same for a press anywhere else on the page (the toolbar, the section
+// panel, the layer bar), which the viewport's listener never sees. There the
+// press still does its own job as well: closing a menu on the way to a slider
+// should not cost a second click.
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    const target = e.target as Node | null;
+    const outside = !contextMenu.owns(e.target) && !(target && viewportEl.contains(target));
+    if (contextMenu.isOpen() && outside) {
+      contextMenu.hide();
     }
   },
   true,
@@ -591,6 +1478,7 @@ function applyTheme(value: string): void {
   currentTheme = value;
   document.body.dataset.mcTheme = value;
   syncBackground();
+  sectionView.redraw();
 }
 
 window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
@@ -600,6 +1488,8 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
   const msg = event.data;
   if (msg?.type === 'load') {
     loadModel(msg);
+  } else if (msg?.type === 'compare') {
+    loadCompare(msg);
   } else if (msg?.type === 'setTheme') {
     applyTheme(msg.value);
   } else if (msg?.type === 'error') {
@@ -611,15 +1501,21 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
   }
 });
 
-window.addEventListener('resize', () => {
+function onResize(): void {
   camera.aspect = aspect();
   camera.updateProjectionMatrix();
   renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
+  sectionView.redraw();
   invalidate();
-});
+}
+
+window.addEventListener('resize', onResize);
 
 function animate(): void {
   requestAnimationFrame(animate);
+  if (sectionStale) {
+    applySection();
+  }
   // OrbitControls returns true while damping is still easing the camera, so the
   // loop keeps painting through the tail of a drag and then stops.
   if (controls.update() || needsRender) {

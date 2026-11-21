@@ -7,13 +7,17 @@ import {
 } from './common';
 import { isStlSetting } from './settings';
 
-// Webview to host messages of the STL viewer (src/stlEditor.ts): the request for
-// the file, plus the context menu's save, reveal, open and theme actions.
+// Webview to host messages of the STL and 3MF viewer (src/stlEditor.ts): the
+// request for the file, the context menu's save, reveal, open and settings
+// actions, and the request for a second model to compare against. `compare`
+// carries a name, never a path: the host only opens one it offered itself.
 export type StlMessage =
   | { type: 'ready' }
   | { type: 'revealInOS' }
   | SaveFrameMessage
   | { type: 'openExternal' }
+  | { type: 'compare'; name: string }
+  | { type: 'compareBrowse' }
   | UpdateSettingMessage;
 
 export function parseStlMessage(raw: unknown): StlMessage | undefined {
@@ -25,7 +29,12 @@ export function parseStlMessage(raw: unknown): StlMessage | undefined {
     case 'ready':
     case 'revealInOS':
     case 'openExternal':
+    case 'compareBrowse':
       return { type: msg.type };
+    case 'compare':
+      return typeof msg.name === 'string' && msg.name.length > 0 && msg.name.length <= 1024
+        ? { type: 'compare', name: msg.name }
+        : undefined;
     case 'saveFrame':
       return saveFrame(msg);
     case 'updateSetting':

@@ -116,6 +116,53 @@ export function parse3mf(bytes: Uint8Array, options: ThreeMfOptions = {}): Three
   return parseParts(unpack(bytes), options);
 }
 
+/**
+ * What a 3MF package holds for the preview: a model, or, for a sliced print
+ * file, the toolpaths of its first plate.
+ */
+export type ThreeMfContent =
+  | ({ kind: 'model' } & ThreeMfModel)
+  | {
+      kind: 'sliced';
+      /** The G-code of the first plate, for src/webview/gcode.ts. */
+      gcode: string;
+      /** How many plates the file has G-code for. */
+      plates: number;
+      /** Metadata/slice_info.config, the slicer's print summary, when present. */
+      sliceInfo: string | undefined;
+    };
+
+/**
+ * Like parse3mf, but a sliced print file (Bambu Studio's and OrcaSlicer's
+ * .gcode.3mf, which keeps the G-code and drops the meshes) comes back as its
+ * G-code instead of a refusal.
+ */
+export function read3mf(bytes: Uint8Array, options: ThreeMfOptions = {}): ThreeMfContent {
+  const parts = unpack(bytes);
+  try {
+    return { kind: 'model', ...parseParts(parts, options) };
+  } catch (err) {
+    if (!(err instanceof NothingToShow)) {
+      throw err;
+    }
+    const plates = gcodeParts(parts);
+    const gcode = plates.length > 0 ? partText(parts, plates[0]) : undefined;
+    if (gcode === undefined) {
+      throw err;
+    }
+    return {
+      kind: 'sliced',
+      gcode,
+      plates: plates.length,
+      sliceInfo: partText(parts, 'Metadata/slice_info.config'),
+    };
+  }
+}
+
+// A package with a well-formed but empty build. Its own class so read3mf can
+// tell "nothing to draw" (look for G-code instead) from a broken file.
+class NothingToShow extends ThreeMfError {}
+
 // The G-code parts in plate order: plate_2 before plate_10.
 function gcodeParts(parts: Parts): string[] {
   const natural = new Intl.Collator('en', { numeric: true });
@@ -156,7 +203,7 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
   };
   const root = load(rootPath);
   if (root.build.length === 0) {
-    throw new ThreeMfError(nothingToShow(parts, 'has nothing in its build to show'));
+    throw new NothingToShow(nothingToShow(parts, 'has nothing in its build to show'));
   }
 
   // Pass 1: how many triangles the build expands to, and whether any of them
@@ -205,7 +252,7 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
     }
   }
   if (total === 0) {
-    throw new ThreeMfError(nothingToShow(parts, 'has no triangles to show'));
+    throw new NothingToShow(nothingToShow(parts, 'has no triangles to show'));
   }
 
   // Pass 2: write every placed triangle, transformed into build coordinates.

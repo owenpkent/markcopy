@@ -149,16 +149,59 @@ Audio notes have a time and an optional end, and nothing else: no pin, area or d
 
 ## STL and 3MF 3D preview
 
-MarkCopy registers as the editor for `.stl` and `.3mf` files, so opening one renders the model inline in a Three.js viewer. Controls are mouse-only, no keyboard required: **left-drag** to orbit, **right-drag** to pan, **scroll wheel** to zoom. The camera fits itself to the model on load, and the toolbar in the top-left offers **Fit view**, a **wireframe** toggle, and a **grid** toggle. An overlay in the bottom-left reports the triangle count and the bounding box as X x Y x Z.
+MarkCopy registers as the editor for `.stl` and `.3mf` files, so opening one renders the model inline in a Three.js viewer. Controls are mouse-only, no keyboard required: **left-drag** to orbit, **right-drag** to pan, **scroll wheel** to zoom. The camera fits itself to the model on load, and the toolbar in the top-left offers **Fit view**, a **wireframe** toggle, a **grid** toggle and a **section** button. An overlay in the bottom-left reports the triangle count, the bounding box as the file's own X x Y x Z, and the grid spacing. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.meshColor` sets the mesh color.
 
-Both binary and ASCII STL are handled. The model is centered in X and Z and rested on the y = 0 plane, so the grid always sits directly under it. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.showGrid` and `markcopy.stl.meshColor` set the grid and mesh color.
+Both binary and ASCII STL are handled. Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. The size is checked before the file is read, not after. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
 
-Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. The size is checked before the file is read, not after. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
+### Orientation and up axis
+
+An STL does not say which way is up. Z is what slicers, Blender and most CAD exports use, so by default (`markcopy.stl.upAxis` = `z`) an STL stands the way it prints instead of lying on its side. If a file was made Y-up, choose **View > Up Axis > Y** in the right-click menu (shown only for an STL); the choice is saved to the setting. A 3MF and a sliced print are always Z-up, as the 3MF format requires. Dimensions, the overlay and **Copy as > Dimensions** are always the file's own X x Y x Z, whichever axis is up. The model is centered over the origin and rested on the floor, so the grid sits directly under it.
+
+### Grid and print bed
+
+The grid is ruled in the file's own units at a round spacing (1, 5, 10, 50, 100 ..., or 0.5, 0.1 ... for a tiny part) chosen so there are at most 40 lines, with a heavier line every tenth. Lines fall on the file's whole numbers, so the file's origin sits on a crossing. The overlay says the spacing: `Grid 1` for an STL (which has no unit) or `Grid 10 mm` for a 3MF. `markcopy.stl.showGrid` sets whether the grid starts on.
+
+**View > Print Bed** (or `markcopy.stl.showBed`) draws the bed as an outline at true size on the floor, plus a faint box to its height. The size is `markcopy.stl.bedSize`, width x depth x height in millimetres, `256x256x256` (a Bambu Lab X1C) by default. A model has no position on a bed yet, so the bed is centered under it, the overlay adds a line such as `Bed 256 × 256 × 256 mm: fits` or `does not fit`, and the outline turns from blue to red when it does not fit. The check allows a quarter turn about the vertical axis and uses the orientation the up axis gives. An STL is taken as millimetres, as slicers do; a 3MF's declared unit is converted. A bed size that does not parse shows no bed.
+
+### Section: cut and measure
+
+The **Section** button (the fourth in the toolbar, or **View > Section**) opens a panel on the right 46% of the window and gives the 3D view the rest. The cut is a plane across one of the file's axes: pick **X**, **Y** or **Z** (it opens across the up axis at mid height) and set the position with the slider, the minus and plus buttons (a round step, 0.1 on a 20 mm part and 1 on a 250 mm one), or by typing an exact value in the number box.
+
+The 3D view clips the model at the plane, hiding everything beyond the cut and drawing the inside faces, and traces the cut outline in yellow. The panel draws the cut flat, to scale, on a grid, in the two remaining axes (cutting Z shows X to the right and Y up).
+
+To measure, point at the flat drawing. A crosshair appears; the horizontal and vertical lines through the pointer are intersected with the outline, and every stretch between crossings is labelled with its length, material (heavy stroke, bold in the readout) and gaps such as pockets and slots alike. Where the parts of an assembly overlap, the overlap reads as one wall and not as a gap: material is judged by which way each surface faces, and a mesh whose faces do not agree on that is measured by counting crossings. The same numbers are listed as text under the drawing, for example `Y = 0.00: 2.50 | 12.70 | 2.50`. Click pins the crosshair; click again releases it. **Copy as > Section Measurements** copies the numbers as text in the layout of a slicing script (see [COPY-MATRIX](../COPY-MATRIX.md#stl-and-3mf-models-stl-3mf)), and **Copy Section as PNG**, at the top of the menu while the section is open, copies the flat drawing.
+
+A section is not available for a sliced print (the button is disabled).
+
+### Comparing versions
+
+Right-click > **Compare with** lists up to 12 other `.stl` and `.3mf` files found near the open one: the same folder, its `versions` subfolder, and the parent folder when the open file is itself inside a `versions` folder. They are ordered by how much of the name they share with the open file (numbers compared as numbers, a `_current` suffix ignored), so the previous version is at the top. **Browse…** opens a file picker for anything else.
+
+The second model is drawn in orange over the first, in the same file coordinates, so two versions of one design line up where they agree; where both share a surface the first shows. The overlay lists both with a color swatch, triangle count and dimensions, and the menu then offers **Show** and **Hide** for each model and **Stop Comparing**. With the section open, both outlines are drawn in the flat panel in their colors, and the readout and **Copy as > Section Measurements** give a row per model: the way to see a difference inside a part. The second file goes through the same size cap and checks as the first; if it is refused, a message appears and the first model stays. A sliced print cannot be compared.
+
+### Sliced print files
+
+A sliced `.gcode.3mf` from Bambu Studio or OrcaSlicer holds G-code and no mesh. The viewer draws the first plate's toolpaths: every extrusion move as a line, colored by the slicer's feature (outer wall, inner wall, infill, support, bridge, top and bottom surfaces ...), in bed coordinates, with the print bed outline shown automatically at its true position. A layer bar at the bottom has a slider and minus and plus buttons, a label such as `Layer 12 / 280 · Z 2.40 mm`, and a **This layer only** checkbox.
+
+The overlay shows the slicer's summary from the file, for example `Sliced print`, `1h 3m · 16.92 g · PETG`, `280 layers, 87,372 moves`, the toolpath's extents, and the grid and bed lines. **Copy as > Print Summary** copies those lines with the file name. Wireframe, Section and Compare with do not apply. The reader handles G0/G1 moves, G2/G3 arcs, absolute and relative extrusion and positioning, and the layer markers of Bambu/Orca, PrusaSlicer and Cura. At most 4,000,000 segments are kept, and the overlay says when a file had more.
+
+Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 of N`); travel moves are not drawn; lines are one pixel wide, with no extrusion width; plain `.gcode` files are not opened by MarkCopy.
 
 ### 3MF models
 
-A `.3mf` opens in the same viewer. MarkCopy reads the model's meshes, the way components and build items place them (with their transforms), and the files that slicers such as Bambu Studio, PrusaSlicer and OrcaSlicer split a project into. Colors come from the 3MF materials: base materials and color groups, on a whole object or on single faces, are drawn; faces with no color (and any texture, composite or multi-property material, which is not drawn) take `markcopy.stl.meshColor`. Paint data that is specific to one slicer (Bambu paint colors, PrusaSlicer multi-material segmentation) is not read. A 3MF is Z-up by the format's definition, so it is turned upright; an STL is drawn as it always was. The overlay and **Copy as > Dimensions** add the file's unit, for example `25.00 × 10.00 × 10.00 mm`. A file that is not a zip archive, that claims more than the STL triangle limit once its components are expanded (a repeated-instance bomb is refused, not built), or that is above 256 MiB shows a message instead of loading. A sliced `.gcode.3mf` holds G-code and thumbnails but no model, so it shows a message asking you to open the project `.3mf` it was sliced from. Textures, beam lattices, plate thumbnails and choosing a plate are not supported.
+A `.3mf` opens in the same viewer. MarkCopy reads the model's meshes, the way components and build items place them (with their transforms), and the files that slicers such as Bambu Studio, PrusaSlicer and OrcaSlicer split a project into. Colors come from the 3MF materials: base materials and color groups, on a whole object or on single faces, are drawn; faces with no color (and any texture, composite or multi-property material, which is not drawn) take `markcopy.stl.meshColor`. Paint data that is specific to one slicer (Bambu paint colors, PrusaSlicer multi-material segmentation) is not read. The overlay and **Copy as > Dimensions** add the file's unit, for example `25.00 × 10.00 × 10.00 mm`. A file that is not a zip archive, that claims more than the STL triangle limit once its components are expanded (a repeated-instance bomb is refused, not built), or that is above 256 MiB shows a message instead of loading. Textures, beam lattices, plate thumbnails and choosing a plate are not supported.
 
-**Right-click** (not drag) for the menu: **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle, **Copy as** gives the file name, full path, dimensions, or triangle count, **View** has Fit View, Front, Back, Left, Right, Top, Bottom and Isometric presets plus wireframe and grid checkboxes that match the toolbar, and **Preferences > Theme** sets `markcopy.theme`. A right-drag pans and does not open the menu. See [COPY-MATRIX](../COPY-MATRIX.md#stl-and-3mf-models-stl-3mf).
+### The right-click menu
+
+**Right-click** (not drag) for the menu; a right-drag pans and does not open it. Everything in it is reachable with the pointer.
+
+- **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle. **Copy Section as PNG** is added at the top while a section is open.
+- **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print), plus the section measurements while a section is open.
+- **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Grid and Print Bed checkboxes (the first three match the toolbar), plus **Up Axis > Z / Y** for an STL.
+- **Compare with** lists nearby models to overlay (above), then Show, Hide and Stop Comparing.
+- **Preferences > Theme** sets `markcopy.theme`.
+- **Open in Default App** and **Reveal in File Explorer** act on the file.
+
+See [COPY-MATRIX](../COPY-MATRIX.md#stl-and-3mf-models-stl-3mf).
 
 [Back to the user guide](README.md)

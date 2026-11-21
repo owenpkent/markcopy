@@ -3,7 +3,14 @@
 // packages are built here with fflate, so each test shows the XML it reads.
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
-import { ThreeMfError, multiply, parse3mf, parseColor, parseMatrix } from '../src/webview/threeMf';
+import {
+  ThreeMfError,
+  multiply,
+  parse3mf,
+  parseColor,
+  parseMatrix,
+  read3mf,
+} from '../src/webview/threeMf';
 
 const CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const PROD = 'http://schemas.microsoft.com/3dmanufacturing/production/2015/06';
@@ -156,6 +163,33 @@ describe('parse3mf refusals', () => {
     expect(refusal(strToU8('solid not a 3mf'))).toMatch(/not a 3MF package/);
   });
 
+  it('refuses a part whose header claims more than its bytes could inflate to', () => {
+    // The sample package, with the uncompressed size of its first part
+    // rewritten to 180 MB in the central directory, where the reader takes it
+    // from. Nothing else changes, so the file is still under two kilobytes.
+    const bytes = Uint8Array.from(ONE);
+    const view = new DataView(bytes.buffer);
+    let patched = false;
+    for (let i = 0; i + 28 < bytes.length && !patched; i++) {
+      if (view.getUint32(i, true) === 0x02014b50) {
+        view.setUint32(i + 24, 180 * 1024 * 1024, true);
+        patched = true;
+      }
+    }
+    expect(patched).toBe(true);
+    expect(refusal(bytes)).toMatch(/claims more data than it can hold/);
+
+    // Raising the compressed size to match the claim does not help: a part
+    // cannot be bigger than the archive it is in.
+    for (let i = 0; i + 28 < bytes.length; i++) {
+      if (view.getUint32(i, true) === 0x02014b50) {
+        view.setUint32(i + 20, 10 * 1024 * 1024, true);
+        break;
+      }
+    }
+    expect(refusal(bytes)).toMatch(/claims more data than it can hold/);
+  });
+
   it('refuses a package with no model part', () => {
     expect(refusal(pack({ '[Content_Types].xml': '<Types/>' }))).toMatch(/no 3D model part/);
   });
@@ -271,6 +305,45 @@ describe('parse3mf refusals', () => {
         1,
       ),
     ).toMatch(/more than 1 triangles/);
+  });
+});
+
+describe('read3mf', () => {
+  it('returns a model as a model', () => {
+    const content = read3mf(ONE);
+    expect(content.kind).toBe('model');
+    expect(content.kind === 'model' && content.triangles).toBe(1);
+  });
+
+  it('returns the first plate of a sliced print file as G-code, with the summary', () => {
+    const content = read3mf(
+      pack({
+        '_rels/.rels': RELS,
+        '3D/3dmodel.model': model('', ''),
+        'Metadata/plate_10.gcode': 'G1 X10',
+        'Metadata/plate_2.gcode': 'G1 X2',
+        'Metadata/slice_info.config': '<config/>',
+      }),
+    );
+    expect(content).toEqual({
+      kind: 'sliced',
+      gcode: 'G1 X2',
+      plates: 2,
+      sliceInfo: '<config/>',
+    });
+  });
+
+  it('still refuses an empty package that has no G-code either', () => {
+    expect(() => read3mf(single('', ''))).toThrow(/nothing in its build/);
+  });
+
+  it('does not take G-code as an excuse for a broken model', () => {
+    const bytes = pack({
+      '_rels/.rels': RELS,
+      '3D/3dmodel.model': model('', '<item objectid="9"/>'),
+      'Metadata/plate_1.gcode': 'G1 X1',
+    });
+    expect(() => read3mf(bytes)).toThrow(/object 9/);
   });
 });
 

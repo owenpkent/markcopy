@@ -37,6 +37,8 @@ jobs:
             markdown,
             gif,
             stl,
+            3mf,
+            gcode,
             video-probe,
             messages,
             docx,

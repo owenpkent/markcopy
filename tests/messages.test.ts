@@ -308,6 +308,21 @@ describe('parseStlMessage', () => {
       expect(parseStlMessage({ type: 'saveFrame', data, name: 'f.png' })).toBeUndefined();
     }
     expect(parseStlMessage({ type: 'copyText', text: 'x' })).toBeUndefined();
+    expect(parseStlMessage({ type: 'compareBrowse', path: '/etc/passwd' })).toEqual({
+      type: 'compareBrowse',
+    });
+    expect(parseStlMessage({ type: 'compare', name: 'versions/a.stl', path: '/x' })).toEqual({
+      type: 'compare',
+      name: 'versions/a.stl',
+    });
+    for (const name of [undefined, '', 7, 'x'.repeat(1025)]) {
+      expect(parseStlMessage({ type: 'compare', name })).toBeUndefined();
+    }
+    expect(parseStlMessage({ type: 'updateSetting', key: 'stl.upAxis', value: 'y' })).toEqual({
+      type: 'updateSetting',
+      key: 'stl.upAxis',
+      value: 'y',
+    });
   });
 
   it('lets the menu write only a valid theme', () => {
