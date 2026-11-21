@@ -9,7 +9,7 @@
 // the folders (src/stlEditor.ts) and this only orders the names.
 
 /** The extensions the 3D preview opens, lower case. */
-export const MODEL_EXTENSIONS = ['.stl', '.3mf'];
+export const MODEL_EXTENSIONS = ['.stl', '.3mf', '.glb', '.step', '.stp'];
 
 export function isModelFile(name: string): boolean {
   const lower = name.toLowerCase();

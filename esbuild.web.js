@@ -2,7 +2,8 @@
 //   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
-//   media/stl.js         STL preview (esm, bundles Three.js)
+//   media/stl.js         3D preview: STL, 3MF, GLB, STEP (esm, bundles Three.js
+//                        and the STEP engine's JS glue)
 //   media/video.js       video preview (esm)
 //   media/gif.js         GIF preview (esm)
 //   media/image.js       image preview (esm)
@@ -10,6 +11,7 @@
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -41,6 +43,22 @@ function removeStaleChunks() {
   }
 }
 
+// The STEP engine (occt-import-js, Open CASCADE compiled to WebAssembly) is
+// 7.6 MB raw, so it ships gzipped (about 3 MB) as its own file beside the
+// bundles: media/occt-import-js.wasm.gz, fetched and inflated only when a STEP
+// file opens (src/webview/step.ts). It stays a separate, replaceable file, not
+// inlined into a bundle, because the engine is LGPL-2.1; its two license files
+// sit next to it. The raw .wasm is never copied, so the VSIX never holds it.
+function copyStepEngine() {
+  const src = path.join(__dirname, 'node_modules', 'occt-import-js', 'dist');
+  const dest = path.join(__dirname, 'media');
+  const gz = zlib.gzipSync(fs.readFileSync(path.join(src, 'occt-import-js.wasm')), { level: 9 });
+  fs.writeFileSync(path.join(dest, 'occt-import-js.wasm.gz'), gz);
+  for (const name of ['license.occt-import-js.txt', 'license.occt.txt']) {
+    fs.copyFileSync(path.join(src, name), path.join(dest, name));
+  }
+}
+
 const shared = {
   bundle: true,
   platform: 'browser',
@@ -63,6 +81,7 @@ async function run(options) {
 async function main() {
   removeStaleChunks();
   copyKatexAssets();
+  copyStepEngine();
   await Promise.all([
     // Markdown preview: ES module with code splitting so mermaid, katex,
     // html-to-image, and turndown load lazily as separate media/chunk-*.js files
@@ -93,6 +112,13 @@ async function main() {
       entryPoints: [{ in: 'src/webview/stl.ts', out: 'stl' }],
       format: 'esm',
       outdir: 'media',
+      // occt-import-js's Emscripten glue requires fs, path and crypto, but only
+      // on its Node code paths, which a webview never takes.
+      alias: {
+        fs: './src/webview/emptyModule.ts',
+        path: './src/webview/emptyModule.ts',
+        crypto: './src/webview/emptyModule.ts',
+      },
     }),
     // Video preview: tiny (no media library, the <video> element does the
     // work), but its own entry point so it does not drag in the Markdown

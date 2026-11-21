@@ -51,6 +51,11 @@
     "stl viewer",
     "3mf",
     "3mf viewer",
+    "glb",
+    "gltf",
+    "step",
+    "step viewer",
+    "cad",
     "3d",
     "mesh",
     "three.js",
@@ -292,6 +297,24 @@
           },
           {
             "filenamePattern": "*.3MF"
+          },
+          {
+            "filenamePattern": "*.glb"
+          },
+          {
+            "filenamePattern": "*.GLB"
+          },
+          {
+            "filenamePattern": "*.step"
+          },
+          {
+            "filenamePattern": "*.STEP"
+          },
+          {
+            "filenamePattern": "*.stp"
+          },
+          {
+            "filenamePattern": "*.STP"
           }
         ],
         "priority": "default"
@@ -718,12 +741,12 @@
         "markcopy.stl.showGrid": {
           "type": "boolean",
           "default": true,
-          "description": "Show a grid under the model in the STL and 3MF preview."
+          "description": "Show a grid under the model in the 3D preview (STL, 3MF, GLB and STEP)."
         },
         "markcopy.stl.meshColor": {
           "type": "string",
           "default": "#8ab4f8",
-          "description": "Color of the mesh material in the STL and 3MF preview. A 3MF file that colors its own faces keeps those colors; this fills in the faces it leaves uncolored."
+          "description": "Color of the mesh material in the 3D preview. A 3MF, GLB or STEP file that colors its own faces keeps those colors; this fills in the faces it leaves uncolored."
         },
         "markcopy.stl.upAxis": {
           "type": "string",
@@ -736,12 +759,12 @@
             "Y is up, as in many game and graphics tools."
           ],
           "default": "z",
-          "description": "Which axis of an STL file points up in the preview. STL does not say, so pick the one your tools use. 3MF is always Z up, as its specification requires."
+          "description": "Which axis of an STL file points up in the preview. STL does not say, so pick the one your tools use. 3MF and STEP are always Z up and GLB (glTF) always Y up, as their specifications require; a GLB is turned upright to stand on the grid."
         },
         "markcopy.stl.showBed": {
           "type": "boolean",
           "default": false,
-          "description": "Show the outline of the print bed under the model in the STL and 3MF preview, and say whether the model fits. A sliced print file always shows it."
+          "description": "Show the outline of the print bed under the model in the 3D preview, and say whether the model fits. A sliced print file always shows it."
         },
         "markcopy.stl.bedSize": {
           "type": "string",
@@ -917,6 +940,7 @@
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-texmath": "^1.0.0",
     "numfmt": "^4.1.4",
+    "occt-import-js": "^0.0.23",
     "pdfjs-dist": "^6.5.438",
     "saxes": "^6.0.0",
     "three": "^0.187.0",

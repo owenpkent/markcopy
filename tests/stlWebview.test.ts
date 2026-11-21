@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { strToU8, zipSync } from 'fflate';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Three from 'three';
+import type * as StepModule from '../src/webview/step';
 
 // The scene the viewer last asked the renderer to draw, which is the way in to
 // the meshes and lines it built.
@@ -41,6 +42,26 @@ vi.mock('three/examples/jsm/controls/OrbitControls.js', async () => {
     }
   }
   return { OrbitControls };
+});
+
+// The real STEP engine, started from the raw wasm in node_modules: the webview
+// would fetch the gzipped copy from media/, which a test has no server for.
+vi.mock('../src/webview/step', async (importOriginal) => {
+  const actual = await importOriginal<typeof StepModule>();
+  const wasmPath = join(
+    __dirname,
+    '..',
+    'node_modules',
+    'occt-import-js',
+    'dist',
+    'occt-import-js.wasm',
+  );
+  const factory = (await import('occt-import-js')).default;
+  return {
+    ...actual,
+    loadStepEngine: async () =>
+      (await factory({ wasmBinary: new Uint8Array(readFileSync(wasmPath)) })) as never,
+  };
 });
 
 const BODY = `
@@ -510,4 +531,65 @@ describe('3D viewer sliced print', () => {
     expect(el<HTMLButtonElement>('btn-section').disabled).toBe(true);
     expect(el<HTMLButtonElement>('btn-wireframe').disabled).toBe(true);
   });
+});
+
+describe('3D viewer GLB and STEP', () => {
+  const file = (name: string) => readFileSync(join(__dirname, '..', name)).toString('base64');
+
+  it('reads the sample GLB, upright, in its own colors', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'glb', name: 'sample.glb', bytes: file('sample.glb') });
+    expect(stats()).toBe('Reading sample.glb…');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    // 4 wide, 2.5 deep, 2.5 tall once turned from glTF's Y up; no unit.
+    expect(stats()).toMatch(/^24 triangles\n4\.00 × 2\.50 × 2\.50\nGrid /);
+    expect(material(meshes()[0]).vertexColors).toBe(true);
+    expect(meshes()[0].geometry.hasAttribute('normal')).toBe(true);
+  });
+
+  it('does not let markcopy.stl.upAxis turn a GLB, which fixes its own', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'glb', name: 'sample.glb', bytes: file('sample.glb'), upAxis: 'y' });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    const asY = meshes()[0].parent?.rotation.x;
+    expect(asY).toBeCloseTo(-Math.PI / 2);
+  });
+
+  it('shows why a GLB could not be read in the viewport', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'glb', name: 'bad.glb', bytes: btoa('not a glb at all') });
+    await vi.waitFor(() => expect(stats()).toMatch(/not a GLB file|cannot be read/));
+  });
+
+  it('reads the sample STEP file in millimetres, with the engine status first', async () => {
+    await import('../src/webview/stl');
+    load({
+      format: 'step',
+      name: 'sample.step',
+      bytes: file('sample.step'),
+      stepEngineUri: 'webview:/media/occt-import-js.wasm.gz',
+    });
+    expect(stats()).toBe('Reading sample.step…');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
+    expect(stats()).toMatch(/^12 triangles\n20\.00 × 10\.00 × 5\.00 mm\nGrid /);
+    expect(material(meshes()[0]).vertexColors).toBe(true);
+  }, 30000);
+
+  it('says why a STEP file could not be read', async () => {
+    await import('../src/webview/stl');
+    load({
+      format: 'step',
+      name: 'bad.step',
+      bytes: btoa('ISO-10303-21;\nDATA;\n#1=NOPE(;\nENDSEC;'),
+    });
+    await vi.waitFor(() => expect(stats()).toMatch(/could not read this file/), { timeout: 20000 });
+  }, 30000);
+
+  it('compares a STEP file with a GLB', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'glb', name: 'sample.glb', bytes: file('sample.glb') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    send({ type: 'compare', format: 'step', name: 'sample.step', bytes: file('sample.step') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2), { timeout: 20000 });
+  }, 30000);
 });
