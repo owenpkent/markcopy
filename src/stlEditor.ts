@@ -6,6 +6,7 @@ import { basename, saveFrame } from './videoEditor';
 import { parseStlMessage } from './messages/stl';
 import { isStlSetting } from './messages/settings';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
+import { isModelFile, rankSiblings } from './stlSiblings';
 
 // A read-only custom editor that renders STL and 3MF files with Three.js in a
 // webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
@@ -52,6 +53,11 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // preview.css carries the shared context menu and toast styles.
     webview.html = this.html(webview, asUri('stl.js'), asUri('preview.css'), nonce, theme);
 
+    // The models offered under Compare with, by the label the menu shows. The
+    // webview asks for one by label and gets it only if it is in this map, so a
+    // page cannot name a path of its own for the host to read.
+    const siblings = new Map<string, vscode.Uri>();
+
     webview.onDidReceiveMessage(async (raw) => {
       const msg = parseStlMessage(raw);
       if (!msg) {
@@ -59,7 +65,17 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       }
       switch (msg.type) {
         case 'ready':
-          await this.sendLoad(webview, document.uri);
+          await this.sendLoad(webview, document.uri, siblings);
+          break;
+        case 'compare': {
+          const sibling = siblings.get(msg.name);
+          if (sibling) {
+            await this.sendCompare(webview, sibling, msg.name);
+          }
+          break;
+        }
+        case 'compareBrowse':
+          await this.browseCompare(webview, document.uri);
           break;
         case 'revealInOS':
           revealInOs(document.uri);
@@ -91,70 +107,41 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     panel.onDidDispose(() => themeListener.dispose());
   }
 
-  private async sendLoad(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
+  private async sendLoad(
+    webview: vscode.Webview,
+    uri: vscode.Uri,
+    siblings: Map<string, vscode.Uri>,
+  ): Promise<void> {
     // The name and full path ride on every reply, errors included, so the menu's
     // Copy as > File Name and Full Path still work for a file that failed to load.
     const name = basename(uri);
     const path = uri.fsPath;
-    const format = is3mf(uri) ? '3mf' : 'stl';
-    const label = format === '3mf' ? '3MF' : 'STL';
     try {
-      // Size first, off stat, before a byte is read. Every guard used to live
-      // in the webview, which meant a hostile file was read whole, base64'd
-      // (1.33x, as a string), serialized through postMessage, and decoded on
-      // the other side before anything asked whether it should have been
-      // opened. The allocation the guards exist to prevent had already
-      // happened five times over by then, in the extension host, where it
-      // takes the whole window down rather than one preview.
-      const stat = await vscode.workspace.fs.stat(uri);
-      if (stat.size > MAX_STL_BYTES) {
-        void webview.postMessage({
-          type: 'error',
-          name,
-          path,
-          message: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_STL_BYTES)} limit for ${label} previews.`,
-        });
+      const model = await readModel(uri);
+      if ('error' in model) {
+        void webview.postMessage({ type: 'error', name, path, message: model.error });
         return;
       }
-
-      const bytes = await vscode.workspace.fs.readFile(uri);
-
-      // Cheap to run here and it saves base64-encoding a file that is about to
-      // be refused. The webview checks again on arrival: this one is about not
-      // doing pointless work, that one is the actual guard on the allocation.
-      //
-      // A 3MF is unpacked in the webview, behind the zip limits in
-      // src/ooxml/zip.ts; all that is worth checking here is that it is a zip.
-      const check =
-        format === '3mf'
-          ? bytes[0] === 0x50 && bytes[1] === 0x4b
-            ? { ok: true }
-            : { ok: false, reason: `${name} is not a 3MF package (it is not a zip archive).` }
-          : checkStl(bytes);
-      if (!check.ok) {
-        void webview.postMessage({
-          type: 'error',
-          name,
-          path,
-          message: check.reason ?? `Could not load ${name}.`,
-        });
-        return;
+      // The folder listing is a convenience for the Compare with menu; a folder
+      // that cannot be listed (a virtual file system, a permission) just means
+      // an empty menu with Browse in it.
+      siblings.clear();
+      for (const [label, sibling] of await findSiblings(uri).catch(() => [])) {
+        siblings.set(label, sibling);
       }
-
       const cfg = vscode.workspace.getConfiguration('markcopy', uri);
       void webview.postMessage({
         type: 'load',
-        format,
+        format: model.format,
         name,
         path,
-        // Base64, not the raw Uint8Array. The webview transport JSON-encodes
-        // messages, and JSON turns a typed array into a numeric-keyed object
-        // ~13x the size of the file (a 5 MB STL becomes ~67 MB of JSON and
-        // several hundred MB of objects). Base64 costs 1.33x and stays a
-        // string end to end. toBytes() in src/webview/stlInfo.ts decodes it.
-        bytes: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
+        bytes: model.bytes,
         showGrid: cfg.get<boolean>('stl.showGrid', true),
         meshColor: cfg.get<string>('stl.meshColor', '#8ab4f8'),
+        upAxis: cfg.get<string>('stl.upAxis', 'z'),
+        showBed: cfg.get<boolean>('stl.showBed', false),
+        bedSize: cfg.get<string>('stl.bedSize', '256x256x256'),
+        siblings: [...siblings.keys()],
       });
     } catch (err) {
       // Into the viewport as well as the toast: a blank 3D canvas with the
@@ -167,6 +154,38 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
         message: `Could not read ${name} (${String(err)}).`,
       });
       void vscode.window.showErrorMessage(`MarkCopy: could not read ${name} (${String(err)}).`);
+    }
+  }
+
+  // The second model of a comparison. It goes through exactly the checks the
+  // first one did; a refusal is a toast, since the first model is still on
+  // screen and should stay there.
+  private async sendCompare(webview: vscode.Webview, uri: vscode.Uri, name: string): Promise<void> {
+    try {
+      const model = await readModel(uri);
+      if ('error' in model) {
+        void webview.postMessage({ type: 'toast', message: model.error });
+        return;
+      }
+      void webview.postMessage({ type: 'compare', format: model.format, name, bytes: model.bytes });
+    } catch (err) {
+      void webview.postMessage({
+        type: 'toast',
+        message: `Could not read ${name} (${String(err)}).`,
+      });
+    }
+  }
+
+  private async browseCompare(webview: vscode.Webview, uri: vscode.Uri): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      defaultUri: vscode.Uri.joinPath(uri, '..'),
+      filters: { 'STL and 3MF models': ['stl', '3mf'] },
+      openLabel: 'Compare',
+      title: `Compare ${basename(uri)} with`,
+    });
+    if (picked?.[0]) {
+      await this.sendCompare(webview, picked[0], basename(picked[0]));
     }
   }
 
@@ -199,13 +218,15 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
      The palette matches media/preview.css so a forced theme looks the same
      across the Markdown, PDF, and STL previews. src/webview/stl.ts reads the
      resolved value and hands it to the WebGL renderer as its clear color. */
-  body { --mc-stl-bg: var(--vscode-editor-background); }
-  body[data-mc-theme='light'] { --mc-stl-bg: #ffffff; }
-  body[data-mc-theme='dark'] { --mc-stl-bg: #0d1117; }
-  body[data-mc-theme='green'] { --mc-stl-bg: #000000; }
+  body { --mc-stl-bg: var(--vscode-editor-background); --mc-stl-fg: var(--vscode-editor-foreground); }
+  body[data-mc-theme='light'] { --mc-stl-bg: #ffffff; --mc-stl-fg: #1f2328; }
+  body[data-mc-theme='dark'] { --mc-stl-bg: #0d1117; --mc-stl-fg: #e6edf3; }
+  body[data-mc-theme='green'] { --mc-stl-bg: #000000; --mc-stl-fg: #33ff33; }
 
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--mc-stl-bg); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
   #viewport { position: fixed; inset: 0; }
+  /* The section panel takes the right of the window and the 3D view the rest. */
+  body.mc-section #viewport { right: 46%; }
   #viewport canvas { display: block; outline: none; }
   #toolbar { position: fixed; top: 8px; left: 8px; z-index: 10; display: flex; gap: 6px; }
   #toolbar button {
@@ -239,6 +260,80 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     pointer-events: none;
     white-space: pre;
   }
+  #stats .swatch, #section-readout .swatch {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 5px;
+  }
+  .mc-stl-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .mc-stl-bar button {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    font-size: 13px;
+    line-height: 1;
+    border: 1px solid var(--vscode-contrastBorder, transparent);
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+    cursor: pointer;
+  }
+  .mc-stl-bar button:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+  .mc-stl-bar button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .mc-stl-bar input[type='range'] { flex: 1; min-width: 60px; }
+  .mc-stl-bar input[type='number'] {
+    width: 76px;
+    height: 26px;
+    box-sizing: border-box;
+    color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 3px;
+  }
+  #section {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 46%;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    background: var(--mc-stl-bg);
+    color: var(--mc-stl-fg);
+    border-left: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
+  }
+  #section[hidden], #layers[hidden] { display: none; }
+  #section .mc-stl-bar { padding: 8px; flex-wrap: wrap; }
+  #section-canvas { flex: 1; min-height: 0; width: 100%; color: var(--mc-stl-fg); cursor: crosshair; }
+  #section-readout { padding: 6px 10px 10px; font-size: 12px; min-height: 3.2em; font-variant-numeric: tabular-nums; }
+  #section-readout .row { white-space: pre-wrap; }
+  #section-readout .hint { opacity: 0.65; margin-top: 2px; }
+  #layers {
+    position: fixed;
+    /* Bottom right, clear of the readout in the bottom left. */
+    right: 8px;
+    bottom: 8px;
+    z-index: 10;
+    width: min(560px, calc(100vw - 320px));
+    min-width: 240px;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border-radius: 4px;
+    color: var(--vscode-editor-foreground);
+    background: var(--vscode-editorWidget-background, rgba(0, 0, 0, 0.4));
+    border: 1px solid var(--vscode-widget-border, transparent);
+  }
+  #layers label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #layer-label { white-space: nowrap; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body data-mc-theme="${theme}" data-vscode-context='{"preventDefaultContextMenuItems":true}'>
@@ -247,14 +342,126 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="btn-fit" title="Fit view" aria-label="Fit view">&#10530;</button>
     <button id="btn-wireframe" title="Toggle wireframe" aria-label="Toggle wireframe">&#9638;</button>
     <button id="btn-grid" title="Toggle grid" aria-label="Toggle grid">&#8862;</button>
+    <button id="btn-section" title="Section: cut the model and measure it" aria-label="Toggle section">&#9707;</button>
   </div>
   <div id="stats"></div>
+  <div id="layers" class="mc-stl-bar" hidden>
+    <button id="layer-down" title="Previous layer" aria-label="Previous layer">&#8722;</button>
+    <input id="layer-range" type="range" min="1" max="1" step="1" value="1" aria-label="Layer" />
+    <button id="layer-up" title="Next layer" aria-label="Next layer">+</button>
+    <span id="layer-label"></span>
+    <label><input id="layer-only" type="checkbox" /> This layer only</label>
+  </div>
+  <div id="section" hidden>
+    <div class="mc-stl-bar">
+      <span>Cut</span>
+      <button id="section-x" title="Cut across X" aria-label="Cut across X">X</button>
+      <button id="section-y" title="Cut across Y" aria-label="Cut across Y">Y</button>
+      <button id="section-z" title="Cut across Z" aria-label="Cut across Z">Z</button>
+      <button id="section-down" title="Move the cut down" aria-label="Move the cut down">&#8722;</button>
+      <input id="section-range" type="range" min="0" max="1" step="any" value="0" aria-label="Cut position" />
+      <button id="section-up" title="Move the cut up" aria-label="Move the cut up">+</button>
+      <input id="section-value" type="number" step="0.1" aria-label="Cut position" />
+      <button id="section-close" title="Close the section" aria-label="Close the section">&#10005;</button>
+    </div>
+    <canvas id="section-canvas"></canvas>
+    <div id="section-readout"></div>
+  </div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }
+}
+
+type ReadModel = { format: 'stl' | '3mf'; bytes: string } | { error: string };
+
+// One model off disk, checked and base64-encoded for the webview, or the reason
+// it was refused. Throws only when the file cannot be read at all.
+async function readModel(uri: vscode.Uri): Promise<ReadModel> {
+  const name = basename(uri);
+  const format = is3mf(uri) ? '3mf' : 'stl';
+  const label = format === '3mf' ? '3MF' : 'STL';
+  // Size first, off stat, before a byte is read. Every guard used to live
+  // in the webview, which meant a hostile file was read whole, base64'd
+  // (1.33x, as a string), serialized through postMessage, and decoded on
+  // the other side before anything asked whether it should have been
+  // opened. The allocation the guards exist to prevent had already
+  // happened five times over by then, in the extension host, where it
+  // takes the whole window down rather than one preview.
+  const stat = await vscode.workspace.fs.stat(uri);
+  if (stat.size > MAX_STL_BYTES) {
+    return {
+      error: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_STL_BYTES)} limit for ${label} previews.`,
+    };
+  }
+
+  const bytes = await vscode.workspace.fs.readFile(uri);
+
+  // Cheap to run here and it saves base64-encoding a file that is about to
+  // be refused. The webview checks again on arrival: this one is about not
+  // doing pointless work, that one is the actual guard on the allocation.
+  //
+  // A 3MF is unpacked in the webview, behind the zip limits in
+  // src/ooxml/zip.ts; all that is worth checking here is that it is a zip.
+  if (format === '3mf') {
+    if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
+      return { error: `${name} is not a 3MF package (it is not a zip archive).` };
+    }
+  } else {
+    const check = checkStl(bytes);
+    if (!check.ok) {
+      return { error: check.reason ?? `Could not load ${name}.` };
+    }
+  }
+  return {
+    format,
+    // Base64, not the raw Uint8Array. The webview transport JSON-encodes
+    // messages, and JSON turns a typed array into a numeric-keyed object
+    // ~13x the size of the file (a 5 MB STL becomes ~67 MB of JSON and
+    // several hundred MB of objects). Base64 costs 1.33x and stays a
+    // string end to end. toBytes() in src/webview/stlInfo.ts decodes it.
+    bytes: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
+  };
+}
+
+// How many entries of one folder are looked at for the Compare with menu. A
+// folder of ten thousand scans is not worth listing in full for a twelve-line
+// menu.
+const MAX_SIBLING_ENTRIES = 2000;
+
+// The other models near `uri`, as [label, uri] pairs in menu order: the same
+// folder, its `versions` subfolder, and the parent when the file is itself in a
+// `versions` folder. That is the layout a model kept with its history has
+// (current file on top, older ones in versions/), from either side.
+async function findSiblings(uri: vscode.Uri): Promise<Array<[string, vscode.Uri]>> {
+  const dir = vscode.Uri.joinPath(uri, '..');
+  const own = basename(uri);
+  const found = new Map<string, vscode.Uri>();
+  const list = async (folder: vscode.Uri, prefix: string): Promise<void> => {
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(folder);
+    } catch {
+      return; // No such folder, which is the usual case for versions/.
+    }
+    for (const [entry, type] of entries.slice(0, MAX_SIBLING_ENTRIES)) {
+      const isFile = (type & vscode.FileType.File) !== 0;
+      if (isFile && isModelFile(entry) && !(prefix === '' && entry === own)) {
+        found.set(prefix + entry, vscode.Uri.joinPath(folder, entry));
+      }
+    }
+  };
+  await list(dir, '');
+  await list(vscode.Uri.joinPath(dir, 'versions'), 'versions/');
+  if (basename(dir).toLowerCase() === 'versions') {
+    await list(vscode.Uri.joinPath(dir, '..'), '../');
+  }
+  return rankSiblings(own, [...found.keys()]).map((label) => [
+    label,
+    found.get(label) as vscode.Uri,
+  ]);
 }
 
 /** Whether the document is a 3MF package rather than an STL, by its extension. */

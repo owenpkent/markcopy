@@ -40,6 +40,12 @@ export const DEFAULT_LIMITS: ZipLimits = {
   maxTotalBytes: 256 * 1024 * 1024,
 };
 
+// The most deflate can expand by is 1032 to 1 (a run of one byte, coded at
+// the format's longest match). The ratio is rounded up and given some slack so
+// that a tiny, legitimately compressible part is never caught by it.
+const MAX_DEFLATE_RATIO = 1100;
+const DEFLATE_SLACK = 4096;
+
 /**
  * A package we will not or cannot read, with a message written to be shown.
  *
@@ -101,6 +107,18 @@ export function openZip(bytes: Uint8Array, options: OpenOptions = {}): Parts {
         }
         if (file.originalSize > limits.maxEntryBytes) {
           throw new OpcError(`part "${file.name}" is too large to preview.`);
+        }
+        // A header can also lie high: fflate sizes the output buffer from the
+        // declared size, so a kilobyte of archive claiming a part just under
+        // the cap costs the whole cap in memory, zero-filled, and whatever the
+        // caller then does over that many bytes. Deflate cannot expand its
+        // input by more than about 1032 to 1, so a claim past that is refused
+        // for what it is before anything is allocated. The compressed size is
+        // a header field too, so it is held to the one thing that is not: no
+        // part is larger than the archive it is in.
+        const stored = Math.min(file.size, bytes.length);
+        if (file.originalSize > stored * MAX_DEFLATE_RATIO + DEFLATE_SLACK) {
+          throw new OpcError(`part "${file.name}" claims more data than it can hold.`);
         }
         declared += file.originalSize;
         if (declared > limits.maxTotalBytes) {

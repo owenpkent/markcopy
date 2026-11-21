@@ -220,20 +220,26 @@ Differences worth stating:
 
 The STL viewer (which also opens `.3mf`) has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
 
-| Action                       | Clipboard flavor | Pastes cleanly into                                                                               |
-| ---------------------------- | ---------------- | ------------------------------------------------------------------------------------------------- |
-| **Copy View as PNG**         | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors                                           |
-| **Save View as PNG…**        | (writes a file)  | Anywhere, via a save dialog                                                                       |
-| **Copy as > File Name**      | `text/plain`     | Anywhere                                                                                          |
-| **Copy as > Full Path**      | `text/plain`     | A terminal, a script, another editor                                                              |
-| **Copy as > Dimensions**     | `text/plain`     | Anywhere (the file's own `X × Y × Z`, two decimals, as the overlay; 3MF adds the unit, e.g. `mm`) |
-| **Copy as > Triangle Count** | `text/plain`     | Anywhere (a plain integer, no thousands separators)                                               |
+| Action                             | Clipboard flavor | Pastes cleanly into                                                                               |
+| ---------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| **Copy View as PNG**               | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors                                           |
+| **Save View as PNG…**              | (writes a file)  | Anywhere, via a save dialog                                                                       |
+| **Copy as > File Name**            | `text/plain`     | Anywhere                                                                                          |
+| **Copy as > Full Path**            | `text/plain`     | A terminal, a script, another editor                                                              |
+| **Copy as > Dimensions**           | `text/plain`     | Anywhere (the file's own `X × Y × Z`, two decimals, as the overlay; 3MF adds the unit, e.g. `mm`) |
+| **Copy as > Triangle Count**       | `text/plain`     | Anywhere (a plain integer, no thousands separators)                                               |
+| **Copy Section as PNG**            | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors (only while a section is open)            |
+| **Copy as > Section Measurements** | `text/plain`     | Anywhere (only while a section is open; layout below)                                             |
+| **Copy as > Print Summary**        | `text/plain`     | Anywhere (a sliced `.gcode.3mf` only; replaces Dimensions and Triangle Count)                     |
 
 Notes:
 
 - **The view is the canvas as it is on screen**, at the canvas's pixel size, with the viewport background (so the theme shows). The grid and wireframe appear if they are on. **Save View as PNG…** proposes `part.png` for `part.stl` or `part.3mf`.
+- **Copy Section as PNG** is the flat section drawing on the viewport background, not the 3D view. It is at the top of the menu while the section is open.
+- **Section Measurements** is laid out like a slicing script's output: a header line `part.stl, Z = 12.00` (`Z = 12.00 mm` for a 3MF), then `Y = 0.00: -8.85 -6.35 6.35 8.85 (spans 2.50 | 12.70 | 2.50)` and the same for the vertical line. It measures where the crosshair is, or through the middle of the model when nothing is pointed at. With a comparison running, each model gets its own report.
+- **Print Summary** is the overlay's lines for a sliced print (`Sliced print`, time, weight and filament, layer and move counts, extents, grid and bed) with the file name.
 - **Both view actions and Dimensions and Triangle Count are greyed out until a model has loaded.** File Name and Full Path work even when the file was refused.
-- **View** holds Fit View, the camera presets (Front, Back, Left, Right, Top, Bottom, Isometric), Wireframe and Grid checkboxes that mirror the toolbar buttons. **Preferences > Theme** writes `markcopy.theme`. **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
+- **View** holds Fit View, the camera presets (Front, Back, Left, Right, Top, Bottom, Isometric), Wireframe, Section and Grid checkboxes that mirror the toolbar buttons, Print Bed, and Up Axis (an STL only). **Compare with** lists nearby models to overlay. **Preferences > Theme** writes `markcopy.theme`. **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.
 - **A right-drag pans and does not open the menu.** Only a right click that stays within a few pixels does. The menu key and Shift+F10 open it too.
 
 **Copy Whole Document as Rich Text**, **Save as PDF**, **Save as Word**, and **Save as PowerPoint** do not apply: all four serialize a rendered HTML document, and the STL and 3MF viewer renders into a WebGL canvas instead of one.

@@ -725,6 +725,29 @@
           "default": "#8ab4f8",
           "description": "Color of the mesh material in the STL and 3MF preview. A 3MF file that colors its own faces keeps those colors; this fills in the faces it leaves uncolored."
         },
+        "markcopy.stl.upAxis": {
+          "type": "string",
+          "enum": [
+            "z",
+            "y"
+          ],
+          "enumDescriptions": [
+            "Z is up, as in slicers, Blender and most CAD exports.",
+            "Y is up, as in many game and graphics tools."
+          ],
+          "default": "z",
+          "description": "Which axis of an STL file points up in the preview. STL does not say, so pick the one your tools use. 3MF is always Z up, as its specification requires."
+        },
+        "markcopy.stl.showBed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the outline of the print bed under the model in the STL and 3MF preview, and say whether the model fits. A sliced print file always shows it."
+        },
+        "markcopy.stl.bedSize": {
+          "type": "string",
+          "default": "256x256x256",
+          "description": "Print bed size in millimetres as width x depth x height, for the bed outline and the fit check. The default is a Bambu Lab X1C; a Prusa MK4 is 250x210x220."
+        },
         "markcopy.audio.autoplay": {
           "type": "boolean",
           "default": false,

@@ -22,6 +22,10 @@ const TRIANGLE = [
   '',
 ].join('\n');
 const readFile = vi.hoisted(() => vi.fn(async () => new Uint8Array()));
+const readDirectory = vi.hoisted(() =>
+  vi.fn(async (_dir: { path: string }): Promise<Array<[string, number]>> => []),
+);
+const showOpenDialog = vi.hoisted(() => vi.fn());
 
 vi.mock('vscode', () => {
   const asUri = (fsPath: string) => ({
@@ -37,6 +41,7 @@ vi.mock('vscode', () => {
         asUri(`${base.path}/${segments.join('/')}`),
     },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+    FileType: { File: 1, Directory: 2 },
     env: { openExternal: vi.fn() },
     workspace: {
       getConfiguration: vi.fn(() => ({
@@ -44,10 +49,10 @@ vi.mock('vscode', () => {
         inspect: () => undefined,
         update: configUpdate,
       })),
-      fs: { stat, readFile, writeFile },
+      fs: { stat, readFile, writeFile, readDirectory },
       onDidChangeConfiguration: vi.fn(() => ({ dispose: () => undefined })),
     },
-    window: { showSaveDialog, showErrorMessage: vi.fn() },
+    window: { showSaveDialog, showOpenDialog, showErrorMessage: vi.fn() },
   };
 });
 
@@ -105,6 +110,13 @@ beforeEach(() => {
 });
 
 describe('isStlSetting', () => {
+  it('allows the up axis, as z or y only', () => {
+    expect(isStlSetting('stl.upAxis', 'z')).toBe(true);
+    expect(isStlSetting('stl.upAxis', 'y')).toBe(true);
+    expect(isStlSetting('stl.upAxis', 'x')).toBe(false);
+    expect(isStlSetting('stl.bedSize', '1x1')).toBe(false);
+  });
+
   it('allows only a valid theme', () => {
     expect(isStlSetting('theme', 'dark')).toBe(true);
     expect(isStlSetting('theme', 'neon')).toBe(false);
@@ -138,6 +150,10 @@ describe('StlEditorProvider', () => {
       bytes: Buffer.from(TRIANGLE).toString('base64'),
       showGrid: true,
       meshColor: '#8ab4f8',
+      upAxis: 'z',
+      showBed: false,
+      bedSize: '256x256x256',
+      siblings: [],
     });
     expect(readFile).toHaveBeenCalledTimes(1);
   });
@@ -188,6 +204,87 @@ describe('StlEditorProvider', () => {
     const { send, posted } = await open('/models/part.3mf');
     await send({ type: 'ready' });
     expect(posted.find((m) => m.type === 'error')?.message).toContain('limit for 3MF previews');
+  });
+
+  describe('compare', () => {
+    // part.stl sits beside another model and above a versions folder. The
+    // listing is keyed by folder path, as the mocked joinPath builds it.
+    beforeEach(() => {
+      readDirectory.mockImplementation(async (dir: { path: string }) => {
+        if (dir.path === '/models/part.stl/..') {
+          return [
+            ['part.stl', 1],
+            ['other.stl', 1],
+            ['notes.md', 1],
+            ['versions', 2],
+          ];
+        }
+        if (dir.path === '/models/part.stl/../versions') {
+          return [
+            ['part_v2.stl', 1],
+            ['part_v10.3mf', 1],
+          ];
+        }
+        throw new Error('no such folder');
+      });
+    });
+
+    it('offers the models beside the file, likeliest version first', async () => {
+      const { send, posted } = await open();
+      await send({ type: 'ready' });
+      expect(posted.find((m) => m.type === 'load')?.siblings).toEqual([
+        'versions/part_v10.3mf',
+        'versions/part_v2.stl',
+        'other.stl',
+      ]);
+    });
+
+    it('sends a model it offered, checked like the first', async () => {
+      const { send, posted } = await open();
+      await send({ type: 'ready' });
+      await send({ type: 'compare', name: 'versions/part_v2.stl' });
+      expect(posted.find((m) => m.type === 'compare')).toEqual({
+        type: 'compare',
+        format: 'stl',
+        name: 'versions/part_v2.stl',
+        bytes: Buffer.from(TRIANGLE).toString('base64'),
+      });
+    });
+
+    it('reads nothing for a name it did not offer', async () => {
+      const { send, posted } = await open();
+      await send({ type: 'ready' });
+      readFile.mockClear();
+      await send({ type: 'compare', name: '../../secrets.stl' });
+      await send({ type: 'compare', name: 'notes.md' });
+      expect(readFile).not.toHaveBeenCalled();
+      expect(posted.find((m) => m.type === 'compare')).toBeUndefined();
+    });
+
+    it('reports a model that fails the checks as a toast, not an error', async () => {
+      const { send, posted } = await open();
+      await send({ type: 'ready' });
+      stat.mockResolvedValue({ size: 300 * 1024 * 1024 });
+      await send({ type: 'compare', name: 'other.stl' });
+      expect(posted.find((m) => m.type === 'compare')).toBeUndefined();
+      expect(posted.find((m) => m.type === 'toast')?.message).toContain('limit for STL previews');
+    });
+
+    it('sends the file picked with Browse, and nothing when it is cancelled', async () => {
+      const { send, posted } = await open();
+      await send({ type: 'ready' });
+      showOpenDialog.mockResolvedValueOnce(undefined);
+      await send({ type: 'compareBrowse' });
+      expect(posted.find((m) => m.type === 'compare')).toBeUndefined();
+
+      const picked = { path: '/elsewhere/old.stl', fsPath: '/elsewhere/old.stl' };
+      showOpenDialog.mockResolvedValueOnce([picked]);
+      await send({ type: 'compareBrowse' });
+      expect(posted.find((m) => m.type === 'compare')).toMatchObject({
+        name: 'old.stl',
+        format: 'stl',
+      });
+    });
   });
 
   it('names the file in the error when it cannot be read', async () => {

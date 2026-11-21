@@ -37,7 +37,7 @@ Then open a Markdown or CSV file: its tab shows the rendered preview, and **Show
 | Images and GIFs | `.png`, `.jpg`, `.webp`, `.avif`, `.bmp`, `.ico`, `.svg`, `.gif` | Copy as PNG, Markdown, or HTML; step through a folder; pin notes to areas of a picture; play, pause and scrub a GIF on its control bar, and step through its frames                                                      |
 | Video           | `.mov`, `.mp4`, `.mkv`, `.webm`, and more                        | Plays inline with its own controls (play, volume, a seek bar that previews the frame under the pointer, with the time and time left, full screen); timecoded video notes; copy the current frame as PNG for a bug report |
 | Audio           | `.mp3`, `.wav`, `.ogg`, `.opus`, `.flac`, `.m4a`, `.aac`         | Plays inline with a click-to-seek waveform, a details panel (codec, levels, tags), speed control and keyboard shortcuts; timestamped notes; step through the audio files in a folder                                     |
-| STL and 3MF     | `.stl`, `.3mf`                                                   | 3D viewer with orbit, wireframe, dimensions, and 3MF colors                                                                                                                                                              |
+| STL and 3MF     | `.stl`, `.3mf`                                                   | 3D viewer with orbit, wireframe, dimensions, a print bed, sections with measuring, compare, 3MF colors, and sliced-print toolpaths                                                                                       |
 
 Previews of other people's files (Word, PowerPoint, Excel, PDF) are read-only by design and need no Office install.
 

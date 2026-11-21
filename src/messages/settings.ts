@@ -40,8 +40,13 @@ export function isGifSetting(key: string, value: unknown): boolean {
   return key === 'theme' && isViewerSetting(key, value);
 }
 
-/** The one setting the STL viewer's menus write (src/webview/stl.ts): the theme. */
+export const STL_UP_AXES = ['z', 'y'];
+
+/** The settings the STL viewer's menus write (src/webview/stl.ts): the theme and which axis is up. */
 export function isStlSetting(key: string, value: unknown): boolean {
+  if (key === 'stl.upAxis') {
+    return typeof value === 'string' && STL_UP_AXES.includes(value);
+  }
   return key === 'theme' && isTheme(value);
 }
 
