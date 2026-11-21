@@ -18,6 +18,7 @@ import {
   loadStepEngine,
   readStep,
   resetStepEngine,
+  stepEngineUrl,
   type OcctEngine,
   type OcctMesh,
 } from '../src/webview/step';
@@ -209,6 +210,26 @@ describe('readStep', () => {
   });
 });
 
+describe('stepEngineUrl', () => {
+  it('is the engine file beside the bundle, keeping its cache token', () => {
+    expect(
+      stepEngineUrl('https://file+.vscode-resource.vscode-cdn.net/ext/media/stl.js?v=abc'),
+    ).toBe('https://file+.vscode-resource.vscode-cdn.net/ext/media/occt-import-js.wasm.gz?v=abc');
+    expect(stepEngineUrl('file:///ext/media/stl.js')).toBe(
+      'file:///ext/media/occt-import-js.wasm.gz',
+    );
+  });
+
+  it('is what loadStepEngine fetches, whatever a message might say', async () => {
+    resetStepEngine();
+    const fetchWasm = vi.fn(async () => new ArrayBuffer(8));
+    await loadStepEngine({ fetchWasm, factory: async () => engine });
+    expect(fetchWasm).toHaveBeenCalledWith(stepEngineUrl());
+    expect(stepEngineUrl()).toMatch(/\/occt-import-js\.wasm\.gz$/);
+    resetStepEngine();
+  });
+});
+
 describe('loadStepEngine', () => {
   it('starts the engine once, from the inflated bytes, and caches it', async () => {
     resetStepEngine();
@@ -218,8 +239,8 @@ describe('loadStepEngine', () => {
       expect(options.wasmBinary.byteLength).toBe(bytes.byteLength);
       return engine;
     });
-    const first = await loadStepEngine('webview:engine.gz', { fetchWasm, factory });
-    const second = await loadStepEngine('webview:engine.gz', { fetchWasm, factory });
+    const first = await loadStepEngine({ fetchWasm, factory });
+    const second = await loadStepEngine({ fetchWasm, factory });
     expect(first).toBe(engine);
     expect(second).toBe(first);
     expect(fetchWasm).toHaveBeenCalledTimes(1);
@@ -233,10 +254,10 @@ describe('loadStepEngine', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValue(new ArrayBuffer(8));
     const factory = vi.fn(async () => engine);
-    await expect(loadStepEngine('u', { fetchWasm, factory })).rejects.toThrow(
+    await expect(loadStepEngine({ fetchWasm, factory })).rejects.toThrow(
       /Could not load the STEP engine/,
     );
-    await expect(loadStepEngine('u', { fetchWasm, factory })).resolves.toBe(engine);
+    await expect(loadStepEngine({ fetchWasm, factory })).resolves.toBe(engine);
     resetStepEngine();
   });
 
@@ -246,7 +267,7 @@ describe('loadStepEngine', () => {
       throw new Error('bad wasm');
     });
     await expect(
-      loadStepEngine('u', { fetchWasm: async () => new ArrayBuffer(8), factory }),
+      loadStepEngine({ fetchWasm: async () => new ArrayBuffer(8), factory }),
     ).rejects.toThrow(/Could not start the STEP engine/);
     resetStepEngine();
   });
@@ -264,7 +285,7 @@ describe('loadStepEngine', () => {
       seen = options.wasmBinary.byteLength;
       return engine;
     };
-    await loadStepEngine('webview:engine.gz', { factory });
+    await loadStepEngine({ factory });
     expect(seen).toBe(raw.byteLength);
     vi.unstubAllGlobals();
     resetStepEngine();

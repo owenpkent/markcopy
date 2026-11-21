@@ -9,7 +9,10 @@
 // times is counted every time) and checked against the cap before a single
 // vertex array exists. Then a copy of the file with its textures, images and
 // samplers removed goes to GLTFLoader, so no image is ever fetched or decoded,
-// the parse cannot wait on one, and img-src stays as narrow as it was. Every
+// the parse cannot wait on one, and img-src stays as narrow as it was. That copy
+// is pruned to the default scene's triangles (see `pruneGlb`) and every accessor
+// left in it is bounds-checked first, since the loader allocates whatever an
+// accessor declares, including accessors with no data behind them. Every
 // mesh's world transform is then baked into one merged, non-indexed geometry.
 //
 // glTF is Y-up and the viewer's models are Z-up (modelRoot turns them upright),
@@ -50,18 +53,39 @@ export interface GlbOptions {
 }
 
 interface Accessor {
+  type?: string;
+  componentType?: number;
   count?: number;
+  normalized?: boolean;
   bufferView?: number;
+  byteOffset?: number;
+  sparse?: {
+    count?: number;
+    indices?: { bufferView?: number; byteOffset?: number; componentType?: number };
+    values?: { bufferView?: number; byteOffset?: number };
+  };
+}
+interface BufferViewDef {
+  buffer?: number;
+  byteOffset?: number;
+  byteLength?: number;
+  byteStride?: number;
+  extensions?: Record<string, unknown>;
 }
 interface Primitive {
   attributes?: Record<string, number>;
   indices?: number;
+  material?: number;
   mode?: number;
   extensions?: Record<string, unknown>;
 }
 interface GltfNode {
   mesh?: number;
   children?: number[];
+  matrix?: unknown;
+  translation?: unknown;
+  rotation?: unknown;
+  scale?: unknown;
   extensions?: { EXT_mesh_gpu_instancing?: { attributes?: Record<string, number> } };
 }
 interface Gltf {
@@ -73,12 +97,13 @@ interface Gltf {
   nodes?: GltfNode[];
   meshes?: Array<{ primitives?: Primitive[] }>;
   accessors?: Accessor[];
-  bufferViews?: Array<{ extensions?: Record<string, unknown> }>;
-  buffers?: Array<{ uri?: string }>;
+  bufferViews?: BufferViewDef[];
+  buffers?: Array<{ uri?: string; byteLength?: number }>;
   images?: unknown[];
   textures?: unknown[];
   samplers?: unknown[];
   materials?: unknown[];
+  extensions?: unknown;
 }
 
 interface Chunks {
@@ -250,54 +275,380 @@ function tooMany(total: number, max: number): string {
   return `This GLB file holds ${total.toLocaleString()} triangles or more, above the ${max.toLocaleString()} MarkCopy previews.`;
 }
 
-// Drop everything texture-shaped from the JSON, and every reference to it, so
-// the loader has no image to fetch or decode. A material keeps its factors.
-function stripTextures(value: unknown): void {
-  if (Array.isArray(value)) {
-    value.forEach(stripTextures);
-    return;
-  }
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
-      const item = record[key];
-      if (/Texture$/.test(key) && item && typeof item === 'object') {
-        delete record[key];
-      } else {
-        stripTextures(item);
-      }
-    }
-  }
+const ACCESSOR_COMPONENTS = new Map<string, number>([
+  ['SCALAR', 1],
+  ['VEC2', 2],
+  ['VEC3', 3],
+  ['VEC4', 4],
+]);
+const COMPONENT_BYTES = new Map<number, number>([
+  [5120, 1],
+  [5121, 1],
+  [5122, 2],
+  [5123, 2],
+  [5125, 4],
+  [5126, 4],
+]);
+const INDEX_COMPONENTS = new Set([5121, 5123, 5125]);
+// Elements across every accessor the loader is left with, per triangle of the
+// cap: positions, normals, colors and indices, with room to spare.
+const ELEMENTS_PER_TRIANGLE = 48;
+
+const tooBig = () =>
+  new GlbError('This GLB file declares an accessor larger than MarkCopy will allocate.');
+const outside = () =>
+  new GlbError('This GLB file has an accessor that reaches outside the data it points at.');
+const malformed = (what: string) => new GlbError(`This GLB file has a malformed ${what}.`);
+
+function wholeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
-function withoutTextures(
+function numbers(value: unknown, length: number): number[] | undefined {
+  return Array.isArray(value) &&
+    value.length === length &&
+    value.every((n) => typeof n === 'number' && Number.isFinite(n))
+    ? (value as number[]).slice()
+    : undefined;
+}
+
+interface OutPrimitive {
+  attributes: { POSITION: number; NORMAL?: number; COLOR_0?: number };
+  indices?: number;
+  material?: number;
+  mode: number;
+}
+interface OutNode {
+  matrix?: number[];
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
+  mesh?: number;
+  children?: number[];
+  extensions?: { EXT_mesh_gpu_instancing: { attributes: Record<string, number> } };
+}
+
+/**
+ * The part of the file the preview draws, as a new glTF: the default scene's
+ * node subtree, the triangle meshes those nodes use (POSITION, indices, NORMAL
+ * and COLOR_0 only, no morph targets), each material's base color factor, and
+ * the accessors, buffer views and buffer those reference. Everything else
+ * (other scenes, animations, skins, cameras, textures, images, samplers) is
+ * left behind, so the loader never sees it. A primitive with no material gets
+ * one in `fallback`, which would otherwise be drawn in three's default white.
+ *
+ * Every accessor that is kept is checked here, before the loader allocates
+ * anything: its count against the vertex budget (an accessor with no buffer view
+ * is allocated at full size, whatever the file's own size), its sparse count,
+ * its extent against its buffer view and the buffer view against the BIN chunk,
+ * and the total across all of them. Anything over is refused. Objects are built
+ * from fixed property names and Maps, never keyed by a name the file chose.
+ */
+export function pruneGlb(
   json: Gltf,
-  bin: Uint8Array | null,
+  binLength: number | null,
+  max: number,
   fallback: [number, number, number] | undefined,
-): ArrayBuffer {
-  const copy = JSON.parse(JSON.stringify(json)) as Gltf;
-  if (fallback) {
-    // A primitive with no material would be drawn in three's default white.
-    // Give those one material of the setting's color instead.
-    const bare = (copy.meshes ?? [])
-      .flatMap((m) => m.primitives ?? [])
-      .filter((p) => typeof (p as { material?: unknown }).material !== 'number');
-    if (bare.length > 0) {
-      const materials = (copy.materials ??= []) as unknown[];
-      materials.push({
-        pbrMetallicRoughness: { baseColorFactor: [...fallback, 1], metallicFactor: 0 },
-      });
-      for (const p of bare) {
-        (p as { material?: number }).material = materials.length - 1;
+): Gltf {
+  const accessors = json.accessors ?? [];
+  const views = json.bufferViews ?? [];
+  const vertexLimit = 3 * max + 2;
+  const elementLimit = ELEMENTS_PER_TRIANGLE * max;
+  let elements = 0;
+
+  const outAccessors: Accessor[] = [];
+  const accessorMap = new Map<number, number>();
+  const outViews: BufferViewDef[] = [];
+  const viewMap = new Map<number, number>();
+
+  const useView = (index: unknown, needBytes: number, offset: number): number => {
+    if (!wholeNumber(index)) {
+      throw malformed('buffer view reference');
+    }
+    const view = views[index];
+    if (!view || typeof view !== 'object' || binLength === null) {
+      throw outside();
+    }
+    const { byteOffset = 0, byteLength, buffer, byteStride } = view;
+    if (buffer !== 0 || !wholeNumber(byteLength) || !wholeNumber(byteOffset)) {
+      throw outside();
+    }
+    if (byteOffset + byteLength > binLength || offset + needBytes > byteLength) {
+      throw outside();
+    }
+    let slot = viewMap.get(index);
+    if (slot === undefined) {
+      const out: BufferViewDef = { buffer: 0, byteOffset, byteLength };
+      if (wholeNumber(byteStride)) {
+        out.byteStride = byteStride;
+      }
+      slot = outViews.push(out) - 1;
+      viewMap.set(index, slot);
+    }
+    return slot;
+  };
+
+  // `kind` says what the accessor is for, and so which shapes it may have.
+  const useAccessor = (
+    index: unknown,
+    kind: 'position' | 'normal' | 'color' | 'index' | 'instance',
+  ): number => {
+    if (!wholeNumber(index)) {
+      throw malformed('accessor reference');
+    }
+    const known = accessorMap.get(index);
+    if (known !== undefined) {
+      return known;
+    }
+    const a = accessors[index];
+    if (!a || typeof a !== 'object') {
+      throw malformed('accessor reference');
+    }
+    const components = ACCESSOR_COMPONENTS.get(String(a.type));
+    const bytes = COMPONENT_BYTES.get(Number(a.componentType));
+    if (components === undefined || bytes === undefined || !wholeNumber(a.count)) {
+      throw malformed('accessor');
+    }
+    if (
+      ((kind === 'position' || kind === 'normal') && components !== 3) ||
+      (kind === 'color' && components < 3) ||
+      (kind === 'index' && (components !== 1 || !INDEX_COMPONENTS.has(Number(a.componentType))))
+    ) {
+      throw malformed('accessor');
+    }
+    if (a.count > vertexLimit) {
+      throw tooBig();
+    }
+    elements += a.count * components;
+    const out: Accessor = {
+      type: a.type,
+      componentType: a.componentType,
+      count: a.count,
+    };
+    if (a.normalized === true) {
+      out.normalized = true;
+    }
+    const elementBytes = components * bytes;
+    if (a.bufferView !== undefined) {
+      const offset = a.byteOffset ?? 0;
+      if (!wholeNumber(offset) || !wholeNumber(a.bufferView)) {
+        throw malformed('accessor');
+      }
+      const stride = views[a.bufferView]?.byteStride ?? elementBytes;
+      if (!wholeNumber(stride) || stride < elementBytes) {
+        throw malformed('buffer view');
+      }
+      const extent = a.count === 0 ? 0 : stride * (a.count - 1) + elementBytes;
+      out.bufferView = useView(a.bufferView, extent, offset);
+      out.byteOffset = offset;
+    }
+    const s = a.sparse;
+    if (s !== undefined) {
+      if (!s || !wholeNumber(s.count) || s.count > a.count) {
+        throw tooBig();
+      }
+      elements += s.count * (components + 1);
+      const indexType = Number(s.indices?.componentType);
+      const indexBytes = COMPONENT_BYTES.get(indexType);
+      const indexAt = s.indices?.byteOffset ?? 0;
+      const valueAt = s.values?.byteOffset ?? 0;
+      if (
+        indexBytes === undefined ||
+        !INDEX_COMPONENTS.has(indexType) ||
+        !wholeNumber(indexAt) ||
+        !wholeNumber(valueAt)
+      ) {
+        throw malformed('accessor');
+      }
+      out.sparse = {
+        count: s.count,
+        indices: {
+          bufferView: useView(s.indices?.bufferView, s.count * indexBytes, indexAt),
+          byteOffset: indexAt,
+          componentType: indexType,
+        },
+        values: {
+          bufferView: useView(s.values?.bufferView, s.count * elementBytes, valueAt),
+          byteOffset: valueAt,
+        },
+      };
+    }
+    if (elements > elementLimit) {
+      throw tooBig();
+    }
+    const slot = outAccessors.push(out) - 1;
+    accessorMap.set(index, slot);
+    return slot;
+  };
+
+  // Materials keep the base color factor and nothing else: colors are all the
+  // preview draws.
+  const outMaterials: unknown[] = [];
+  const materialMap = new Map<number, number>();
+  const useMaterial = (index: unknown): number | undefined => {
+    if (!wholeNumber(index)) {
+      return undefined;
+    }
+    let slot = materialMap.get(index);
+    if (slot === undefined) {
+      const def = json.materials?.[index] as
+        { pbrMetallicRoughness?: { baseColorFactor?: unknown } } | undefined;
+      if (!def || typeof def !== 'object') {
+        return undefined;
+      }
+      const factor = numbers(def.pbrMetallicRoughness?.baseColorFactor, 4);
+      slot =
+        outMaterials.push(factor ? { pbrMetallicRoughness: { baseColorFactor: factor } } : {}) - 1;
+      materialMap.set(index, slot);
+    }
+    return slot;
+  };
+  let fallbackMaterial: number | undefined;
+
+  const outMeshes: Array<{ primitives: OutPrimitive[] }> = [];
+  const meshMap = new Map<number, number>();
+  const useMesh = (index: number): number | undefined => {
+    const known = meshMap.get(index);
+    if (known !== undefined) {
+      return known;
+    }
+    const mesh = json.meshes?.[index];
+    if (!mesh || typeof mesh !== 'object') {
+      return undefined;
+    }
+    const primitives: OutPrimitive[] = [];
+    for (const p of mesh.primitives ?? []) {
+      const mode = p?.mode ?? 4;
+      const position = p?.attributes?.POSITION;
+      // Points and lines draw no surface, and a primitive with no POSITION has
+      // none either.
+      if (!p || ![4, 5, 6].includes(mode) || position === undefined) {
+        continue;
+      }
+      const out: OutPrimitive = {
+        attributes: { POSITION: useAccessor(position, 'position') },
+        mode,
+      };
+      const normal = p.attributes?.NORMAL;
+      const color = p.attributes?.COLOR_0;
+      // The glTF rule: every attribute of a primitive has the vertex count.
+      for (const other of [normal, color]) {
+        if (other !== undefined && accessors[other]?.count !== accessors[position]?.count) {
+          throw malformed('attribute');
+        }
+      }
+      if (normal !== undefined) {
+        out.attributes.NORMAL = useAccessor(normal, 'normal');
+      }
+      if (color !== undefined) {
+        out.attributes.COLOR_0 = useAccessor(color, 'color');
+      }
+      if (p.indices !== undefined) {
+        out.indices = useAccessor(p.indices, 'index');
+      }
+      let material = useMaterial(p.material);
+      if (material === undefined && fallback) {
+        fallbackMaterial ??=
+          outMaterials.push({
+            pbrMetallicRoughness: { baseColorFactor: [...fallback, 1], metallicFactor: 0 },
+          }) - 1;
+        material = fallbackMaterial;
+      }
+      if (material !== undefined) {
+        out.material = material;
+      }
+      primitives.push(out);
+    }
+    const slot = outMeshes.push({ primitives }) - 1;
+    meshMap.set(index, slot);
+    return slot;
+  };
+
+  const outNodes: OutNode[] = [];
+  const nodeMap = new Map<number, number>();
+  let usesInstancing = false;
+  const useNode = (index: number): number | undefined => {
+    const known = nodeMap.get(index);
+    if (known !== undefined) {
+      return known;
+    }
+    const node = json.nodes?.[index];
+    if (!node || typeof node !== 'object') {
+      return undefined;
+    }
+    const out: OutNode = {};
+    const slot = outNodes.push(out) - 1;
+    nodeMap.set(index, slot);
+    const matrix = numbers(node.matrix, 16);
+    const translation = numbers(node.translation, 3);
+    const rotation = numbers(node.rotation, 4);
+    const scale = numbers(node.scale, 3);
+    if (matrix) out.matrix = matrix;
+    if (translation) out.translation = translation;
+    if (rotation) out.rotation = rotation;
+    if (scale) out.scale = scale;
+    if (wholeNumber(node.mesh)) {
+      const mesh = useMesh(node.mesh);
+      if (mesh !== undefined) {
+        out.mesh = mesh;
       }
     }
+    const instancing = node.extensions?.EXT_mesh_gpu_instancing?.attributes;
+    if (instancing && out.mesh !== undefined) {
+      const attributes: Record<string, number> = {};
+      for (const name of ['TRANSLATION', 'ROTATION', 'SCALE'] as const) {
+        if (instancing[name] !== undefined) {
+          attributes[name] = useAccessor(instancing[name], 'instance');
+        }
+      }
+      usesInstancing = true;
+      out.extensions = { EXT_mesh_gpu_instancing: { attributes } };
+    }
+    const children: number[] = [];
+    for (const child of node.children ?? []) {
+      const c = wholeNumber(child) ? useNode(child) : undefined;
+      if (c !== undefined) {
+        children.push(c);
+      }
+    }
+    if (children.length > 0) {
+      out.children = children;
+    }
+    return slot;
+  };
+
+  const sceneIndex = typeof json.scene === 'number' ? json.scene : 0;
+  const roots = json.scenes?.[sceneIndex]?.nodes ?? json.scenes?.[0]?.nodes ?? [];
+  const sceneNodes: number[] = [];
+  for (const root of roots) {
+    const slot = wholeNumber(root) ? useNode(root) : undefined;
+    if (slot !== undefined) {
+      sceneNodes.push(slot);
+    }
   }
-  delete copy.images;
-  delete copy.textures;
-  delete copy.samplers;
-  stripTextures(copy.materials);
-  stripTextures((copy as { extensions?: unknown }).extensions);
-  const text = new TextEncoder().encode(JSON.stringify(copy));
+
+  const pruned: Gltf = {
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: sceneNodes }],
+    nodes: outNodes,
+    meshes: outMeshes,
+    accessors: outAccessors,
+    bufferViews: outViews,
+    materials: outMaterials,
+  };
+  if (binLength !== null && outViews.length > 0) {
+    pruned.buffers = [{ byteLength: binLength }];
+  }
+  if (usesInstancing) {
+    pruned.extensionsUsed = ['EXT_mesh_gpu_instancing'];
+  }
+  return pruned;
+}
+
+// The pruned glTF and the BIN chunk as a GLB for the loader.
+function encodeGlb(pruned: Gltf, bin: Uint8Array | null): ArrayBuffer {
+  const text = new TextEncoder().encode(JSON.stringify(pruned));
   const jsonLength = (text.length + 3) & ~3;
   const binLength = bin ? (bin.byteLength + 3) & ~3 : 0;
   const total = 12 + 8 + jsonLength + (bin ? 8 + binLength : 0);
@@ -501,7 +852,8 @@ export async function readGlb(bytes: Uint8Array, options: GlbOptions = {}): Prom
       'This GLB file holds no triangle meshes to show (points and lines are not drawn).',
     );
   }
-  const scene = await loadScene(withoutTextures(json, bin, options.fallbackColor));
+  const pruned = pruneGlb(json, bin ? bin.byteLength : null, max, options.fallbackColor);
+  const scene = await loadScene(encodeGlb(pruned, bin));
   const model = bake(collect(scene), triangles);
   if (model.positions.length === 0) {
     throw new GlbError('This GLB file holds no triangle meshes to show.');

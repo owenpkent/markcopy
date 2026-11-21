@@ -155,7 +155,7 @@ Both binary and ASCII STL are handled. Corrupt and hostile files are rejected ra
 
 ### Orientation and up axis
 
-An STL does not say which way is up. Z is what slicers, Blender and most CAD exports use, so by default (`markcopy.stl.upAxis` = `z`) an STL stands the way it prints instead of lying on its side. If a file was made Y-up, choose **View > Up Axis > Y** in the right-click menu (shown only for an STL); the choice is saved to the setting. A 3MF, a STEP file and a sliced print are always Z-up, as those formats require, and a GLB is always Y-up, as glTF requires: it is turned upright when it loads, so it stands on the grid whatever the setting says. Dimensions, the overlay and **Copy as > Dimensions** are always the file's own X x Y x Z, whichever axis is up. The model is centered over the origin and rested on the floor, so the grid sits directly under it.
+An STL does not say which way is up. Z is what slicers, Blender and most CAD exports use, so by default (`markcopy.stl.upAxis` = `z`) an STL stands the way it prints instead of lying on its side. If a file was made Y-up, choose **View > Up Axis > Y** in the right-click menu (shown for an STL and a STEP file); the choice is saved to the setting. A STEP file does not fix its up axis either, so it follows the setting too, Z by default. A 3MF and a sliced print are always Z-up, as those formats require, and a GLB is always Y-up, as glTF requires: it is turned upright when it loads, so it stands on the grid whatever the setting says. Dimensions, the overlay and **Copy as > Dimensions** are always the file's own X x Y x Z, whichever axis is up. The model is centered over the origin and rested on the floor, so the grid sits directly under it.
 
 ### Grid and print bed
 

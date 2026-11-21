@@ -67,6 +67,12 @@ const asCount = (json: Json) => json as unknown as CountArg;
 
 afterEach(() => vi.restoreAllMocks());
 
+// The JSON chunk of the GLB that was handed to the loader.
+function givenJson(data: ArrayBuffer): Json {
+  const length = new DataView(data).getUint32(12, true);
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(data, 20, length))) as Json;
+}
+
 describe('glbHeaderProblem', () => {
   it('accepts a version 2 header', () => {
     expect(glbHeaderProblem(glb(triangleJson(), TRIANGLE_BIN))).toBeNull();
@@ -219,6 +225,121 @@ describe('readGlb', () => {
       /1,000 MarkCopy previews/,
     );
     expect(parse).not.toHaveBeenCalled();
+  });
+
+  describe('what the loader is given', () => {
+    const f32 = (n: number) => ({ componentType: 5126, count: n, type: 'VEC3' });
+
+    it('refuses an oversized bufferless POSITION in a secondary scene', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const json = triangleJson({
+        scenes: [{ nodes: [0] }, { nodes: [1] }],
+        nodes: [{ mesh: 0 }, { mesh: 1 }],
+        meshes: [
+          { primitives: [{ attributes: { POSITION: 0 } }] },
+          { primitives: [{ attributes: { POSITION: 1 } }] },
+        ],
+        accessors: [{ bufferView: 0, ...f32(3) }, f32(3000)],
+      });
+      // The secondary scene is not drawn, so it is pruned away and the loader
+      // never sees the accessor: the file reads, as one triangle.
+      const model = await readGlb(glb(json, TRIANGLE_BIN), { maxTriangles: 1 });
+      expect(model.positions.length).toBe(9);
+      const given = givenJson(parse.mock.calls[0][0] as ArrayBuffer);
+      expect((given.accessors as Json[]).map((a) => a.count)).toEqual([3]);
+    });
+
+    it('refuses an oversized bufferless NORMAL on a one-triangle mesh', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const json = triangleJson({
+        meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 } }] }],
+        accessors: [{ bufferView: 0, ...f32(3) }, f32(3000)],
+      });
+      await expect(readGlb(glb(json, TRIANGLE_BIN), { maxTriangles: 1 })).rejects.toThrow(
+        /malformed attribute|larger than MarkCopy will allocate/,
+      );
+      expect(parse).not.toHaveBeenCalled();
+    });
+
+    it('refuses a normal accessor that is large but matches its positions', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const json = triangleJson({
+        meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1 } }] }],
+        accessors: [f32(3000), f32(3000)],
+      });
+      await expect(readGlb(glb(json), { maxTriangles: 1 })).rejects.toThrow(
+        /larger than MarkCopy will allocate/,
+      );
+      expect(parse).not.toHaveBeenCalled();
+    });
+
+    it('refuses an accessor that reaches past its buffer view, and a view past the BIN chunk', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const past = triangleJson({ accessors: [{ bufferView: 0, byteOffset: 4, ...f32(3) }] });
+      await expect(readGlb(glb(past, TRIANGLE_BIN))).rejects.toThrow(/reaches outside/);
+      const view = triangleJson({
+        bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 3600 }],
+      });
+      await expect(readGlb(glb(view, TRIANGLE_BIN))).rejects.toThrow(/reaches outside/);
+      expect(parse).not.toHaveBeenCalled();
+    });
+
+    it('bounds a sparse accessor count', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const json = triangleJson({
+        accessors: [
+          {
+            bufferView: 0,
+            ...f32(3),
+            sparse: {
+              count: 1_000_000,
+              indices: { bufferView: 0, componentType: 5123 },
+              values: { bufferView: 0 },
+            },
+          },
+        ],
+      });
+      await expect(readGlb(glb(json, TRIANGLE_BIN))).rejects.toThrow(/larger than MarkCopy/);
+      expect(parse).not.toHaveBeenCalled();
+    });
+
+    it('keeps only what it draws: no morph targets, other attributes or other scenes', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const json = triangleJson({
+        scene: 1,
+        scenes: [{ nodes: [1] }, { nodes: [0] }],
+        nodes: [{ mesh: 0 }, { mesh: 0 }],
+        meshes: [
+          {
+            primitives: [
+              { attributes: { POSITION: 0, TEXCOORD_0: 1 }, targets: [{ POSITION: 1 }] },
+            ],
+          },
+        ],
+        animations: [{ channels: [], samplers: [] }],
+        accessors: [{ bufferView: 0, ...f32(3) }, f32(900000)],
+      });
+      const model = await readGlb(glb(json, TRIANGLE_BIN));
+      expect(model.positions.length).toBe(9);
+      const given = givenJson(parse.mock.calls[0][0] as ArrayBuffer);
+      expect(given.animations).toBeUndefined();
+      expect(given.scenes).toHaveLength(1);
+      expect(given.accessors).toHaveLength(1);
+    });
+
+    it('still loads the default scene of a valid multi-scene file', async () => {
+      const json = triangleJson({
+        scene: 1,
+        scenes: [{ nodes: [1] }, { nodes: [0] }],
+        nodes: [{ mesh: 1 }, { mesh: 0 }],
+        meshes: [
+          { primitives: [{ attributes: { POSITION: 0 } }] },
+          { primitives: [{ attributes: { POSITION: 0 } }] },
+        ],
+      });
+      const model = await readGlb(glb(json, TRIANGLE_BIN));
+      expect(model.positions.length).toBe(9);
+    });
   });
 
   it('counts a mesh once for every node that places it', () => {

@@ -44,7 +44,7 @@ export const STEP_PARAMS = {
 };
 
 export interface StepModel {
-  /** Nine floats per triangle, millimetres, the file's own (Z-up) axes. */
+  /** Nine floats per triangle, millimetres, the file's own axes. */
   positions: Float32Array;
   /** Three floats per vertex. */
   colors: Float32Array;
@@ -167,6 +167,18 @@ function validColor(color: number[] | null | undefined): [number, number, number
 // ---------------------------------------------------------------------------
 let engine: Promise<OcctEngine> | null = null;
 
+/**
+ * Where the gzipped engine is served from: beside the bundle that is running,
+ * never from a value a message carries. The query (a cache-busting token the
+ * host puts on the bundle's own URL) is kept so a new version is fetched anew.
+ */
+export function stepEngineUrl(base: string = import.meta.url): string {
+  const own = new URL(base);
+  const url = new URL('occt-import-js.wasm.gz', own);
+  url.search = own.search;
+  return url.href;
+}
+
 /** The gzipped engine, fetched and inflated by the browser. */
 async function fetchWasm(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url);
@@ -181,7 +193,6 @@ async function fetchWasm(url: string): Promise<ArrayBuffer> {
  * so reopening a file tries again.
  */
 export function loadStepEngine(
-  wasmUrl: string,
   deps: {
     fetchWasm?: (url: string) => Promise<ArrayBuffer>;
     factory?: (options: { wasmBinary: ArrayBuffer }) => Promise<unknown>;
@@ -193,7 +204,7 @@ export function loadStepEngine(
     const started = (async () => {
       let wasmBinary: ArrayBuffer;
       try {
-        wasmBinary = await get(wasmUrl);
+        wasmBinary = await get(stepEngineUrl());
       } catch (err) {
         throw err instanceof StepError
           ? err

@@ -151,7 +151,6 @@ describe('StlEditorProvider', () => {
       showGrid: true,
       meshColor: '#8ab4f8',
       upAxis: 'z',
-      stepEngineUri: 'webview:/ext/media/occt-import-js.wasm.gz',
       showBed: false,
       bedSize: '256x256x256',
       siblings: [],
@@ -209,7 +208,6 @@ describe('StlEditorProvider', () => {
     expect(first.posted.find((m) => m.type === 'load')).toMatchObject({
       format: 'glb',
       bytes: Buffer.from(glb).toString('base64'),
-      stepEngineUri: 'webview:/ext/media/occt-import-js.wasm.gz',
     });
 
     const step = new Uint8Array(Buffer.from('﻿ISO-10303-21;\nHEADER;'));
@@ -263,20 +261,22 @@ describe('StlEditorProvider', () => {
   });
 
   it('keeps wasm-unsafe-eval out of every other source file', async () => {
-    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const { readdirSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const root = join(__dirname, '..', 'src');
     const found: string[] = [];
+    // The entry kind comes from the listing itself, so there is no separate
+    // stat of a path that could change before it is read.
     const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        if (statSync(full).isDirectory()) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
           walk(full);
         } else if (
-          /\.ts$/.test(entry) &&
+          /\.ts$/.test(entry.name) &&
           readFileSync(full, 'utf8').includes("'wasm-unsafe-eval'")
         ) {
-          found.push(entry);
+          found.push(entry.name);
         }
       }
     };

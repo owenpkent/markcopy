@@ -54,7 +54,6 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       .getConfiguration('markcopy', document.uri)
       .get<string>('theme', 'auto');
     // preview.css carries the shared context menu and toast styles.
-    const stepEngineUri = asUri(STEP_ENGINE_FILE).toString();
     webview.html = this.html(webview, asUri('stl.js'), asUri('preview.css'), nonce, theme);
 
     // The models offered under Compare with, by the label the menu shows. The
@@ -69,7 +68,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       }
       switch (msg.type) {
         case 'ready':
-          await this.sendLoad(webview, document.uri, siblings, stepEngineUri);
+          await this.sendLoad(webview, document.uri, siblings);
           break;
         case 'compare': {
           const sibling = siblings.get(msg.name);
@@ -115,7 +114,6 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webview: vscode.Webview,
     uri: vscode.Uri,
     siblings: Map<string, vscode.Uri>,
-    stepEngineUri: string,
   ): Promise<void> {
     // The name and full path ride on every reply, errors included, so the menu's
     // Copy as > File Name and Full Path still work for a file that failed to load.
@@ -144,7 +142,6 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
         showGrid: cfg.get<boolean>('stl.showGrid', true),
         meshColor: cfg.get<string>('stl.meshColor', '#8ab4f8'),
         upAxis: cfg.get<string>('stl.upAxis', 'z'),
-        stepEngineUri,
         showBed: cfg.get<boolean>('stl.showBed', false),
         bedSize: cfg.get<string>('stl.bedSize', '256x256x256'),
         siblings: [...siblings.keys()],
@@ -387,9 +384,6 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 }
 
 export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step';
-
-/** The gzipped STEP engine, copied into media/ by esbuild.web.js. */
-const STEP_ENGINE_FILE = 'occt-import-js.wasm.gz';
 
 type ReadModel = { format: ModelFormat; bytes: string } | { error: string };
 

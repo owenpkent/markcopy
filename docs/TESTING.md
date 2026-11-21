@@ -433,7 +433,8 @@ Open [sample.glb](../sample.glb). It opens in the same viewer as the STL.
 Open [sample.step](../sample.step). It opens in the same viewer as the STL.
 
 - [ ] ★ The first STEP file in a window shows `Loading STEP engine…`, then `Reading sample.step…`, then `12 triangles` and `20.00 × 10.00 × 5.00 mm`. Record how long the engine takes from opening to the box appearing (cold, then reopening the file in the same window, which should be near instant): ___ s and ___ s.
-- [ ] ★ An orange box stands on the grid, with six flat faces. It is Z-up whatever `markcopy.stl.upAxis` says.
+- [ ] ★ An orange box stands on the grid, with six flat faces (Z-up, the default). **View > Up Axis** is offered; a Y-up STEP export (SOLIDWORKS default) stands upright with it set to `y`, and lies on its side with `z`.
+- [ ] Pick a STEP file under **Compare with**, then another model before the engine has started: the later pick is the one shown, and **Stop Comparing** while a STEP comparison is loading leaves no overlay behind.
 - [ ] Offline (disconnect the network, then reopen a window): the STEP file still opens, since the engine is read from the extension's own folder.
 - [ ] A real CAD export with curved faces (a fillet, a cylinder) shows smooth shading, and a STEP assembly with colors keeps them.
 - [ ] A text file renamed to `.step` is refused with "is not a STEP file", and a file that starts like STEP but is damaged says the engine could not read it.

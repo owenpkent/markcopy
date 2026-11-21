@@ -19,6 +19,15 @@ import type * as StepModule from '../src/webview/step';
 // the meshes and lines it built.
 const drawn = vi.hoisted(() => ({ scene: undefined as Three.Scene | undefined }));
 
+// Holds the STEP engine back until a test lets it go, and counts the starts
+// that have finished, so a test can pile up requests behind a slow engine.
+const engineGate = vi.hoisted(() => ({
+  hold: null as Promise<void> | null,
+  engine: null as Promise<never> | null,
+  calls: 0,
+  answered: 0,
+}));
+
 vi.mock('three', async (importOriginal) => {
   const actual = await importOriginal<typeof Three>();
   class WebGLRenderer {
@@ -59,8 +68,16 @@ vi.mock('../src/webview/step', async (importOriginal) => {
   const factory = (await import('occt-import-js')).default;
   return {
     ...actual,
-    loadStepEngine: async () =>
-      (await factory({ wasmBinary: new Uint8Array(readFileSync(wasmPath)) })) as never,
+    loadStepEngine: async () => {
+      engineGate.calls++;
+      await engineGate.hold;
+      engineGate.engine ??= factory({
+        wasmBinary: new Uint8Array(readFileSync(wasmPath)),
+      }) as Promise<never>;
+      const engine = await engineGate.engine;
+      engineGate.answered++;
+      return engine;
+    },
   };
 });
 
@@ -107,6 +124,9 @@ beforeEach(() => {
   posted = [];
   frame = undefined;
   drawn.scene = undefined;
+  engineGate.hold = null;
+  engineGate.calls = 0;
+  engineGate.answered = 0;
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: (msg: Record<string, unknown>) => posted.push(msg),
   }));
@@ -323,6 +343,21 @@ describe('3D viewer models', () => {
     await import('../src/webview/stl');
     load({ bytes: boxStl([0, 0, 0], [10, 20, 30]) });
     expect(stats()).toBe('12 triangles\n10.00 × 20.00 × 30.00\nGrid 1');
+  });
+
+  it('works out the normals of an STL whose facet normals are zero', async () => {
+    await import('../src/webview/stl');
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]) });
+    const normal = meshes()[0].geometry.getAttribute('normal');
+    expect(normal.count).toBe(36);
+    let unit = 0;
+    for (let i = 0; i < normal.count; i++) {
+      const length = Math.hypot(normal.getX(i), normal.getY(i), normal.getZ(i));
+      if (Math.abs(length - 1) < 1e-4) {
+        unit++;
+      }
+    }
+    expect(unit).toBe(36);
   });
 
   it('reads the sample 3MF with its unit', async () => {
@@ -567,7 +602,6 @@ describe('3D viewer GLB and STEP', () => {
       format: 'step',
       name: 'sample.step',
       bytes: file('sample.step'),
-      stepEngineUri: 'webview:/media/occt-import-js.wasm.gz',
     });
     expect(stats()).toBe('Reading sample.step…');
     await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
@@ -583,6 +617,140 @@ describe('3D viewer GLB and STEP', () => {
       bytes: btoa('ISO-10303-21;\nDATA;\n#1=NOPE(;\nENDSEC;'),
     });
     await vi.waitFor(() => expect(stats()).toMatch(/could not read this file/), { timeout: 20000 });
+  }, 30000);
+
+  it('keeps the normals a GLB and a STEP file bring', async () => {
+    const THREE = await import('three');
+    const compute = vi.spyOn(THREE.BufferGeometry.prototype, 'computeVertexNormals');
+    await import('../src/webview/stl');
+    load({ format: 'glb', name: 'sample.glb', bytes: file('sample.glb') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(compute).not.toHaveBeenCalled();
+    load({ format: 'step', name: 'sample.step', bytes: file('sample.step') });
+    await vi.waitFor(() => expect(stats()).toMatch(/mm\nGrid /), { timeout: 20000 });
+    expect(meshes()[0].geometry.hasAttribute('normal')).toBe(true);
+    expect(compute).not.toHaveBeenCalled();
+  }, 30000);
+
+  // The sample box with its geometry turned into Y-up coordinates (x, y, z)
+  // becomes (x, z, -y), the way a Y-up CAD export has it, while the file's own
+  // global frame (the last placement) stays as it is.
+  const yUpStep = (): string => {
+    const text = readFileSync(join(__dirname, '..', 'sample.step'), 'utf8').replace(
+      /^#(\d+)=(CARTESIAN_POINT|DIRECTION)\('',\(([^)]*)\)\);$/gm,
+      (whole, id: string, kind: string, xyz: string) => {
+        if (Number(id) >= 141 && Number(id) <= 143) {
+          return whole;
+        }
+        const [x, y, z] = xyz.split(',').map(Number);
+        return `#${id}=${kind}('',(${x.toFixed(6)},${z.toFixed(6)},${(-y).toFixed(6)}));`;
+      },
+    );
+    return Buffer.from(text).toString('base64');
+  };
+
+  const stepFit = (bytes: string, upAxis: string, bed = '30x12x6') => {
+    load({ format: 'step', name: 'box.step', bytes, upAxis, showBed: true, bedSize: bed });
+  };
+
+  it('stands a Z-up STEP file on the grid, and fits it to a bed', async () => {
+    await import('../src/webview/stl');
+    stepFit(file('sample.step'), 'z');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
+    expect(stats()).toMatch(
+      /^12 triangles\n20\.00 × 10\.00 × 5\.00 mm\n.*Bed 30 × 12 × 6 mm: fits$/,
+    );
+    expect(meshes()[0].parent?.rotation.x).toBeCloseTo(-Math.PI / 2);
+  }, 30000);
+
+  it('follows markcopy.stl.upAxis for a Y-up STEP file, which then fits upright', async () => {
+    await import('../src/webview/stl');
+    stepFit(yUpStep(), 'y');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
+    // The file's own X x Y x Z, with Y the 5 mm height.
+    expect(stats()).toMatch(
+      /^12 triangles\n20\.00 × 5\.00 × 10\.00 mm\n.*Bed 30 × 12 × 6 mm: fits$/,
+    );
+    expect(meshes()[0].parent?.rotation.x).toBeCloseTo(0);
+  }, 30000);
+
+  it('lays a Y-up STEP file on its side when the up axis is left at Z', async () => {
+    await import('../src/webview/stl');
+    stepFit(yUpStep(), 'z');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
+    expect(stats()).toMatch(/Bed 30 × 12 × 6 mm: does not fit$/);
+    expect(meshes()[0].parent?.rotation.x).toBeCloseTo(-Math.PI / 2);
+  }, 30000);
+
+  // Open the submenu whose row starts with `label` in the open context menu.
+  const openSubmenu = (label: string): void => {
+    const row = [...el('mc-menu').querySelectorAll('.mc-menu-item')].find((item) =>
+      (item.textContent ?? '').startsWith(label),
+    );
+    row?.dispatchEvent(new MouseEvent('mouseenter'));
+  };
+  const menuText = (): string =>
+    [...document.querySelectorAll('.mc-menu')].map((panel) => panel.textContent).join('|');
+
+  it('offers the Up Axis menu for a STEP file but not for a GLB', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'step', name: 'sample.step', bytes: file('sample.step') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1), { timeout: 20000 });
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    openSubmenu('View');
+    expect(menuText()).toContain('Up Axis');
+    load({ format: 'glb', name: 'sample.glb', bytes: file('sample.glb') });
+    await vi.waitFor(() => expect(stats()).toMatch(/^24 triangles/));
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    openSubmenu('View');
+    expect(menuText()).toContain('Fit View');
+    expect(menuText()).not.toContain('Up Axis');
+  }, 30000);
+
+  it('keeps the latest comparison when an earlier STEP one finishes after it', async () => {
+    await import('../src/webview/stl');
+    let release = () => {};
+    engineGate.hold = new Promise<void>((resolve) => (release = resolve));
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]), siblings: ['earlier.step', 'latest.stl'] });
+    send({ type: 'compare', format: 'step', name: 'earlier.step', bytes: file('sample.step') });
+    send({
+      type: 'compare',
+      format: 'stl',
+      name: 'latest.stl',
+      bytes: boxStl([0, 0, 0], [10, 20, 25]),
+    });
+    await vi.waitFor(() => expect(stats()).toMatch(/latest\.stl/));
+    await vi.waitFor(() => expect(engineGate.calls).toBeGreaterThan(0));
+    release();
+    await vi.waitFor(() => expect(engineGate.answered).toBe(engineGate.calls), { timeout: 20000 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(stats()).toMatch(/latest\.stl/);
+    expect(stats()).not.toMatch(/earlier\.step/);
+    expect(meshes()).toHaveLength(2);
+  }, 30000);
+
+  it('does not bring an overlay back when Stop Comparing came before a pending STEP one', async () => {
+    await import('../src/webview/stl');
+    let release = () => {};
+    engineGate.hold = new Promise<void>((resolve) => (release = resolve));
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]), siblings: ['a.stl', 'later.step'] });
+    send({ type: 'compare', format: 'stl', name: 'a.stl', bytes: boxStl([0, 0, 0], [10, 20, 25]) });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    send({ type: 'compare', format: 'step', name: 'later.step', bytes: file('sample.step') });
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    openSubmenu('Compare with');
+    const stop = [...document.querySelectorAll<HTMLElement>('.mc-menu-item')].find(
+      (node) => node.textContent === 'Stop Comparing',
+    );
+    expect(stop).toBeDefined();
+    stop?.click();
+    expect(meshes()).toHaveLength(1);
+    await vi.waitFor(() => expect(engineGate.calls).toBeGreaterThan(0));
+    release();
+    await vi.waitFor(() => expect(engineGate.answered).toBe(engineGate.calls), { timeout: 20000 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(meshes()).toHaveLength(1);
+    expect(stats()).toMatch(/^12 triangles/);
   }, 30000);
 
   it('compares a STEP file with a GLB', async () => {
