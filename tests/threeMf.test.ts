@@ -66,6 +66,48 @@ describe('parse3mf', () => {
     expect(out.unit).toBe('millimeter');
   });
 
+  it('reads build items, objects and components as parts, named from the name attributes', () => {
+    const bytes = single(
+      `<object id="1" name="Peg">${TRIANGLE_MESH}</object>
+       <object id="2" name="Kit"><components>
+         <component objectid="1" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>
+         <component objectid="1" transform="1 0 0 0 1 0 0 0 1 5 0 0"/>
+       </components></object>
+       <object id="3">${TRIANGLE_MESH}</object>`,
+      '<item objectid="2"/><item objectid="3"/>',
+    );
+    const { parts } = parse3mf(bytes);
+    expect(parts.children.map((c) => c.name)).toEqual(['Kit', 'Part 1']);
+    const [kit, loose] = parts.children;
+    expect(kit.children.map((c) => [c.name, c.ranges])).toEqual([
+      ['Peg', [[0, 1]]],
+      ['Peg', [[1, 1]]],
+    ]);
+    expect(loose.ranges).toEqual([[2, 1]]);
+  });
+
+  it('cleans object names: controls out, length capped', () => {
+    const bytes = single(
+      `<object id="1" name="a&#10;b${'x'.repeat(500)}">${TRIANGLE_MESH}</object>`,
+      '<item objectid="1"/>',
+    );
+    const [part] = parse3mf(bytes).parts.children;
+    expect(part.name.startsWith('a bx')).toBe(true);
+    expect(part.name.length).toBe(200);
+  });
+
+  it('gives a part for each placement, so ranges cover every triangle once', () => {
+    const bytes = single(
+      `<object id="1">${TRIANGLE_MESH}</object>`,
+      Array.from({ length: 50 }, () => '<item objectid="1"/>').join(''),
+    );
+    const { parts, triangles } = parse3mf(bytes);
+    expect(triangles).toBe(50);
+    expect(parts.children.map((c) => c.ranges[0])).toEqual(
+      Array.from({ length: 50 }, (_, i) => [i, 1]),
+    );
+  });
+
   it('reports the unit the file declares', () => {
     const xml = model(`<object id="1">${TRIANGLE_MESH}</object>`, '<item objectid="1"/>');
     const inches = pack({

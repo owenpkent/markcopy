@@ -21,6 +21,7 @@ import {
   stepEngineUrl,
   type OcctEngine,
   type OcctMesh,
+  type OcctResult,
 } from '../src/webview/step';
 
 const DIST = join(__dirname, '..', 'node_modules', 'occt-import-js', 'dist');
@@ -87,7 +88,7 @@ describe('the engine glue under the viewer CSP', () => {
 });
 
 // A stand-in engine returning `meshes`, for the cases the real one cannot make.
-function fake(result: { success: boolean; meshes?: OcctMesh[] }): OcctEngine {
+function fake(result: OcctResult): OcctEngine {
   return { ReadStepFile: () => result };
 }
 const STEP = new TextEncoder().encode('ISO-10303-21;\nHEADER;');
@@ -127,6 +128,86 @@ describe('readStep', () => {
     expect(model.colored).toBe(true);
     expect(model.colors[0]).toBeGreaterThan(model.colors[2]);
     expect(model.normals).not.toBeNull();
+  });
+
+  it('gives the sample box as one part covering every triangle', () => {
+    const { parts } = readStep(engine, sample());
+    expect(parts.children.map((c) => [c.name, c.ranges])).toEqual([['Box', [[0, 12]]]]);
+  });
+
+  it('reads the sample assembly into a tree: a named sub-assembly with a part and a part twice', () => {
+    const bytes = new Uint8Array(readFileSync(join(__dirname, '..', 'sample-assembly.step')));
+    const model = readStep(engine, bytes);
+    expect(model.positions.length).toBe(36 * 9);
+    const [demo] = model.parts.children;
+    expect(demo.name).toBe('Demo assembly');
+    const [kit] = demo.children;
+    expect(kit.name).toBe('Mounting kit');
+    expect(kit.children.map((c) => [c.name, c.ranges])).toEqual([
+      ['Plate', [[0, 12]]],
+      ['Peg', [[12, 12]]],
+      ['Peg', [[24, 12]]],
+    ]);
+  });
+
+  it('maps engine mesh indexes to triangle ranges even when a mesh is dropped', () => {
+    const empty = quad({ index: { array: [] } });
+    const result = {
+      success: true,
+      root: {
+        name: '',
+        meshes: [],
+        children: [
+          { name: 'A', meshes: [0], children: [] },
+          { name: 'B', meshes: [1], children: [] },
+          { name: 'C', meshes: [2], children: [] },
+        ],
+      },
+      meshes: [quad(), empty, quad()],
+    };
+    const { parts } = readStep(fake(result), STEP);
+    // B's mesh has no triangles, so it is not a part; C follows A in the geometry.
+    expect(parts.children.map((c) => [c.name, c.ranges])).toEqual([
+      ['A', [[0, 2]]],
+      ['C', [[2, 2]]],
+    ]);
+  });
+
+  it('puts a mesh the tree never names, or a result with no tree, at the top', () => {
+    const noTree = readStep(
+      fake({ success: true, meshes: [quad({ name: 'Solo' }), quad()] }),
+      STEP,
+    );
+    expect(noTree.parts.children.map((c) => c.name)).toEqual(['Solo', 'Part 1']);
+    const tree = readStep(
+      fake({
+        success: true,
+        root: { name: '', meshes: [], children: [{ name: 'A', meshes: [0], children: [] }] },
+        meshes: [quad(), quad({ name: 'Loose' })],
+      }),
+      STEP,
+    );
+    expect(tree.parts.children.map((c) => c.name)).toEqual(['A', 'Loose']);
+  });
+
+  it('uses a mesh once however many nodes name it, and survives a very deep tree', () => {
+    let node: Record<string, unknown> = { name: 'leaf', meshes: [0], children: [] };
+    for (let i = 0; i < 5000; i++) {
+      node = { name: `n${i}`, meshes: [0], children: [node] };
+    }
+    const { parts } = readStep(
+      fake({ success: true, root: node as never, meshes: [quad()] }),
+      STEP,
+    );
+    let leaves = 0;
+    const count = (n: typeof parts): void => {
+      if (n.children.length === 0) {
+        leaves++;
+      }
+      n.children.forEach(count);
+    };
+    count(parts);
+    expect(leaves).toBe(1);
   });
 
   it('says when the engine cannot read the file', () => {

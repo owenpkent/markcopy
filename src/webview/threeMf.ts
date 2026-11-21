@@ -20,6 +20,7 @@
 import { openZip, partForRels, partText, resolveTarget, OpcError, type Parts } from '../ooxml/zip';
 import { attr, walkXml } from '../ooxml/xml';
 import { MAX_STL_BYTES, MAX_TRIANGLES } from './stlInfo';
+import { PartTreeBuilder, type PartNode } from './parts';
 
 /** A 3MF the preview will not or cannot draw, with a message written to be shown. */
 export class ThreeMfError extends Error {}
@@ -33,6 +34,11 @@ export interface ThreeMfModel {
    */
   colors: Float32Array | null;
   triangles: number;
+  /**
+   * The build's objects and their components as parts: leaves are triangle
+   * ranges of `positions`. Names come from the objects' `name` attributes.
+   */
+  parts: PartNode;
   /** The root model's unit: `millimeter` unless the file says otherwise. */
   unit: string;
 }
@@ -86,6 +92,7 @@ interface Mesh {
 }
 
 interface ObjectDef {
+  name: string | undefined;
   pid: number;
   pindex: number;
   mesh: Mesh | null;
@@ -268,18 +275,28 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
   // per visit, which the cap does bound.
   const holdsTriangles = (path: string, id: string): boolean =>
     (counts.get(`${path}#${id}`) ?? 0) > 0;
+  const builder = new PartTreeBuilder(total);
   const emit = (path: string, id: string, m: Matrix): void => {
     const part = load(path);
     const obj = lookup(part, id, path);
+    const placed = obj.components.filter((c) =>
+      holdsTriangles(c.path ? resolveTarget(path, c.path) : path, c.objectId),
+    );
+    const first = tri;
     if (obj.mesh) {
       tri = writeMesh(obj, part, m, positions, colors, tri, fallback, path);
     }
-    for (const c of obj.components) {
-      const childPath = c.path ? resolveTarget(path, c.path) : path;
-      if (holdsTriangles(childPath, c.objectId)) {
-        emit(childPath, c.objectId, multiply(c.transform, m));
-      }
+    if (placed.length === 0) {
+      // A part: an object with a mesh of its own and nothing placed in it.
+      builder.leaf(obj.name, [[first, tri - first]]);
+      return;
     }
+    builder.begin(obj.name);
+    builder.leaf(obj.name, [[first, tri - first]]);
+    for (const c of placed) {
+      emit(c.path ? resolveTarget(path, c.path) : path, c.objectId, multiply(c.transform, m));
+    }
+    builder.end();
   };
   for (const item of root.build) {
     const itemPath = item.path ? resolveTarget(rootPath, item.path) : rootPath;
@@ -288,7 +305,7 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
     }
   }
 
-  return { positions, colors, triangles: total, unit: root.unit };
+  return { positions, colors, triangles: total, unit: root.unit, parts: builder.finish() };
 }
 
 // The root model part: the target of the package's 3D model relationship, or
@@ -384,6 +401,7 @@ function readModel(xml: string, path: string): ModelPart {
             objId = attr(attrs, 'id') ?? '';
             const pid = attr(attrs, 'pid');
             obj = {
+              name: attr(attrs, 'name'),
               pid: pid === undefined ? -1 : intern(pid),
               pindex: index(attr(attrs, 'pindex')),
               mesh: null,

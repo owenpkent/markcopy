@@ -351,6 +351,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="btn-wireframe" title="Toggle wireframe" aria-label="Toggle wireframe">&#9638;</button>
     <button id="btn-grid" title="Toggle grid" aria-label="Toggle grid">&#8862;</button>
     <button id="btn-section" title="Section: cut the model and measure it" aria-label="Toggle section">&#9707;</button>
+    <button id="btn-parts" title="Parts: the model's parts and assemblies" aria-label="Toggle parts" aria-pressed="false" hidden>&#9776;</button>
   </div>
   <div id="stats"></div>
   <div id="layers" class="mc-stl-bar" hidden>
@@ -359,6 +360,15 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="layer-up" title="Next layer" aria-label="Next layer">+</button>
     <span id="layer-label"></span>
     <label><input id="layer-only" type="checkbox" /> This layer only</label>
+  </div>
+  <div id="parts" hidden>
+    <div class="mc-parts-head">
+      <span class="mc-parts-title">Parts</span>
+      <span id="parts-count"></span>
+      <button id="parts-show-all" title="Show every part" aria-label="Show all parts">Show all</button>
+      <button id="parts-close" title="Close the parts panel" aria-label="Close the parts panel">&#10005;</button>
+    </div>
+    <div id="parts-list" role="tree" aria-label="Parts"></div>
   </div>
   <div id="section" hidden>
     <div class="mc-stl-bar">

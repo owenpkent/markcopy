@@ -121,6 +121,73 @@ describe('readGlb', () => {
     expect(model.normals).not.toBeNull();
   });
 
+  it('reads the node hierarchy as parts, with the file own spelling of each name', async () => {
+    const json = triangleJson();
+    json.nodes = [
+      { name: 'Main Frame', children: [1, 2] },
+      { name: 'Left Wing', mesh: 0, translation: [1, 0, 0] },
+      { mesh: 0, translation: [2, 0, 0] },
+    ];
+    (json.scenes as Json[])[0].nodes = [0];
+    const model = await readGlb(glb(json, TRIANGLE_BIN));
+    expect(model.positions.length).toBe(2 * 9);
+    const [frame] = model.parts.children;
+    expect(frame.name).toBe('Main Frame');
+    expect(frame.children.map((c) => [c.name, c.ranges])).toEqual([
+      ['Left Wing', [[0, 1]]],
+      ['Part 1', [[1, 1]]],
+    ]);
+  });
+
+  it('reads the sample as two parts', async () => {
+    const bytes = new Uint8Array(readFileSync(join(__dirname, '..', 'sample.glb')));
+    const { parts } = await readGlb(bytes);
+    const leaves: Array<[string, number]> = [];
+    const walk = (n: typeof parts): void => {
+      if (n.children.length === 0) {
+        leaves.push([n.name, n.ranges.reduce((sum, r) => sum + r[1], 0)]);
+      }
+      n.children.forEach(walk);
+    };
+    walk(parts);
+    expect(leaves).toHaveLength(2);
+    expect(leaves.reduce((sum, l) => sum + l[1], 0)).toBe(24);
+  });
+
+  it('makes each instanced copy its own part of one named node', async () => {
+    const bin = Buffer.concat([
+      TRIANGLE_BIN,
+      Buffer.from(new Float32Array([0, 0, 0, 5, 0, 0, 10, 0, 0]).buffer),
+    ]);
+    const json = triangleJson();
+    json.nodes = [
+      {
+        name: 'Bolt',
+        mesh: 0,
+        extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 1 } } },
+      },
+    ];
+    json.extensionsUsed = ['EXT_mesh_gpu_instancing'];
+    (json.accessors as Json[]).push({
+      bufferView: 1,
+      componentType: 5126,
+      count: 3,
+      type: 'VEC3',
+    });
+    json.bufferViews = [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 36 },
+    ];
+    json.buffers = [{ byteLength: 72 }];
+    const model = await readGlb(glb(json, bin));
+    expect(model.positions.length).toBe(3 * 9);
+    expect(model.parts.children.map((c) => [c.name, c.ranges])).toEqual([
+      ['Bolt', [[0, 1]]],
+      ['Bolt', [[1, 1]]],
+      ['Bolt', [[2, 1]]],
+    ]);
+  });
+
   it('bakes the node transform and the Y-up to Z-up turn', async () => {
     const model = await readGlb(glb(triangleJson({}, { translation: [10, 20, 30] }), TRIANGLE_BIN));
     // glTF (x, y, z) goes to (x, -z, y).
