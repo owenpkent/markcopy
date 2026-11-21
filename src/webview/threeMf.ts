@@ -259,6 +259,15 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
   const positions = new Float32Array(total * 9);
   const colors = colored ? new Float32Array(total * 9) : null;
   let tri = 0;
+  // The count bounds the triangles written, not the placements walked: a
+  // subtree that holds no triangles adds nothing to the total however many
+  // times it is placed, so forty levels of doubled empty components would pass
+  // the cap and then be visited a trillion times here. Pass 1 already knows
+  // every object's count, so a placement of nothing is skipped before its
+  // transform is composed. What is left to walk holds at least one triangle
+  // per visit, which the cap does bound.
+  const holdsTriangles = (path: string, id: string): boolean =>
+    (counts.get(`${path}#${id}`) ?? 0) > 0;
   const emit = (path: string, id: string, m: Matrix): void => {
     const part = load(path);
     const obj = lookup(part, id, path);
@@ -266,11 +275,17 @@ function parseParts(parts: Parts, options: ThreeMfOptions): ThreeMfModel {
       tri = writeMesh(obj, part, m, positions, colors, tri, fallback, path);
     }
     for (const c of obj.components) {
-      emit(c.path ? resolveTarget(path, c.path) : path, c.objectId, multiply(c.transform, m));
+      const childPath = c.path ? resolveTarget(path, c.path) : path;
+      if (holdsTriangles(childPath, c.objectId)) {
+        emit(childPath, c.objectId, multiply(c.transform, m));
+      }
     }
   };
   for (const item of root.build) {
-    emit(item.path ? resolveTarget(rootPath, item.path) : rootPath, item.objectId, item.transform);
+    const itemPath = item.path ? resolveTarget(rootPath, item.path) : rootPath;
+    if (holdsTriangles(itemPath, item.objectId)) {
+      emit(itemPath, item.objectId, item.transform);
+    }
   }
 
   return { positions, colors, triangles: total, unit: root.unit };
