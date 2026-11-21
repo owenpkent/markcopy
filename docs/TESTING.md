@@ -419,7 +419,7 @@ Open [sample.3mf](../sample.3mf). It opens in the same viewer as the STL.
 
 ### Up axis
 
-The up axis, grid and bed, section, compare and sliced print blocks below cover what no automated test checks: `tests/stlWebview.test.ts` runs the real viewer code with the WebGL renderer replaced and verifies readouts and behaviour, not pixels, so the 3D frame, the section drawing, colors and the layer display have not yet been checked by hand.
+The up axis, grid and bed, section, compare and sliced print blocks below cover what no automated test checks: `tests/stlWebview.test.ts` runs the real viewer code with the WebGL renderer replaced and verifies readouts and behaviour, not pixels, so the 3D frame, the section drawing, colors and the layer display are only as checked as the last manual pass. For 1.7.0 that was a quick pass in the Extension Development Host on 2026-11-20 (an STL, the sample 3MF, a section and a comparison, a sliced print), not the blocks below item by item.
 
 - [ ] ★ With the default `markcopy.stl.upAxis` of `z`, a Z-up STL such as a slicer export stands on its base on the grid. The overlay dimensions are the file's own X x Y x Z.
 - [ ] Right-click > **View** > **Up Axis** > **Y** turns the model to the old Y-up orientation, the dimensions do not change, and reopening the file keeps Y (the setting persisted). **Z** puts it back.

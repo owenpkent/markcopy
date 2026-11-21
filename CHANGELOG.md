@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.7.0] - 2026-11-20
+
 ### Added
 
 - **3MF preview.** A `.3mf` file now opens in the STL viewer, renamed MarkCopy 3D Preview. It reads meshes, components, build items and transforms, including the Production extension's separate object parts that Bambu Studio, PrusaSlicer and OrcaSlicer write, and draws Materials-extension colors (base materials and color groups, per object or per face). Faces with no color use `markcopy.stl.meshColor`. The model is turned upright (3MF is Z-up), and the overlay and **Copy as > Dimensions** include the file's unit, for example `25.00 × 10.00 × 10.00 mm`. A sliced `.gcode.3mf` holds no model, so it is drawn as toolpaths (below). The package is read in the webview with the shared zip and XML limits; an instancing bomb, a component cycle, a non-zip file and a malformed model are refused with a message. Not supported: textures, beam lattices, slicer paint colors, plate thumbnails and plate selection. Measured on 2026-11-20 (parse only, Node, not the webview render): 7 real slicer project files from Printables and MakerWorld, 2,824 to 2,649,754 triangles, all read; the 2.6M-triangle file in about 4.1 s and a 1.0M one in about 1.4 s; two `.gcode.3mf` files were recognised as sliced prints. `sample.3mf` is a two-cube sample for manual checks.
@@ -23,12 +30,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Maintenance
 
-- Two new Jazzer.js fuzz targets in the nightly matrix: `3mf` (`read3mf`, then the section maths or the G-code reader) and `gcode` (`parseGcode` and `readSliceInfo`), with seeds in `fuzz/corpus/` and dictionaries in `fuzz/dict/`. Local runs on 2026-11-20 after the fixes: `3mf` 910,848 runs in 46 s and `gcode` 181,617 runs in 21 s, no findings. New unit tests cover the section maths, the G-code reader, the section panel, the sibling ranking and the host's compare handling; `tests/stlWebview.test.ts` runs the real viewer against the real Three.js with only the WebGL renderer replaced and checks readouts and behaviour, not pixels. The 3D frame, the section drawing, colors and the layer display have not yet been checked by hand in VS Code.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- Two new Jazzer.js fuzz targets in the nightly matrix: `3mf` (`read3mf`, then the section maths or the G-code reader) and `gcode` (`parseGcode` and `readSliceInfo`), with seeds in `fuzz/corpus/` and dictionaries in `fuzz/dict/`. Local runs on 2026-11-20 after the fixes: `3mf` 910,848 runs in 46 s and `gcode` 181,617 runs in 21 s, no findings. New unit tests cover the section maths, the G-code reader, the section panel, the sibling ranking and the host's compare handling; `tests/stlWebview.test.ts` runs the real viewer against the real Three.js with only the WebGL renderer replaced and checks readouts and behaviour, not pixels. By hand in the Extension Development Host on 2026-11-20: a quick pass over an STL, the sample 3MF, a section and a comparison on a part with a `versions` folder, and a sliced print. The full manual checklist for these features was not worked through item by item.
 
 ## [1.6.1] - 2026-11-20
 
@@ -672,7 +674,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/owenpkent/markcopy/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/owenpkent/markcopy/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/owenpkent/markcopy/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/owenpkent/markcopy/compare/v1.4.0...v1.5.0
