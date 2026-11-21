@@ -228,6 +228,39 @@ describe('parse3mf refusals', () => {
     expect(Date.now() - started).toBeLessThan(2000);
   });
 
+  it('skips placements that hold no triangles instead of walking each one', () => {
+    // The same forty levels of doubling, but over an object with nothing in
+    // it, beside one ordinary triangle. The total is 1, well under any cap,
+    // so only skipping the empty subtree keeps this from 2^40 visits.
+    const levels = ['<object id="0"><components/></object>'];
+    for (let i = 1; i <= 40; i++) {
+      levels.push(
+        `<object id="${i}"><components><component objectid="${i - 1}"/><component objectid="${i - 1}"/></components></object>`,
+      );
+    }
+    const bytes = single(
+      `${levels.join('')}<object id="99">${TRIANGLE_MESH}</object>`,
+      '<item objectid="40"/><item objectid="99" transform="1 0 0 0 1 0 0 0 1 0 0 3"/>',
+    );
+    const started = Date.now();
+    const out = parse3mf(bytes);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(out.triangles).toBe(1);
+    expect(Array.from(out.positions)).toEqual([0, 0, 3, 1, 0, 3, 0, 1, 3]);
+  });
+
+  it('still draws the triangles that sit under an otherwise empty branch', () => {
+    // An assembly with one empty part and one real one, two levels down.
+    const bytes = single(
+      `<object id="1"><components/></object>
+       <object id="2">${TRIANGLE_MESH}</object>
+       <object id="3"><components><component objectid="1"/><component objectid="2"/></components></object>
+       <object id="4"><components><component objectid="3"/><component objectid="1"/></components></object>`,
+      '<item objectid="4"/>',
+    );
+    expect(parse3mf(bytes).triangles).toBe(1);
+  });
+
   it('refuses a model above the triangle cap it is given', () => {
     expect(
       refusal(

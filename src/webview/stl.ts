@@ -253,13 +253,17 @@ interface Parsed {
   unit: string;
   // Whether the geometry was turned from the file's Z-up to the viewer's Y-up.
   turned: boolean;
+  // Whether the file's own per-vertex colors are drawn. Only a 3MF's are: an
+  // STL can carry a color attribute too (a Magics header makes STLLoader add
+  // one), and an STL has always been drawn in markcopy.stl.meshColor.
+  colored: boolean;
 }
 
 function showModel(msg: LoadMessage, meshColor: THREE.Color, parsed: Parsed | null): void {
   if (!parsed) {
     return;
   }
-  const { geometry, unit, turned } = parsed;
+  const { geometry, unit, turned, colored: vertexColors } = parsed;
   geometry.computeBoundingBox();
   const box = geometry.boundingBox as THREE.Box3;
   const size = new THREE.Vector3();
@@ -280,7 +284,6 @@ function showModel(msg: LoadMessage, meshColor: THREE.Color, parsed: Parsed | nu
 
   // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
   // already filled in where the file gives none, so the material stays white.
-  const vertexColors = geometry.hasAttribute('color');
   const material = new THREE.MeshStandardMaterial({
     color: vertexColors ? new THREE.Color(0xffffff) : meshColor,
     vertexColors,
@@ -316,7 +319,7 @@ function readStl(raw: Uint8Array): Parsed | null {
   const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
   try {
     // STL carries no unit, so the readout gives none.
-    return { geometry: new STLLoader().parse(buffer), unit: '', turned: false };
+    return { geometry: new STLLoader().parse(buffer), unit: '', turned: false, colored: false };
   } catch (err) {
     showError(`Could not parse this STL file (${String(err)}).`);
     return null;
@@ -336,7 +339,8 @@ function read3mf(raw: Uint8Array, meshColor: THREE.Color): Parsed | null {
       geometry.setAttribute('color', new THREE.BufferAttribute(model.colors, 3));
     }
     geometry.rotateX(-Math.PI / 2);
-    return { geometry, unit: UNIT_LABELS[model.unit] ?? model.unit, turned: true };
+    const unit = UNIT_LABELS[model.unit] ?? model.unit;
+    return { geometry, unit, turned: true, colored: model.colors !== null };
   } catch (err) {
     showError(
       err instanceof ThreeMfError ? err.message : `Could not read this 3MF file (${String(err)}).`,
