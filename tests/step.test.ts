@@ -2,10 +2,16 @@
 // Coverage for src/webview/step.ts. The real Open CASCADE engine runs here, in
 // Node, from the raw wasm in node_modules (the webview gets the gzipped copy).
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import vm from 'node:vm';
 import { gzipSync } from 'node:zlib';
 import occtimportjs from 'occt-import-js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+// The same patch esbuild.web.js applies when bundling the glue.
+const { patchOcctGlue } = createRequire(__filename)('../scripts/occt-no-eval') as {
+  patchOcctGlue: (source: string) => string;
+};
 import { stepHeaderProblem } from '../src/webview/modelSniff';
 import {
   StepError,
@@ -16,14 +22,68 @@ import {
   type OcctMesh,
 } from '../src/webview/step';
 
-const WASM = join(__dirname, '..', 'node_modules', 'occt-import-js', 'dist', 'occt-import-js.wasm');
+const DIST = join(__dirname, '..', 'node_modules', 'occt-import-js', 'dist');
+const WASM = join(DIST, 'occt-import-js.wasm');
+const GLUE = join(DIST, 'occt-import-js.js');
 const sample = () => new Uint8Array(readFileSync(join(__dirname, '..', 'sample.step')));
 
+type Factory = (options: { wasmBinary: Uint8Array }) => Promise<unknown>;
+
+// Run glue source where code from strings is refused, as the 3D viewer's CSP
+// does ('wasm-unsafe-eval' but no 'unsafe-eval'), and return its factory.
+function glueWithoutEval(source: string): Factory {
+  const mod: { exports: unknown } = { exports: {} };
+  const context = vm.createContext(
+    {
+      module: mod,
+      exports: mod.exports,
+      WebAssembly,
+      TextDecoder,
+      console,
+      setTimeout,
+      clearTimeout,
+    },
+    { codeGeneration: { strings: false, wasm: true } },
+  );
+  vm.runInContext(source, context);
+  const exported = mod.exports as Factory | { default: Factory };
+  return typeof exported === 'function' ? exported : exported.default;
+}
+
+// The real-engine cases run the glue as it is bundled: patched, without eval.
 let engine: OcctEngine;
 beforeAll(async () => {
   const wasmBinary = readFileSync(WASM);
-  engine = (await occtimportjs({ wasmBinary })) as OcctEngine;
+  const factory = glueWithoutEval(patchOcctGlue(readFileSync(GLUE, 'utf8')));
+  engine = (await factory({ wasmBinary })) as OcctEngine;
 }, 60_000);
+
+describe('the engine glue under the viewer CSP', () => {
+  it('fails unpatched, because embind builds bindings with new Function', async () => {
+    const wasmBinary = readFileSync(WASM);
+    const run = async () => glueWithoutEval(readFileSync(GLUE, 'utf8'))({ wasmBinary });
+    await expect(run()).rejects.toThrow(/Code generation from strings/);
+  }, 60_000);
+
+  it('patches both string-compiled invokers and nothing else builds code', () => {
+    const patched = patchOcctGlue(readFileSync(GLUE, 'utf8'));
+    expect(patched).not.toMatch(/newFunc\(Function\b|new Function\b|\beval\(/);
+    expect(patched).toContain('var invokerFn=function(...args){');
+    expect(patched).toContain('var invokerFunction=function(obj,func,destructorsRef,args){');
+  });
+
+  it('refuses glue it does not recognise, so an upgrade cannot ship unpatched', () => {
+    expect(() => patchOcctGlue('var x=1;')).toThrow(/expected one embind craftInvokerFunction/);
+  });
+
+  it('matches the unpatched engine on the sample', async () => {
+    const plain = (await occtimportjs({ wasmBinary: readFileSync(WASM) })) as OcctEngine;
+    const a = readStep(plain, sample());
+    const b = readStep(engine, sample());
+    expect(Array.from(b.positions)).toEqual(Array.from(a.positions));
+    expect(Array.from(b.colors)).toEqual(Array.from(a.colors));
+  }, 60_000);
+});
 
 // A stand-in engine returning `meshes`, for the cases the real one cannot make.
 function fake(result: { success: boolean; meshes?: OcctMesh[] }): OcctEngine {

@@ -439,6 +439,8 @@ Open [sample.step](../sample.step). It opens in the same viewer as the STL.
 - [ ] A text file renamed to `.step` is refused with "is not a STEP file", and a file that starts like STEP but is damaged says the engine could not read it.
 - [ ] Developer: Toggle Developer Tools shows no CSP violation while a STEP file opens. Open a non-STEP model in a fresh window and confirm `occt-import-js.wasm.gz` is not requested.
 
+The first manual pass, in the Extension Development Host on 2026-11-21, caught what the unit tests had not: the engine failed to start with an `EvalError`, because embind's glue builds bindings with `new Function` and the viewer's CSP has no `'unsafe-eval'`. The glue is now patched when bundled (`scripts/occt-no-eval.js`), and `tests/step.test.ts` runs it in a Node context that refuses code from strings. After the fix, a quick pass opened `sample.glb` and `sample.step` and both looked right; the blocks above were not walked item by item and the load times were not recorded.
+
 ### Up axis
 
 The up axis, grid and bed, section, compare and sliced print blocks below cover what no automated test checks: `tests/stlWebview.test.ts` runs the real viewer code with the WebGL renderer replaced and verifies readouts and behaviour, not pixels, so the 3D frame, the section drawing, colors and the layer display are only as checked as the last manual pass. For 1.7.0 that was a quick pass in the Extension Development Host on 2026-11-20 (an STL, the sample 3MF, a section and a comparison, a sliced print), not the blocks below item by item.

@@ -12,6 +12,7 @@ const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { patchOcctGlue } = require('./scripts/occt-no-eval');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -119,6 +120,19 @@ async function main() {
         path: './src/webview/emptyModule.ts',
         crypto: './src/webview/emptyModule.ts',
       },
+      // The glue builds embind bindings with `new Function`, which the 3D
+      // viewer's CSP refuses; swap in the eval-free form (scripts/occt-no-eval.js).
+      plugins: [
+        {
+          name: 'occt-no-eval',
+          setup(build) {
+            build.onLoad({ filter: /occt-import-js[\\/]dist[\\/]occt-import-js\.js$/ }, (args) => ({
+              contents: patchOcctGlue(fs.readFileSync(args.path, 'utf8')),
+              loader: 'js',
+            }));
+          },
+        },
+      ],
     }),
     // Video preview: tiny (no media library, the <video> element does the
     // work), but its own entry point so it does not drag in the Markdown
