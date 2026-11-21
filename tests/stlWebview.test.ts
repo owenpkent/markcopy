@@ -76,4 +76,25 @@ describe('STL webview host replies', () => {
     expect(toast.hidden).toBe(false);
     expect(toast.textContent).toBe('Frame saved');
   });
+
+  it('shows why a 3MF could not be read in the viewport', async () => {
+    await import('../src/webview/stl');
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'load',
+          format: '3mf',
+          name: 'part.3mf',
+          path: '/models/part.3mf',
+          bytes: btoa('not a zip'),
+          showGrid: true,
+          meshColor: '#8ab4f8',
+        },
+        origin: window.origin,
+      }),
+    );
+    const stats = document.getElementById('stats') as HTMLDivElement;
+    expect(stats.textContent).toBe('Reading part.3mf…');
+    await vi.waitFor(() => expect(stats.textContent).toMatch(/not a 3MF package/));
+  });
 });

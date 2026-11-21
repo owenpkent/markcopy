@@ -7,8 +7,10 @@ import { parseStlMessage } from './messages/stl';
 import { isStlSetting } from './messages/settings';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 
-// A read-only custom editor that renders STL files with Three.js in a webview.
-// Mouse-only orbit/pan/zoom; see media/stl.js (built from src/webview/stl.ts).
+// A read-only custom editor that renders STL and 3MF files with Three.js in a
+// webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
+// src/webview/stl.ts). A 3MF is a zip of XML parts, which the webview unpacks
+// (src/webview/threeMf.ts): the host only stats it and checks it is a zip.
 //
 // Its right-click menu carries a handful of copy actions (the current view as a
 // PNG, the file name and path, the dimensions and triangle count) plus view
@@ -94,6 +96,8 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // Copy as > File Name and Full Path still work for a file that failed to load.
     const name = basename(uri);
     const path = uri.fsPath;
+    const format = is3mf(uri) ? '3mf' : 'stl';
+    const label = format === '3mf' ? '3MF' : 'STL';
     try {
       // Size first, off stat, before a byte is read. Every guard used to live
       // in the webview, which meant a hostile file was read whole, base64'd
@@ -108,7 +112,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
           type: 'error',
           name,
           path,
-          message: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_STL_BYTES)} limit for STL previews.`,
+          message: `${name} is ${mib(stat.size)}, above MarkCopy's ${mib(MAX_STL_BYTES)} limit for ${label} previews.`,
         });
         return;
       }
@@ -118,7 +122,15 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       // Cheap to run here and it saves base64-encoding a file that is about to
       // be refused. The webview checks again on arrival: this one is about not
       // doing pointless work, that one is the actual guard on the allocation.
-      const check = checkStl(bytes);
+      //
+      // A 3MF is unpacked in the webview, behind the zip limits in
+      // src/ooxml/zip.ts; all that is worth checking here is that it is a zip.
+      const check =
+        format === '3mf'
+          ? bytes[0] === 0x50 && bytes[1] === 0x4b
+            ? { ok: true }
+            : { ok: false, reason: `${name} is not a 3MF package (it is not a zip archive).` }
+          : checkStl(bytes);
       if (!check.ok) {
         void webview.postMessage({
           type: 'error',
@@ -132,6 +144,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       const cfg = vscode.workspace.getConfiguration('markcopy', uri);
       void webview.postMessage({
         type: 'load',
+        format,
         name,
         path,
         // Base64, not the raw Uint8Array. The webview transport JSON-encodes
@@ -179,7 +192,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="${csp}" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MarkCopy STL Preview</title>
+<title>MarkCopy 3D Preview</title>
 <link href="${styleUri}" rel="stylesheet" />
 <style>
   /* Viewport background per markcopy.theme; 'auto' follows the VS Code theme.
@@ -242,6 +255,11 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 </body>
 </html>`;
   }
+}
+
+/** Whether the document is a 3MF package rather than an STL, by its extension. */
+export function is3mf(uri: vscode.Uri): boolean {
+  return uri.path.toLowerCase().endsWith('.3mf');
 }
 
 function mib(bytes: number): string {

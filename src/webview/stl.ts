@@ -1,6 +1,6 @@
-// Browser-side STL viewer for the MarkCopy STL preview. Bundled on its own into
-// media/stl.js (see esbuild.web.js) so Three.js only loads when an .stl file is
-// opened, never for the Markdown, CSV, or PDF previews.
+// Browser-side 3D viewer for the MarkCopy STL and 3MF previews. Bundled on its
+// own into media/stl.js (see esbuild.web.js) so Three.js only loads when an .stl
+// or .3mf file is opened, never for the Markdown, CSV, or PDF previews.
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -14,6 +14,7 @@ import {
   viewFileName,
   type ViewPreset,
 } from './stlInfo';
+import { ThreeMfError, UNIT_LABELS, parse3mf } from './threeMf';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -21,6 +22,8 @@ interface VsCodeApi {
 
 interface LoadMessage {
   type: 'load';
+  // Absent from an older host: STL.
+  format?: 'stl' | '3mf';
   name: string;
   // The full file system path, for the menu's Copy as > Full Path.
   path: string;
@@ -232,24 +235,31 @@ function loadModel(msg: LoadMessage): void {
     return;
   }
 
-  // Guard against malformed/malicious STL before allocating: a binary header can
-  // over-claim its triangle count and make STLLoader allocate tens of GB.
-  const check = checkStl(raw);
-  if (!check.ok) {
-    showError(check.reason ?? 'Could not load this STL file.');
+  const meshColor = new THREE.Color(msg.meshColor || '#8ab4f8');
+  if (msg.format !== '3mf') {
+    showModel(msg, meshColor, readStl(raw));
     return;
   }
+  // Unpacking and reading a slicer project runs to seconds for a few million
+  // triangles, all on this thread. Say so first, and give the browser a frame
+  // to paint it before the parse holds the thread.
+  showStats(`Reading ${msg.name}…`);
+  window.setTimeout(() => showModel(msg, meshColor, read3mf(raw, meshColor)), 16);
+}
 
-  const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+interface Parsed {
+  geometry: THREE.BufferGeometry;
+  // The unit as shown ('mm'), or '' when the format has none (STL).
+  unit: string;
+  // Whether the geometry was turned from the file's Z-up to the viewer's Y-up.
+  turned: boolean;
+}
 
-  const loader = new STLLoader();
-  let geometry: THREE.BufferGeometry;
-  try {
-    geometry = loader.parse(buffer);
-  } catch (err) {
-    showError(`Could not parse this STL file (${String(err)}).`);
+function showModel(msg: LoadMessage, meshColor: THREE.Color, parsed: Parsed | null): void {
+  if (!parsed) {
     return;
   }
+  const { geometry, unit, turned } = parsed;
   geometry.computeBoundingBox();
   const box = geometry.boundingBox as THREE.Box3;
   const size = new THREE.Vector3();
@@ -268,8 +278,12 @@ function loadModel(msg: LoadMessage): void {
     (mesh.material as THREE.Material).dispose();
   }
 
+  // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
+  // already filled in where the file gives none, so the material stays white.
+  const vertexColors = geometry.hasAttribute('color');
   const material = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(msg.meshColor || '#8ab4f8'),
+    color: vertexColors ? new THREE.Color(0xffffff) : meshColor,
+    vertexColors,
     metalness: 0.1,
     roughness: 0.7,
     wireframe: wireframeActive,
@@ -283,9 +297,52 @@ function loadModel(msg: LoadMessage): void {
   fitView();
 
   triangleCount = geometry.attributes.position.count / 3;
-  dimensionsText = `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`;
+  // The file's own X, Y and Z: for a turned model the viewer's Y is the file's
+  // Z and the viewer's Z the file's Y.
+  const [dx, dy, dz] = turned ? [size.x, size.z, size.y] : [size.x, size.y, size.z];
+  dimensionsText = `${dx.toFixed(2)} × ${dy.toFixed(2)} × ${dz.toFixed(2)}${unit ? ` ${unit}` : ''}`;
   showStats(`${triangleCount.toLocaleString()} triangles\n${dimensionsText}`);
   invalidate();
+}
+
+// Guard against malformed/malicious STL before allocating: a binary header can
+// over-claim its triangle count and make STLLoader allocate tens of GB.
+function readStl(raw: Uint8Array): Parsed | null {
+  const check = checkStl(raw);
+  if (!check.ok) {
+    showError(check.reason ?? 'Could not load this STL file.');
+    return null;
+  }
+  const buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+  try {
+    // STL carries no unit, so the readout gives none.
+    return { geometry: new STLLoader().parse(buffer), unit: '', turned: false };
+  } catch (err) {
+    showError(`Could not parse this STL file (${String(err)}).`);
+    return null;
+  }
+}
+
+// parse3mf bounds every allocation itself (see threeMf.ts). 3MF is Z-up by
+// specification, with the build plate in XY; the viewer is Y-up with the grid
+// in XZ, so the model is turned upright to stand on the grid as it would on the
+// plate.
+function read3mf(raw: Uint8Array, meshColor: THREE.Color): Parsed | null {
+  try {
+    const model = parse3mf(raw, { fallbackColor: [meshColor.r, meshColor.g, meshColor.b] });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3));
+    if (model.colors) {
+      geometry.setAttribute('color', new THREE.BufferAttribute(model.colors, 3));
+    }
+    geometry.rotateX(-Math.PI / 2);
+    return { geometry, unit: UNIT_LABELS[model.unit] ?? model.unit, turned: true };
+  } catch (err) {
+    showError(
+      err instanceof ThreeMfError ? err.message : `Could not read this 3MF file (${String(err)}).`,
+    );
+    return null;
+  }
 }
 
 btnFit.addEventListener('click', () => {
