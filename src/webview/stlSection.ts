@@ -12,7 +12,7 @@
 // The canvas is plain 2D drawing with no Three.js, and the arithmetic is in
 // meshSection.ts and the two pure helpers below, which is what is unit-tested;
 // the drawing itself is checked by hand (see docs/TESTING.md).
-import { fmt, gridStep, lineCrossings, spans, type Span } from './meshSection';
+import { fmt, gridStep, lineSpans, spanEdges, type Span } from './meshSection';
 
 export interface SectionOutline {
   /** The model's file name, for the readout. */
@@ -75,13 +75,13 @@ export interface MeasureRow {
 /** What the crosshair at (u, v) reads off each outline. */
 export function measure(outlines: readonly SectionOutline[], u: number, v: number): MeasureRow[] {
   return outlines.map((outline) => {
-    const across = lineCrossings(outline.segments, 'v', v);
-    const up = lineCrossings(outline.segments, 'u', u);
+    const across = lineSpans(outline.segments, 'v', v);
+    const up = lineSpans(outline.segments, 'u', u);
     return {
       label: outline.label,
       color: outline.color,
-      across: { crossings: across, spans: spans(across) },
-      up: { crossings: up, spans: spans(up) },
+      across: { crossings: spanEdges(across), spans: across },
+      up: { crossings: spanEdges(up), spans: up },
     };
   });
 }
@@ -209,12 +209,18 @@ function drawGrid(
   const lines = (from: number, to: number, place: (value: number, major: boolean) => void) => {
     const first = Math.ceil(from / step);
     const last = Math.floor(to / step);
-    // A degenerate extent cannot ask for more lines than there are pixels.
-    if (last - first > 2000) {
+    // A degenerate extent cannot ask for more lines than there are pixels. And
+    // the loop counts the lines, not the grid index: a model a long way from
+    // its origin (a coordinate near 1e16 with a small extent) has an index past
+    // the integers a double can step through, where `k++` leaves k unchanged
+    // and a loop on it never ends. There is no grid to draw at that distance,
+    // since neighbouring lines are not distinct numbers either.
+    const count = last - first;
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || !(count <= 2000)) {
       return;
     }
-    for (let k = first; k <= last; k++) {
-      place(k * step, k % 10 === 0);
+    for (let i = 0; i <= count; i++) {
+      place((first + i) * step, (first + i) % 10 === 0);
     }
   };
   lines(-fit.x0 / fit.scale, (width - fit.x0) / fit.scale, (u, major) => {

@@ -6,9 +6,16 @@
 import { describe, expect, it } from 'vitest';
 import { fitExtent, measure, type SectionOutline } from '../src/webview/stlSection';
 
-// A square outline from (lo, lo) to (hi, hi), as four segments.
+// A square outline from (lo, lo) to (hi, hi), as four segments running
+// anticlockwise, which puts the outside on each segment's right: the outline of
+// a solid, as sectionSegments directs it.
 function square(lo: number, hi: number): number[] {
   return [lo, lo, hi, lo, hi, lo, hi, hi, hi, hi, lo, hi, lo, hi, lo, lo];
+}
+
+// The same square running clockwise: the wall of a hole.
+function hole(lo: number, hi: number): number[] {
+  return [lo, lo, lo, hi, lo, hi, hi, hi, hi, hi, hi, lo, hi, lo, lo, lo];
 }
 
 describe('fitExtent', () => {
@@ -36,7 +43,7 @@ describe('measure', () => {
   const tube: SectionOutline = {
     label: 'tube.stl',
     color: '#00f',
-    segments: Float32Array.from([...square(-10, 10), ...square(-6, 6)]),
+    segments: Float32Array.from([...square(-10, 10), ...hole(-6, 6)]),
   };
 
   it('reads wall, pocket, wall along both lines of the crosshair', () => {
@@ -61,11 +68,22 @@ describe('measure', () => {
     expect(row.up.spans).toHaveLength(3);
   });
 
+  it('reads two overlapping solids as one wall', () => {
+    const overlap: SectionOutline = {
+      label: 'assembly.3mf',
+      color: '#00f',
+      segments: Float32Array.from([...square(-10, 2), ...square(-2, 10)]),
+    };
+    const [row] = measure([overlap], 0, 0);
+    expect(row.across.crossings).toEqual([-10, 10]);
+    expect(row.across.spans.map((s) => [s.length, s.solid])).toEqual([[20, true]]);
+  });
+
   it('gives a row per outline, in order, so two versions read side by side', () => {
     const wider: SectionOutline = {
       label: 'old.stl',
       color: '#f80',
-      segments: Float32Array.from([...square(-10, 10), ...square(-7, 7)]),
+      segments: Float32Array.from([...square(-10, 10), ...hole(-7, 7)]),
     };
     const rows = measure([tube, wider], 0, 0);
     expect(rows.map((r) => r.label)).toEqual(['tube.stl', 'old.stl']);

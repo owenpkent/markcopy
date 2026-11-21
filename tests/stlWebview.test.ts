@@ -14,6 +14,10 @@ import { strToU8, zipSync } from 'fflate';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Three from 'three';
 
+// The scene the viewer last asked the renderer to draw, which is the way in to
+// the meshes and lines it built.
+const drawn = vi.hoisted(() => ({ scene: undefined as Three.Scene | undefined }));
+
 vi.mock('three', async (importOriginal) => {
   const actual = await importOriginal<typeof Three>();
   class WebGLRenderer {
@@ -22,7 +26,9 @@ vi.mock('three', async (importOriginal) => {
     setPixelRatio(): void {}
     setSize(): void {}
     setClearColor(): void {}
-    render(): void {}
+    render(scene: Three.Scene): void {
+      drawn.scene = scene;
+    }
   }
   return { ...actual, WebGLRenderer };
 });
@@ -79,6 +85,7 @@ beforeEach(() => {
   document.body.className = '';
   posted = [];
   frame = undefined;
+  drawn.scene = undefined;
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage: (msg: Record<string, unknown>) => posted.push(msg),
   }));
@@ -154,6 +161,44 @@ function load(extra: Record<string, unknown>): void {
   });
 }
 
+/** The meshes in the scene the viewer drew, in the order it added them. */
+function meshes(): Three.Mesh[] {
+  const found: Three.Mesh[] = [];
+  drawn.scene?.traverse((object) => {
+    if ((object as Three.Mesh).isMesh) {
+      found.push(object as Three.Mesh);
+    }
+  });
+  return found;
+}
+
+const material = (mesh: Three.Mesh) => mesh.material as Three.MeshStandardMaterial;
+
+/** How many vertices each traced section outline has, one entry per model cut. */
+function sectionOutlines(): number[] {
+  const found: number[] = [];
+  drawn.scene?.traverse((object) => {
+    const lines = object as Three.LineSegments;
+    if (lines.isLineSegments && lines.renderOrder === 2) {
+      found.push(lines.geometry.getAttribute('position').count);
+    }
+  });
+  return found;
+}
+
+// A one-triangle binary STL whose header carries the "COLOR=" marker
+// Materialise Magics writes, which makes STLLoader attach a per-vertex color
+// attribute to the geometry.
+function magicsStl(): string {
+  const out = Buffer.alloc(84 + 50);
+  out.write('COLOR=', 0, 'latin1');
+  out.set([255, 0, 0, 255], 6);
+  out.writeUInt32LE(1, 80);
+  out.writeFloatLE(1, 84 + 12 + 12);
+  out.writeFloatLE(1, 84 + 12 + 24 + 4);
+  return out.toString('base64');
+}
+
 const RELS = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="r" Target="/3D/3dmodel.model" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
 </Relationships>`;
@@ -191,6 +236,47 @@ function slicedPrint(): string {
   return Buffer.from(zip).toString('base64');
 }
 
+// A 3MF of one cube from the origin to `size` on every axis, in `unit`, with
+// an object-level base material when `color` is given.
+function cube3mf(size: number, unit: string, color?: string): string {
+  const s = size;
+  const v = [
+    [0, 0, 0],
+    [s, 0, 0],
+    [s, s, 0],
+    [0, s, 0],
+    [0, 0, s],
+    [s, 0, s],
+    [s, s, s],
+    [0, s, s],
+  ];
+  const faces = [
+    [0, 2, 1],
+    [0, 3, 2],
+    [4, 5, 6],
+    [4, 6, 7],
+    [0, 1, 5],
+    [0, 5, 4],
+    [1, 2, 6],
+    [1, 6, 5],
+    [2, 3, 7],
+    [2, 7, 6],
+    [3, 0, 4],
+    [3, 4, 7],
+  ];
+  const vertices = v.map(([x, y, z]) => `<vertex x="${x}" y="${y}" z="${z}"/>`).join('');
+  const triangles = faces.map(([a, b, c]) => `<triangle v1="${a}" v2="${b}" v3="${c}"/>`).join('');
+  const base = color
+    ? `<basematerials id="9"><base name="c" displaycolor="${color}"/></basematerials>`
+    : '';
+  const model =
+    `<model unit="${unit}" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>${base}` +
+    `<object id="1"${color ? ' pid="9" pindex="0"' : ''}><mesh><vertices>${vertices}</vertices>` +
+    `<triangles>${triangles}</triangles></mesh></object></resources><build><item objectid="1"/></build></model>`;
+  const zip = zipSync({ '_rels/.rels': strToU8(RELS), '3D/3dmodel.model': strToU8(model) });
+  return Buffer.from(zip).toString('base64');
+}
+
 describe('STL webview host replies', () => {
   it('shows the confirmation the host sends after Save View as PNG', async () => {
     await import('../src/webview/stl');
@@ -225,6 +311,25 @@ describe('3D viewer models', () => {
     await vi.waitFor(() =>
       expect(stats()).toBe('24 triangles\n25.00 × 10.00 × 10.00 mm\nGrid 1 mm'),
     );
+  });
+
+  it('draws an STL in the configured mesh color even when the file carries colors', async () => {
+    // The loader gives this file a color attribute; the viewer has never drawn
+    // an STL's own colors, and 3MF support must not start doing so by accident.
+    await import('../src/webview/stl');
+    load({ bytes: magicsStl(), meshColor: '#00ff00' });
+    const [mesh] = meshes();
+    expect(mesh.geometry.hasAttribute('color')).toBe(true);
+    expect(material(mesh).vertexColors).toBe(false);
+    expect(material(mesh).color.getHexString()).toBe('00ff00');
+  });
+
+  it('draws a colored 3MF in its own colors', async () => {
+    await import('../src/webview/stl');
+    load({ format: '3mf', name: 'blue.3mf', bytes: cube3mf(10, 'millimeter', '#0000FF') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(material(meshes()[0]).vertexColors).toBe(true);
+    expect(material(meshes()[0]).color.getHexString()).toBe('ffffff');
   });
 
   it('leaves the grid out of the readout when it is off', async () => {
@@ -315,6 +420,53 @@ describe('3D viewer compare', () => {
         'Grid 1',
     );
     expect(el('stats').querySelectorAll('.swatch')).toHaveLength(2);
+  });
+
+  it('draws the second model in the comparison color whatever colors it brings', async () => {
+    // Both versions are the same blue in their files. The overlay is only
+    // readable if the second is the orange its swatch says it is.
+    await import('../src/webview/stl');
+    load({ format: '3mf', name: 'new.3mf', bytes: cube3mf(10, 'millimeter', '#0000FF') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    send({
+      type: 'compare',
+      format: '3mf',
+      name: 'old.3mf',
+      bytes: cube3mf(8, 'millimeter', '#0000FF'),
+    });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    const [first, second] = meshes();
+    expect(material(first).vertexColors).toBe(true);
+    expect(material(second).vertexColors).toBe(false);
+    expect(material(second).color.getHexString()).toBe('f0883e');
+  });
+
+  it('brings a second model in other units to the first model scale', async () => {
+    // The same 10 mm cube, once in millimetres and once as 1 cm. They are the
+    // same part, so they must coincide, in the overlay and in a section.
+    await import('../src/webview/stl');
+    load({ format: '3mf', name: 'mm.3mf', bytes: cube3mf(10, 'millimeter') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    send({ type: 'compare', format: '3mf', name: 'cm.3mf', bytes: cube3mf(1, 'centimeter') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+
+    const [first, second] = meshes();
+    for (const mesh of [first, second]) {
+      mesh.geometry.computeBoundingBox();
+      expect(mesh.geometry.boundingBox?.max.toArray()).toEqual([10, 10, 10]);
+    }
+    // Each still reads out in its own file's unit.
+    expect(stats()).toBe(
+      'mm.3mf  12 triangles  10.00 × 10.00 × 10.00 mm\n' +
+        'cm.3mf  12 triangles  1.00 × 1.00 × 1.00 cm\n' +
+        'Grid 0.5 mm',
+    );
+
+    el('btn-section').click();
+    expect(el<HTMLInputElement>('section-value').value).toBe('5.00');
+    // Both cubes are cut at Z = 5 mm: four sides of two triangles each, two
+    // vertices a piece.
+    expect(sectionOutlines()).toEqual([16, 16]);
   });
 
   it('keeps the first model when the second cannot be read', async () => {

@@ -21,6 +21,8 @@ import {
   spans,
   unionBounds,
   type Axis,
+  lineSpans,
+  spanEdges,
 } from '../src/webview/meshSection';
 
 type Vec3 = [number, number, number];
@@ -391,5 +393,111 @@ describe('formatSectionReport', () => {
     expect(text).toBe(
       ['a.stl, X = 0.00', 'Y = 2.00: 1.00 3.50 (spans 2.50)', 'Z = 1.00: 0.50'].join('\n'),
     );
+  });
+});
+
+// A box whose twelve triangles are wound to face outward, which is what tells
+// a crossing into the solid from one out of it. `inward` flips every triangle,
+// as the wall of a cavity is wound.
+function shell(min: number[], max: number[], inward = false): number[] {
+  const [x0, y0, z0] = min;
+  const [x1, y1, z1] = max;
+  const v = [
+    [x0, y0, z0],
+    [x1, y0, z0],
+    [x1, y1, z0],
+    [x0, y1, z0],
+    [x0, y0, z1],
+    [x1, y0, z1],
+    [x1, y1, z1],
+    [x0, y1, z1],
+  ];
+  const faces = [
+    [0, 2, 1],
+    [0, 3, 2],
+    [4, 5, 6],
+    [4, 6, 7],
+    [0, 1, 5],
+    [0, 5, 4],
+    [1, 2, 6],
+    [1, 6, 5],
+    [2, 3, 7],
+    [2, 7, 6],
+    [3, 0, 4],
+    [3, 4, 7],
+  ];
+  return faces.flatMap(([a, b, c]) => (inward ? [v[a], v[c], v[b]] : [v[a], v[b], v[c]]).flat());
+}
+
+// The stretches along X through the middle of a Z = 5 cut.
+function acrossX(soup: number[]): Array<[number, number, boolean]> {
+  const segments = sectionSegments(Float32Array.from(soup), 2, 5);
+  return lineSpans(segments, 'v', 5).map((s) => [s.from, s.to, s.solid]);
+}
+
+describe('lineSpans', () => {
+  it('reads one closed shell as one stretch of material', () => {
+    expect(acrossX(shell([0, 0, 0], [10, 10, 10]))).toEqual([[0, 10, true]]);
+  });
+
+  it('reads two overlapping solids as solid throughout, not a gap where they overlap', () => {
+    // X = [0, 10] and [5, 15]: four crossings at 0, 5, 10, 15. Counting them
+    // off would call 5 to 10, where the part is solid twice over, a gap.
+    const soup = [...shell([0, 0, 0], [10, 10, 10]), ...shell([5, 0, 0], [15, 10, 10])];
+    expect(acrossX(soup)).toEqual([[0, 15, true]]);
+    const segments = sectionSegments(Float32Array.from(soup), 2, 5);
+    expect(spanEdges(lineSpans(segments, 'v', 5))).toEqual([0, 15]);
+    // The same along Y, where both solids span the same stretch.
+    expect(lineSpans(segments, 'u', 7).map((s) => [s.from, s.to, s.solid])).toEqual([
+      [0, 10, true],
+    ]);
+  });
+
+  it('reads a solid nested inside another as solid, not a pocket', () => {
+    const soup = [...shell([0, 0, 0], [20, 10, 10]), ...shell([5, 2, 2], [15, 8, 8])];
+    expect(acrossX(soup)).toEqual([[0, 20, true]]);
+  });
+
+  it('reads two solids that touch as one, with no zero-width gap between', () => {
+    const soup = [...shell([0, 0, 0], [10, 10, 10]), ...shell([10, 0, 0], [20, 10, 10])];
+    expect(acrossX(soup)).toEqual([[0, 20, true]]);
+  });
+
+  it('reads a real cavity, wound inward, as a gap between two walls', () => {
+    const soup = [...shell([0, 0, 0], [20, 10, 10]), ...shell([4, 2, 2], [16, 8, 8], true)];
+    expect(acrossX(soup)).toEqual([
+      [0, 4, true],
+      [4, 16, false],
+      [16, 20, true],
+    ]);
+  });
+
+  it('reads two separate solids with the space between them as a gap', () => {
+    const soup = [...shell([0, 0, 0], [4, 10, 10]), ...shell([6, 0, 0], [10, 10, 10])];
+    expect(acrossX(soup)).toEqual([
+      [0, 4, true],
+      [4, 6, false],
+      [6, 10, true],
+    ]);
+  });
+
+  it('falls back to counting crossings for a mesh wound inside out', () => {
+    // Every face backward: the winding says the line leaves before it enters.
+    // Counting needs no winding and still reads the wall.
+    expect(acrossX(shell([0, 0, 0], [10, 10, 10], true))).toEqual([[0, 10, true]]);
+    // An inside-out tube: counting gives wall, pocket, wall.
+    const soup = [...shell([0, 0, 0], [20, 10, 10], true), ...shell([4, 2, 2], [16, 8, 8], true)];
+    expect(acrossX(soup)).toEqual([
+      [0, 4, true],
+      [4, 16, false],
+      [16, 20, true],
+    ]);
+  });
+
+  it('gives nothing for a line that misses, and for a line that is not a number', () => {
+    const segments = sectionSegments(Float32Array.from(shell([0, 0, 0], [10, 10, 10])), 2, 5);
+    expect(lineSpans(segments, 'v', 50)).toEqual([]);
+    expect(lineSpans(segments, 'v', Number.NaN)).toEqual([]);
+    expect(spanEdges([])).toEqual([]);
   });
 });

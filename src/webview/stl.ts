@@ -30,10 +30,11 @@ import {
   fmt,
   formatSectionReport,
   gridStep,
-  lineCrossings,
+  lineSpans,
   parseBedSize,
   planeAxes,
   sectionSegments,
+  spanEdges,
   unionBounds,
   type Axis,
   type Bounds,
@@ -181,6 +182,10 @@ interface Model {
   // tool cuts. Empty for a toolpath.
   positions: Float32Array;
   box: Bounds;
+  // The model's size along its file's X, Y and Z, in its file's unit, as shown.
+  // Taken when the file is read: a compared model is rescaled to the first
+  // model's unit afterwards, and its readout should still be its own.
+  dims: string;
   triangles: number;
   // The unit as shown ('mm'), or '' when the format has none (STL).
   unit: string;
@@ -275,7 +280,15 @@ function buildStl(name: string, raw: Uint8Array, color: THREE.Color, swatch: str
     // take it as millimetres, as every slicer does.
     const geometry = new STLLoader().parse(buffer);
     const positions = geometry.getAttribute('position').array as Float32Array;
-    return meshModel(name, geometry, positions, color, swatch, '', 1, false);
+    // Never the file's own colors: an STL can carry a color attribute (a Magics
+    // header makes the loader add one), and an STL has always been drawn in
+    // markcopy.stl.meshColor.
+    return meshModel(name, geometry, positions, color, swatch, {
+      unit: '',
+      mmPerUnit: 1,
+      fixedZUp: false,
+      colored: false,
+    });
   } catch (err) {
     return `Could not parse this STL file (${String(err)}).`;
   }
@@ -294,9 +307,12 @@ function build3mf(name: string, raw: Uint8Array, color: THREE.Color, swatch: str
     if (content.colors) {
       geometry.setAttribute('color', new THREE.BufferAttribute(content.colors, 3));
     }
-    const unit = UNIT_LABELS[content.unit] ?? content.unit;
-    const mm = MM_PER_UNIT[content.unit] ?? 1;
-    return meshModel(name, geometry, content.positions, color, swatch, unit, mm, true);
+    return meshModel(name, geometry, content.positions, color, swatch, {
+      unit: UNIT_LABELS[content.unit] ?? content.unit,
+      mmPerUnit: MM_PER_UNIT[content.unit] ?? 1,
+      fixedZUp: true,
+      colored: content.colors !== null,
+    });
   } catch (err) {
     return err instanceof ThreeMfError
       ? err.message
@@ -311,14 +327,14 @@ function meshModel(
   positions: Float32Array,
   color: THREE.Color,
   swatch: string,
-  unit: string,
-  mmPerUnit: number,
-  fixedZUp: boolean,
+  // `colored`: whether the geometry's per-vertex colors are the file's own and
+  // are to be drawn.
+  about: { unit: string; mmPerUnit: number; fixedZUp: boolean; colored: boolean },
 ): Model {
+  const { unit, mmPerUnit, fixedZUp, colored: vertexColors } = about;
   geometry.computeVertexNormals();
   // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
   // already filled in where the file gives none, so the material stays white.
-  const vertexColors = geometry.hasAttribute('color');
   const material = new THREE.MeshStandardMaterial({
     color: vertexColors ? new THREE.Color(0xffffff) : color,
     vertexColors,
@@ -337,6 +353,7 @@ function meshModel(
     mmPerUnit,
     fixedZUp,
     swatch,
+    dims: sizeText(bounds(positions), unit),
   };
 }
 
@@ -409,6 +426,7 @@ function toolpathModel(
     object: new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true })),
     positions: new Float32Array(0),
     box: { min: path.min, max: path.max },
+    dims: sizeText({ min: path.min, max: path.max }, 'mm'),
     triangles: 0,
     unit: 'mm',
     mmPerUnit: 1,
@@ -683,9 +701,12 @@ function showStats(lines: StatLine[]): void {
 
 /** The model's size along the file's own X, Y and Z, with its unit when it has one. */
 function dimensions(model: Model): string {
-  const { min, max } = model.box;
+  return model.dims;
+}
+
+function sizeText({ min, max }: Bounds, unit: string): string {
   const size = [0, 1, 2].map((a) => fmt(max[a] - min[a])).join(' × ');
-  return model.unit ? `${size} ${model.unit}` : size;
+  return unit ? `${size} ${unit}` : size;
 }
 
 function renderStats(): void {
@@ -804,10 +825,25 @@ function setOther(model: Model | null): void {
     disposeModel(other);
   }
   other = model;
-  if (model) {
+  if (model && primary) {
+    // Both models share one coordinate group, and the section and its numbers
+    // read both position arrays in the first model's unit. A part exported in
+    // centimetres beside the same part in millimetres would otherwise sit at a
+    // tenth of the size and show as a difference that is not there.
+    const ratio = model.mmPerUnit / primary.mmPerUnit;
+    if (Number.isFinite(ratio) && ratio > 0 && ratio !== 1) {
+      // Scales the position attribute in place, which is model.positions.
+      model.object.geometry.scale(ratio, ratio, ratio);
+      model.box = bounds(model.positions);
+    }
     // Where the two models share a surface, the first one shows; the second is
     // pushed a hair back so the pair does not flicker.
     const material = model.object.material as THREE.MeshStandardMaterial;
+    // One flat color, the one its swatch and its section outline have. A 3MF's
+    // own colors would leave two versions of a part looking the same.
+    material.vertexColors = false;
+    material.color.set(OTHER_COLOR);
+    material.needsUpdate = true;
     material.polygonOffset = true;
     material.polygonOffsetFactor = 1;
     material.polygonOffsetUnits = 2;
@@ -1046,8 +1082,8 @@ function sectionReport(): string {
   return sectionOutlines
     .map((outline) =>
       formatSectionReport(outline.label, sectionAxis, sectionValue, unit, [
-        { fixed: 'v', value: at.v, crossings: lineCrossings(outline.segments, 'v', at.v) },
-        { fixed: 'u', value: at.u, crossings: lineCrossings(outline.segments, 'u', at.u) },
+        { fixed: 'v', value: at.v, crossings: spanEdges(lineSpans(outline.segments, 'v', at.v)) },
+        { fixed: 'u', value: at.u, crossings: spanEdges(lineSpans(outline.segments, 'u', at.u)) },
       ]),
     )
     .join('\n\n');

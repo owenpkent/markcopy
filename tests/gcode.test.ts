@@ -422,3 +422,41 @@ describe('formatDuration', () => {
     expect(formatDuration(Number.POSITIVE_INFINITY)).toBe('0s');
   });
 });
+
+describe('parseGcode extrusion state across mode changes', () => {
+  const layer = ['; CHANGE_LAYER', '; Z_HEIGHT: 0.2', 'G1 Z0.2'];
+
+  it('takes E as relative under G91 with no M83', () => {
+    // Both moves push a millimetre of filament. Read as absolute, the second
+    // would repeat E1 and look like a travel.
+    const tp = parseGcode([...layer, 'G91', 'G1 X10 E1', 'G1 X10 E1', ''].join('\n'));
+    expect(tp.segments).toBe(2);
+    expect(Array.from(tp.positions)).toEqual(
+      [0, 0, 0.2, 10, 0, 0.2, 10, 0, 0.2, 20, 0, 0.2].map(Math.fround),
+    );
+  });
+
+  it('keeps the running E through a relative stretch, so a later absolute E is judged against it', () => {
+    // Absolute to 10, two more relative (12 in all), then absolute 11: that is
+    // a retraction of one and must not be drawn.
+    const tp = parseGcode(
+      [...layer, 'G90', 'G1 X10 E10', 'M83', 'G1 X20 E2', 'M82', 'G1 X30 E11', ''].join('\n'),
+    );
+    expect(tp.segments).toBe(2);
+    expect(tp.max[0]).toBe(20);
+  });
+
+  it('draws an absolute move that passes the running total after a relative stretch', () => {
+    const tp = parseGcode(
+      [...layer, 'G90', 'G1 X10 E10', 'M83', 'G1 X20 E2', 'M82', 'G1 X30 E13', ''].join('\n'),
+    );
+    expect(tp.segments).toBe(3);
+  });
+
+  it('still resets the total with G92', () => {
+    const tp = parseGcode(
+      [...layer, 'M83', 'G1 X10 E5', 'M82', 'G92 E0', 'G1 X20 E1', 'G1 X30 E0.5', ''].join('\n'),
+    );
+    expect(tp.segments).toBe(2);
+  });
+});

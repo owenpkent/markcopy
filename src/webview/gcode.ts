@@ -428,12 +428,15 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
         const nx = hasX ? (relativeXyz ? x + wx : wx) : x;
         const ny = hasY ? (relativeXyz ? y + wy : wy) : y;
         const nz = hasZ ? (relativeXyz ? z + wz : wz) : z;
+        // E is relative when either G91 or M83 says so, as the slicers' own
+        // readers take it, and its running total is kept in both modes: after
+        // a stretch of relative moves, an absolute E is compared against where
+        // the filament really is, not where it was before them.
         let extruding = false;
         if (hasE) {
-          extruding = relativeE ? we > 0 : we > lastE;
-          if (!relativeE) {
-            lastE = we;
-          }
+          const nextE = relativeE || relativeXyz ? lastE + we : we;
+          extruding = nextE > lastE;
+          lastE = nextE;
         }
         if (extruding && (nx !== x || ny !== y || nz !== z)) {
           if (cmdNumber >= 2) {

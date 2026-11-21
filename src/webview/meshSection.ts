@@ -107,6 +107,11 @@ function straddles(positions: Float32Array, base: number, axis: Axis, value: num
  * emitted twice and none is missing. That is why the height is not nudged off
  * round values.
  *
+ * Each segment is also given a direction: it runs with the triangle's outward
+ * face (the side its winding makes the front) on its right. That is what lets
+ * lineSpans tell a crossing that enters material from one that leaves it,
+ * which a bare list of crossings cannot say.
+ *
  * Triangles with a non-finite coordinate are skipped, and a non-finite `value`
  * gives an empty result. The buffer is sized exactly by a counting pass first,
  * so memory never exceeds 4 floats per input triangle.
@@ -146,8 +151,34 @@ export function sectionSegments(positions: Float32Array, axis: Axis, value: numb
       out[o++] = ui + f * (positions[base + j * 3 + ua] - ui);
       out[o++] = vi + f * (positions[base + j * 3 + va] - vi);
     }
+    // The in-plane part of the face normal, from the winding, against the
+    // segment turned a quarter turn clockwise. If they disagree, the segment is
+    // running the other way round and its ends are swapped.
+    const nu = normalComponent(positions, base, ua);
+    const nv = normalComponent(positions, base, va);
+    const du = out[o - 2] - out[o - 4];
+    const dv = out[o - 1] - out[o - 3];
+    if (dv * nu - du * nv < 0) {
+      const u = out[o - 4];
+      const v = out[o - 3];
+      out[o - 4] = out[o - 2];
+      out[o - 3] = out[o - 1];
+      out[o - 2] = u;
+      out[o - 1] = v;
+    }
   }
   return out;
+}
+
+// One component of (b - a) x (c - a) for the triangle at `base`.
+function normalComponent(positions: Float32Array, base: number, axis: Axis): number {
+  const j = (axis + 1) % 3;
+  const k = (axis + 2) % 3;
+  const abj = positions[base + 3 + j] - positions[base + j];
+  const abk = positions[base + 3 + k] - positions[base + k];
+  const acj = positions[base + 6 + j] - positions[base + j];
+  const ack = positions[base + 6 + k] - positions[base + k];
+  return abj * ack - abk * acj;
 }
 
 /**
@@ -213,6 +244,92 @@ export function spans(crossings: number[]): Span[] {
     out.push({ from, to, length: to - from, solid: i % 2 === 0 });
   }
   return out;
+}
+
+/**
+ * The stretches of material and gap along a line across the section, by how
+ * much solid the line is inside rather than by counting crossings.
+ *
+ * Counting (first stretch material, then alternate) is right for one closed
+ * shell and wrong as soon as two overlap: two cubes that share half their
+ * volume give four crossings, and the middle, where the part is solid twice
+ * over, would read as a gap. 3MF builds a part out of overlapping components
+ * routinely, and its fill rule is the positive one: a point is material when it
+ * is inside more shells than it has left. So each crossing is taken as entering
+ * or leaving, by the direction sectionSegments gave its segment, and a stretch
+ * is material while the count is above zero. Neighbouring stretches of the same
+ * kind are joined, so the overlap reads as one wall.
+ *
+ * That relies on the mesh facing outward. One that does not (inside out, or
+ * wound at random, which STL files in the wild are) would dip below zero or not
+ * return to it; those fall back to counting, which needs no winding.
+ */
+export function lineSpans(segments: Float32Array, fixed: 'u' | 'v', value: number): Span[] {
+  if (!Number.isFinite(value)) {
+    return [];
+  }
+  const f = fixed === 'v' ? 1 : 0;
+  const r = 1 - f;
+  // Position along the line, and +1 for a crossing into material or -1 out.
+  const hits: Array<[number, number]> = [];
+  const count = Math.floor(segments.length / 4);
+  for (let s = 0; s < count; s++) {
+    const k = s * 4;
+    const a = segments[k + f];
+    const b = segments[k + 2 + f];
+    const ra = segments[k + r];
+    const rb = segments[k + 2 + r];
+    if (
+      !Number.isFinite(a) ||
+      !Number.isFinite(b) ||
+      !Number.isFinite(ra) ||
+      !Number.isFinite(rb)
+    ) {
+      continue;
+    }
+    if (a < value === b < value) {
+      continue;
+    }
+    // The outward side is on the segment's right. Going along +u, a segment
+    // heading down (v falling) has its outward side behind the line, so the
+    // line is entering; going along +v, that is a segment heading right.
+    const entering = fixed === 'v' ? b < a : b > a;
+    hits.push([ra + ((value - a) / (b - a)) * (rb - ra), entering ? 1 : -1]);
+  }
+  // Entering before leaving where two faces coincide, so two solids that touch
+  // read as one without a zero-width gap between them.
+  hits.sort((p, q) => p[0] - q[0] || q[1] - p[1]);
+
+  const out: Span[] = [];
+  let depth = 0;
+  for (let i = 0; i < hits.length; i++) {
+    depth += hits[i][1];
+    if (depth < 0) {
+      break;
+    }
+    if (i + 1 === hits.length) {
+      break;
+    }
+    const from = hits[i][0];
+    const to = hits[i + 1][0];
+    const solid = depth > 0;
+    const last = out[out.length - 1];
+    if (last && last.solid === solid) {
+      last.to = to;
+      last.length = to - last.from;
+    } else if (to > from) {
+      out.push({ from, to, length: to - from, solid });
+    }
+  }
+  if (depth !== 0) {
+    return spans(hits.map((hit) => hit[0]));
+  }
+  return out;
+}
+
+/** The ends of a run of spans, in order: where the line meets the surface. */
+export function spanEdges(list: readonly Span[]): number[] {
+  return list.length === 0 ? [] : [list[0].from, ...list.map((span) => span.to)];
 }
 
 /**

@@ -1,6 +1,13 @@
 import { ThreeMfError, read3mf } from '../../src/webview/threeMf';
 import { parseGcode, readSliceInfo } from '../../src/webview/gcode';
-import { bounds, lineCrossings, sectionSegments, spans } from '../../src/webview/meshSection';
+import {
+  bounds,
+  lineCrossings,
+  lineSpans,
+  sectionSegments,
+  spanEdges,
+  spans,
+} from '../../src/webview/meshSection';
 
 // read3mf answers a package it will not draw with ThreeMfError and nothing
 // else: a zip refusal, malformed model XML, a missing object, a component
@@ -33,5 +40,16 @@ export function fuzz(data: Buffer): void {
     const segments = sectionSegments(content.positions, axis, middle);
     spans(lineCrossings(segments, 'u', 0));
     spans(lineCrossings(segments, 'v', 0));
+    for (const fixed of ['u', 'v'] as const) {
+      // What the viewer shows: stretches in order, each ending where the next
+      // begins, none running backward.
+      const list = lineSpans(segments, fixed, 0);
+      const edges = spanEdges(list);
+      for (let i = 1; i < edges.length; i++) {
+        if (!(edges[i] >= edges[i - 1])) {
+          throw new Error('section spans are out of order');
+        }
+      }
+    }
   }
 }
