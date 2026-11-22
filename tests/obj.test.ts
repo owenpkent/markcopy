@@ -426,3 +426,127 @@ describe('readObj normals', () => {
     expect(model.parts.children[1].ranges).toEqual([[12, 6]]);
   });
 });
+
+describe('OBJ review fixes', () => {
+  const TRI = 'v 0 0 0\nv 1 0 0\nv 0 1 0\n';
+  const area = (positions: Float32Array) => {
+    let sum = 0;
+    for (let t = 0; t < positions.length; t += 9) {
+      const p = positions;
+      const ux = p[t + 3] - p[t];
+      const uy = p[t + 4] - p[t + 1];
+      const uz = p[t + 5] - p[t + 2];
+      const vx = p[t + 6] - p[t];
+      const vy = p[t + 7] - p[t + 1];
+      const vz = p[t + 8] - p[t + 2];
+      sum += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+    }
+    return sum;
+  };
+
+  it('keeps the faces of an object that also has l or p records, and never gives them to the loader', () => {
+    const parse = vi.spyOn(OBJLoader.prototype, 'parse');
+    for (const record of ['l 1 2', 'p 1']) {
+      const model = readObj(bytes(`${TRI}o Body\nf 1 2 3\n${record}\n`));
+      expect(model.positions.length / 9, record).toBe(1);
+      expect(model.parts.children.map((p) => p.name)).toEqual(['Body']);
+    }
+    const lines = Array.from({ length: 20 }, () => 'l 1 2').join('\n');
+    readObj(bytes(`${TRI}f 1 2 3\n${lines}\np 1 2 3\n  l 1 2\n`));
+    for (const [text] of parse.mock.calls) {
+      expect(text).not.toMatch(/^\s*[lp]\b/m);
+    }
+    expect(parse).toHaveBeenCalledTimes(3);
+  });
+
+  it('counts a bare v, vn or vt and a v split by any whitespace against the caps', () => {
+    const parse = vi.spyOn(OBJLoader.prototype, 'parse');
+    const base = 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
+    const normals = 'vn 0 0 1\nvn 0 0 1\nvn 0 0 1\n';
+    for (const extra of ['v', 'vn', 'vt', 'v\f1 2 3']) {
+      const text = `${normals}${base}${Array.from({ length: 4 }, () => extra).join('\n')}\n`;
+      expect(
+        () => readObj(bytes(text), { limits: { maxVertices: 3 } }),
+        JSON.stringify(extra),
+      ).toThrow(/more than 3 vertices/);
+    }
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it('triangulates a concave polygon inside itself, and leaves a convex one and its normals and UVs alone', () => {
+    const l = [
+      'v 3 0 0',
+      'v 3 1 0',
+      'v 1 1 0',
+      'v 1 3 0',
+      'v 0 3 0',
+      'v 0 0 0',
+      'f 1 2 3 4 5 6',
+      '',
+    ].join('\n');
+    const concave = readObj(bytes(l));
+    expect(concave.positions.length / 9).toBe(4);
+    expect(area(concave.positions)).toBeCloseTo(5, 6);
+    // Every triangle keeps the polygon's winding (+z here), so flat normals agree.
+    for (let t = 0; t < concave.positions.length; t += 9) {
+      const p = concave.positions;
+      const z =
+        (p[t + 3] - p[t]) * (p[t + 7] - p[t + 1]) - (p[t + 4] - p[t + 1]) * (p[t + 6] - p[t]);
+      expect(z).toBeGreaterThan(0);
+    }
+    const quad = readObj(bytes(QUAD_AND_TRIANGLE));
+    expect(quad.positions.length / 9).toBe(3);
+    // Corner tokens travel with their corners: v/vt/vn survive a rewrite.
+    const vns = [1, 2, 3, 4, 5, 6].map((k) => `vn 0 0 ${k}`).join('\n');
+    const withVn = l.replace('f 1 2 3 4 5 6', `${vns}\nf 1//1 2//2 3//3 4//4 5//5 6//6`);
+    const scanned = scanObj(withVn);
+    expect(scanned.text).toMatch(/f \d\/\/\d \d\/\/\d \d\/\/\d/);
+    const model = readObj(bytes(withVn));
+    expect(model.normals).not.toBeNull();
+    expect(model.positions.length / 9).toBe(4);
+    // Each vertex got the normal its own corner named.
+    const n = model.normals as Float32Array;
+    const p = model.positions;
+    const wantZ = new Map([
+      ['3,0', 1],
+      ['3,1', 2],
+      ['1,1', 3],
+      ['1,3', 4],
+      ['0,3', 5],
+      ['0,0', 6],
+    ]);
+    for (let v = 0; v < p.length / 3; v++) {
+      expect(n[v * 3 + 2]).toBe(wantZ.get(`${p[v * 3]},${p[v * 3 + 1]}`));
+    }
+  });
+
+  it('makes one part named for the o line when every o is followed by a g', () => {
+    const text = `${TRI}o Body\ng front\nf 1 2 3\ng back\nf 1 3 2\n`;
+    const parts = readObj(bytes(text)).parts.children;
+    expect(parts.map((p) => [p.name, p.ranges])).toEqual([['Body', [[0, 2]]]]);
+  });
+
+  it('keeps the default color on faces before the first usemtl', () => {
+    const fallback: [number, number, number] = [0.1, 0.2, 0.3];
+    const mtl = [{ name: 'a.mtl', text: 'newmtl Red\nKd 1 0 0\n' }];
+    const model = readObj(bytes(`${TRI}f 1 2 3\nusemtl Red\nf 1 3 2\n`), {
+      mtl,
+      fallbackColor: fallback,
+    });
+    const c = Array.from(model.colors as Float32Array);
+    expect(c.slice(0, 3).map((x) => +x.toFixed(4))).toEqual(fallback);
+    expect(c.slice(9, 12)).toEqual([1, 0, 0]);
+    // A material named like the stand-in is still a material of the file.
+    const named = readObj(bytes(`${TRI}f 1 2 3\nusemtl markcopy-initial-material\nf 1 3 2\n`), {
+      mtl: [{ name: 'a.mtl', text: 'newmtl markcopy-initial-material\nKd 0 1 0\n' }],
+      fallbackColor: fallback,
+    });
+    const nc = Array.from(named.colors as Float32Array);
+    expect(nc.slice(0, 3).map((x) => +x.toFixed(4))).toEqual(fallback);
+    expect(nc.slice(9, 12)).toEqual([0, 1, 0]);
+  });
+
+  it('skips a UTF-8 byte order mark before the first mtllib line', () => {
+    expect(objMtlNames(bytes('﻿mtllib sample.mtl\nv 0 0 0\n'))).toEqual(['sample.mtl']);
+  });
+});

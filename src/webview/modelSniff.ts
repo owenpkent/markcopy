@@ -113,7 +113,8 @@ export const MAX_MTL_BYTES = 4 * 1024 * 1024;
 export function objMtlNames(bytes: Uint8Array): string[] {
   const names: string[] = [];
   const key = 'mtllib';
-  let i = 0;
+  // A UTF-8 byte order mark is not part of the first line's keyword.
+  let i = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
   while (i < bytes.length && names.length <= MAX_MTL_FILES) {
     let end = bytes.indexOf(0x0a, i);
     if (end < 0) {

@@ -10,6 +10,13 @@
 // index is checked against what was declared so far. Past the caps, or on an
 // index that points nowhere, the file is refused before OBJLoader runs.
 //
+// The same pass rewrites the text the loader gets, so what is counted is what it
+// reads: `l` and `p` records are dropped (the loader would turn the whole object
+// into lines or points), a concave polygon is split into triangles here (the
+// loader only fans from the first corner, which fills outside it), and faces that
+// come before the first `usemtl` get a material of their own so they keep the
+// default color.
+//
 // Colors come from the .mtl files the host read from the OBJ's own folder and
 // sent along (see src/stlEditor.ts): parsed HERE, never by MTLLoader, and every
 // texture line is ignored, so nothing is fetched and the CSP stays as it is. A
@@ -49,16 +56,6 @@ export interface ObjSegment {
   object: number;
   objectName: string;
   triangles: number;
-  /** An `l` or `p` line is in it: OBJLoader then makes lines or points, not a mesh. */
-  linesOrPoints: boolean;
-}
-
-export interface ObjScan {
-  vertices: number;
-  triangles: number;
-  /** Every face vertex has a normal that exists, so the file's `vn` can be kept. */
-  allNormals: boolean;
-  segments: ObjSegment[];
 }
 
 export interface ScanLimits {
@@ -70,23 +67,122 @@ export interface ScanLimits {
 }
 
 const OBJECT_LINE = /^[og]\s*(.+)?/;
+// The loader reads the first word of a v line with split(/\s+/), so `v\f1 2 3`
+// is a vertex and a bare `v` (no coordinates) is one too, with NaN coordinates.
+const DECLARATION = /^(v|vn|vt)(?:\s|$)/;
+
+// Past this many corners a concave polygon is fanned, not ear-clipped: earcut
+// can take quadratic time, and a line is capped at MAX_OBJ_LINE anyway.
+const MAX_EARCUT_CORNERS = 4096;
 
 // A face index resolved against the count declared so far, as OBJLoader does:
-// 1 is the first, -1 the last. Zero and anything out of range point at nothing.
-function resolves(token: string, count: number): boolean {
+// 1 is the first, -1 the last. Zero and anything out of range point at nothing
+// (returns -1), else the zero-based vertex.
+function resolveIndex(token: string, count: number): number {
   const index = parseInt(token, 10);
   if (!Number.isFinite(index) || index === 0) {
-    return false;
+    return -1;
   }
   const at = index > 0 ? index - 1 : index + count;
-  return at >= 0 && at < count;
+  return at >= 0 && at < count ? at : -1;
 }
 
 /**
- * Counts what a file holds and checks every face index, without building
- * anything per vertex. Throws ObjError past a cap or on a bad index. The loop
- * mirrors OBJLoader's line classification (by first character) so that the
- * counts are what the loader will go on to allocate.
+ * Splits an n-gon (n >= 4) whose fan from the first corner would be wrong, into
+ * n-2 triangles, as indices into its corners. Null when the fan is right (every
+ * fan triangle turns the same way as the polygon, which for a simple polygon
+ * means the fan tiles it exactly), so a convex face is left as the loader reads it.
+ * Otherwise the polygon is projected along the dominant axis of its Newell normal
+ * and ear-clipped with three's ShapeUtils; each triangle keeps the polygon's
+ * winding. Falls back to the fan when earcut gives anything but n-2 triangles.
+ */
+function triangulatePolygon(
+  corners: ReadonlyArray<number>,
+  positions: Float32Array,
+): Array<[number, number, number]> | null {
+  const n = corners.length;
+  const at = (corner: number, axis: number): number => positions[corners[corner] * 3 + axis];
+  // Newell normal.
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const [x0, y0, z0] = [at(i, 0), at(i, 1), at(i, 2)];
+    const [x1, y1, z1] = [at(j, 0), at(j, 1), at(j, 2)];
+    nx += (y0 - y1) * (z0 + z1);
+    ny += (z0 - z1) * (x0 + x1);
+    nz += (x0 - x1) * (y0 + y1);
+  }
+  if (![nx, ny, nz].every(Number.isFinite)) {
+    return null;
+  }
+  const ax = Math.abs(nx);
+  const ay = Math.abs(ny);
+  const az = Math.abs(nz);
+  if (Math.max(ax, ay, az) === 0) {
+    return null; // no area to fill
+  }
+  // Drop the dominant axis; the other two keep the right-hand order.
+  const [u, v] = ax >= ay && ax >= az ? [1, 2] : ay >= az ? [2, 0] : [0, 1];
+  const pts = Array.from({ length: n }, (_, i) => new THREE.Vector2(at(i, u), at(i, v)));
+  const cross = (a: number, b: number, c: number): number =>
+    (pts[b].x - pts[a].x) * (pts[c].y - pts[a].y) - (pts[b].y - pts[a].y) * (pts[c].x - pts[a].x);
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+  }
+  if (area === 0) {
+    return null;
+  }
+  let fanIsRight = true;
+  for (let i = 1; i < n - 1 && fanIsRight; i++) {
+    fanIsRight = cross(0, i, i + 1) * area >= 0;
+  }
+  if (fanIsRight || n > MAX_EARCUT_CORNERS) {
+    return null;
+  }
+  // triangulateShape drops a closing duplicate of the first point from what it is
+  // given, which would not change the indices of the rest; it gets a copy anyway.
+  const faces = THREE.ShapeUtils.triangulateShape(
+    pts.map((p) => p.clone()),
+    [],
+  );
+  if (faces.length !== n - 2) {
+    return null;
+  }
+  return faces.map(([a, b, c]): [number, number, number] =>
+    cross(a, b, c) * area < 0 ? [a, c, b] : [a, b, c],
+  );
+}
+
+/** What scanObj found, and the text OBJLoader should be given. */
+export interface ObjScan {
+  vertices: number;
+  triangles: number;
+  /** Every face vertex has a normal that exists, so the file's `vn` can be kept. */
+  allNormals: boolean;
+  segments: ObjSegment[];
+  /**
+   * The file as the loader must read it: no `l` or `p` lines, concave n-gons
+   * already split into triangles, and when faces come before the first `usemtl`
+   * a first `usemtl` line naming `initialMaterial`.
+   */
+  text: string;
+  /**
+   * The name of that injected material, or null when none was needed. It is a
+   * name that occurs nowhere in the file, so no `usemtl` of the file can use it.
+   */
+  initialMaterial: string | null;
+}
+
+/**
+ * Counts what a file holds, checks every face index and rewrites the text for
+ * the loader, without building anything per face. Throws ObjError past a cap or
+ * on a bad index. The loop mirrors OBJLoader's line classification (by first
+ * character, tokens split on /\s+/) so that the counts are what the loader will
+ * go on to allocate: the loader is given the rewritten text, not the original.
  */
 export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   const maxTriangles = limits.maxTriangles ?? MAX_TRIANGLES;
@@ -95,13 +191,20 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   const maxObjects = limits.maxObjects ?? MAX_OBJ_OBJECTS;
   const maxUses = limits.maxMaterialUses ?? MAX_OBJ_MATERIAL_USES;
 
-  // The loader joins a line continued with a backslash before it splits lines.
+  // The loader turns CRLF into LF and joins a line continued with a backslash
+  // before it splits lines, once each. It will do both again on the rewritten
+  // text, so they are done to a fixed point here: what is left has no \r before a
+  // newline, and a backslash left before one (from `\\` then a newline) gets a
+  // space after it, so the loader reads it as the plain line it is.
   let source = text;
   if (source.indexOf('\r\n') !== -1) {
-    source = source.replace(/\r\n/g, '\n');
+    source = source.replace(/\r+\n/g, '\n');
   }
   if (source.indexOf('\\\n') !== -1) {
     source = source.replace(/\\\n/g, '');
+    if (source.indexOf('\\\n') !== -1) {
+      source = source.replace(/\\\n/g, '\\ \n');
+    }
   }
 
   let vertices = 0;
@@ -109,24 +212,33 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   let uvs = 0;
   let triangles = 0;
   let uses = 0;
+  const materialNames = new Set<string>();
   let allNormals = true;
+  let facesBeforeMaterial = false;
+  // Positions of the vertices declared so far, for ear clipping a concave face.
+  let positions = new Float32Array(3 * 256);
   // The loader's implicit first object: the first o or g line renames it.
-  let current: ObjSegment = {
-    kind: '',
-    name: '',
-    object: 0,
-    objectName: '',
-    triangles: 0,
-    linesOrPoints: false,
-  };
+  let current: ObjSegment = { kind: '', name: '', object: 0, objectName: '', triangles: 0 };
   let named = false;
   let objects = 0;
   let objectName = '';
   const segments: ObjSegment[] = [current];
 
+  // The rewritten text: the source, minus what is dropped, plus what replaces it.
+  const chunks: string[] = [];
+  let copied = 0;
+  const rewrite = (lineStart: number, lineEnd: number, replacement: string): void => {
+    chunks.push(source.slice(copied, lineStart));
+    if (replacement.length > 0) {
+      chunks.push(replacement, '\n');
+    }
+    copied = lineEnd + 1;
+  };
+
   let at = 0;
   let lineNo = 0;
   while (at <= source.length) {
+    const lineStart = at;
     let end = source.indexOf('\n', at);
     if (end < 0) {
       end = source.length;
@@ -147,12 +259,12 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
       continue;
     }
     if (first === 'v') {
-      const kind = line.slice(1, 2);
-      if (kind === ' ' || kind === '\t') {
+      const kind = DECLARATION.exec(line)?.[1];
+      if (kind === 'v') {
         vertices++;
-      } else if (kind === 'n' && /\s/.test(line.charAt(2))) {
+      } else if (kind === 'vn') {
         normals++;
-      } else if (kind === 't' && /\s/.test(line.charAt(2))) {
+      } else if (kind === 'vt') {
         uvs++;
       }
       if (vertices > maxVertices || normals > maxVertices || uvs > maxVertices) {
@@ -160,20 +272,34 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
           `This OBJ file declares more than ${maxVertices.toLocaleString()} vertices, normals or texture coordinates, past what the preview opens.`,
         );
       }
+      if (kind === 'v') {
+        if (vertices * 3 > positions.length) {
+          const grown = new Float32Array(positions.length * 2);
+          grown.set(positions);
+          positions = grown;
+        }
+        const data = line.split(/\s+/, 4);
+        positions[vertices * 3 - 3] = parseFloat(data[1]);
+        positions[vertices * 3 - 2] = parseFloat(data[2]);
+        positions[vertices * 3 - 1] = parseFloat(data[3]);
+      }
     } else if (first === 'f') {
       const tokens = line
         .slice(1)
         .trim()
         .split(/\s+/)
         .filter((t) => t.length > 0);
+      const corners: number[] = [];
       for (const token of tokens) {
         const parts = token.split('/');
-        if (!resolves(parts[0], vertices)) {
+        const corner = resolveIndex(parts[0], vertices);
+        if (corner < 0) {
           throw new ObjError(
             `Line ${lineNo} of this OBJ file uses a vertex that has not been declared (${token.slice(0, 40)}).`,
           );
         }
-        if (parts[2] === undefined || parts[2] === '' || !resolves(parts[2], normals)) {
+        corners.push(corner);
+        if (parts[2] === undefined || parts[2] === '' || resolveIndex(parts[2], normals) < 0) {
           allNormals = false;
         }
       }
@@ -185,8 +311,23 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
           `This OBJ file has more than ${maxTriangles.toLocaleString()} triangles, past what the preview opens.`,
         );
       }
+      if (n > 0 && uses === 0) {
+        facesBeforeMaterial = true;
+      }
+      if (tokens.length >= 4) {
+        const split = triangulatePolygon(corners, positions);
+        if (split !== null) {
+          rewrite(
+            lineStart,
+            end,
+            split.map(([a, b, c]) => `f ${tokens[a]} ${tokens[b]} ${tokens[c]}`).join('\n'),
+          );
+        }
+      }
     } else if (first === 'l' || first === 'p') {
-      current.linesOrPoints = true;
+      // The loader would turn the whole object into lines or points, and a line
+      // is allocated without any count here: neither reaches it.
+      rewrite(lineStart, end, '');
     } else {
       const object = OBJECT_LINE.exec(line);
       if (object !== null) {
@@ -205,14 +346,7 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
           current.object = objects;
           current.objectName = objectName;
         } else {
-          current = {
-            kind,
-            name,
-            object: objects,
-            objectName,
-            triangles: 0,
-            linesOrPoints: false,
-          };
+          current = { kind, name, object: objects, objectName, triangles: 0 };
           segments.push(current);
         }
         if (segments.length > maxObjects) {
@@ -220,14 +354,43 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
             `This OBJ file has more than ${maxObjects.toLocaleString()} objects and groups, past what the preview opens.`,
           );
         }
-      } else if (line.startsWith('usemtl ') && ++uses > maxUses) {
-        throw new ObjError(
-          `This OBJ file switches material more than ${maxUses.toLocaleString()} times, past what the preview opens.`,
-        );
+      } else if (line.startsWith('usemtl ')) {
+        if (++uses > maxUses) {
+          throw new ObjError(
+            `This OBJ file switches material more than ${maxUses.toLocaleString()} times, past what the preview opens.`,
+          );
+        }
+        // The loader's own rule for the name.
+        materialNames.add(line.substring(7).trim());
       }
     }
   }
-  return { vertices, triangles, allNormals: allNormals && triangles > 0, segments };
+
+  // Faces before the first usemtl: the loader would give them the first
+  // material's color after the fact. A material of their own, named with
+  // a name no usemtl line of the file uses (a set lookup per try, bounded by
+  // the usemtl cap, never a scan of the text), keeps the default color on them.
+  let initialMaterial: string | null = null;
+  if (facesBeforeMaterial) {
+    initialMaterial = 'markcopy-initial-material';
+    for (let i = 1; materialNames.has(initialMaterial); i++) {
+      initialMaterial = `markcopy-initial-material-${i}`;
+    }
+  }
+  const rewritten =
+    chunks.length === 0 && initialMaterial === null
+      ? source
+      : (initialMaterial === null ? '' : `usemtl ${initialMaterial}\n`) +
+        chunks.join('') +
+        source.slice(copied);
+  return {
+    vertices,
+    triangles,
+    allNormals: allNormals && triangles > 0,
+    segments,
+    text: rewritten,
+    initialMaterial,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +515,7 @@ export function readObj(bytes: Uint8Array, options: ObjOptions = {}): ObjModel {
   }
 
   // Bounded above. Only now does anything get allocated per vertex.
-  const group = quietly(() => new OBJLoader().parse(text));
+  const group = quietly(() => new OBJLoader().parse(scan.text));
   const meshes = group.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh === true);
 
   const total = meshes.reduce((n, m) => n + m.geometry.getAttribute('position').count / 3, 0);
@@ -365,7 +528,7 @@ export function readObj(bytes: Uint8Array, options: ObjOptions = {}): ObjModel {
 
   // Which o or g line each mesh came from: the segments that make a mesh, in
   // order. If the loader disagrees (it should not), each mesh is its own part.
-  const expected = scan.segments.filter((s) => s.triangles > 0 && !s.linesOrPoints);
+  const expected = scan.segments.filter((s) => s.triangles > 0);
   const mapped =
     expected.length === meshes.length &&
     expected.every((s, i) => s.triangles === meshes[i].geometry.getAttribute('position').count / 3);
@@ -380,7 +543,6 @@ export function readObj(bytes: Uint8Array, options: ObjOptions = {}): ObjModel {
           object: 0,
           objectName: '',
           triangles: 0,
-          linesOrPoints: false,
         },
   }));
 
@@ -429,7 +591,8 @@ export function readObj(bytes: Uint8Array, options: ObjOptions = {}): ObjModel {
         }))
       : [{ start: 0, count: vertexCount, name: list[0]?.name ?? '' }];
     for (const range of ranges) {
-      const rgb = colorOf(range.name);
+      // Faces before the first usemtl: no material, so the default color.
+      const rgb = range.name === scan.initialMaterial ? null : colorOf(range.name);
       if (!rgb) {
         continue;
       }
@@ -482,7 +645,8 @@ export function objParts(
   total: number,
 ): PartNode {
   const builder = new PartTreeBuilder(total);
-  const byObject = pieces.some((p) => p.segment?.kind === 'o');
+  // By recorded identity: an `o` line followed at once by a `g` has no mesh of its own.
+  const byObject = pieces.some((p) => (p.segment?.object ?? 0) > 0);
   const byGroup = !byObject && pieces.some((p) => p.segment?.kind === 'g');
   if (!byObject && !byGroup) {
     builder.leaf('', [[0, total]]);
