@@ -204,7 +204,9 @@ A sliced `.gcode.3mf` from Bambu Studio or OrcaSlicer holds G-code and no mesh. 
 
 The overlay shows the slicer's summary from the file, for example `Sliced print`, `1h 3m · 16.92 g · PETG`, `280 layers, 87,372 moves`, the toolpath's extents, and the grid and bed lines. **Copy as > Print Summary** copies those lines with the file name. Wireframe, Section and Compare with do not apply. The reader handles G0/G1 moves, G2/G3 arcs, absolute and relative extrusion and positioning, and the layer markers of Bambu/Orca, PrusaSlicer and Cura. At most 4,000,000 segments are kept, and the overlay says when a file had more.
 
-Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 of N`); travel moves are not drawn; lines are one pixel wide, with no extrusion width.
+Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 of N`); travel moves are drawn only as playback shows them (see below); lines are one pixel wide, with no extrusion width.
+
+A **playback bar** sits above the layer bar for any G-code: a **Play** button (a real button, labelled Play or Pause), a position slider over the moves, a speed list (30 moves/s up to 1M moves/s, preset so the whole print takes about a minute or less), a **Travel moves** checkbox and a readout such as `Move 12,345 / 1,926,000 · External perimeter`. A blue cone marks the nozzle. The print opens paused with everything drawn; Play from the end starts over, and **Space** toggles play and pause when the viewer has focus (not while a button, list or text field has it). Nothing is drawn past the playhead, so the print builds up as it plays, and the playhead and the layer bar are one position: playing into a new layer moves the layer bar, and picking a layer shows the print through that layer and parks the nozzle at its end. **Travel moves** draws the non-extruding moves of the current layer up to the nozzle as thin dim lines; arc moves (`G2`/`G3`, including a full circle or a spiral Z-hop) are drawn as arcs. In a narrow editor the bar wraps onto two rows, with the readout on its own row.
 
 ### Plain G-code files
 

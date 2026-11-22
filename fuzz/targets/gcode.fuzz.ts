@@ -13,6 +13,14 @@ export function fuzz(data: Buffer): void {
   if (path.layerEnd.length !== path.layerZ.length) {
     throw new Error('layerEnd and layerZ differ in length');
   }
+  if (path.travel.length !== path.travelMoves * 6 || path.travelAt.length !== path.travelMoves) {
+    throw new Error('travel arrays do not match the travel count');
+  }
+  for (let i = 1; i < path.travelMoves; i++) {
+    if (path.travelAt[i] < path.travelAt[i - 1] || path.travelAt[i] > path.segments) {
+      throw new Error('travelAt is not ascending within the segment count');
+    }
+  }
   let last = 0;
   for (const end of path.layerEnd) {
     if (end < last || end > path.segments) {

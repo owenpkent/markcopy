@@ -4,8 +4,9 @@
 // A `.gcode.3mf` from Bambu Studio or OrcaSlicer is a zip holding
 // `Metadata/plate_1.gcode` and `Metadata/slice_info.config`. The G-code is a
 // list of machine moves, and only the ones that deposit plastic belong in a
-// toolpath preview: travel moves and retractions are left out, because drawing
-// them buries the part under a tangle of hops.
+// toolpath preview: travel moves are kept apart from the extrusion (compactly,
+// for the viewer's playback, which draws them only near the nozzle), because
+// drawing them all buries the part under a tangle of hops.
 //
 // The text can be over 100 MB and is untrusted, so the scan never builds a line
 // array (that would double the memory), reads the handful of letter/number
@@ -29,6 +30,12 @@ export interface Toolpath {
   /** Per layer, its Z height. */
   layerZ: Float32Array;
   segments: number;
+  /** Six floats per travel (non-extruding) move, like `positions`. Ordered by file position, so `travelAt` is ascending. */
+  travel: Float32Array;
+  /** Per travel move, how many extrusion segments came before it. A move with value n is made just before segment n is drawn. */
+  travelAt: Uint32Array;
+  /** The number of travel moves kept (`travelAt.length`). */
+  travelMoves: number;
   /** True when maxSegments was reached and the rest of the file was dropped. */
   truncated: boolean;
   /** Bounds of the kept segments; all zeros when there are none. */
@@ -41,6 +48,9 @@ export interface Toolpath {
  * 100 MB budget, and it is already more lines than a GPU draws usefully at once.
  */
 export const MAX_SEGMENTS = 4_000_000;
+
+/** The most travel moves kept, 28 bytes each. Past it the rest are left out; the extrusion is unaffected. */
+export const MAX_TRAVEL = 1_000_000;
 
 // An arc is cut into chords of about this length. Finer than a nozzle width, so
 // a circle reads as a circle without spending segments the eye cannot resolve.
@@ -142,13 +152,23 @@ function readNumber(text: string, i: number, end: number): number {
 }
 
 /** Turn G-code text into extrusion line segments. Never throws. */
-export function parseGcode(text: string, options: { maxSegments?: number } = {}): Toolpath {
+export function parseGcode(
+  text: string,
+  options: { maxSegments?: number; maxTravel?: number } = {},
+): Toolpath {
   const requested = options.maxSegments;
   const maxSegments =
     typeof requested === 'number' && Number.isFinite(requested)
       ? Math.max(0, Math.min(Math.floor(requested), MAX_SEGMENTS))
       : MAX_SEGMENTS;
+  const requestedTravel = options.maxTravel;
+  const maxTravel =
+    typeof requestedTravel === 'number' && Number.isFinite(requestedTravel)
+      ? Math.max(0, Math.min(Math.floor(requestedTravel), MAX_TRAVEL))
+      : MAX_TRAVEL;
 
+  const travel = new Grow(Float32Array, 6 * 256);
+  const travelAt = new Grow(Uint32Array, 256);
   const positions = new Grow(Float32Array, 6 * 1024);
   const featureIdx = new Grow(Uint8Array, 1024);
   const layerEnd = new Grow(Uint32Array, 256);
@@ -196,6 +216,8 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
       featureIdx.length = 0;
       layerEnd.length = 0;
       layerZ.length = 0;
+      travel.length = 0;
+      travelAt.length = 0;
       layerOpen = false;
       features = ['Unknown'];
       featureIndex = new Map();
@@ -246,6 +268,20 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     count++;
   };
 
+  const travelChord = (
+    x1: number,
+    y1: number,
+    z1: number,
+    x2: number,
+    y2: number,
+    z2: number,
+  ): void => {
+    if (travelAt.length < maxTravel) {
+      travel.push6(x1, y1, z1, x2, y2, z2);
+      travelAt.push(count);
+    }
+  };
+
   const arc = (
     x0: number,
     y0: number,
@@ -256,10 +292,11 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     i: number,
     j: number,
     clockwise: boolean,
+    sink: typeof emit = emit,
   ): void => {
     const radius = Math.hypot(i, j);
     if (!(radius > 1e-6)) {
-      emit(x0, y0, z0, x1, y1, z1);
+      sink(x0, y0, z0, x1, y1, z1);
       return;
     }
     const cx = x0 + i;
@@ -280,6 +317,9 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     let py = y0;
     let pz = z0;
     for (let k = 1; k <= chords && !done; k++) {
+      if (sink === travelChord && travelAt.length >= maxTravel) {
+        break;
+      }
       let nx = x1;
       let ny = y1;
       let nz = z1;
@@ -290,7 +330,7 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
         ny = cy + radius * Math.sin(angle);
         nz = z0 + (z1 - z0) * t;
       }
-      emit(px, py, pz, nx, ny, nz);
+      sink(px, py, pz, nx, ny, nz);
       px = nx;
       py = ny;
       pz = nz;
@@ -447,9 +487,27 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
           } else {
             emit(x, y, z, nx, ny, nz);
           }
-        } else if (extruding && cmdNumber >= 2 && (hasI || hasJ)) {
+        } else if (!extruding && (nx !== x || ny !== y || nz !== z)) {
+          if (cmdNumber >= 2) {
+            arc(x, y, z, nx, ny, nz, hasI ? wi : 0, hasJ ? wj : 0, cmdNumber === 2, travelChord);
+          } else if (travelAt.length < maxTravel) {
+            travel.push6(x, y, z, nx, ny, nz);
+            travelAt.push(count);
+          }
+        } else if (cmdNumber >= 2 && (hasI || hasJ)) {
           // A full circle ends where it began, so it did not move.
-          arc(x, y, z, nx, ny, nz, hasI ? wi : 0, hasJ ? wj : 0, cmdNumber === 2);
+          arc(
+            x,
+            y,
+            z,
+            nx,
+            ny,
+            nz,
+            hasI ? wi : 0,
+            hasJ ? wj : 0,
+            cmdNumber === 2,
+            extruding ? emit : travelChord,
+          );
         }
         x = nx;
         y = ny;
@@ -503,6 +561,9 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     layerEnd: layerEnd.finish(),
     layerZ: layerZ.finish(),
     segments,
+    travel: travel.finish(),
+    travelAt: travelAt.finish(),
+    travelMoves: travelAt.length,
     truncated,
     min,
     max,

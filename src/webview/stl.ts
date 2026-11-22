@@ -25,6 +25,20 @@ import { ThreeMfError, UNIT_LABELS, read3mf } from './threeMf';
 import { GlbError, readGlb } from './glb';
 import { StepError, loadStepEngine, readStep } from './step';
 import {
+  SPEEDS,
+  advance,
+  clampHead,
+  defaultSpeedIndex,
+  headForLayer,
+  layerAtHead,
+  layerStart,
+  nozzleAt,
+  speedLabel,
+  spaceTogglesPlayback,
+  stepSpeed,
+  travelRange,
+} from './gcodePlayback';
+import {
   featureColor,
   formatDuration,
   parseGcode,
@@ -162,6 +176,12 @@ const layersEl = byId<HTMLDivElement>('layers');
 const layerRange = byId<HTMLInputElement>('layer-range');
 const layerLabel = byId<HTMLSpanElement>('layer-label');
 const layerOnly = byId<HTMLInputElement>('layer-only');
+const playbackEl = byId<HTMLDivElement>('playback');
+const playToggle = byId<HTMLButtonElement>('play-toggle');
+const playRange = byId<HTMLInputElement>('play-range');
+const playSpeed = byId<HTMLSelectElement>('play-speed');
+const playTravel = byId<HTMLInputElement>('play-travel');
+const playLabel = byId<HTMLSpanElement>('play-label');
 
 const partsPanel = createPartsPanel(
   {
@@ -265,6 +285,10 @@ interface Model {
   // CSS color that stands for this model in the readouts and the section.
   swatch: string;
   toolpath?: Toolpath;
+  // What playback draws over a toolpath: the travel moves (null when the file
+  // has none) and the nozzle marker. Both are children of `object`, so they
+  // share its transform and go with it.
+  playback?: { travel: THREE.LineSegments | null; nozzle: THREE.Mesh };
   // The slicer's print summary, a line per fact, for a sliced print file.
   summary?: string[];
   // A plain G-code file, as opposed to a sliced print file. It shows no bed
@@ -472,6 +496,46 @@ function tint(material: THREE.MeshStandardMaterial): void {
   material.emissiveIntensity = 0.55;
 }
 
+// The travel moves share the parser's own array (no copy) and are drawn dim;
+// the nozzle is a cone in file coordinates (Z up) with its tip at the origin,
+// scaled to the print, so setting its position puts the tip on the nozzle.
+function playbackParts(path: Toolpath): NonNullable<Model['playback']> {
+  let travel: THREE.LineSegments | null = null;
+  if (path.travelMoves > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(path.travel, 3));
+    geometry.setDrawRange(0, 0);
+    travel = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: 0x8b949e,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      }),
+    );
+    travel.visible = false;
+    // The bounds of the whole list are not the bounds of what is drawn.
+    travel.frustumCulled = false;
+  }
+  const size = Math.max(
+    Math.hypot(path.max[0] - path.min[0], path.max[1] - path.min[1], path.max[2] - path.min[2]) /
+      60,
+    0.5,
+  );
+  const cone = new THREE.ConeGeometry(size * 0.35, size, 16);
+  // The cone's tip is +Y; turn it to point down -Z and slide the tip to the origin.
+  cone.rotateX(-Math.PI / 2);
+  cone.translate(0, 0, size / 2);
+  const nozzle = new THREE.Mesh(
+    cone,
+    new THREE.MeshBasicMaterial({ color: 0x2f81f7, depthTest: false }),
+  );
+  nozzle.renderOrder = 3;
+  nozzle.frustumCulled = false;
+  return { travel, nozzle };
+}
+
 function toolpathModel(
   name: string,
   gcode: string,
@@ -518,10 +582,20 @@ function toolpathModel(
     `${path.layerEnd.length.toLocaleString()} layers, ${path.segments.toLocaleString()} moves` +
       (path.truncated ? ' (more than the preview draws; the rest is left out)' : ''),
   );
+  const object = new THREE.LineSegments(
+    geometry,
+    new THREE.LineBasicMaterial({ vertexColors: true }),
+  );
+  const playback = playbackParts(path);
+  object.add(playback.nozzle);
+  if (playback.travel) {
+    object.add(playback.travel);
+  }
   return {
     name,
     kind: 'toolpath',
-    object: new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ vertexColors: true })),
+    object,
+    playback,
     positions: new Float32Array(0),
     box: { min: path.min, max: path.max },
     dims: sizeText({ min: path.min, max: path.max }, 'mm'),
@@ -729,6 +803,12 @@ async function build(
 function disposeModel(model: Model): void {
   modelRoot.remove(model.object);
   model.object.geometry.dispose();
+  if (model.playback) {
+    model.playback.nozzle.geometry.dispose();
+    (model.playback.nozzle.material as THREE.Material).dispose();
+    model.playback.travel?.geometry.dispose();
+    (model.playback.travel?.material as THREE.Material | undefined)?.dispose();
+  }
   if (model.materials) {
     for (const material of Object.values(model.materials)) {
       material.dispose();
@@ -1128,10 +1208,17 @@ function showPrimary(built: Built): void {
   btnWireframe.disabled = sliced;
   btnSection.disabled = sliced;
   layersEl.hidden = !sliced;
+  playbackEl.hidden = !sliced;
+  stopPlayback();
   if (built.toolpath) {
     layerRange.max = String(built.toolpath.layerEnd.length);
     layerOnly.checked = false;
-    setLayer(built.toolpath.layerEnd.length);
+    // Paused at the end, the whole print shown; playback never starts itself.
+    playRange.max = String(built.toolpath.segments);
+    playSpeed.selectedIndex = defaultSpeedIndex(built.toolpath.segments);
+    playTravel.disabled = !built.playback?.travel;
+    playTravel.checked = false;
+    setHead(built.toolpath.segments);
   }
   place();
   fitView();
@@ -1420,26 +1507,163 @@ btnParts.addEventListener('click', togglePartsPanel);
 // ---------------------------------------------------------------------------
 let layer = 1;
 
+// The playhead is the one piece of state: how many extrusion segments are
+// drawn, as a float (the nozzle sits part way along the next one). The layer
+// bar and the playback slider are both views of it, and every change goes
+// through setHead, which moves the draw ranges, the nozzle and both readouts.
+let head = 0;
+let playing = false;
+let lastTick = 0;
+const nozzlePoint = { x: 0, y: 0, z: 0 };
+const travelSpan = { first: 0, last: 0 };
+// What the readouts last said, so a frame that changes nothing they show does
+// not touch the DOM.
+let shownMove = -1;
+let shownLayer = -1;
+
 function setLayer(value: number): void {
+  const path = primary?.toolpath;
+  if (!path) {
+    return;
+  }
+  // Picking a layer shows the print through that layer, as the layer bar
+  // always has, and parks the nozzle at its end; playing carries on from there.
+  setHead(headForLayer(path.layerEnd, value));
+}
+
+function setHead(value: number): void {
   const path = primary?.toolpath;
   if (!primary || !path) {
     return;
   }
+  head = clampHead(value, path.segments);
   const count = path.layerEnd.length;
-  layer = Math.min(Math.max(Math.round(value) || 1, 1), count);
-  layerRange.value = String(layer);
-  const end = path.layerEnd[layer - 1];
-  const start = layerOnly.checked && layer > 1 ? path.layerEnd[layer - 2] : 0;
+  layer = layerAtHead(path.layerEnd, head);
+  const drawn = Math.floor(head);
+  const start = layerOnly.checked ? layerStart(path.layerEnd, layer) : 0;
   // Two vertices per segment.
-  primary.object.geometry.setDrawRange(start * 2, (end - start) * 2);
-  layerLabel.textContent = `Layer ${layer} / ${count} · Z ${fmt(path.layerZ[layer - 1])} mm`;
+  primary.object.geometry.setDrawRange(start * 2, Math.max(drawn - start, 0) * 2);
+
+  const parts = primary.playback;
+  if (parts) {
+    nozzleAt(path.positions, path.segments, head, nozzlePoint);
+    parts.nozzle.position.set(nozzlePoint.x, nozzlePoint.y, nozzlePoint.z);
+    if (parts.travel) {
+      parts.travel.visible = playTravel.checked;
+      if (playTravel.checked) {
+        travelRange(path.travelAt, path.travelMoves, path.layerEnd, head, travelSpan);
+        parts.travel.geometry.setDrawRange(
+          travelSpan.first * 2,
+          (travelSpan.last - travelSpan.first) * 2,
+        );
+      }
+    }
+  }
+
+  if (layer !== shownLayer) {
+    shownLayer = layer;
+    layerRange.value = String(layer);
+    layerLabel.textContent = `Layer ${layer} / ${count} · Z ${fmt(path.layerZ[layer - 1])} mm`;
+  }
+  if (drawn !== shownMove) {
+    shownMove = drawn;
+    playRange.value = String(drawn);
+    const last = Math.min(Math.max(drawn - 1, 0), path.segments - 1);
+    const feature = path.features[path.feature[last]];
+    const text = `Move ${drawn.toLocaleString()} / ${path.segments.toLocaleString()}`;
+    playRange.setAttribute('aria-valuetext', text);
+    playLabel.textContent = feature && feature !== 'Unknown' ? `${text} · ${feature}` : text;
+  }
   invalidate();
 }
 
+function setPlaying(on: boolean): void {
+  const path = primary?.toolpath;
+  if (on && (!path || path.segments === 0)) {
+    return;
+  }
+  if (on && path && head >= path.segments) {
+    // Playing from the end starts over.
+    setHead(0);
+  }
+  playing = on;
+  lastTick = performance.now();
+  syncPlayButton();
+}
+
+function syncPlayButton(): void {
+  const on = playing;
+  playToggle.textContent = on ? '❚❚' : '▶';
+  playToggle.title = on ? 'Pause (Space)' : 'Play (Space)';
+  playToggle.setAttribute('aria-label', on ? 'Pause' : 'Play');
+  playToggle.classList.toggle('active', on);
+}
+
+function stopPlayback(): void {
+  if (playing) {
+    setPlaying(false);
+  }
+  syncPlayButton();
+  shownMove = -1;
+  shownLayer = -1;
+}
+
+// Called once per frame by the render loop. A multiply, a clamp and the
+// draw-range updates in setHead: nothing here depends on the number of moves.
+function tickPlayback(): void {
+  if (!playing) {
+    return;
+  }
+  const path = primary?.toolpath;
+  const now = performance.now();
+  // A long stall (a hidden tab) is a pause, not a leap.
+  const seconds = Math.min((now - lastTick) / 1000, 0.1);
+  lastTick = now;
+  if (!path) {
+    setPlaying(false);
+    return;
+  }
+  setHead(advance(head, seconds, SPEEDS[playSpeed.selectedIndex] ?? SPEEDS[0], path.segments));
+  if (head >= path.segments) {
+    setPlaying(false);
+  }
+}
+
+for (const speed of SPEEDS) {
+  const option = document.createElement('option');
+  option.textContent = speedLabel(speed);
+  playSpeed.appendChild(option);
+}
+
 layerRange.addEventListener('input', () => setLayer(Number(layerRange.value)));
-layerOnly.addEventListener('change', () => setLayer(layer));
+layerOnly.addEventListener('change', () => setHead(head));
 byId('layer-down').addEventListener('click', () => setLayer(layer - 1));
 byId('layer-up').addEventListener('click', () => setLayer(layer + 1));
+playToggle.addEventListener('click', () => setPlaying(!playing));
+playRange.addEventListener('input', () => setHead(Number(playRange.value)));
+playTravel.addEventListener('change', () => setHead(head));
+playSpeed.addEventListener('keydown', (e) => {
+  // Left and right step the speed; up and down keep the select's own behaviour.
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    playSpeed.selectedIndex = stepSpeed(playSpeed.selectedIndex, e.key === 'ArrowLeft' ? -1 : 1);
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) {
+    return;
+  }
+  // The shared context menu handles Space on its own rows.
+  const target = e.target as HTMLElement | null;
+  if (e.defaultPrevented || target?.closest?.('.mc-menu, [role^="menuitem"]')) {
+    return;
+  }
+  if (playbackEl.hidden || !spaceTogglesPlayback(target)) {
+    return;
+  }
+  e.preventDefault();
+  setPlaying(!playing);
+});
 
 // ---------------------------------------------------------------------------
 // Section
@@ -2094,6 +2318,7 @@ function animate(): void {
   if (sectionStale) {
     applySection();
   }
+  tickPlayback();
   // OrbitControls returns true while damping is still easing the camera, so the
   // loop keeps painting through the tail of a drag and then stops.
   if (controls.update() || needsRender) {

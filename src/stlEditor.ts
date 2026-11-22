@@ -358,20 +358,27 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     color: var(--mc-stl-fg);
     border-left: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
   }
-  #section[hidden], #layers[hidden] { display: none; }
+  #section[hidden], #layers[hidden], #playback[hidden] { display: none; }
   #section .mc-stl-bar { padding: 8px; flex-wrap: wrap; }
   #section-canvas { flex: 1; min-height: 0; width: 100%; color: var(--mc-stl-fg); cursor: crosshair; }
   #section-readout { padding: 6px 10px 10px; font-size: 12px; min-height: 3.2em; font-variant-numeric: tabular-nums; }
   #section-readout .row { white-space: pre-wrap; }
   #section-readout .hint { opacity: 0.65; margin-top: 2px; }
-  #layers {
+  /* The playback and layer bars stack in one column, bottom right and clear of
+     the readout in the bottom left, so the playback bar sits above the layer bar
+     whatever height either has when it wraps in a narrow editor. */
+  #bars {
     position: fixed;
-    /* Bottom right, clear of the readout in the bottom left. */
     right: 8px;
     bottom: 8px;
     z-index: 10;
     width: min(560px, calc(100vw - 320px));
     min-width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #layers, #playback {
     box-sizing: border-box;
     padding: 5px 8px;
     border-radius: 4px;
@@ -379,7 +386,26 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     background: var(--vscode-editorWidget-background, rgba(0, 0, 0, 0.4));
     border: 1px solid var(--vscode-widget-border, transparent);
   }
-  #layers label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  /* The controls wrap; the readout takes a row of its own and is clipped with an
+     ellipsis rather than pushed off screen. */
+  #playback { flex-wrap: wrap; }
+  #play-range { flex: 1 1 80px; min-width: 60px; }
+  #play-speed {
+    height: 26px;
+    color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+    background: var(--vscode-dropdown-background, var(--vscode-input-background));
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+    border-radius: 3px;
+  }
+  #play-label {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  #layers label, #playback label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   #layer-label { white-space: nowrap; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -393,12 +419,21 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="btn-parts" title="Parts: the model's parts and assemblies" aria-label="Toggle parts" aria-pressed="false" hidden>&#9776;</button>
   </div>
   <div id="stats"></div>
+  <div id="bars">
+  <div id="playback" class="mc-stl-bar" role="group" aria-label="Nozzle playback" hidden>
+    <button id="play-toggle" title="Play (Space)" aria-label="Play">&#9654;</button>
+    <input id="play-range" type="range" min="0" max="1" step="1" value="0" aria-label="Playback position" />
+    <select id="play-speed" title="Playback speed" aria-label="Playback speed"></select>
+    <label><input id="play-travel" type="checkbox" /> Travel moves</label>
+    <span id="play-label"></span>
+  </div>
   <div id="layers" class="mc-stl-bar" hidden>
     <button id="layer-down" title="Previous layer" aria-label="Previous layer">&#8722;</button>
     <input id="layer-range" type="range" min="1" max="1" step="1" value="1" aria-label="Layer" />
     <button id="layer-up" title="Next layer" aria-label="Next layer">+</button>
     <span id="layer-label"></span>
     <label><input id="layer-only" type="checkbox" /> This layer only</label>
+  </div>
   </div>
   <div id="parts" hidden>
     <div class="mc-parts-head">
