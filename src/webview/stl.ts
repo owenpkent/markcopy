@@ -42,6 +42,22 @@ import {
   type Bounds,
 } from './meshSection';
 import { createSectionView, type SectionOutline } from './stlSection';
+import {
+  HIDDEN,
+  HIGHLIGHT,
+  NORMAL,
+  buildPartModel,
+  drawGroups,
+  findLeaf,
+  leafBounds,
+  partsMarkdown,
+  stlPartTree,
+  type DrawState,
+  type PartItem,
+  type PartModel,
+  type PartNode,
+} from './parts';
+import { createPartsPanel } from './partsPanel';
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -112,6 +128,8 @@ const btnFit = byId<HTMLButtonElement>('btn-fit');
 const btnWireframe = byId<HTMLButtonElement>('btn-wireframe');
 const btnGrid = byId<HTMLButtonElement>('btn-grid');
 const btnSection = byId<HTMLButtonElement>('btn-section');
+const btnParts = byId<HTMLButtonElement>('btn-parts');
+const partsEl = byId<HTMLDivElement>('parts');
 const menuEl = byId<HTMLDivElement>('mc-menu');
 const toastEl = byId<HTMLDivElement>('mc-toast');
 const sectionEl = byId<HTMLDivElement>('section');
@@ -125,6 +143,19 @@ const layersEl = byId<HTMLDivElement>('layers');
 const layerRange = byId<HTMLInputElement>('layer-range');
 const layerLabel = byId<HTMLSpanElement>('layer-label');
 const layerOnly = byId<HTMLInputElement>('layer-only');
+
+const partsPanel = createPartsPanel(
+  {
+    list: byId<HTMLDivElement>('parts-list'),
+    count: byId<HTMLSpanElement>('parts-count'),
+    showAll: byId<HTMLButtonElement>('parts-show-all'),
+  },
+  {
+    onChange: () => applyParts(),
+    onIsolate: (item) => frameParts(item),
+  },
+);
+byId('parts-close').addEventListener('click', () => setPartsOpen(false));
 
 const contextMenu = createMenu(menuEl);
 const sectionView = createSectionView(sectionCanvas, byId<HTMLDivElement>('section-readout'));
@@ -180,6 +211,18 @@ interface Model {
   name: string;
   kind: 'mesh' | 'toolpath';
   object: THREE.Mesh | THREE.LineSegments;
+  // A mesh's three looks, drawn through geometry groups (see applyParts): as is,
+  // hidden, and tinted for the selected part. `object.material` is `base`, or all
+  // three as an array while a part is hidden or selected. Wireframe and the
+  // section's clipping are set on every one.
+  materials?: {
+    base: THREE.MeshStandardMaterial;
+    hidden: THREE.MeshStandardMaterial;
+    highlight: THREE.MeshStandardMaterial;
+  };
+  // The parts tree: leaves are triangle ranges of `positions`. Absent for a
+  // toolpath.
+  parts?: PartNode;
   // A mesh's triangles, nine floats each, in file coordinates: what the section
   // tool cuts. Empty for a toolpath.
   positions: Float32Array;
@@ -291,6 +334,7 @@ function buildStl(name: string, raw: Uint8Array, color: THREE.Color, swatch: str
       mmPerUnit: 1,
       fixedZUp: false,
       colored: false,
+      parts: stlPartTree(geometry.groups, geometry.userData.groupNames, positions.length / 9),
     });
   } catch (err) {
     return `Could not parse this STL file (${String(err)}).`;
@@ -315,6 +359,7 @@ function build3mf(name: string, raw: Uint8Array, color: THREE.Color, swatch: str
       mmPerUnit: MM_PER_UNIT[content.unit] ?? 1,
       fixedZUp: true,
       colored: content.colors !== null,
+      parts: content.parts,
     });
   } catch (err) {
     return err instanceof ThreeMfError
@@ -342,6 +387,7 @@ function meshModel(
     fixedZUp: boolean;
     colored: boolean;
     keepNormals?: boolean;
+    parts: PartNode;
   },
 ): Model {
   const { unit, mmPerUnit, fixedZUp, colored: vertexColors } = about;
@@ -357,10 +403,16 @@ function meshModel(
     roughness: 0.7,
     wireframe: wireframeActive,
   });
+  const hidden = material.clone();
+  hidden.visible = false;
+  const highlight = material.clone();
+  tint(highlight);
   return {
     name,
     kind: 'mesh',
     object: new THREE.Mesh(geometry, material),
+    materials: { base: material, hidden, highlight },
+    parts: about.parts,
     positions,
     box: bounds(positions),
     triangles: Math.floor(positions.length / 9),
@@ -370,6 +422,17 @@ function meshModel(
     swatch,
     dims: sizeText(bounds(positions), unit),
   };
+}
+
+// The selected part's tint: the theme's accent as a glow over its own color.
+function tint(material: THREE.MeshStandardMaterial): void {
+  const accent = getComputedStyle(document.body).getPropertyValue('--mc-accent').trim();
+  try {
+    material.emissive.set(accent || '#4493f8');
+  } catch {
+    material.emissive.set('#4493f8');
+  }
+  material.emissiveIntensity = 0.55;
 }
 
 // Colors for the slicer's feature names, close to the ones Bambu Studio and
@@ -478,6 +541,7 @@ async function buildGlb(
       fixedZUp: true,
       colored: true,
       keepNormals: true,
+      parts: content.parts,
     });
   } catch (err) {
     return err instanceof GlbError ? err.message : `Could not read this GLB file (${String(err)}).`;
@@ -513,6 +577,7 @@ async function buildStep(
       fixedZUp: false,
       colored: content.colored,
       keepNormals: true,
+      parts: content.parts,
     });
   } catch (err) {
     return err instanceof StepError
@@ -557,11 +622,28 @@ async function build(
 function disposeModel(model: Model): void {
   modelRoot.remove(model.object);
   model.object.geometry.dispose();
-  (model.object.material as THREE.Material).dispose();
+  if (model.materials) {
+    for (const material of Object.values(model.materials)) {
+      material.dispose();
+    }
+  } else {
+    (model.object.material as THREE.Material).dispose();
+  }
 }
 
+// The material a mesh is drawn with when nothing is hidden or selected.
 function meshMaterial(model: Model): THREE.MeshStandardMaterial | null {
-  return model.kind === 'mesh' ? (model.object.material as THREE.MeshStandardMaterial) : null;
+  return model.materials?.base ?? null;
+}
+
+// Every look of a mesh, for what has to hold for all of them (wireframe, the
+// section's clipping).
+function eachMaterial(model: Model, apply: (material: THREE.MeshStandardMaterial) => void): void {
+  if (model.materials) {
+    apply(model.materials.base);
+    apply(model.materials.hidden);
+    apply(model.materials.highlight);
+  }
 }
 
 function models(): Model[] {
@@ -713,18 +795,23 @@ function rebuildFloor(): void {
 // Frames the model from `preset`'s direction at the distance that fits its
 // bounding sphere. 'isometric' is the angle a freshly loaded model opens at.
 function fitView(preset: ViewPreset = 'isometric'): void {
-  const fovRadians = (camera.fov * Math.PI) / 180;
-  // A narrow viewport (the section panel open beside it) needs more distance
-  // for the same sphere than a wide one.
-  const narrow = Math.max(Math.min(1, aspect()), 0.2);
-  const distance = (boundingSphere.radius * 1.6) / Math.sin(fovRadians / 2) / narrow;
   const [dx, dy, dz] = VIEW_PRESETS[preset];
-  const direction = new THREE.Vector3(dx, dy, dz).normalize();
-  camera.position.copy(boundingSphere.center).addScaledVector(direction, distance);
+  frameSphere(boundingSphere.center, boundingSphere.radius, new THREE.Vector3(dx, dy, dz));
+}
+
+// Puts the camera `direction` away from `center`, far enough to hold a sphere of
+// `radius`.
+function frameSphere(center: THREE.Vector3, radius: number, direction: THREE.Vector3): void {
+  const fovRadians = (camera.fov * Math.PI) / 180;
+  // A narrow viewport (the section or parts panel open beside it) needs more
+  // distance for the same sphere than a wide one.
+  const narrow = Math.max(Math.min(1, aspect()), 0.2);
+  const distance = (radius * 1.6) / Math.sin(fovRadians / 2) / narrow;
+  camera.position.copy(center).addScaledVector(direction.clone().normalize(), distance);
   camera.near = Math.max(distance / 100, 0.01);
-  camera.far = distance * 100 + boundingSphere.radius * 4;
+  camera.far = distance * 100 + radius * 4;
   camera.updateProjectionMatrix();
-  controls.target.copy(boundingSphere.center);
+  controls.target.copy(center);
   controls.update();
   invalidate();
 }
@@ -735,10 +822,7 @@ function setWireframe(on: boolean): void {
   wireframeActive = on;
   btnWireframe.classList.toggle('active', on);
   for (const model of models()) {
-    const material = meshMaterial(model);
-    if (material) {
-      material.wireframe = on;
-    }
+    eachMaterial(model, (material) => (material.wireframe = on));
   }
   invalidate();
 }
@@ -891,6 +975,7 @@ function showPrimary(built: Built): void {
   other = null;
   primary = built;
   modelRoot.add(built.object);
+  setParts(built);
 
   const sliced = built.kind === 'toolpath';
   // A sliced print is a position on a bed, so the bed is part of the picture.
@@ -997,6 +1082,195 @@ function toggleVisible(model: Model): void {
 }
 
 // ---------------------------------------------------------------------------
+// Parts
+// ---------------------------------------------------------------------------
+// The tree beside the model. Hiding, isolating and highlighting a part only
+// re-draws ranges of the one merged geometry: the groups below name the ranges
+// and the material each is drawn with, so the geometry is never rebuilt.
+//
+// What a hidden part leaves behind: the 3D view and the section cut (outline,
+// measurements and Copy as > Section Measurements). What it does not: the
+// model's bounds, so the grid, the print bed fit check, the dimensions, the
+// triangle count and the section's range stay those of the whole file, and
+// Compare with still lays the other model over the whole one.
+let partModel: PartModel | null = null;
+let partsOpen = false;
+// The triangles that are shown, for the section; rebuilt when visibility moves.
+let cutCache: Float32Array | null = null;
+
+function partsAvailable(): boolean {
+  return primary?.kind === 'mesh' && partModel !== null && partModel.leaves.length >= 2;
+}
+
+// Called when a model is loaded: a model of two or more parts opens the panel.
+function setParts(built: Model): void {
+  const model = built.parts && built.kind === 'mesh' ? buildPartModel(built.parts) : null;
+  partModel = model && model.leaves.length >= 1 ? model : null;
+  const multi = partModel !== null && partModel.leaves.length >= 2;
+  partsPanel.setModel(multi ? partModel : null);
+  cutCache = null;
+  btnParts.hidden = !multi;
+  // Starts every part shown; also drops the groups a multi-solid STL arrives with.
+  applyParts();
+  setPartsOpen(multi);
+}
+
+function setPartsOpen(on: boolean): void {
+  partsOpen = on && partsAvailable();
+  document.body.classList.toggle('mc-parts', partsOpen);
+  partsEl.hidden = !partsOpen;
+  btnParts.classList.toggle('active', partsOpen);
+  btnParts.setAttribute('aria-pressed', String(partsOpen));
+  onResize();
+}
+
+function togglePartsPanel(): void {
+  setPartsOpen(!partsOpen);
+}
+
+// Draw each part as the panel says: hidden parts not at all, the selected one
+// tinted. Adjacent ranges in one state are one group.
+function applyParts(): void {
+  if (!primary || primary.kind !== 'mesh' || !primary.materials) {
+    return;
+  }
+  const mesh = primary.object as THREE.Mesh;
+  const model = partsPanel.model();
+  const { base, hidden, highlight } = primary.materials;
+  const selection = partsPanel.selection();
+  cutCache = null;
+  mesh.geometry.clearGroups();
+  if (!model || (partsPanel.allVisible() && !selection)) {
+    mesh.material = base;
+  } else {
+    const stateOf = (leaf: number): DrawState =>
+      !partsPanel.isVisible(leaf)
+        ? HIDDEN
+        : selection && leaf >= selection[0] && leaf < selection[1]
+          ? HIGHLIGHT
+          : NORMAL;
+    for (const group of drawGroups(model.segments, stateOf, primary.triangles)) {
+      // Groups count vertices, three to a triangle.
+      mesh.geometry.addGroup(group.start * 3, group.count * 3, group.state);
+    }
+    mesh.material = [base, hidden, highlight];
+  }
+  if (sectionOn) {
+    applySection();
+  }
+  invalidate();
+}
+
+// The triangles the section cuts: every one, unless parts are hidden.
+function cutPositions(model: Model): Float32Array {
+  const parts = partsPanel.model();
+  if (model !== primary || !parts || partsPanel.allVisible()) {
+    return model.positions;
+  }
+  if (!cutCache) {
+    const groups = drawGroups(
+      parts.segments,
+      (leaf) => (partsPanel.isVisible(leaf) ? NORMAL : HIDDEN),
+      model.triangles,
+    ).filter((group) => group.state !== HIDDEN);
+    const out = new Float32Array(groups.reduce((sum, group) => sum + group.count * 9, 0));
+    let at = 0;
+    for (const group of groups) {
+      out.set(model.positions.subarray(group.start * 9, (group.start + group.count) * 9), at);
+      at += group.count * 9;
+    }
+    cutCache = out;
+  }
+  return cutCache;
+}
+
+// Isolate: bring the camera, from where it is, to the part's bounds.
+function frameParts(item: PartItem): void {
+  const parts = partsPanel.model();
+  if (!primary || !parts) {
+    return;
+  }
+  const box = leafBounds(primary.positions, parts.leaves, item.leafFrom, item.leafTo);
+  if (!box) {
+    return;
+  }
+  // The box is in file coordinates; modelRoot carries it to the viewer's.
+  const world = new THREE.Box3(
+    new THREE.Vector3(...box.min),
+    new THREE.Vector3(...box.max),
+  ).applyMatrix4(modelRoot.matrixWorld);
+  const sphere = world.getBoundingSphere(new THREE.Sphere());
+  const direction = camera.position.clone().sub(controls.target);
+  if (direction.lengthSq() < 1e-12) {
+    direction.set(1, 1, 1);
+  }
+  frameSphere(sphere.center, Math.max(sphere.radius, 1e-6), direction);
+}
+
+// Picking: a click that is not a drag. The first visible part under the pointer
+// is found by binary search over the leaf ranges (findLeaf).
+const raycaster = new THREE.Raycaster();
+const CLICK_SLOP = 4;
+
+function pickPart(clientX: number, clientY: number): number {
+  const parts = partsPanel.model();
+  // Three still intersects an invisible object: a model hidden by Compare with is not pickable.
+  if (!primary || primary.kind !== 'mesh' || !parts || !primary.object.visible) {
+    return -1;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return -1;
+  }
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1,
+  );
+  // The render loop only refreshes these when it paints, and a damped camera or
+  // a just-placed model may be ahead of the last frame.
+  camera.updateMatrixWorld();
+  modelRoot.updateMatrixWorld(true);
+  raycaster.setFromCamera(ndc, camera);
+  for (const hit of raycaster.intersectObject(primary.object, false)) {
+    if (hit.faceIndex === undefined || hit.faceIndex === null) {
+      continue;
+    }
+    // Not onto what the section has cut away.
+    if (sectionOn && clipPlane.distanceToPoint(hit.point) < 0) {
+      continue;
+    }
+    const leaf = findLeaf(parts.segments, hit.faceIndex);
+    // Not through a hidden part.
+    if (leaf >= 0 && partsPanel.isVisible(leaf)) {
+      return leaf;
+    }
+  }
+  return -1;
+}
+
+let pressedAt: { x: number; y: number } | null = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  pressedAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const down = pressedAt;
+  pressedAt = null;
+  if (!down || e.button !== 0 || !partsOpen) {
+    return;
+  }
+  if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > CLICK_SLOP) {
+    return;
+  }
+  const leaf = pickPart(e.clientX, e.clientY);
+  if (leaf >= 0) {
+    partsPanel.selectLeaf(leaf);
+  } else {
+    partsPanel.clearSelection();
+  }
+});
+btnParts.addEventListener('click', togglePartsPanel);
+
+// ---------------------------------------------------------------------------
 // Sliced prints: layer slider
 // ---------------------------------------------------------------------------
 let layer = 1;
@@ -1078,12 +1352,11 @@ function closeSection(): void {
   sectionOutlines = [];
   sectionView.setData(null);
   for (const model of models()) {
-    const material = meshMaterial(model);
-    if (material) {
+    eachMaterial(model, (material) => {
       material.clippingPlanes = null;
       material.side = THREE.FrontSide;
       material.needsUpdate = true;
-    }
+    });
   }
   onResize();
   if (primary) {
@@ -1158,15 +1431,17 @@ function applySection(): void {
       continue;
     }
     if (!material.clippingPlanes) {
-      material.clippingPlanes = [clipPlane];
-      // The cut opens the model, so its inside faces have to draw too.
-      material.side = THREE.DoubleSide;
-      material.needsUpdate = true;
+      eachMaterial(model, (each) => {
+        each.clippingPlanes = [clipPlane];
+        // The cut opens the model, so its inside faces have to draw too.
+        each.side = THREE.DoubleSide;
+        each.needsUpdate = true;
+      });
     }
     if (!model.object.visible) {
       continue;
     }
-    const segments = sectionSegments(model.positions, sectionAxis, sectionValue);
+    const segments = sectionSegments(cutPositions(model), sectionAxis, sectionValue);
     sectionOutlines.push({ label: model.name, color: model.swatch, segments });
 
     // The same outline in 3D, on the cut. Drawn over the model (no depth test)
@@ -1443,6 +1718,13 @@ function viewEntries(): MenuEntry[] {
     entries.push(
       { kind: 'checkbox', label: 'Wireframe', checked: wireframeActive, run: toggleWireframe },
       { kind: 'checkbox', label: 'Section', checked: sectionOn, run: toggleSection },
+      {
+        kind: 'checkbox',
+        label: 'Parts',
+        checked: partsOpen,
+        run: togglePartsPanel,
+        disabled: !partsAvailable(),
+      },
     );
   }
   entries.push(
@@ -1474,6 +1756,14 @@ function buildMenu(): MenuEntry[] {
   ];
   if (sectionOn) {
     menu.push({ kind: 'item', label: 'Copy Section as PNG', run: () => void copySectionPng() });
+  }
+  if (primary?.kind === 'mesh' && primary.parts) {
+    const tree = primary.parts;
+    menu.push({
+      kind: 'item',
+      label: 'Copy parts list',
+      run: () => copyText(partsMarkdown(tree), 'Copied parts list'),
+    });
   }
   menu.push(
     { kind: 'divider' },
@@ -1612,6 +1902,9 @@ function applyTheme(value: string): void {
   document.body.dataset.mcTheme = value;
   syncBackground();
   sectionView.redraw();
+  if (primary?.materials) {
+    tint(primary.materials.highlight);
+  }
 }
 
 window.addEventListener('message', (event: MessageEvent<HostMessage>) => {

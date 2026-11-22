@@ -17,7 +17,10 @@ import type * as StepModule from '../src/webview/step';
 
 // The scene the viewer last asked the renderer to draw, which is the way in to
 // the meshes and lines it built.
-const drawn = vi.hoisted(() => ({ scene: undefined as Three.Scene | undefined }));
+const drawn = vi.hoisted(() => ({
+  scene: undefined as Three.Scene | undefined,
+  controls: undefined as { target: Three.Vector3 } | undefined,
+}));
 
 // Holds the STEP engine back until a test lets it go, and counts the starts
 // that have finished, so a test can pile up requests behind a slow engine.
@@ -46,7 +49,12 @@ vi.mock('three/examples/jsm/controls/OrbitControls.js', async () => {
   const { Vector3 } = await vi.importActual<typeof Three>('three');
   class OrbitControls {
     target = new Vector3();
+    constructor(private camera: Three.Camera) {
+      drawn.controls = this;
+    }
+    // The real controls aim the camera at the target on every update.
     update(): boolean {
+      this.camera.lookAt(this.target);
       return false;
     }
   }
@@ -88,6 +96,7 @@ const BODY = `
     <button id="btn-wireframe"></button>
     <button id="btn-grid"></button>
     <button id="btn-section"></button>
+    <button id="btn-parts" hidden></button>
   </div>
   <div id="stats"></div>
   <div id="layers" hidden>
@@ -96,6 +105,12 @@ const BODY = `
     <button id="layer-up"></button>
     <span id="layer-label"></span>
     <input id="layer-only" type="checkbox" />
+  </div>
+  <div id="parts" hidden>
+    <span id="parts-count"></span>
+    <button id="parts-show-all"></button>
+    <button id="parts-close"></button>
+    <div id="parts-list"></div>
   </div>
   <div id="section" hidden>
     <button id="section-x"></button>
@@ -760,4 +775,370 @@ describe('3D viewer GLB and STEP', () => {
     send({ type: 'compare', format: 'step', name: 'sample.step', bytes: file('sample.step') });
     await vi.waitFor(() => expect(meshes()).toHaveLength(2), { timeout: 20000 });
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// The parts panel
+// ---------------------------------------------------------------------------
+// An ASCII STL of axis-aligned boxes, one `solid` each: the way a multi-part STL
+// carries its parts.
+function asciiBoxes(boxes: Array<[string, number[], number[]]>): string {
+  const out: string[] = [];
+  for (const [name, [x0, y0, z0], [x1, y1, z1]] of boxes) {
+    const v = [
+      [x0, y0, z0],
+      [x1, y0, z0],
+      [x1, y1, z0],
+      [x0, y1, z0],
+      [x0, y0, z1],
+      [x1, y0, z1],
+      [x1, y1, z1],
+      [x0, y1, z1],
+    ];
+    const faces = [
+      [0, 2, 1],
+      [0, 3, 2],
+      [4, 5, 6],
+      [4, 6, 7],
+      [0, 1, 5],
+      [0, 5, 4],
+      [1, 2, 6],
+      [1, 6, 5],
+      [2, 3, 7],
+      [2, 7, 6],
+      [3, 0, 4],
+      [3, 4, 7],
+    ];
+    out.push(`solid ${name}`);
+    for (const face of faces) {
+      out.push('facet normal 0 0 0', ' outer loop');
+      for (const index of face) {
+        out.push(`  vertex ${v[index].join(' ')}`);
+      }
+      out.push(' endloop', 'endfacet');
+    }
+    out.push(`endsolid ${name}`);
+  }
+  return Buffer.from(out.join('\n') + '\n').toString('base64');
+}
+
+const TWO_BOXES = (): string =>
+  asciiBoxes([
+    ['left', [0, 0, 0], [10, 10, 10]],
+    ['right', [20, 0, 0], [30, 10, 10]],
+  ]);
+
+const rows = () => [...document.querySelectorAll<HTMLElement>('#parts-list .mc-part-row')];
+const rowName = (row: HTMLElement) => row.querySelector('.mc-part-name')?.textContent;
+const rowsNamed = (name: string) => rows().filter((row) => rowName(row) === name);
+const rowNamed = (name: string, nth = 0) => rowsNamed(name)[nth];
+const showBox = (row: HTMLElement) => row.querySelector<HTMLInputElement>('input.mc-part-check')!;
+const selectedNames = () =>
+  rows()
+    .filter((row) => row.classList.contains('mc-part-selected'))
+    .map(rowName);
+const groupsOf = () =>
+  meshes()[0].geometry.groups.map((g) => [g.start / 3, g.count / 3, g.materialIndex]);
+
+function openMenuAt(): void {
+  document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+}
+function menuRow(label: string): HTMLElement | undefined {
+  return [...document.querySelectorAll<HTMLElement>('.mc-menu-item')].find(
+    (item) => item.textContent?.replace('✓', '').replace('▸', '').trim() === label,
+  );
+}
+
+/** Click every point of a grid over the viewport, collecting what each selects. */
+function sweep(): Set<string> {
+  const canvas = document.querySelector('#viewport canvas') as HTMLCanvasElement;
+  const found = new Set<string>();
+  for (let x = 20; x < 800; x += 40) {
+    for (let y = 15; y < 600; y += 30) {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: x, clientY: y }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: x, clientY: y }),
+      );
+      for (const name of selectedNames()) {
+        found.add(name as string);
+      }
+    }
+  }
+  return found;
+}
+
+describe('3D viewer parts panel', () => {
+  beforeEach(() => {
+    // Give the viewport a size, so the camera has an aspect and a click a place.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: () => 600,
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+  });
+
+  it('opens by itself for a model of two or more parts, one row each', async () => {
+    await import('../src/webview/stl');
+    expect(el('parts').hidden).toBe(true);
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    expect(el('parts').hidden).toBe(false);
+    expect(el<HTMLButtonElement>('btn-parts').hidden).toBe(false);
+    expect(document.body.classList.contains('mc-parts')).toBe(true);
+    expect(rows().map(rowName)).toEqual(['left', 'right']);
+    expect(el('parts-count').textContent).toBe('2 parts');
+    // Each row shows its triangle count, as text.
+    expect(rows().map((row) => row.querySelector('.mc-part-tris')?.textContent)).toEqual([
+      '12',
+      '12',
+    ]);
+    expect(meshes()[0].geometry.groups).toHaveLength(0);
+  });
+
+  it('stays out of the way of a one-part model, and the menu says why', async () => {
+    await import('../src/webview/stl');
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]) });
+    expect(el('parts').hidden).toBe(true);
+    expect(el<HTMLButtonElement>('btn-parts').hidden).toBe(true);
+    expect(document.body.classList.contains('mc-parts')).toBe(false);
+    openMenuAt();
+    menuRow('View')!.click();
+    const parts = menuRow('Parts')!;
+    expect(parts.getAttribute('aria-disabled')).toBe('true');
+    parts.click();
+    expect(el('parts').hidden).toBe(true);
+  });
+
+  it('opens and closes from the toolbar, the close button and View > Parts', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    el('btn-parts').click();
+    expect(el('parts').hidden).toBe(true);
+    expect(el('btn-parts').classList.contains('active')).toBe(false);
+    openMenuAt();
+    menuRow('View')!.click();
+    expect(menuRow('Parts')!.getAttribute('aria-disabled')).toBeNull();
+    menuRow('Parts')!.click();
+    expect(el('parts').hidden).toBe(false);
+    el('parts-close').click();
+    expect(el('parts').hidden).toBe(true);
+  });
+
+  it('hides a part by its checkbox, drawing the rest with one group each', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    showBox(rowNamed('left')).click();
+    expect(el('parts-count').textContent).toBe('1 of 2 shown');
+    expect(groupsOf()).toEqual([
+      [0, 12, 1],
+      [12, 12, 0],
+    ]);
+    expect(Array.isArray(meshes()[0].material)).toBe(true);
+    expect(showBox(rowNamed('left')).checked).toBe(false);
+    // Not rebuilt: the same geometry, the same triangles.
+    expect(meshes()[0].geometry.getAttribute('position').count).toBe(72);
+    el('parts-show-all').click();
+    expect(meshes()[0].geometry.groups).toHaveLength(0);
+    expect(Array.isArray(meshes()[0].material)).toBe(false);
+    expect(el<HTMLButtonElement>('parts-show-all').disabled).toBe(true);
+  });
+
+  it('selects a row on a click, tints that part, and clears on a second click', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    rowNamed('right').click();
+    expect(selectedNames()).toEqual(['right']);
+    expect(groupsOf()).toEqual([
+      [0, 12, 0],
+      [12, 12, 2],
+    ]);
+    const [base, hidden, highlight] = meshes()[0].material as Three.MeshStandardMaterial[];
+    expect(hidden.visible).toBe(false);
+    expect(highlight.emissive.getHex()).not.toBe(base.emissive.getHex());
+    rowNamed('right').click();
+    expect(selectedNames()).toEqual([]);
+    expect(meshes()[0].geometry.groups).toHaveLength(0);
+  });
+
+  it('isolates a part and frames the camera on its bounds, then shows all', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    const isolate = rowNamed('right').querySelector<HTMLButtonElement>('.mc-part-isolate')!;
+    isolate.click();
+    expect(groupsOf()).toEqual([
+      [0, 12, 1],
+      [12, 12, 0],
+    ]);
+    // The pair is centred on x = 15, so the right box (centre x = 25) sits 10 to
+    // the right of the middle, 5 up, and on the middle line in depth.
+    const target = drawn.controls!.target;
+    expect(target.x).toBeCloseTo(10, 4);
+    expect(target.y).toBeCloseTo(5, 4);
+    expect(target.z).toBeCloseTo(0, 4);
+    el('parts-show-all').click();
+    expect(meshes()[0].geometry.groups).toHaveLength(0);
+  });
+
+  it('picks a part with a click and not with a drag, and clears on empty space', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    expect(sweep()).toEqual(new Set(['left', 'right']));
+    // A click that lands on nothing clears the selection.
+    const canvas = document.querySelector('#viewport canvas') as HTMLCanvasElement;
+    rowNamed('left').click();
+    expect(selectedNames()).toEqual(['left']);
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 2, clientY: 2 }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { button: 0, clientX: 2, clientY: 2 }));
+    expect(selectedNames()).toEqual([]);
+    // A drag (the pointer moved more than a few pixels) selects nothing.
+    rowNamed('left').click();
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 400, clientY: 300 }));
+    canvas.dispatchEvent(new MouseEvent('pointerup', { button: 0, clientX: 460, clientY: 300 }));
+    expect(selectedNames()).toEqual(['left']);
+  });
+
+  it('does not pick through a hidden part', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    showBox(rowNamed('left')).click();
+    expect(sweep()).toEqual(new Set(['right']));
+  });
+
+  it('does not pick a model hidden by Compare with, and clears the selection', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    send({ type: 'compare', format: 'stl', name: 'c.stl', bytes: boxStl([0, 0, 0], [1, 1, 1]) });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    rowNamed('left').click();
+    expect(selectedNames()).toEqual(['left']);
+    openMenuAt();
+    [...document.querySelectorAll<HTMLElement>('.mc-menu-item')]
+      .find((item) => (item.textContent ?? '').startsWith('Compare with'))
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    menuRow('Show two.stl')!.click();
+    expect(meshes()[0].visible).toBe(false);
+    expect(sweep()).toEqual(new Set());
+    expect(selectedNames()).toEqual([]);
+  });
+
+  it('cuts only the parts that are shown', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    el('btn-section').click();
+    // Two boxes at Z = 5: eight sides of two triangles, two vertices each.
+    expect(sectionOutlines()).toEqual([32]);
+    showBox(rowNamed('left')).click();
+    expect(sectionOutlines()).toEqual([16]);
+    el('parts-show-all').click();
+    expect(sectionOutlines()).toEqual([32]);
+  });
+
+  it('copies the parts list as a Markdown table from the menu', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    let copied = '';
+    (document as unknown as { execCommand: () => boolean }).execCommand = () => {
+      const event = new Event('copy', { cancelable: true });
+      Object.assign(event, { clipboardData: { setData: (_t: string, v: string) => (copied = v) } });
+      document.dispatchEvent(event);
+      return true;
+    };
+    openMenuAt();
+    menuRow('Copy parts list')!.click();
+    expect(copied).toBe(
+      [
+        '| Part | Assembly | Qty | Triangles |',
+        '| --- | --- | ---: | ---: |',
+        '| left |  | 1 | 12 |',
+        '| right |  | 1 | 12 |',
+      ].join('\n'),
+    );
+    expect(el('mc-toast').textContent).toBe('Copied parts list');
+  });
+
+  describe('with the sample assembly', () => {
+    const assembly = () =>
+      readFileSync(join(__dirname, '..', 'sample-assembly.step')).toString('base64');
+    async function openAssembly(): Promise<void> {
+      await import('../src/webview/stl');
+      load({
+        format: 'step',
+        name: 'sample-assembly.step',
+        bytes: assembly(),
+        stepEngineUri: 'webview:/media/occt-import-js.wasm.gz',
+      });
+      await vi.waitFor(() => expect(rows().length).toBeGreaterThan(0), { timeout: 20000 });
+    }
+
+    it('shows the tree, with the repeated peg as one row of quantity 2', async () => {
+      await openAssembly();
+      expect(rows().map(rowName)).toEqual(['Demo assembly', 'Mounting kit', 'Plate', 'Peg']);
+      expect(rowNamed('Peg').querySelector('.mc-part-qty')?.textContent).toBe('x2');
+      expect(el('parts-count').textContent).toBe('3 parts');
+      // The row opens onto its two instances.
+      rowNamed('Peg').querySelector<HTMLButtonElement>('.mc-part-toggle')!.click();
+      expect(rowsNamed('Peg')).toHaveLength(3);
+    }, 30000);
+
+    it('cascades an assembly checkbox to its children, with a mixed state between', async () => {
+      await openAssembly();
+      showBox(rowNamed('Mounting kit')).click();
+      expect(groupsOf()).toEqual([[0, 36, 1]]);
+      expect(rows().every((row) => !showBox(row).checked)).toBe(true);
+      // Showing the pegs shows both instances; the plate stays hidden.
+      showBox(rowNamed('Peg')).click();
+      expect(groupsOf()).toEqual([
+        [0, 12, 1],
+        [12, 24, 0],
+      ]);
+      expect(showBox(rowNamed('Peg')).checked).toBe(true);
+      expect(showBox(rowNamed('Mounting kit')).indeterminate).toBe(true);
+      expect(showBox(rowNamed('Demo assembly')).indeterminate).toBe(true);
+      expect(showBox(rowNamed('Plate')).checked).toBe(false);
+      // Checking the mixed assembly shows everything.
+      showBox(rowNamed('Demo assembly')).click();
+      expect(meshes()[0].geometry.groups).toHaveLength(0);
+    }, 30000);
+
+    it('keeps keyboard focus on the disclosure button after it is activated', async () => {
+      await openAssembly();
+      const toggle = () =>
+        rowNamed('Mounting kit').querySelector<HTMLButtonElement>('.mc-part-toggle')!;
+      // Collapse, then expand again: both replace every row.
+      for (const label of ['Collapse Mounting kit', 'Expand Mounting kit']) {
+        const before = toggle();
+        before.focus();
+        expect(document.activeElement).toBe(before);
+        expect(before.getAttribute('aria-label')).toBe(label);
+        before.click();
+        expect(before.isConnected).toBe(false);
+        expect(document.activeElement).toBe(toggle());
+      }
+    }, 30000);
+
+    it('selects the row of a picked part, opening the assembly that holds it', async () => {
+      await openAssembly();
+      // Fold the whole tree away, then pick: the row must come back.
+      rowNamed('Demo assembly').querySelector<HTMLButtonElement>('.mc-part-toggle')!.click();
+      expect(rows().map(rowName)).toEqual(['Demo assembly']);
+      const found = sweep();
+      expect(found.has('Plate') || found.has('Peg')).toBe(true);
+      expect(rowsNamed('Mounting kit')).toHaveLength(1);
+    }, 30000);
+  });
 });

@@ -233,8 +233,10 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--mc-stl-bg); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
   #viewport { position: fixed; inset: 0; }
-  /* The section panel takes the right of the window and the 3D view the rest. */
-  body.mc-section #viewport { right: 46%; }
+  /* The dock on the right of the window (Section, and Parts, stacked above it) takes
+     --mc-dock-w and the 3D view the rest. */
+  body { --mc-dock-w: 46%; }
+  body.mc-section #viewport { right: var(--mc-dock-w); }
   #viewport canvas { display: block; outline: none; }
   #toolbar { position: fixed; top: 8px; left: 8px; z-index: 10; display: flex; gap: 6px; }
   #toolbar button {
@@ -310,7 +312,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 46%;
+    width: var(--mc-dock-w);
     z-index: 5;
     display: flex;
     flex-direction: column;
@@ -351,6 +353,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="btn-wireframe" title="Toggle wireframe" aria-label="Toggle wireframe">&#9638;</button>
     <button id="btn-grid" title="Toggle grid" aria-label="Toggle grid">&#8862;</button>
     <button id="btn-section" title="Section: cut the model and measure it" aria-label="Toggle section">&#9707;</button>
+    <button id="btn-parts" title="Parts: the model's parts and assemblies" aria-label="Toggle parts" aria-pressed="false" hidden>&#9776;</button>
   </div>
   <div id="stats"></div>
   <div id="layers" class="mc-stl-bar" hidden>
@@ -359,6 +362,15 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="layer-up" title="Next layer" aria-label="Next layer">+</button>
     <span id="layer-label"></span>
     <label><input id="layer-only" type="checkbox" /> This layer only</label>
+  </div>
+  <div id="parts" hidden>
+    <div class="mc-parts-head">
+      <span class="mc-parts-title">Parts</span>
+      <span id="parts-count"></span>
+      <button id="parts-show-all" title="Show every part" aria-label="Show all parts">Show all</button>
+      <button id="parts-close" title="Close the parts panel" aria-label="Close the parts panel">&#10005;</button>
+    </div>
+    <div id="parts-list" role="tree" aria-label="Parts"></div>
   </div>
   <div id="section" hidden>
     <div class="mc-stl-bar">

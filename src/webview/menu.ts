@@ -16,7 +16,13 @@ export type MenuEntry =
   | { kind: 'submenu'; label: string; entries: MenuEntry[] }
   | { kind: 'label'; label: string }
   | { kind: 'divider' }
-  | { kind: 'radio' | 'checkbox'; label: string; checked: boolean; run: () => void };
+  | {
+      kind: 'radio' | 'checkbox';
+      label: string;
+      checked: boolean;
+      run: () => void;
+      disabled?: boolean;
+    };
 
 let restoringFocus = false;
 
@@ -266,6 +272,10 @@ export function createMenu(root: HTMLDivElement): MenuController {
       const text = document.createElement('span');
       text.textContent = entry.label;
       el.append(check, text);
+      if (entry.disabled) {
+        el.classList.add('mc-menu-item--disabled');
+        el.setAttribute('aria-disabled', 'true');
+      }
     } else if (entry.kind === 'submenu') {
       el.className = 'mc-menu-item mc-menu-item--submenu';
       el.setAttribute('role', 'menuitem');
@@ -323,7 +333,7 @@ export function createMenu(root: HTMLDivElement): MenuController {
         focusFirst(panels[depth + 1]);
         return;
       }
-      if (entry.kind === 'item' && entry.disabled) {
+      if (entry.disabled) {
         // Nothing to run, and the menu stays open: closing it would read as the
         // action having been taken.
         return;

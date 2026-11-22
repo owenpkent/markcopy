@@ -173,6 +173,25 @@ To measure, point at the flat drawing. A crosshair appears; the horizontal and v
 
 A section is not available for a sliced print (the button is disabled).
 
+### Parts and assemblies
+
+A model with two or more parts opens with a **Parts** panel in the dock on the right, the same width as the Section panel, and the 3D view takes the rest. With Section open too, Parts sits above Section in the one dock (each scrolls on its own), so the 3D view is no narrower than with Section alone. A STEP file brings its assembly tree, a GLB its node hierarchy (a node with several materials is still one part, and copies placed by `EXT_mesh_gpu_instancing` are one part per copy; an unnamed node takes its mesh's name), a 3MF its build items, objects and components, and an ASCII STL with several `solid <name>` blocks one part per solid. Any other STL is one part, and a sliced `.gcode.3mf` has no model, so neither shows the panel. Unnamed nodes are called `Part 1`, `Assembly 1` and so on.
+
+Every control is a visible button or checkbox at least 44 px square, so nothing needs a double-click or the keyboard (though a double-click on a row, the arrow keys, Enter and Space work as shortcuts):
+
+- **The arrow** at the left of a row opens or closes an assembly.
+- **The checkbox** shows or hides the part. An assembly's checkbox does the same for everything under it, and shows a mixed state when only some of its parts are shown.
+- **Click a row** to select it: that part is tinted in the 3D view and the rest is left as it is. Click it again to clear. A row shows its name, its triangle count, and `x2` when siblings with the same name and the same triangle count repeat under one assembly: they are one row with a quantity, and the arrow opens it onto the instances (the triangle count of a quantity row is one instance's).
+- **Isolate** shows only that part and moves the camera, from where it is, to frame the part.
+- **Show all** in the header shows every part again. The header also counts the parts (`12 parts`, or `3 of 12 shown`).
+- **Click a part in the 3D view** (a click, not a drag, so orbiting never selects) to select its row: its assemblies open and the row scrolls into view. Click empty space to clear the selection. A hidden part cannot be picked, and neither can the part of a model a section has cut away.
+
+The panel opens by itself for two or more parts. The toolbar button (the one after Section) and **View > Parts** open and close it, and so does the close button in its header; with one part the button is hidden and **View > Parts** is greyed out. Hiding a part leaves the 3D view and the section cut (its outline and measurements), so a section across an assembly shows only the parts that are shown. It does not change the model's bounds: the grid, the print bed fit check, the dimensions, the triangle count and the section's range stay those of the whole file, and Compare with still overlays the other model on the whole one.
+
+Right-click > **Copy parts list** puts a Markdown table on the clipboard, `| Part | Assembly | Qty | Triangles |`, one row per distinct part with the path of assemblies above it joined by `/`, and and Markdown or HTML characters in a name (`<M6>`, `**Retainer**`, a pipe, a backslash) escaped so each name pastes and renders as the literal text. It lists every part whether or not it is shown.
+
+A file's names are cut to 200 characters with control and direction-override characters removed. A model with more than 20,000 nodes keeps the first 20,000 and gathers the rest under one `More parts` row, which hides, isolates and selects as a unit; nesting deeper than 64 levels is flattened into the 64th.
+
 ### Comparing versions
 
 Right-click > **Compare with** lists up to 12 other `.stl`, `.3mf`, `.glb`, `.step` and `.stp` files found near the open one: the same folder, its `versions` subfolder, and the parent folder when the open file is itself inside a `versions` folder. They are ordered by how much of the name they share with the open file (numbers compared as numbers, a `_current` suffix ignored), so the previous version is at the top. **Browse…** opens a file picker for anything else.
@@ -204,8 +223,8 @@ A `.step` or `.stp` (ISO 10303-21, any AP) opens in the same viewer. Solids are 
 **Right-click** (not drag) for the menu; a right-drag pans and does not open it. Everything in it is reachable with the pointer.
 
 - **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle. **Copy Section as PNG** is added at the top while a section is open.
-- **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print), plus the section measurements while a section is open.
-- **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Grid and Print Bed checkboxes (the first three match the toolbar), plus **Up Axis > Z / Y** for an STL (not shown for the formats that fix their own).
+- **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print), plus the section measurements while a section is open. **Copy parts list** (top level) copies the parts as a Markdown table.
+- **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Parts, Grid and Print Bed checkboxes (Wireframe, Section, Parts and Grid match the toolbar), plus **Up Axis > Z / Y** for an STL (not shown for the formats that fix their own).
 - **Compare with** lists nearby models to overlay (above), then Show, Hide and Stop Comparing.
 - **Preferences > Theme** sets `markcopy.theme`.
 - **Open in Default App** and **Reveal in File Explorer** act on the file.

@@ -2886,3 +2886,184 @@ body.mc-audio .mc-audio-grid dd {
   white-space: pre-wrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- 3D viewer: parts and assembly tree ------------------------------------
+   The panel beside the model (src/webview/partsPanel.ts). It uses the same
+   palette variables as the rest of the previews, so the auto, light, dark and
+   green themes all apply. Every control is at least 44 px square. */
+/* The panel shares the right-hand dock with Section: the same width
+   (--mc-dock-w, set with the section panel in src/stlEditor.ts), so the 3D view
+   is as wide with Parts open as with Section open, and with both open the two
+   stack, Parts above and Section below, each scrolling on its own. */
+body.mc-parts #viewport {
+  right: var(--mc-dock-w, 46%);
+}
+#parts {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--mc-dock-w, 46%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  background: var(--mc-stl-bg, var(--mc-bg));
+  color: var(--mc-stl-fg, var(--mc-fg));
+  border-left: 1px solid var(--mc-border);
+  font-size: 13px;
+}
+body.mc-parts.mc-section #parts {
+  bottom: 50%;
+  border-bottom: 1px solid var(--mc-border);
+}
+body.mc-parts.mc-section #section {
+  top: 50%;
+}
+#parts[hidden] {
+  display: none;
+}
+.mc-parts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--mc-border);
+}
+.mc-parts-title {
+  font-weight: 600;
+}
+#parts-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--mc-muted-fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#parts button,
+#parts .mc-part-showbox {
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+#parts button:hover:not(:disabled) {
+  background: var(--mc-row-hover);
+}
+#parts button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#parts button:focus-visible,
+.mc-part-row:focus-visible {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: -2px;
+}
+#parts-show-all {
+  border-color: var(--mc-accent);
+  color: var(--mc-accent);
+}
+#parts-close {
+  font-size: 16px;
+}
+#parts-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.mc-part-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding-right: 6px;
+  padding-left: calc(var(--mc-depth, 0) * 16px);
+  border-bottom: 1px solid var(--mc-border);
+  cursor: pointer;
+}
+.mc-part-row:nth-child(even) {
+  background: color-mix(in srgb, var(--mc-row-alt) 45%, transparent);
+}
+.mc-part-row:hover {
+  background: var(--mc-row-hover);
+}
+.mc-part-row.mc-part-selected {
+  background: color-mix(in srgb, var(--mc-accent) 26%, transparent);
+  box-shadow: inset 3px 0 0 var(--mc-accent);
+}
+.mc-part-row.mc-part-off .mc-part-name,
+.mc-part-row.mc-part-off .mc-part-tris,
+.mc-part-row.mc-part-off .mc-part-qty {
+  opacity: 0.5;
+}
+#parts .mc-part-toggle {
+  flex: none;
+  width: 44px;
+  padding: 0;
+  border-color: transparent;
+}
+#parts .mc-part-toggle.mc-part-leaf {
+  visibility: hidden;
+}
+#parts .mc-part-showbox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  border-color: transparent;
+}
+.mc-part-check {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--mc-accent);
+}
+.mc-part-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-part-qty,
+.mc-part-tris {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--mc-muted-fg);
+}
+.mc-part-qty {
+  color: var(--mc-accent);
+}
+.mc-part-tris {
+  min-width: 4.5em;
+  text-align: right;
+}
+#parts .mc-part-isolate {
+  flex: none;
+  font-size: 12px;
+}
+/* The toolbar button keeps its look but a 44 px hit area, like the panel's controls. */
+#btn-parts {
+  position: relative;
+}
+#btn-parts::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+#btn-parts[hidden] {
+  display: none;
+}

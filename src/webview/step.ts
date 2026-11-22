@@ -11,6 +11,7 @@
 import occtimportjs from 'occt-import-js';
 import { stepHeaderProblem } from './modelSniff';
 import { MAX_TRIANGLES } from './stlInfo';
+import { PartTreeBuilder, type PartNode } from './parts';
 
 /** A STEP file the viewer cannot show; the message is for the person. */
 export class StepError extends Error {}
@@ -26,8 +27,16 @@ export interface OcctMesh {
   index: { array: ArrayLike<number> };
 }
 
+/** A node of the assembly tree: `meshes` index the result's `meshes`. */
+export interface OcctNode {
+  name?: string;
+  meshes?: number[];
+  children?: OcctNode[];
+}
+
 export interface OcctResult {
   success: boolean;
+  root?: OcctNode;
   meshes?: OcctMesh[];
 }
 
@@ -52,6 +61,8 @@ export interface StepModel {
   normals: Float32Array | null;
   /** Whether the file colored anything; false means colors is all the fallback. */
   colored: boolean;
+  /** The assembly tree: leaves are triangle ranges of `positions`. */
+  parts: PartNode;
 }
 
 export interface StepOptions {
@@ -86,7 +97,16 @@ export function readStep(
       'The STEP engine could not read this file. It may be damaged or use a part of STEP it does not support.',
     );
   }
-  const meshes = (result.meshes ?? []).filter((m) => m?.index?.array?.length >= 3);
+  // `root` refers to meshes by their place in the engine's own list, so keep
+  // that index while dropping the ones with nothing to draw.
+  const all = result.meshes ?? [];
+  const keep: number[] = [];
+  all.forEach((m, i) => {
+    if (m?.index?.array?.length >= 3) {
+      keep.push(i);
+    }
+  });
+  const meshes = keep.map((i) => all[i]);
   let triangles = 0;
   for (const mesh of meshes) {
     triangles += Math.floor(mesh.index.array.length / 3);
@@ -106,7 +126,10 @@ export function readStep(
   let allNormals = true;
   let colored = false;
   let at = 0;
-  for (const mesh of meshes) {
+  // Where each kept mesh landed, as `[first triangle, count]`, by engine index.
+  const placed = new Map<number, [number, number]>();
+  for (const [k, mesh] of meshes.entries()) {
+    placed.set(keep[k], [at / 9, Math.floor(mesh.index.array.length / 3)]);
     const position = mesh.attributes?.position?.array;
     const normal = mesh.attributes?.normal?.array;
     const index = mesh.index.array;
@@ -151,7 +174,72 @@ export function readStep(
       }
     }
   }
-  return { positions, colors, normals: allNormals ? normals : null, colored };
+  return {
+    positions,
+    colors,
+    normals: allNormals ? normals : null,
+    colored,
+    parts: stepParts(result.root, all, placed, triangles),
+  };
+}
+
+// The engine's assembly tree as parts. Its root is the document, not a part, so
+// its contents sit at the top. A mesh the tree never names (or a result with no
+// tree at all) is still a part, so every triangle belongs to one.
+function stepParts(
+  root: OcctNode | undefined,
+  all: OcctMesh[],
+  placed: Map<number, [number, number]>,
+  total: number,
+): PartNode {
+  const builder = new PartTreeBuilder(total);
+  const used = new Set<number>();
+  const meshLeaf = (index: unknown, name: unknown): void => {
+    if (typeof index !== 'number' || used.has(index)) {
+      return;
+    }
+    const range = placed.get(index);
+    if (range) {
+      used.add(index);
+      builder.leaf(name || all[index]?.name, [range]);
+    }
+  };
+  // An explicit stack: the tree is the file's, and may be as deep as it likes.
+  type Step = { node: OcctNode; top: boolean } | 'end';
+  const todo: Step[] = root && typeof root === 'object' ? [{ node: root, top: true }] : [];
+  while (todo.length > 0) {
+    const step = todo.pop() as Step;
+    if (step === 'end') {
+      builder.end();
+      continue;
+    }
+    const { node, top } = step;
+    const own = Array.isArray(node.meshes) ? node.meshes : [];
+    const kids = Array.isArray(node.children) ? node.children : [];
+    if (!top && kids.length === 0 && own.length === 1) {
+      // A part: the node's name is the part's.
+      meshLeaf(own[0], node.name);
+      continue;
+    }
+    if (!top) {
+      builder.begin(node.name);
+      todo.push('end');
+    }
+    for (let i = kids.length - 1; i >= 0; i--) {
+      if (kids[i] && typeof kids[i] === 'object') {
+        todo.push({ node: kids[i], top: false });
+      }
+    }
+    // The node's own meshes come before its children: they are written now, the
+    // children are popped after.
+    for (const index of own) {
+      meshLeaf(index, '');
+    }
+  }
+  for (const index of placed.keys()) {
+    meshLeaf(index, '');
+  }
+  return builder.finish();
 }
 
 function validColor(color: number[] | null | undefined): [number, number, number] | null {

@@ -19,9 +19,10 @@
 // so the merged geometry is turned from Y-up to Z-up here, once, and the model
 // is flagged Z-up like a 3MF is. See the note on `yUpToZUp` below.
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { glbHeaderProblem } from './modelSniff';
 import { MAX_TRIANGLES } from './stlInfo';
+import { PartTreeBuilder, type PartNode } from './parts';
 
 /** A GLB the viewer cannot or will not show; the message is for the person. */
 export class GlbError extends Error {}
@@ -44,6 +45,8 @@ export interface GlbModel {
   colors: Float32Array;
   /** Three floats per vertex, Z-up, when every mesh had normals; else null. */
   normals: Float32Array | null;
+  /** The node hierarchy: leaves are triangle ranges of `positions`. */
+  parts: PartNode;
 }
 
 export interface GlbOptions {
@@ -80,6 +83,7 @@ interface Primitive {
   extensions?: Record<string, unknown>;
 }
 interface GltfNode {
+  name?: unknown;
   mesh?: number;
   children?: number[];
   matrix?: unknown;
@@ -95,7 +99,7 @@ interface Gltf {
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
   nodes?: GltfNode[];
-  meshes?: Array<{ primitives?: Primitive[] }>;
+  meshes?: Array<{ name?: unknown; primitives?: Primitive[] }>;
   accessors?: Accessor[];
   bufferViews?: BufferViewDef[];
   buffers?: Array<{ uri?: string; byteLength?: number }>;
@@ -323,6 +327,7 @@ interface OutPrimitive {
   mode: number;
 }
 interface OutNode {
+  name?: string;
   matrix?: number[];
   translation?: number[];
   rotation?: number[];
@@ -330,6 +335,11 @@ interface OutNode {
   mesh?: number;
   children?: number[];
   extensions?: { EXT_mesh_gpu_instancing: { attributes: Record<string, number> } };
+}
+
+/** A file-given name, if it is a non-empty string, capped at 200 characters. */
+function nameOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value.slice(0, 200) : undefined;
 }
 
 /**
@@ -518,7 +528,7 @@ export function pruneGlb(
   };
   let fallbackMaterial: number | undefined;
 
-  const outMeshes: Array<{ primitives: OutPrimitive[] }> = [];
+  const outMeshes: Array<{ name?: string; primitives: OutPrimitive[] }> = [];
   const meshMap = new Map<number, number>();
   const useMesh = (index: number): number | undefined => {
     const known = meshMap.get(index);
@@ -572,7 +582,8 @@ export function pruneGlb(
       }
       primitives.push(out);
     }
-    const slot = outMeshes.push({ primitives }) - 1;
+    const meshName = nameOf(mesh.name);
+    const slot = outMeshes.push(meshName ? { name: meshName, primitives } : { primitives }) - 1;
     meshMap.set(index, slot);
     return slot;
   };
@@ -590,6 +601,9 @@ export function pruneGlb(
       return undefined;
     }
     const out: OutNode = {};
+    // Kept for the parts tree, which reads node and mesh names; parts.ts cleans them.
+    const nodeName = nameOf(node.name);
+    if (nodeName) out.name = nodeName;
     const slot = outNodes.push(out) - 1;
     nodeMap.set(index, slot);
     const matrix = numbers(node.matrix, 16);
@@ -708,7 +722,13 @@ function encodeGlb(pruned: Gltf, bin: Uint8Array | null): ArrayBuffer {
   return out.buffer;
 }
 
-function loadScene(data: ArrayBuffer): Promise<THREE.Object3D> {
+interface Loaded {
+  scene: THREE.Object3D;
+  /** The loader's map from each object it made to the glTF node, mesh and primitive it came from. */
+  associations: ReadonlyMap<unknown, { nodes?: number } | undefined>;
+}
+
+function loadScene(data: ArrayBuffer): Promise<Loaded> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new GlbError('Reading this GLB file timed out.')),
@@ -724,7 +744,9 @@ function loadScene(data: ArrayBuffer): Promise<THREE.Object3D> {
       new GLTFLoader().parse(
         data,
         '',
-        done((gltf: { scene: THREE.Object3D }) => resolve(gltf.scene)),
+        done((gltf: GLTF) =>
+          resolve({ scene: gltf.scene, associations: gltf.parser.associations }),
+        ),
         done((err: unknown) =>
           reject(new GlbError(`Could not read this GLB file (${errorText(err)}).`)),
         ),
@@ -743,13 +765,29 @@ function errorText(err: unknown): string {
   return String(err);
 }
 
-interface Piece {
+export interface Piece {
   mesh: THREE.Mesh;
   /** World matrices to place it at: one, or one per instance. */
   matrices: THREE.Matrix4[];
+  /** `[first triangle, count]` per placement, filled in by bake. */
+  ranges: Array<[number, number]>;
+  /** The (pruned) source node this was drawn for, when the loader says. */
+  node?: number;
 }
 
-function collect(scene: THREE.Object3D): Piece[] {
+// The glTF node an object belongs to: its own association, or the nearest
+// ancestor's (a multi-primitive mesh is a Group holding one Mesh per primitive).
+function nodeOf(object: THREE.Object3D, associations: Loaded['associations']): number | undefined {
+  for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+    const node = associations.get(o)?.nodes;
+    if (node !== undefined) {
+      return node;
+    }
+  }
+  return undefined;
+}
+
+function collect(scene: THREE.Object3D, associations: Loaded['associations']): Piece[] {
   scene.updateMatrixWorld(true);
   const pieces: Piece[] = [];
   scene.traverse((object) => {
@@ -765,9 +803,14 @@ function collect(scene: THREE.Object3D): Piece[] {
         instanced.getMatrixAt(i, local);
         matrices.push(new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, local));
       }
-      pieces.push({ mesh, matrices });
+      pieces.push({ mesh, matrices, ranges: [], node: nodeOf(object, associations) });
     } else {
-      pieces.push({ mesh, matrices: [mesh.matrixWorld.clone()] });
+      pieces.push({
+        mesh,
+        matrices: [mesh.matrixWorld.clone()],
+        ranges: [],
+        node: nodeOf(object, associations),
+      });
     }
   });
   return pieces;
@@ -791,7 +834,7 @@ function yUpToZUp(x: number, y: number, z: number, out: Float32Array, at: number
   out[at + 2] = y;
 }
 
-function bake(pieces: Piece[], triangles: number): GlbModel {
+function bake(pieces: Piece[], triangles: number): Omit<GlbModel, 'parts'> {
   const positions = new Float32Array(triangles * 9);
   const colors = new Float32Array(triangles * 9);
   const normals = new Float32Array(triangles * 9);
@@ -800,7 +843,8 @@ function bake(pieces: Piece[], triangles: number): GlbModel {
   const normalVector = new THREE.Vector3();
   const normalMatrix = new THREE.Matrix3();
   let at = 0;
-  for (const { mesh, matrices } of pieces) {
+  for (const piece of pieces) {
+    const { mesh, matrices } = piece;
     const geometry = mesh.geometry;
     const position = geometry.getAttribute('position');
     const index = geometry.getIndex();
@@ -813,6 +857,7 @@ function bake(pieces: Piece[], triangles: number): GlbModel {
     const total = index ? index.count : position.count;
     const groups = geometry.groups.length > 0 ? geometry.groups : null;
     for (const matrix of matrices) {
+      const firstTriangle = at / 9;
       normalMatrix.getNormalMatrix(matrix);
       // A mirrored placement flips the winding; swap two corners so the faces
       // keep facing outward, as the 3MF reader does.
@@ -853,6 +898,7 @@ function bake(pieces: Piece[], triangles: number): GlbModel {
           at += 3;
         }
       }
+      piece.ranges.push([firstTriangle, at / 9 - firstTriangle]);
     }
   }
   // Fewer triangles than the JSON promised (a primitive the loader dropped):
@@ -891,10 +937,79 @@ export async function readGlb(bytes: Uint8Array, options: GlbOptions = {}): Prom
     );
   }
   const pruned = pruneGlb(json, bin ? bin.byteLength : null, max, options.fallbackColor);
-  const scene = await loadScene(encodeGlb(pruned, bin));
-  const model = bake(collect(scene), triangles);
+  const { scene, associations } = await loadScene(encodeGlb(pruned, bin));
+  const pieces = collect(scene, associations);
+  const model = bake(pieces, triangles);
   if (model.positions.length === 0) {
     throw new GlbError('This GLB file holds no triangle meshes to show.');
   }
-  return model;
+  return { ...model, parts: glbParts(pruned, pieces, model.positions.length / 9) };
+}
+
+// The node hierarchy as parts, read from the pruned source JSON rather than from
+// three's objects (which are not one per node: a mesh with several materials is a
+// Group of Meshes). The loader's associations say which source node each drawn
+// mesh came from. A node is one part holding the ranges of all its primitives; a
+// node that places a mesh many times (EXT_mesh_gpu_instancing) is one part per
+// copy, and an instanced node with nothing under it puts them straight into its
+// parent, so the quantity row is the part itself. A name is the node's, else its
+// mesh's, else left for "Part N". Exported for tests.
+export function glbParts(pruned: Gltf, pieces: Piece[], total: number): PartNode {
+  const builder = new PartTreeBuilder(total);
+  const byNode = new Map<number, Piece[]>();
+  for (const piece of pieces) {
+    if (piece.node !== undefined) {
+      const list = byNode.get(piece.node);
+      if (list) {
+        list.push(piece);
+      } else {
+        byNode.set(piece.node, [piece]);
+      }
+    }
+  }
+  const nodes = (pruned.nodes ?? []) as unknown as OutNode[];
+  const meshes = (pruned.meshes ?? []) as unknown as Array<{ name?: string }>;
+  const seen = new Set<number>();
+  const leaves = (index: number, name: string): void => {
+    const list = byNode.get(index) ?? [];
+    // Every primitive of a placement has the same number of placements.
+    // A loop, not Math.min(...): a node may hold more primitives than a call
+    // takes arguments.
+    let placements = list.length > 0 ? Infinity : 0;
+    for (const p of list) {
+      placements = Math.min(placements, p.ranges.length);
+    }
+    for (let k = 0; k < placements; k++) {
+      builder.leaf(
+        name,
+        list.map((p) => p.ranges[k]),
+      );
+    }
+  };
+  // Depth is bounded by countGlbTriangles (64 nodes), before this runs; `seen`
+  // keeps a hostile cycle from being walked twice.
+  const visit = (index: number): void => {
+    const node = nodes[index];
+    if (!node || seen.has(index)) {
+      return;
+    }
+    seen.add(index);
+    const meshName = node.mesh !== undefined ? meshes[node.mesh]?.name : undefined;
+    const name = node.name ?? meshName ?? '';
+    const kids = node.children ?? [];
+    if (kids.length === 0) {
+      leaves(index, name);
+      return;
+    }
+    builder.begin(node.name ?? '');
+    leaves(index, name);
+    for (const child of kids) {
+      visit(child);
+    }
+    builder.end();
+  };
+  for (const root of pruned.scenes?.[0]?.nodes ?? []) {
+    visit(root);
+  }
+  return builder.finish();
 }
