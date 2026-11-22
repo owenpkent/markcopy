@@ -4,9 +4,12 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### Fixed
+### Planned
 
-- **Parts and assembly tree.** A GLB node with several materials is one part (and each instance of an instanced node one part), and an unnamed node is called after its mesh with the file's own spelling. Parts and Section now share one right-hand dock instead of leaving the 3D view a sliver, and the panel keeps keyboard focus on the expand or collapse button after it redraws. An ASCII STL's parts come from the loader's own solids, so a byte order mark or a closing name such as `endsolid Brace facet guard` no longer drops them. Copy parts list writes names as literal text (`<M6>`, `**Retainer**`), and no longer merges an assembly named `Machine / Arm` with Machine > Arm. A model hidden through Compare with can no longer be picked.
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.8.0] - 2026-11-21
 
 ### Added
 
@@ -19,11 +22,6 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Plain G-code in the 3D preview.** A `.gcode` or `.gco` file (either case) now opens in the 3D viewer by default, drawn as a sliced print is: extrusion moves colored by feature, a layer bar with **This layer only**, the grid and a bed outline, and no Parts panel. The bed comes from the file's own slicer settings (PrusaSlicer `bed_shape`, Bambu and Orca `printable_area`, Cura machine settings where present, including Cura 5's `;SETTING_3` lines joined back together; only the first and last 256 KiB are searched), else `markcopy.stl.bedSize` when `markcopy.stl.showBed` is on. PrusaSlicer and Cura feature names (`External perimeter`, `WALL-OUTER`, `FILL`, `SKIN`, ...) get the same colors as Bambu and Orca's. Only text G-code opens: a NUL byte in the first 64 KiB and Prusa binary G-code (`GCDE`) are refused with a message. The viewer menu has **Open as Text**, also when a file has no extrusion moves. Measured on a synthetic 50.1 MB file in the unit-test environment: host read 37 ms, webview parse 295 ms (1,926,000 segments).
 - **G-code nozzle playback in the 3D preview.** A G-code file or sliced `.gcode.3mf` gets a playback bar: Play and Pause, a position slider over the extrusion moves, a speed list (30 moves/s to 1M moves/s, defaulting to the slowest that plays the print in a minute), a blue cone at the nozzle, and a readout of the move and its feature. It opens paused at the end, so the whole print is shown; it never starts on its own, and **Space** toggles it when the viewer has focus and no button, list or field does. Moves past the playhead are not drawn: the playhead only moves the draw range of the existing geometry, so playing and scrubbing cost the same on a 2-million-move file as on a small one, with no rebuilding. The layer bar and the slider are one position (playing into a new layer moves the layer bar; picking a layer shows the print through it). **Travel moves** draws the current layer's non-extruding moves, up to the nozzle, as thin dim lines (arcs, including full circles and spiral Z-hops, are drawn as arcs, and a hop shows only once the nozzle has left); on a narrow editor the bar wraps and its readout takes its own row; the reader now keeps them compactly (up to 1,000,000, 28 bytes each) beside the extrusion.
 - `sample.gcode`, five layers of a 20 mm square in PrusaSlicer style, for trying it.
-
-### Planned
-
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
 
 ## [1.7.0] - 2026-11-20
 
@@ -690,7 +688,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/owenpkent/markcopy/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/owenpkent/markcopy/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/owenpkent/markcopy/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/owenpkent/markcopy/compare/v1.5.0...v1.6.0

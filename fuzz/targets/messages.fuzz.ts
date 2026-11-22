@@ -37,6 +37,7 @@ const PREVIEW_TOGGLES = ['syncScroll', 'autoPreview', 'math', 'footnotes'];
 const IMAGE_BACKGROUNDS = ['checkerboard', 'light', 'dark', 'theme'];
 const VIEWER_TOGGLES = ['video.loop', 'video.autoplay', 'video.review'];
 const AUDIO_TOGGLES = ['audio.review', 'audio.loop', 'audio.autoplay', 'audio.showTags'];
+const STL_UP_AXES = ['z', 'y'];
 const GRID_OPS = [
   'insertRowAbove',
   'insertRowBelow',
@@ -159,8 +160,13 @@ function settingAllowed(surface: string, key: string, value: unknown): boolean {
       );
     case 'audio':
       return theme || (AUDIO_TOGGLES.includes(key) && bool);
+    case 'stl':
+      // The 3D viewer's Up Axis menu.
+      return (
+        theme || (key === 'stl.upAxis' && typeof value === 'string' && STL_UP_AXES.includes(value))
+      );
     default:
-      return theme; // pdf, tex, gif, stl
+      return theme; // pdf, tex, gif
   }
 }
 
