@@ -7,14 +7,15 @@ import { parseStlMessage } from './messages/stl';
 import { isStlSetting } from './messages/settings';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 import { isModelFile, rankSiblings } from './stlSiblings';
-import { glbHeaderProblem, stepHeaderProblem } from './webview/modelSniff';
+import { gcodeProblem, glbHeaderProblem, stepHeaderProblem } from './webview/modelSniff';
 
-// A read-only custom editor that renders STL, 3MF, GLB and STEP files with
+// A read-only custom editor that renders STL, 3MF, GLB, STEP and plain G-code files with
 // Three.js in a webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
 // src/webview/stl.ts). A 3MF is a zip of XML parts, which the webview unpacks
 // (src/webview/threeMf.ts), a GLB is read by glb.ts and a STEP file is
-// tessellated by an Open CASCADE WebAssembly engine (step.ts): the host only
-// stats each one and checks its first bytes.
+// tessellated by an Open CASCADE WebAssembly engine (step.ts) and G-code is
+// drawn as toolpaths (gcode.ts): the host only stats each one and checks its
+// first bytes.
 //
 // Its right-click menu carries a handful of copy actions (the current view as a
 // PNG, the file name and path, the dimensions and triangle count) plus view
@@ -85,6 +86,10 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'saveFrame':
           await saveFrame(document.uri, msg.name, msg.data, webview);
+          break;
+        case 'openAsText':
+          // Always the host's own document, in the plain text editor.
+          await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
           break;
         case 'openExternal':
           // Always the host's own document, never a URI the webview sent.
@@ -164,6 +169,14 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
   // first one did; a refusal is a toast, since the first model is still on
   // screen and should stay there.
   private async sendCompare(webview: vscode.Webview, uri: vscode.Uri, name: string): Promise<void> {
+    if (modelFormat(uri) === 'gcode') {
+      // Toolpaths have no model to lay over another; say so without reading it.
+      void webview.postMessage({
+        type: 'toast',
+        message: `${name} is G-code and has no model to compare.`,
+      });
+      return;
+    }
     try {
       const model = await readModel(uri);
       if ('error' in model) {
@@ -183,7 +196,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
       defaultUri: vscode.Uri.joinPath(uri, '..'),
-      filters: { '3D models': ['stl', '3mf', 'glb', 'step', 'stp'] },
+      filters: { '3D models': ['stl', '3mf', 'glb', 'step', 'stp', 'gcode', 'gco'] },
       openLabel: 'Compare',
       title: `Compare ${basename(uri)} with`,
     });
@@ -395,11 +408,17 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 }
 
-export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step';
+export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step' | 'gcode';
 
 type ReadModel = { format: ModelFormat; bytes: string } | { error: string };
 
-const LABELS: Record<ModelFormat, string> = { stl: 'STL', '3mf': '3MF', glb: 'GLB', step: 'STEP' };
+const LABELS: Record<ModelFormat, string> = {
+  stl: 'STL',
+  '3mf': '3MF',
+  glb: 'GLB',
+  step: 'STEP',
+  gcode: 'G-code',
+};
 
 // One model off disk, checked and base64-encoded for the webview, or the reason
 // it was refused. Throws only when the file cannot be read at all.
@@ -439,6 +458,13 @@ async function readModel(uri: vscode.Uri): Promise<ReadModel> {
     const problem = glbHeaderProblem(bytes);
     if (problem) {
       return { error: `${name} is not a GLB file: ${problem}` };
+    }
+  } else if (format === 'gcode') {
+    // Text only. The toolpaths, the layers and the bed are read in the webview
+    // (src/webview/gcode.ts); here only what keeps a binary file out.
+    const problem = gcodeProblem(bytes);
+    if (problem) {
+      return { error: `${name} cannot be previewed: ${problem}.` };
     }
   } else if (format === 'step') {
     const problem = stepHeaderProblem(bytes);
@@ -508,6 +534,9 @@ export function modelFormat(uri: vscode.Uri): ModelFormat {
   }
   if (path.endsWith('.glb')) {
     return 'glb';
+  }
+  if (path.endsWith('.gcode') || path.endsWith('.gco')) {
+    return 'gcode';
   }
   return path.endsWith('.step') || path.endsWith('.stp') ? 'step' : 'stl';
 }

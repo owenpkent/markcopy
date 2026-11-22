@@ -53,6 +53,8 @@ const Z_EPSILON = 1e-4;
 
 // Feature indices are stored in a byte; index 0 is 'Unknown'.
 const MAX_FEATURES = 256;
+/** Longest feature name kept; longer ones are cut. */
+const MAX_FEATURE_NAME = 256;
 
 // A word larger than this is not a coordinate on any printer, it is garbage (or
 // an attempt to overflow the float arrays), so the word is ignored.
@@ -333,7 +335,8 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     }
   };
 
-  const setFeature = (name: string): void => {
+  const setFeature = (raw: string): void => {
+    const name = raw.length > MAX_FEATURE_NAME ? raw.slice(0, MAX_FEATURE_NAME) : raw;
     if (name !== currentFeature) {
       currentFeature = name;
       featureStale = true;
@@ -595,4 +598,170 @@ export function formatDuration(seconds: number): string {
   const first = parts.findIndex(([n]) => n > 0);
   const shown = parts.slice(first, first + 2).filter(([n], idx) => idx === 0 || n > 0);
   return shown.map(([n, unit]) => `${n}${unit}`).join(' ');
+}
+
+// Colors for the slicer's feature names, close to the ones Bambu Studio and
+// OrcaSlicer use for the same lines. First match wins, so the more specific
+// name comes first. Covers the names of Bambu/Orca (`; FEATURE: Outer wall`),
+// PrusaSlicer and SuperSlicer (`;TYPE:External perimeter`) and Cura
+// (`;TYPE:WALL-OUTER`, `FILL`, `SKIN`).
+const FEATURE_COLORS: Array<[RegExp, number]> = [
+  [/support/i, 0x3fd65b],
+  [/overhang/i, 0x4f6bed],
+  [/outer|external/i, 0xff7d38],
+  [/inner|perimeter|wall/i, 0xf2c94c],
+  [/top/i, 0xf04a4a],
+  [/bottom/i, 0x7a6ff0],
+  [/internal solid|solid infill/i, 0xa35ad6],
+  [/bridge/i, 0x4d9ad9],
+  [/gap/i, 0x9aa0a6],
+  // Cura's SKIN is its top and bottom surfaces.
+  [/skin/i, 0xf04a4a],
+  [/infill|^fill$/i, 0xc0453a],
+  [/skirt|brim/i, 0x00a085],
+  [/prime|wipe/i, 0x8fd18a],
+];
+
+/** The color (0xRRGGBB) for a slicer's feature name, or undefined for a name it does not know. */
+export function featureColor(feature: string): number | undefined {
+  // An ordered-substring test: `/support.*interface/` is quadratic on a long
+  // name made of many "support" words.
+  const lower = feature.toLowerCase();
+  const support = lower.indexOf('support');
+  if (support !== -1 && lower.indexOf('interface', support + 7) !== -1) {
+    return 0x1f8a3b;
+  }
+  return FEATURE_COLORS.find(([pattern]) => pattern.test(feature))?.[1];
+}
+
+/** The print bed a file's own slicer settings describe, in the G-code's bed coordinates (mm). */
+export interface GcodeBed {
+  /** The bed's lowest X and Y. */
+  origin: [number, number];
+  /** Width (X), depth (Y) and height (Z), the height Infinity when the file gives none. */
+  size: [number, number, number];
+}
+
+/** How much of each end of a file is searched for slicer settings. */
+export const SETTINGS_WINDOW = 256 * 1024;
+
+const MAX_BED_MM = 5000;
+
+function bedFromShape(list: string): { origin: [number, number]; size: [number, number] } | null {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  let points = 0;
+  for (const part of list.split(',')) {
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?)\s*$/i.exec(part);
+    if (!m) {
+      return null;
+    }
+    const x = Number(m[1]);
+    const y = Number(m[2]);
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y);
+    y1 = Math.max(y1, y);
+    points++;
+  }
+  const w = x1 - x0;
+  const d = y1 - y0;
+  if (points < 3 || !(w > 0) || !(d > 0) || w > MAX_BED_MM || d > MAX_BED_MM) {
+    return null;
+  }
+  return { origin: [x0, y0], size: [w, d] };
+}
+
+/** Most of a Cura settings block that is reassembled. */
+const MAX_SETTINGS_CHARS = 128 * 1024;
+
+/**
+ * Cura 5 writes its settings as JSON, escaped (a backslash-n for a newline)
+ * and cut into fixed-width ;SETTING_3 lines, so a key or a number can span two
+ * lines. Join the consecutive payloads and undo the escapes; the result reads
+ * like the older key = value lines.
+ */
+function curaSettings(text: string): string {
+  const parts: string[] = [];
+  let total = 0;
+  const lineRe = /^;SETTING_3 ([^\r\n]*)/gm;
+  let m: RegExpExecArray | null;
+  while (total < MAX_SETTINGS_CHARS && (m = lineRe.exec(text)) !== null) {
+    parts.push(m[1]);
+    total += m[1].length;
+  }
+  return (
+    parts
+      .join('')
+      // The optional escape letter makes every backslash run match once, whatever
+      // follows it, so a long run with no escape after it is not retried from
+      // each of its backslashes (which made decoding quadratic).
+      .replace(/\\+([nr"]?)/g, (run: string, c: string) =>
+        c === '' ? run : c === 'n' ? '\n' : c === 'r' ? '\r' : c,
+      )
+  );
+}
+
+function numberAfter(text: string, pattern: RegExp, extra = ''): number | undefined {
+  const m = pattern.exec(text) ?? (extra ? pattern.exec(extra) : null);
+  if (!m) {
+    return undefined;
+  }
+  const value = Number(m[1]);
+  return Number.isFinite(value) && value > 0 && value <= MAX_BED_MM ? value : undefined;
+}
+
+function bedInWindow(text: string): GcodeBed | undefined {
+  // PrusaSlicer and SuperSlicer: `; bed_shape = 0x0,250x0,250x210,0x210` and
+  // `; max_print_height = 210`. Bambu Studio and OrcaSlicer: `; printable_area =
+  // 0x0,256x0,256x256,0x256` and `; printable_height = 250`.
+  const shape = /^[ \t]*;[ \t]*(?:bed_shape|printable_area)[ \t]*=[ \t]*([^\r\n]*)/m.exec(text);
+  if (shape) {
+    const bed = bedFromShape(shape[1]);
+    if (bed) {
+      const height = numberAfter(
+        text,
+        /^[ \t]*;[ \t]*(?:max_print_height|printable_height)[ \t]*=[ \t]*(\d+(?:\.\d+)?)/m,
+      );
+      return { origin: bed.origin, size: [bed.size[0], bed.size[1], height ?? Infinity] };
+    }
+  }
+  // Cura writes no bed in its header. Where a file carries its machine
+  // settings, either as `;MACHINE_WIDTH:` lines or inside the serialized
+  // `;SETTING_3` block, they give the size; a printer whose origin is the bed's
+  // middle says so with machine_center_is_zero.
+  const settings = curaSettings(text);
+  const field = (header: string, key: string): number | undefined =>
+    numberAfter(
+      text,
+      new RegExp(String.raw`(?:;${header}:|\b${key}[ \t]*=[ \t]*)(\d+(?:\.\d+)?)(?![\d.])`, 'i'),
+      settings,
+    );
+  const w = field('MACHINE_WIDTH', 'machine_width');
+  const d = field('MACHINE_DEPTH', 'machine_depth');
+  if (w !== undefined && d !== undefined) {
+    const h = field('MACHINE_HEIGHT', 'machine_height');
+    const centerRe = /\bmachine_center_is_zero[ \t]*=[ \t]*true\b/i;
+    const centered = centerRe.test(text) || centerRe.test(settings);
+    return { origin: centered ? [-w / 2, -d / 2] : [0, 0], size: [w, d, h ?? Infinity] };
+  }
+  return undefined;
+}
+
+/**
+ * The bed a G-code file's own slicer settings describe. Slicers write their
+ * settings as comments, usually in a block at the end, so only the last and
+ * first SETTINGS_WINDOW characters are searched (the whole text when it is
+ * shorter than both), the end first. A file that names no bed gives undefined.
+ */
+export function readGcodeBed(text: string): GcodeBed | undefined {
+  if (text.length <= 2 * SETTINGS_WINDOW) {
+    return bedInWindow(text);
+  }
+  return (
+    bedInWindow(text.slice(text.length - SETTINGS_WINDOW)) ??
+    bedInWindow(text.slice(0, SETTINGS_WINDOW))
+  );
 }

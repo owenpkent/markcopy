@@ -295,9 +295,13 @@ describe('parsePdfMessage and parseTexMessage', () => {
 
 describe('parseStlMessage', () => {
   it('accepts the STL messages', () => {
-    for (const type of ['ready', 'revealInOS', 'openExternal']) {
+    for (const type of ['ready', 'revealInOS', 'openExternal', 'openAsText']) {
       expect(parseStlMessage({ type })).toEqual({ type });
     }
+    // The document is always the host's own; a path in the message is dropped.
+    expect(parseStlMessage({ type: 'openAsText', path: '/etc/passwd' })).toEqual({
+      type: 'openAsText',
+    });
     expect(parseStlMessage({ type: 'saveFrame', data: 'AAAA', name: 'part.png' })).toEqual({
       type: 'saveFrame',
       data: 'AAAA',

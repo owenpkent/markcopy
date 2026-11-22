@@ -147,15 +147,15 @@ Audio notes have a time and an optional end, and nothing else: no pin, area or d
 
 **On codecs.** VS Code's Chromium decodes MP3, WAV, Ogg Vorbis, Opus, and FLAC, but it has no AAC decoder. A `.m4a` or `.aac` file usually holds AAC, so it may not play; the preview then says which extension VS Code cannot decode and offers **Open in default player**. There is no ffmpeg conversion for audio.
 
-## 3D preview (STL, 3MF, GLB, STEP)
+## 3D preview (STL, 3MF, GLB, STEP, G-code)
 
-MarkCopy registers as the editor for `.stl`, `.3mf`, `.glb`, `.step` and `.stp` files, so opening one renders the model inline in a Three.js viewer. Controls are mouse-only, no keyboard required: **left-drag** to orbit, **right-drag** to pan, **scroll wheel** to zoom. The camera fits itself to the model on load, and the toolbar in the top-left offers **Fit view**, a **wireframe** toggle, a **grid** toggle and a **section** button. An overlay in the bottom-left reports the triangle count, the bounding box as the file's own X x Y x Z, and the grid spacing. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.meshColor` sets the mesh color.
+MarkCopy registers as the editor for `.stl`, `.3mf`, `.glb`, `.step`, `.stp`, `.gcode` and `.gco` files, so opening one renders the model inline in a Three.js viewer. Controls are mouse-only, no keyboard required: **left-drag** to orbit, **right-drag** to pan, **scroll wheel** to zoom. The camera fits itself to the model on load, and the toolbar in the top-left offers **Fit view**, a **wireframe** toggle, a **grid** toggle and a **section** button. An overlay in the bottom-left reports the triangle count, the bounding box as the file's own X x Y x Z, and the grid spacing. The viewport background follows `markcopy.theme` along with the other previews; `markcopy.stl.meshColor` sets the mesh color.
 
 Both binary and ASCII STL are handled. Corrupt and hostile files are rejected rather than loaded: a binary STL whose header claims more triangles than the file can hold, any model above ~5.4 million triangles, or any file above 256 MiB shows a message in the panel instead of hanging the viewer on a multi-gigabyte allocation. The size is checked before the file is read, not after. As with the PDF viewer, the file is read by the extension host and handed to the webview as bytes, so nothing is fetched over the network, and **Reopen Editor With...** opens the raw bytes instead.
 
 ### Orientation and up axis
 
-An STL does not say which way is up. Z is what slicers, Blender and most CAD exports use, so by default (`markcopy.stl.upAxis` = `z`) an STL stands the way it prints instead of lying on its side. If a file was made Y-up, choose **View > Up Axis > Y** in the right-click menu (shown for an STL and a STEP file); the choice is saved to the setting. A STEP file does not fix its up axis either, so it follows the setting too, Z by default. A 3MF and a sliced print are always Z-up, as those formats require, and a GLB is always Y-up, as glTF requires: it is turned upright when it loads, so it stands on the grid whatever the setting says. Dimensions, the overlay and **Copy as > Dimensions** are always the file's own X x Y x Z, whichever axis is up. The model is centered over the origin and rested on the floor, so the grid sits directly under it.
+An STL does not say which way is up. Z is what slicers, Blender and most CAD exports use, so by default (`markcopy.stl.upAxis` = `z`) an STL stands the way it prints instead of lying on its side. If a file was made Y-up, choose **View > Up Axis > Y** in the right-click menu (shown for an STL and a STEP file); the choice is saved to the setting. A STEP file does not fix its up axis either, so it follows the setting too, Z by default. A 3MF, a sliced print and plain G-code are always Z-up, as those formats require, and a GLB is always Y-up, as glTF requires: it is turned upright when it loads, so it stands on the grid whatever the setting says. Dimensions, the overlay and **Copy as > Dimensions** are always the file's own X x Y x Z, whichever axis is up. The model is centered over the origin and rested on the floor, so the grid sits directly under it.
 
 ### Grid and print bed
 
@@ -171,11 +171,11 @@ The 3D view clips the model at the plane, hiding everything beyond the cut and d
 
 To measure, point at the flat drawing. A crosshair appears; the horizontal and vertical lines through the pointer are intersected with the outline, and every stretch between crossings is labelled with its length, material (heavy stroke, bold in the readout) and gaps such as pockets and slots alike. Where the parts of an assembly overlap, the overlap reads as one wall and not as a gap: material is judged by which way each surface faces, and a mesh whose faces do not agree on that is measured by counting crossings. The same numbers are listed as text under the drawing, for example `Y = 0.00: 2.50 | 12.70 | 2.50`. Click pins the crosshair; click again releases it. **Copy as > Section Measurements** copies the numbers as text in the layout of a slicing script (see [COPY-MATRIX](../COPY-MATRIX.md#3d-models-stl-3mf-glb-step-stp)), and **Copy Section as PNG**, at the top of the menu while the section is open, copies the flat drawing.
 
-A section is not available for a sliced print (the button is disabled).
+A section is not available for a sliced print or G-code (the button is disabled).
 
 ### Parts and assemblies
 
-A model with two or more parts opens with a **Parts** panel in the dock on the right, the same width as the Section panel, and the 3D view takes the rest. With Section open too, Parts sits above Section in the one dock (each scrolls on its own), so the 3D view is no narrower than with Section alone. A STEP file brings its assembly tree, a GLB its node hierarchy (a node with several materials is still one part, and copies placed by `EXT_mesh_gpu_instancing` are one part per copy; an unnamed node takes its mesh's name), a 3MF its build items, objects and components, and an ASCII STL with several `solid <name>` blocks one part per solid. Any other STL is one part, and a sliced `.gcode.3mf` has no model, so neither shows the panel. Unnamed nodes are called `Part 1`, `Assembly 1` and so on.
+A model with two or more parts opens with a **Parts** panel in the dock on the right, the same width as the Section panel, and the 3D view takes the rest. With Section open too, Parts sits above Section in the one dock (each scrolls on its own), so the 3D view is no narrower than with Section alone. A STEP file brings its assembly tree, a GLB its node hierarchy (a node with several materials is still one part, and copies placed by `EXT_mesh_gpu_instancing` are one part per copy; an unnamed node takes its mesh's name), a 3MF its build items, objects and components, and an ASCII STL with several `solid <name>` blocks one part per solid. Any other STL is one part, and a sliced `.gcode.3mf` or a plain G-code file has no model, so neither shows the panel. Unnamed nodes are called `Part 1`, `Assembly 1` and so on.
 
 Every control is a visible button or checkbox at least 44 px square, so nothing needs a double-click or the keyboard (though a double-click on a row, the arrow keys, Enter and Space work as shortcuts):
 
@@ -196,7 +196,7 @@ A file's names are cut to 200 characters with control and direction-override cha
 
 Right-click > **Compare with** lists up to 12 other `.stl`, `.3mf`, `.glb`, `.step` and `.stp` files found near the open one: the same folder, its `versions` subfolder, and the parent folder when the open file is itself inside a `versions` folder. They are ordered by how much of the name they share with the open file (numbers compared as numbers, a `_current` suffix ignored), so the previous version is at the top. **Browse…** opens a file picker for anything else.
 
-The second model is drawn in orange over the first, in the same file coordinates, so two versions of one design line up where they agree; where both share a surface the first shows. The overlay lists both with a color swatch, triangle count and dimensions, and the menu then offers **Show** and **Hide** for each model and **Stop Comparing**. With the section open, both outlines are drawn in the flat panel in their colors, and the readout and **Copy as > Section Measurements** give a row per model: the way to see a difference inside a part. The second file goes through the same size cap and checks as the first; if it is refused, a message appears and the first model stays. A sliced print cannot be compared.
+The second model is drawn in orange over the first, in the same file coordinates, so two versions of one design line up where they agree; where both share a surface the first shows. The overlay lists both with a color swatch, triangle count and dimensions, and the menu then offers **Show** and **Hide** for each model and **Stop Comparing**. With the section open, both outlines are drawn in the flat panel in their colors, and the readout and **Copy as > Section Measurements** give a row per model: the way to see a difference inside a part. The second file goes through the same size cap and checks as the first; if it is refused, a message appears and the first model stays. A sliced print or a G-code file cannot be compared.
 
 ### Sliced print files
 
@@ -204,7 +204,23 @@ A sliced `.gcode.3mf` from Bambu Studio or OrcaSlicer holds G-code and no mesh. 
 
 The overlay shows the slicer's summary from the file, for example `Sliced print`, `1h 3m · 16.92 g · PETG`, `280 layers, 87,372 moves`, the toolpath's extents, and the grid and bed lines. **Copy as > Print Summary** copies those lines with the file name. Wireframe, Section and Compare with do not apply. The reader handles G0/G1 moves, G2/G3 arcs, absolute and relative extrusion and positioning, and the layer markers of Bambu/Orca, PrusaSlicer and Cura. At most 4,000,000 segments are kept, and the overlay says when a file had more.
 
-Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 of N`); travel moves are not drawn; lines are one pixel wide, with no extrusion width; plain `.gcode` files are not opened by MarkCopy.
+Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 of N`); travel moves are not drawn; lines are one pixel wide, with no extrusion width.
+
+### Plain G-code files
+
+A `.gcode` or `.gco` file (either letter case) opens in the same viewer, by default, and is drawn exactly as a sliced print is: the extrusion moves as lines colored by feature, a layer bar with **This layer only**, and the overlay (`G-code`, the layer and move counts, the extents, grid and bed). There is no mesh, so the Parts panel, Section, Wireframe and Compare with do not apply. The right-click menu has **Open as Text** to read the file in the text editor instead (**Reopen Editor With...** reaches it too). `.g` files are not claimed.
+
+Only text G-code opens. A file with a NUL byte in its first 64 KiB, and Prusa's binary G-code (`.bgcode`, which starts with `GCDE` whatever its extension), are refused with a message; the 256 MiB size cap applies. A file with no extrusion moves says so instead of drawing nothing, and the right-click menu still offers **Open as Text**. Cura 5 writes its machine settings across several `;SETTING_3` lines; they are joined before the bed size is read.
+
+The bed outline comes from the slicer settings the file carries as comments, read from the last and first 256 KiB only:
+
+- PrusaSlicer and SuperSlicer: `; bed_shape = 0x0,250x0,250x210,0x210` (the bounding box of the points) and `; max_print_height`.
+- Bambu Studio and OrcaSlicer: `; printable_area = ...` and `; printable_height`.
+- Cura writes no bed in its header. A `;MACHINE_WIDTH:` and `;MACHINE_DEPTH:` pair, or `machine_width` and `machine_depth` inside its serialized settings comment, is used when present (`machine_center_is_zero = True` puts the origin in the middle).
+
+When the file names no bed, `markcopy.stl.bedSize` is used if `markcopy.stl.showBed` is on, and no bed is drawn otherwise. A bed that comes from the file also sets where the outline sits (a bed centred on the origin is drawn centred) and the overlay says whether the print fits it.
+
+Feature names are matched by their words: PrusaSlicer's `External perimeter`, `Perimeter`, `Internal infill`, `Solid infill`, `Top solid infill`, `Bridge infill`, `Support material`, `Skirt/Brim` and Cura's `WALL-OUTER`, `WALL-INNER`, `FILL`, `SKIN`, `SUPPORT`, `SKIRT` get the same colors as Bambu and Orca's `Outer wall`, `Inner wall`, `Sparse infill` and so on. A name MarkCopy does not know is drawn gray.
 
 ### 3MF models
 
@@ -223,7 +239,7 @@ A `.step` or `.stp` (ISO 10303-21, any AP) opens in the same viewer. Solids are 
 **Right-click** (not drag) for the menu; a right-drag pans and does not open it. Everything in it is reachable with the pointer.
 
 - **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle. **Copy Section as PNG** is added at the top while a section is open.
-- **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print), plus the section measurements while a section is open. **Copy parts list** (top level) copies the parts as a Markdown table.
+- **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print or G-code file), plus the section measurements while a section is open. **Copy parts list** (top level) copies the parts as a Markdown table.
 - **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Parts, Grid and Print Bed checkboxes (Wireframe, Section, Parts and Grid match the toolbar), plus **Up Axis > Z / Y** for an STL (not shown for the formats that fix their own).
 - **Compare with** lists nearby models to overlay (above), then Show, Hide and Stop Comparing.
 - **Preferences > Theme** sets `markcopy.theme`.

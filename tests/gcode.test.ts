@@ -5,7 +5,16 @@
 // G-code is written inline in each test so the expected segments can be checked
 // by eye against it.
 import { describe, expect, it } from 'vitest';
-import { MAX_SEGMENTS, formatDuration, parseGcode, readSliceInfo } from '../src/webview/gcode';
+import {
+  MAX_SEGMENTS,
+  SETTINGS_WINDOW,
+  featureColor,
+  formatDuration,
+  parseGcode,
+  readGcodeBed,
+  readSliceInfo,
+} from '../src/webview/gcode';
+import { gcodeProblem } from '../src/webview/modelSniff';
 import type { Toolpath } from '../src/webview/gcode';
 
 /** Segment `n` as [x1, y1, z1, x2, y2, z2], rounded to a micron so float32 noise does not matter. */
@@ -458,5 +467,233 @@ describe('parseGcode extrusion state across mode changes', () => {
       [...layer, 'M83', 'G1 X10 E5', 'M82', 'G92 E0', 'G1 X20 E1', 'G1 X30 E0.5', ''].join('\n'),
     );
     expect(tp.segments).toBe(2);
+  });
+});
+
+describe('readGcodeBed', () => {
+  it('reads PrusaSlicer and SuperSlicer bed_shape and max_print_height', () => {
+    const text = lines(
+      'G1 X1 Y1 E1',
+      '; prusaslicer_config = begin',
+      '; bed_shape = 0x0,250x0,250x210,0x210',
+      '; max_print_height = 200',
+    );
+    expect(readGcodeBed(text)).toEqual({ origin: [0, 0], size: [250, 210, 200] });
+  });
+
+  it('reads Bambu Studio and OrcaSlicer printable_area and printable_height', () => {
+    const text = lines(
+      '; CONFIG_BLOCK_START',
+      '; printable_area = 0x0,256x0,256x256,0x256',
+      '; printable_height = 250',
+    );
+    expect(readGcodeBed(text)).toEqual({ origin: [0, 0], size: [256, 256, 250] });
+  });
+
+  it('takes the bounding box of a bed that is not at the origin, and leaves the height open', () => {
+    const text = lines(';bed_shape = -110x-110,110x-110,110x110,-110x110');
+    const bed = readGcodeBed(text);
+    expect(bed?.origin).toEqual([-110, -110]);
+    expect(bed?.size).toEqual([220, 220, Infinity]);
+  });
+
+  it('reads Cura machine settings where a file carries them, and a centred origin', () => {
+    expect(readGcodeBed(lines(';MACHINE_WIDTH:220', ';MACHINE_DEPTH:200'))).toEqual({
+      origin: [0, 0],
+      size: [220, 200, Infinity],
+    });
+    // Cura serializes its settings into one comment, newlines written as \n.
+    const serialized =
+      ';SETTING_3 {"global_quality": "[values]\\nmachine_width = 300\\nmachine_depth = 300\\n' +
+      'machine_center_is_zero = True\\n"}';
+    expect(readGcodeBed(lines(serialized))).toEqual({
+      origin: [-150, -150],
+      size: [300, 300, Infinity],
+    });
+  });
+
+  describe('Cura settings wrapped over ;SETTING_3 lines', () => {
+    // Cura's GCodeWriter escapes backslashes, newlines and carriage returns,
+    // then cuts the JSON into 69-character chunks, each prefixed ';SETTING_3 '.
+    const WIDTH = 69;
+    it('decodes a long backslash run with no escape after it in linear time', () => {
+      // Each doubling of the run used to take four times as long (332 ms at 32 KiB).
+      const run = ';SETTING_3 ' + '\\'.repeat(65536) + 'x\n';
+      const started = performance.now();
+      expect(readGcodeBed(run)).toBeUndefined();
+      expect(performance.now() - started).toBeLessThan(50);
+      // A run before a real escape still decodes, and the size reads after it.
+      const settings =
+        ';SETTING_3 ' + '\\'.repeat(9) + 'x\\\\nmachine_width = 220\\\\nmachine_depth = 210\n';
+      expect(readGcodeBed(settings)?.size.slice(0, 2)).toEqual([220, 210]);
+    });
+    const escaped = (settings: string): string =>
+      JSON.stringify({ global_quality: settings })
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+    const wrap = (settings: string): string => {
+      const json = escaped(settings);
+      const out: string[] = [];
+      for (let i = 0; i < json.length; i += WIDTH) {
+        out.push(';SETTING_3 ' + json.slice(i, i + WIDTH));
+      }
+      return out.join('\n');
+    };
+    // Settings text whose escaped JSON puts a chunk boundary 'offset' characters
+    // into the first occurrence of 'needle'.
+    const splitInside = (needle: string, offset: number, tail: string): string => {
+      const head = '[values]\n';
+      const body = (pad: number): string => head + 'x'.repeat(pad) + '\n' + tail;
+      for (let pad = 0; pad < WIDTH; pad++) {
+        const settings = body(pad);
+        const json = escaped(settings);
+        if ((json.indexOf(needle) + offset) % WIDTH === 0) {
+          return settings;
+        }
+      }
+      throw new Error('no padding found');
+    };
+    const tail = 'machine_width = 220\nmachine_depth = 200\nmachine_height = 250\n';
+    const centered = tail + 'machine_center_is_zero = True\n';
+
+    it('reads a key split across two lines', () => {
+      const settings = splitInside('machine_width', 11, tail);
+      const text = wrap(settings);
+      expect(text).toContain('machine_wid\n;SETTING_3 th');
+      expect(readGcodeBed(text)).toEqual({ origin: [0, 0], size: [220, 200, 250] });
+    });
+
+    it('reads a number split across two lines completely', () => {
+      const settings = splitInside('machine_width = 220', 'machine_width = 2'.length, tail);
+      const text = wrap(settings);
+      expect(text).toContain('machine_width = 2\n;SETTING_3 20');
+      expect(readGcodeBed(text)?.size).toEqual([220, 200, 250]);
+    });
+
+    it('reads machine_center_is_zero split across two lines', () => {
+      const settings = splitInside('machine_center_is_zero', 12, centered);
+      const text = wrap(settings);
+      expect(text).toContain('machine_cent\n;SETTING_3 er_is_zero');
+      expect(readGcodeBed(text)).toEqual({ origin: [-110, -100], size: [220, 200, 250] });
+    });
+
+    it('does not take a prefix of a key or a number for a whole one', () => {
+      const text = wrap(
+        '[values]\nxmachine_width = 999\nmachine_width = 220.5\nmachine_depth = 200\n',
+      );
+      expect(readGcodeBed(text)?.size).toEqual([220.5, 200, Infinity]);
+    });
+  });
+
+  it('gives nothing for a file that names no bed, or a bed that is not a rectangle of numbers', () => {
+    expect(readGcodeBed(lines('G1 X1 Y1 E1', ';MINX:0', ';MAXX:20'))).toBeUndefined();
+    expect(readGcodeBed(lines('; bed_shape = nonsense'))).toBeUndefined();
+    expect(readGcodeBed(lines('; bed_shape = 0x0,0x0,0x0'))).toBeUndefined();
+    expect(readGcodeBed(lines('; bed_shape = 0x0,99999x0,99999x99999,0x99999'))).toBeUndefined();
+    expect(readGcodeBed('')).toBeUndefined();
+  });
+
+  it('prefers the end of a large file, then its start, and never looks at the middle', () => {
+    const filler = ';'.padEnd(1000, 'x') + '\n';
+    const middle = '; bed_shape = 0x0,1x0,1x1,0x1\n';
+    const pad = filler.repeat(Math.ceil((SETTINGS_WINDOW * 2.5) / filler.length));
+    const start = '; bed_shape = 0x0,100x0,100x100,0x100\n';
+    const end = '; printable_area = 0x0,200x0,200x200,0x200\n';
+    expect(readGcodeBed(start + pad + end)?.size).toEqual([200, 200, Infinity]);
+    expect(readGcodeBed(start + pad + pad)?.size).toEqual([100, 100, Infinity]);
+    expect(readGcodeBed(pad + middle + pad)).toBeUndefined();
+    expect(readGcodeBed(middle)?.size).toEqual([1, 1, Infinity]);
+  });
+});
+
+describe('featureColor', () => {
+  const ORANGE = 0xff7d38;
+  const YELLOW = 0xf2c94c;
+  const RED = 0xf04a4a;
+  const PURPLE = 0xa35ad6;
+  const INFILL = 0xc0453a;
+  const BRIDGE = 0x4d9ad9;
+  const SUPPORT = 0x3fd65b;
+  const SKIRT = 0x00a085;
+
+  it('classifies a long name of repeated words in linear time', () => {
+    const long = 'support '.repeat(8192).trim();
+    const start = performance.now();
+    expect(featureColor(long)).toBe(SUPPORT);
+    expect(featureColor(long + ' interface')).toBe(0x1f8a3b);
+    expect(featureColor('interface support')).toBe(SUPPORT);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+
+  it('maps the PrusaSlicer names', () => {
+    expect(featureColor('External perimeter')).toBe(ORANGE);
+    expect(featureColor('Perimeter')).toBe(YELLOW);
+    expect(featureColor('Internal infill')).toBe(INFILL);
+    expect(featureColor('Solid infill')).toBe(PURPLE);
+    expect(featureColor('Top solid infill')).toBe(RED);
+    expect(featureColor('Bridge infill')).toBe(BRIDGE);
+    expect(featureColor('Support material')).toBe(SUPPORT);
+    expect(featureColor('Support material interface')).toBe(0x1f8a3b);
+    expect(featureColor('Skirt/Brim')).toBe(SKIRT);
+    expect(featureColor('Overhang perimeter')).toBe(0x4f6bed);
+    expect(featureColor('Gap fill')).toBe(0x9aa0a6);
+  });
+
+  it('maps the Cura names', () => {
+    expect(featureColor('WALL-OUTER')).toBe(ORANGE);
+    expect(featureColor('WALL-INNER')).toBe(YELLOW);
+    expect(featureColor('FILL')).toBe(INFILL);
+    expect(featureColor('SKIN')).toBe(RED);
+    expect(featureColor('SUPPORT')).toBe(SUPPORT);
+    expect(featureColor('SUPPORT-INTERFACE')).toBe(0x1f8a3b);
+    expect(featureColor('SKIRT')).toBe(SKIRT);
+    expect(featureColor('PRIME-TOWER')).toBe(0x8fd18a);
+  });
+
+  it('still maps the Bambu and Orca names, and leaves an unknown one to the caller', () => {
+    expect(featureColor('Outer wall')).toBe(ORANGE);
+    expect(featureColor('Inner wall')).toBe(YELLOW);
+    expect(featureColor('Sparse infill')).toBe(INFILL);
+    expect(featureColor('Custom')).toBeUndefined();
+    expect(featureColor('Unknown')).toBeUndefined();
+  });
+
+  it('reads Cura and Prusa feature comments into the segments', () => {
+    const cura = parseGcode(
+      lines(';LAYER:0', ';TYPE:WALL-OUTER', 'G1 X0 Y0', 'G1 X5 Y0 E1', ';TYPE:FILL', 'G1 X5 Y5 E2'),
+    );
+    expect(cura.features).toEqual(['Unknown', 'WALL-OUTER', 'FILL']);
+    const prusa = parseGcode(
+      lines(';LAYER_CHANGE', ';Z:.2', ';TYPE:Top solid infill', 'G1 X0 Y0', 'G1 X5 Y0 E1'),
+    );
+    expect(prusa.features).toEqual(['Unknown', 'Top solid infill']);
+  });
+});
+
+describe('gcodeProblem', () => {
+  const bytes = (text: string) => new Uint8Array(Buffer.from(text, 'latin1'));
+
+  it('accepts text G-code, empty or not', () => {
+    expect(gcodeProblem(bytes('G1 X1 Y1 E1\n; done\n'))).toBeNull();
+    expect(gcodeProblem(new Uint8Array(0))).toBeNull();
+  });
+
+  it('refuses Prusa binary G-code by its magic, whatever the rest', () => {
+    expect(gcodeProblem(bytes('GCDE\u0001\u0000\u0000'))).toBe(
+      'binary G-code (.bgcode) is not supported',
+    );
+    expect(gcodeProblem(bytes('GCDE plain text after the magic'))).toBe(
+      'binary G-code (.bgcode) is not supported',
+    );
+  });
+
+  it('refuses a NUL byte in the first 64 KiB but not after it', () => {
+    expect(gcodeProblem(bytes('G1 X1\u0000 Y1'))).toMatch(/NUL byte/);
+    const late = new Uint8Array(70 * 1024).fill(0x41);
+    late[65 * 1024] = 0;
+    expect(gcodeProblem(late)).toBeNull();
+    late[64 * 1024 - 1] = 0;
+    expect(gcodeProblem(late)).toMatch(/NUL byte/);
   });
 });

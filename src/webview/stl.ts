@@ -24,7 +24,15 @@ import {
 import { ThreeMfError, UNIT_LABELS, read3mf } from './threeMf';
 import { GlbError, readGlb } from './glb';
 import { StepError, loadStepEngine, readStep } from './step';
-import { formatDuration, parseGcode, readSliceInfo, type Toolpath } from './gcode';
+import {
+  featureColor,
+  formatDuration,
+  parseGcode,
+  readGcodeBed,
+  readSliceInfo,
+  type GcodeBed,
+  type Toolpath,
+} from './gcode';
 import {
   AXIS_NAMES,
   bounds,
@@ -63,7 +71,7 @@ interface VsCodeApi {
   postMessage(message: unknown): void;
 }
 
-type Format = 'stl' | '3mf' | 'glb' | 'step';
+type Format = 'stl' | '3mf' | 'glb' | 'step' | 'gcode';
 
 interface LoadMessage {
   type: 'load';
@@ -243,6 +251,12 @@ interface Model {
   toolpath?: Toolpath;
   // The slicer's print summary, a line per fact, for a sliced print file.
   summary?: string[];
+  // A plain G-code file, as opposed to a sliced print file. It shows no bed
+  // unless its own settings give one or markcopy.stl.showBed is on.
+  plainGcode?: boolean;
+  // The bed the file's own slicer settings describe, which wins over
+  // markcopy.stl.bedSize.
+  bed?: GcodeBed;
 }
 
 type Built = Model | string;
@@ -262,6 +276,9 @@ const OTHER_COLOR = '#f0883e';
 const SECTION_COLOR = 0xffd33d;
 
 let primary: Model | null = null;
+// Whether the loaded document is a plain G-code file, set before it is built so
+// that Open as Text is offered even when no model could be drawn from it.
+let documentIsGcode = false;
 let other: Model | null = null;
 let siblings: string[] = [];
 let showGridSetting = true;
@@ -435,39 +452,22 @@ function tint(material: THREE.MeshStandardMaterial): void {
   material.emissiveIntensity = 0.55;
 }
 
-// Colors for the slicer's feature names, close to the ones Bambu Studio and
-// OrcaSlicer use for the same lines. First match wins, so the more specific
-// name comes first.
-const FEATURE_COLORS: Array<[RegExp, number]> = [
-  [/support interface/i, 0x1f8a3b],
-  [/support/i, 0x3fd65b],
-  [/overhang/i, 0x4f6bed],
-  [/outer|external/i, 0xff7d38],
-  [/inner|perimeter|wall/i, 0xf2c94c],
-  [/top/i, 0xf04a4a],
-  [/bottom/i, 0x7a6ff0],
-  [/internal solid|solid infill/i, 0xa35ad6],
-  [/bridge/i, 0x4d9ad9],
-  [/gap/i, 0x9aa0a6],
-  [/infill/i, 0xc0453a],
-  [/skirt|brim/i, 0x00a085],
-  [/prime|wipe/i, 0x8fd18a],
-];
-
 function toolpathModel(
   name: string,
   gcode: string,
   plates: number,
   sliceInfo: string | undefined,
+  plain = false,
 ): Built {
   const path = parseGcode(gcode);
   if (path.segments === 0) {
-    return 'This sliced print file has no extrusion moves to show.';
+    return plain
+      ? 'This G-code file has no extrusion moves to show.'
+      : 'This sliced print file has no extrusion moves to show.';
   }
-  const palette = path.features.map((feature) => {
-    const match = FEATURE_COLORS.find(([pattern]) => pattern.test(feature));
-    return new THREE.Color(match ? match[1] : 0x8a8f98);
-  });
+  const palette = path.features.map(
+    (feature) => new THREE.Color(featureColor(feature) ?? 0x8a8f98),
+  );
   // Two vertices per segment, both the color of the segment's feature.
   const colors = new Float32Array(path.segments * 6);
   for (let i = 0; i < path.segments; i++) {
@@ -490,7 +490,7 @@ function toolpathModel(
   if (materials.length > 0) {
     facts.push(materials.join(', '));
   }
-  const summary = [`Sliced print${plates > 1 ? `, plate 1 of ${plates}` : ''}`];
+  const summary = [plain ? 'G-code' : `Sliced print${plates > 1 ? `, plate 1 of ${plates}` : ''}`];
   if (facts.length > 0) {
     summary.push(facts.join(' · '));
   }
@@ -512,7 +512,20 @@ function toolpathModel(
     swatch: '#ff7d38',
     toolpath: path,
     summary,
+    plainGcode: plain,
+    bed: readGcodeBed(gcode),
   };
+}
+
+// Plain G-code from any slicer. The host has checked it is text; the bytes are
+// read as UTF-8, which a bad sequence only turns into replacement characters in
+// a comment.
+function buildGcode(name: string, raw: Uint8Array): Built {
+  try {
+    return toolpathModel(name, new TextDecoder().decode(raw), 1, undefined, true);
+  } catch (err) {
+    return `Could not read this G-code file (${String(err)}).`;
+  }
 }
 
 // A GLB is read by three's GLTFLoader after glb.ts has refused what it cannot
@@ -614,6 +627,8 @@ async function build(
       return buildGlb(name, raw, color, css);
     case 'step':
       return buildStep(name, raw, color, css);
+    case 'gcode':
+      return buildGcode(name, raw);
     default:
       return buildStl(name, raw, color, css);
   }
@@ -718,7 +733,11 @@ function rebuildFloor(): void {
   let z0 = -worldSize.z / 2 - foot / 4;
   let z1 = worldSize.z / 2 + foot / 4;
 
-  const bedMm = showBedSetting ? parseBedSize(bedSizeSetting) : null;
+  // A toolpath's own slicer settings give its bed; anything else, and a file
+  // that names none, takes markcopy.stl.bedSize.
+  const fileBed = primary.kind === 'toolpath' ? primary.bed : undefined;
+  const bedMm = showBedSetting ? (fileBed?.size ?? parseBedSize(bedSizeSetting)) : null;
+  const bedOrigin = fileBed?.origin ?? [0, 0];
   let bedNote = '';
   if (bedMm) {
     const scale = primary.mmPerUnit;
@@ -728,13 +747,17 @@ function rebuildFloor(): void {
     // A sliced print has a real place on the bed (its coordinates are the
     // bed's); a model has none yet, so the bed is centred under it.
     const sliced = primary.kind === 'toolpath';
-    const bx0 = sliced ? ox : -w / 2;
-    const bz1 = sliced ? oz : d / 2;
+    const bx0 = sliced ? ox + bedOrigin[0] / scale : -w / 2;
+    const bz1 = sliced ? oz - bedOrigin[1] / scale : d / 2;
     const bx1 = bx0 + w;
     const bz0 = bz1 - d;
     const { min, max } = primary.box;
     const fits = sliced
-      ? min[0] >= -1e-6 && min[1] >= -1e-6 && max[0] <= w && max[1] <= d && max[2] <= h
+      ? min[0] >= bedOrigin[0] - 1e-6 &&
+        min[1] >= bedOrigin[1] - 1e-6 &&
+        max[0] <= bedOrigin[0] + w &&
+        max[1] <= bedOrigin[1] + d &&
+        max[2] <= h
       : fitsBed(
           [worldSize.x * scale, worldSize.z * scale, worldSize.y * scale],
           [bedMm[0], bedMm[1], bedMm[2]],
@@ -928,6 +951,7 @@ function renderStats(): void {
 // ---------------------------------------------------------------------------
 function loadModel(msg: LoadMessage): void {
   fileName = msg.name;
+  documentIsGcode = msg.format === 'gcode';
   filePath = msg.path ?? '';
   showGridSetting = msg.showGrid !== false;
   showBedSetting = msg.showBed === true;
@@ -979,7 +1003,9 @@ function showPrimary(built: Built): void {
 
   const sliced = built.kind === 'toolpath';
   // A sliced print is a position on a bed, so the bed is part of the picture.
-  showBedSetting = showBedSetting || sliced;
+  // (A plain G-code file shows one only when its own settings name a bed or
+  // markcopy.stl.showBed is on.)
+  showBedSetting = showBedSetting || (sliced && (!built.plainGcode || built.bed !== undefined));
   btnWireframe.disabled = sliced;
   btnSection.disabled = sliced;
   layersEl.hidden = !sliced;
@@ -1778,6 +1804,15 @@ function buildMenu(): MenuEntry[] {
     { kind: 'divider' },
     { kind: 'submenu', label: 'Preferences', entries: themeItems() },
     { kind: 'divider' },
+    ...(documentIsGcode
+      ? [
+          {
+            kind: 'item' as const,
+            label: 'Open as Text',
+            run: () => vscode.postMessage({ type: 'openAsText' }),
+          },
+        ]
+      : []),
     {
       kind: 'item',
       label: 'Open in Default App',

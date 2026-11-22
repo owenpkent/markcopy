@@ -15,6 +15,7 @@ describe('messages fuzz target', () => {
   const valid: unknown[] = [
     { type: 'navigate', step: 1 },
     { type: 'navigate', step: -1 },
+    { type: 'openAsText' },
     { type: 'reviewEnable' },
     { type: 'reviewCopy' },
     { type: 'reviewAdd', at: 0, text: 'note' },

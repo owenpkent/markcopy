@@ -37,3 +37,23 @@ export function stepHeaderProblem(bytes: Uint8Array): string | null {
   }
   return null;
 }
+
+const GCODE_SNIFF_BYTES = 64 * 1024;
+
+/**
+ * Why a file cannot be read as plain-text G-code, or null. Prusa's binary
+ * G-code starts with `GCDE` whatever its extension; any other file with a NUL
+ * byte in its first 64 KiB is not text.
+ */
+export function gcodeProblem(bytes: Uint8Array): string | null {
+  if (bytes[0] === 0x47 && bytes[1] === 0x43 && bytes[2] === 0x44 && bytes[3] === 0x45) {
+    return 'binary G-code (.bgcode) is not supported';
+  }
+  const end = Math.min(bytes.length, GCODE_SNIFF_BYTES);
+  for (let i = 0; i < end; i++) {
+    if (bytes[i] === 0) {
+      return 'it contains binary data (a NUL byte), so it is not text G-code';
+    }
+  }
+  return null;
+}
