@@ -380,6 +380,28 @@ describe('STL solids', () => {
     expect(tree.children.map((c) => c.ranges)).toEqual([[[0, 2]], [[2, 3]]]);
   });
 
+  it('skips an empty solid and keeps the drawable ones after it', () => {
+    // STLLoader gives an empty solid a zero-count group: counts [0, 3, 3].
+    const text = [
+      'solid empty',
+      'endsolid empty',
+      ...['A', 'B'].flatMap((name) => [
+        `solid ${name}`,
+        'facet normal 0 0 1',
+        'outer loop',
+        'vertex 0 0 0',
+        'vertex 1 0 0',
+        'vertex 0 1 0',
+        'endloop',
+        'endfacet',
+        `endsolid ${name}`,
+      ]),
+    ].join('\n');
+    const tree = parse(new TextEncoder().encode(text));
+    expect(names(tree)).toEqual(['A', 'B']);
+    expect(tree.children.map((c) => c.ranges)).toEqual([[[0, 1]], [[1, 1]]]);
+  });
+
   it('is one part for a single solid or a binary file', () => {
     expect(names(parse(asciiStl([['only', 2]])))).toEqual(['Part 1']);
     expect(names(stlPartTree([], undefined, 4))).toEqual(['Part 1']);

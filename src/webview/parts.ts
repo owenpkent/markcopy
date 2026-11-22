@@ -525,9 +525,10 @@ export function partsMarkdown(root: PartNode): string {
  * The part tree of an STL: one part per solid, in file order. The ranges and
  * names are STLLoader's own (`geometry.groups`, in vertices, and
  * `geometry.userData.groupNames`), so they agree with what is drawn whatever the
- * loader accepts (a byte order mark, a closing name made of syntax words). A file
- * with no more than one solid, or whose groups do not tile `total` triangles, is
- * one part.
+ * loader accepts (a byte order mark, a closing name made of syntax words). An
+ * empty solid (a zero-count group) is skipped, keeping its index into the names.
+ * A file with no more than one drawable solid, or whose drawable groups do not
+ * tile `total` triangles, is one part.
  */
 export function stlPartTree(
   groups: ReadonlyArray<{ start: number; count: number }>,
@@ -535,10 +536,11 @@ export function stlPartTree(
   total: number,
 ): PartNode {
   const builder = new PartTreeBuilder(total);
-  let tiled = groups.length > 1;
+  const drawable = groups.filter((group) => group.count !== 0);
+  let tiled = drawable.length > 1;
   let cursor = 0;
-  for (const group of groups) {
-    if (group.start !== cursor || group.count % 3 !== 0 || group.count === 0) {
+  for (const group of drawable) {
+    if (group.start !== cursor || group.count % 3 !== 0) {
       tiled = false;
       break;
     }
@@ -547,6 +549,9 @@ export function stlPartTree(
   if (tiled && cursor / 3 === total) {
     const given = Array.isArray(groupNames) ? groupNames : [];
     groups.forEach((group, i) => {
+      if (group.count === 0) {
+        return;
+      }
       // The loader reads `solid\s(.+)`: an unnamed solid takes the next line as its name.
       const raw = typeof given[i] === 'string' ? given[i].trim() : '';
       const name = /^(facet\s+normal|endsolid)(\s|$)/.test(raw) ? '' : raw;

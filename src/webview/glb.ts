@@ -765,7 +765,7 @@ function errorText(err: unknown): string {
   return String(err);
 }
 
-interface Piece {
+export interface Piece {
   mesh: THREE.Mesh;
   /** World matrices to place it at: one, or one per instance. */
   matrices: THREE.Matrix4[];
@@ -953,8 +953,8 @@ export async function readGlb(bytes: Uint8Array, options: GlbOptions = {}): Prom
 // node that places a mesh many times (EXT_mesh_gpu_instancing) is one part per
 // copy, and an instanced node with nothing under it puts them straight into its
 // parent, so the quantity row is the part itself. A name is the node's, else its
-// mesh's, else left for "Part N".
-function glbParts(pruned: Gltf, pieces: Piece[], total: number): PartNode {
+// mesh's, else left for "Part N". Exported for tests.
+export function glbParts(pruned: Gltf, pieces: Piece[], total: number): PartNode {
   const builder = new PartTreeBuilder(total);
   const byNode = new Map<number, Piece[]>();
   for (const piece of pieces) {
@@ -973,7 +973,12 @@ function glbParts(pruned: Gltf, pieces: Piece[], total: number): PartNode {
   const leaves = (index: number, name: string): void => {
     const list = byNode.get(index) ?? [];
     // Every primitive of a placement has the same number of placements.
-    const placements = list.length > 0 ? Math.min(...list.map((p) => p.ranges.length)) : 0;
+    // A loop, not Math.min(...): a node may hold more primitives than a call
+    // takes arguments.
+    let placements = list.length > 0 ? Infinity : 0;
+    for (const p of list) {
+      placements = Math.min(placements, p.ranges.length);
+    }
     for (let k = 0; k < placements; k++) {
       builder.leaf(
         name,

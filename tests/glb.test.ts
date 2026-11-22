@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { glbHeaderProblem } from '../src/webview/modelSniff';
-import { GlbError, countGlbTriangles, readGlb } from '../src/webview/glb';
+import { GlbError, countGlbTriangles, glbParts, readGlb, type Piece } from '../src/webview/glb';
 
 type Json = Record<string, unknown>;
 type CountArg = Parameters<typeof countGlbTriangles>[0];
@@ -639,5 +639,24 @@ describe('part names from the source', () => {
     (json.meshes as Json[])[0].name = 'mesh_42';
     const model = await readGlb(glb(json, TRIANGLE_BIN));
     expect(model.parts.children[0].name).toBe('mesh_42');
+  });
+});
+
+describe('glbParts', () => {
+  it('handles a node with more primitives than a call takes arguments', () => {
+    // 200,000 one-triangle primitives on one node: lightweight placement records,
+    // no scene. Math.min(...ranges) threw RangeError here.
+    const n = 200_000;
+    const pieces = Array.from({ length: n }, (_, i): Piece => ({
+      mesh: null as never,
+      matrices: [],
+      ranges: [[i, 1]],
+      node: 0,
+    }));
+    const pruned = { scenes: [{ nodes: [0] }], nodes: [{ mesh: 0, name: 'Wide' }], meshes: [{}] };
+    const tree = glbParts(pruned as never, pieces, n);
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0].name).toBe('Wide');
+    expect(tree.children[0].ranges).toHaveLength(n);
   });
 });
