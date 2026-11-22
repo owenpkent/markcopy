@@ -191,20 +191,26 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   const maxObjects = limits.maxObjects ?? MAX_OBJ_OBJECTS;
   const maxUses = limits.maxMaterialUses ?? MAX_OBJ_MATERIAL_USES;
 
-  // The loader turns CRLF into LF and joins a line continued with a backslash
-  // before it splits lines, once each. It will do both again on the rewritten
-  // text, so they are done to a fixed point here: what is left has no \r before a
-  // newline, and a backslash left before one (from `\\` then a newline) gets a
-  // space after it, so the loader reads it as the plain line it is.
+  // The loader turns CRLF into LF and then joins a line continued with a
+  // backslash, once each, before it splits lines. Both are done here exactly as
+  // it does them, and it will do both again on the rewritten text, so whatever
+  // either pass could still change is then defused: a \r left before a newline
+  // (a join can make a new CRLF) becomes a space, and a backslash left before a
+  // newline gets a space after it. Neither replacement can make the other's
+  // pattern, so the loader's passes find nothing and it parses exactly the text
+  // counted here.
   let source = text;
   if (source.indexOf('\r\n') !== -1) {
-    source = source.replace(/\r+\n/g, '\n');
+    source = source.replace(/\r\n/g, '\n');
   }
   if (source.indexOf('\\\n') !== -1) {
     source = source.replace(/\\\n/g, '');
-    if (source.indexOf('\\\n') !== -1) {
-      source = source.replace(/\\\n/g, '\\ \n');
-    }
+  }
+  if (source.indexOf('\r\n') !== -1) {
+    source = source.replace(/\r\n/g, ' \n');
+  }
+  if (source.indexOf('\\\n') !== -1) {
+    source = source.replace(/\\\n/g, '\\ \n');
   }
 
   let vertices = 0;
@@ -213,6 +219,8 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   let triangles = 0;
   let uses = 0;
   const materialNames = new Set<string>();
+  // Indices into `chunks` of blank usemtl lines, named at the end.
+  const blankMaterials: number[] = [];
   let allNormals = true;
   let facesBeforeMaterial = false;
   // Positions of the vertices declared so far, for ear clipping a concave face.
@@ -361,7 +369,16 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
           );
         }
         // The loader's own rule for the name.
-        materialNames.add(line.substring(7).trim());
+        const name = line.substring(7).trim();
+        materialNames.add(name);
+        if (name === '') {
+          // A blank usemtl (no material) is not carried into the next o or g,
+          // so a later named usemtl there would color the faces before it.
+          // It becomes the default-color material, which is carried over; the
+          // name is filled in once the file's names are known.
+          rewrite(lineStart, end, 'usemtl');
+          blankMaterials.push(chunks.length - 2);
+        }
       }
     }
   }
@@ -371,16 +388,19 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
   // a name no usemtl line of the file uses (a set lookup per try, bounded by
   // the usemtl cap, never a scan of the text), keeps the default color on them.
   let initialMaterial: string | null = null;
-  if (facesBeforeMaterial) {
+  if (facesBeforeMaterial || blankMaterials.length > 0) {
     initialMaterial = 'markcopy-initial-material';
     for (let i = 1; materialNames.has(initialMaterial); i++) {
       initialMaterial = `markcopy-initial-material-${i}`;
+    }
+    for (const slot of blankMaterials) {
+      chunks[slot] = `usemtl ${initialMaterial}`;
     }
   }
   const rewritten =
     chunks.length === 0 && initialMaterial === null
       ? source
-      : (initialMaterial === null ? '' : `usemtl ${initialMaterial}\n`) +
+      : (facesBeforeMaterial ? `usemtl ${initialMaterial}\n` : '') +
         chunks.join('') +
         source.slice(copied);
   return {

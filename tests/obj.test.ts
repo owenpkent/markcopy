@@ -546,6 +546,47 @@ describe('OBJ review fixes', () => {
     expect(nc.slice(9, 12)).toEqual([0, 1, 0]);
   });
 
+  it('keeps the default color after a blank usemtl, across an o line', () => {
+    const fallback: [number, number, number] = [0.1, 0.2, 0.3];
+    const model = readObj(
+      bytes(`${TRI}usemtl \no First\nf 1 2 3\no Second\nf 1 2 3\nusemtl Red\nf 1 3 2\n`),
+      { mtl: [{ name: 'a.mtl', text: 'newmtl Red\nKd 1 0 0\n' }], fallbackColor: fallback },
+    );
+    const c = Array.from(model.colors as Float32Array).map((x) => +x.toFixed(4));
+    expect(model.positions.length / 9).toBe(3);
+    expect(c.slice(0, 3)).toEqual(fallback);
+    // Second's first face comes before usemtl Red.
+    expect(c.slice(9, 12)).toEqual(fallback);
+    expect(c.slice(18, 21)).toEqual([1, 0, 0]);
+  });
+
+  it('hands the loader text its newline passes cannot change, so the count holds', () => {
+    // A backslash, CR, backslash, LF, LF: joining the continuation makes a new
+    // CRLF, which the loader would turn into another join.
+    const seam = String.fromCharCode(92, 13, 92, 10, 10);
+    const source = `${TRI}f 1 2 3${seam}f 1 2 3\n`;
+    const scan = scanObj(source, { maxTriangles: 2 });
+    expect(scan.text.includes('\r\n')).toBe(false);
+    expect(scan.text.includes('\\\n')).toBe(false);
+    let made = -1;
+    try {
+      made = readObj(bytes(source), { limits: { maxTriangles: 2 } }).positions.length / 9;
+    } catch (e) {
+      expect(e).toBeInstanceOf(ObjError);
+    }
+    expect(made).toBeLessThanOrEqual(scan.triangles);
+    // Nested seams and stray CRs leave nothing for the loader's passes either.
+    // (A seam that joins two faces into one malformed line is refused instead.)
+    for (const tail of ['\\\r\r\n', '\\\\\n\n', '\r\\\r\n\\\n', '\\\r\\\r\\\n\n\n']) {
+      try {
+        const text = scanObj(`${TRI}f 1 2 3${tail}f 1 2 3\n`).text;
+        expect(text.includes('\r\n') || text.includes('\\\n')).toBe(false);
+      } catch (e) {
+        expect(e).toBeInstanceOf(ObjError);
+      }
+    }
+  });
+
   it('skips a UTF-8 byte order mark before the first mtllib line', () => {
     expect(objMtlNames(bytes('﻿mtllib sample.mtl\nv 0 0 0\n'))).toEqual(['sample.mtl']);
   });
