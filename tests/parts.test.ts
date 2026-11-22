@@ -1,6 +1,8 @@
 // Coverage for src/webview/parts.ts: the part tree builder and its caps, name
 // cleaning, the rows with quantities, the range lookup used for picking, the
 // geometry groups, the Markdown parts list and the STL solid reader.
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { createMarkdownIt } from '../src/render';
 import { describe, expect, it } from 'vitest';
 import {
   HIDDEN,
@@ -16,7 +18,6 @@ import {
   findLeaf,
   leafBounds,
   partsMarkdown,
-  readStlSolids,
   stlPartTree,
   type PartNode,
 } from '../src/webview/parts';
@@ -285,6 +286,42 @@ describe('partsMarkdown', () => {
     expect(partsMarkdown(b.finish()).split('\n')[2]).toBe('| Bolt | Machine / Arm | 1 | 2 |');
   });
 
+  it('keeps a flat assembly named "Machine / Arm" apart from a nested Machine > Arm', () => {
+    const b = new PartTreeBuilder(10);
+    b.begin('Machine / Arm');
+    b.leaf('Bolt', [[0, 2]]);
+    b.end();
+    b.begin('Machine');
+    b.begin('Arm');
+    b.leaf('Bolt', [[2, 2]]);
+    b.end();
+    b.end();
+    // One row each, not '| Bolt | Machine / Arm | 2 | 2 |'.
+    expect(partsMarkdown(b.finish()).split('\n').slice(2)).toEqual([
+      '| Bolt | Machine / Arm | 1 | 2 |',
+      '| Bolt | Machine / Arm | 1 | 2 |',
+    ]);
+  });
+
+  it('renders names as literal text', () => {
+    const raw: PartNode = {
+      name: '',
+      children: [
+        { name: '<M6>', children: [], ranges: [[0, 1]] },
+        { name: '**Retainer**', children: [], ranges: [[1, 1]] },
+        { name: 'a|b\\c & d_e', children: [], ranges: [[2, 1]] },
+      ],
+      ranges: [],
+    };
+    const html = createMarkdownIt().render(partsMarkdown(raw));
+    const dom = new DOMParser().parseFromString(html, 'text/html');
+    const cells = [...dom.querySelectorAll('tbody tr')].map(
+      (tr) => tr.querySelector('td')?.textContent,
+    );
+    expect(cells).toEqual(['<M6>', '**Retainer**', 'a|b\\c & d_e']);
+    expect(dom.querySelectorAll('strong, m6')).toHaveLength(0);
+  });
+
   it('escapes pipes, backslashes and newlines so a name cannot break the table', () => {
     const b = new PartTreeBuilder(10);
     b.begin('A | B');
@@ -324,46 +361,78 @@ function asciiStl(solids: Array<[string, number]>): Uint8Array {
 }
 
 describe('STL solids', () => {
-  it('reads one part per solid, in order, with its facet count', () => {
-    const solids = readStlSolids(
-      asciiStl([
-        ['left', 2],
-        ['right', 3],
-      ]),
+  const parse = (bytes: Uint8Array): PartNode => {
+    const geometry = new STLLoader().parse(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
     );
-    expect(solids).toEqual([
-      { name: ' left', triangles: 2 },
-      { name: ' right', triangles: 3 },
-    ]);
-    const tree = stlPartTree(
+    const total = geometry.getAttribute('position').count / 3;
+    return stlPartTree(geometry.groups, geometry.userData.groupNames, total);
+  };
+
+  it('reads one part per solid, in order, with its facet count', () => {
+    const tree = parse(
       asciiStl([
         ['left', 2],
         ['right', 3],
       ]),
-      5,
     );
     expect(names(tree)).toEqual(['left', 'right']);
     expect(tree.children.map((c) => c.ranges)).toEqual([[[0, 2]], [[2, 3]]]);
   });
 
-  it('is one part for a single solid, a binary file, or counts that do not add up', () => {
-    expect(names(stlPartTree(asciiStl([['only', 2]]), 2))).toEqual(['Part 1']);
-    expect(names(stlPartTree(new Uint8Array(100), 4))).toEqual(['Part 1']);
+  it('is one part for a single solid or a binary file', () => {
+    expect(names(parse(asciiStl([['only', 2]])))).toEqual(['Part 1']);
+    expect(names(stlPartTree([], undefined, 4))).toEqual(['Part 1']);
     expect(
       names(
         stlPartTree(
-          asciiStl([
-            ['a', 2],
-            ['b', 2],
-          ]),
+          [
+            { start: 0, count: 6 },
+            { start: 6, count: 6 },
+          ],
+          ['a', 'b'],
           9,
         ),
       ),
     ).toEqual(['Part 1']);
   });
 
-  it('refuses a file whose solids nest or whose facets sit outside one', () => {
-    expect(readStlSolids(new TextEncoder().encode('solid a\nsolid b\nendsolid\n'))).toBeNull();
-    expect(readStlSolids(new TextEncoder().encode('facet normal 0 0 1\n'))).toBeNull();
+  it('keeps both solids of a file that starts with a UTF-8 byte order mark', () => {
+    const plain = asciiStl([
+      ['left', 2],
+      ['right', 3],
+    ]);
+    const bom = new Uint8Array(plain.length + 3);
+    bom.set([0xef, 0xbb, 0xbf]);
+    bom.set(plain, 3);
+    const tree = parse(bom);
+    expect(names(tree)).toEqual(['left', 'right']);
+    expect(tree.children.map((c) => c.ranges)).toEqual([[[0, 2]], [[2, 3]]]);
+  });
+
+  it('keeps a solid whose name holds syntax words, with its closing name', () => {
+    const tree = parse(
+      asciiStl([
+        ['Brace facet guard', 1],
+        ['Other', 1],
+      ]),
+    );
+    expect(names(tree)).toEqual(['Brace facet guard', 'Other']);
+  });
+
+  it('leaves an unnamed solid unnamed', () => {
+    const facet = [
+      'facet normal 0 0 1',
+      'outer loop',
+      'vertex 0 0 0',
+      'vertex 1 0 0',
+      'vertex 0 1 0',
+      'endloop',
+      'endfacet',
+      '',
+    ].join('\n');
+    const text = `solid\n${facet}endsolid\nsolid b\n${facet}endsolid b\n`;
+    const tree = parse(new TextEncoder().encode(text));
+    expect(names(tree)).toEqual(['Part 1', 'b']);
   });
 });

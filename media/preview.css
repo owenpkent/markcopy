@@ -2891,30 +2891,34 @@ body.mc-audio .mc-audio-grid dd {
    The panel beside the model (src/webview/partsPanel.ts). It uses the same
    palette variables as the rest of the previews, so the auto, light, dark and
    green themes all apply. Every control is at least 44 px square. */
-body.mc-parts {
-  --mc-parts-w: min(440px, 50vw);
-}
+/* The panel shares the right-hand dock with Section: the same width
+   (--mc-dock-w, set with the section panel in src/stlEditor.ts), so the 3D view
+   is as wide with Parts open as with Section open, and with both open the two
+   stack, Parts above and Section below, each scrolling on its own. */
 body.mc-parts #viewport {
-  left: var(--mc-parts-w);
-}
-body.mc-parts #toolbar,
-body.mc-parts #stats {
-  left: calc(var(--mc-parts-w) + 8px);
+  right: var(--mc-dock-w, 46%);
 }
 #parts {
   position: fixed;
   top: 0;
-  left: 0;
+  right: 0;
   bottom: 0;
-  width: var(--mc-parts-w, min(440px, 50vw));
+  width: var(--mc-dock-w, 46%);
   z-index: 5;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   background: var(--mc-stl-bg, var(--mc-bg));
   color: var(--mc-stl-fg, var(--mc-fg));
-  border-right: 1px solid var(--mc-border);
+  border-left: 1px solid var(--mc-border);
   font-size: 13px;
+}
+body.mc-parts.mc-section #parts {
+  bottom: 50%;
+  border-bottom: 1px solid var(--mc-border);
+}
+body.mc-parts.mc-section #section {
+  top: 50%;
 }
 #parts[hidden] {
   display: none;

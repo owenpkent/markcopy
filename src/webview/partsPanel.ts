@@ -175,10 +175,19 @@ export function createPartsPanel(els: PartsPanelElements, hooks: PartsPanelHooks
     if (item.children.length === 0) {
       return;
     }
+    // render() replaces every row, so a focused control is put back by item id.
+    const focused = document.activeElement as HTMLElement | null;
+    const control = focused && list.contains(focused) ? focused.closest('button, input') : null;
+    const kept = control ? itemOf(control) : null;
+    const className = control?.className;
     if (!expanded.delete(item.id)) {
       expanded.add(item.id);
     }
     render();
+    if (kept && className) {
+      const first = className.split(' ')[0];
+      rows.get(kept.id)?.querySelector<HTMLElement>(`.${first}`)?.focus();
+    }
   }
 
   function select(item: PartItem | null): void {

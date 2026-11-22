@@ -1019,6 +1019,23 @@ describe('3D viewer parts panel', () => {
     expect(sweep()).toEqual(new Set(['right']));
   });
 
+  it('does not pick a model hidden by Compare with, and clears the selection', async () => {
+    await import('../src/webview/stl');
+    load({ name: 'two.stl', bytes: TWO_BOXES() });
+    send({ type: 'compare', format: 'stl', name: 'c.stl', bytes: boxStl([0, 0, 0], [1, 1, 1]) });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    rowNamed('left').click();
+    expect(selectedNames()).toEqual(['left']);
+    openMenuAt();
+    [...document.querySelectorAll<HTMLElement>('.mc-menu-item')]
+      .find((item) => (item.textContent ?? '').startsWith('Compare with'))
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    menuRow('Show two.stl')!.click();
+    expect(meshes()[0].visible).toBe(false);
+    expect(sweep()).toEqual(new Set());
+    expect(selectedNames()).toEqual([]);
+  });
+
   it('cuts only the parts that are shown', async () => {
     await import('../src/webview/stl');
     load({ name: 'two.stl', bytes: TWO_BOXES() });
@@ -1096,6 +1113,22 @@ describe('3D viewer parts panel', () => {
       // Checking the mixed assembly shows everything.
       showBox(rowNamed('Demo assembly')).click();
       expect(meshes()[0].geometry.groups).toHaveLength(0);
+    }, 30000);
+
+    it('keeps keyboard focus on the disclosure button after it is activated', async () => {
+      await openAssembly();
+      const toggle = () =>
+        rowNamed('Mounting kit').querySelector<HTMLButtonElement>('.mc-part-toggle')!;
+      // Collapse, then expand again: both replace every row.
+      for (const label of ['Collapse Mounting kit', 'Expand Mounting kit']) {
+        const before = toggle();
+        before.focus();
+        expect(document.activeElement).toBe(before);
+        expect(before.getAttribute('aria-label')).toBe(label);
+        before.click();
+        expect(before.isConnected).toBe(false);
+        expect(document.activeElement).toBe(toggle());
+      }
     }, 30000);
 
     it('selects the row of a picked part, opening the assembly that holds it', async () => {

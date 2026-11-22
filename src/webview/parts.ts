@@ -472,10 +472,13 @@ export function leafBounds(
 // Copy parts list
 // ---------------------------------------------------------------------------
 function cell(text: string): string {
+  // Literal text: markdown-it lets any ASCII punctuation be backslash-escaped,
+  // and the preview renders HTML, so the angle brackets and ampersand become
+  // entities, which decode to the character rather than starting markup.
   return text
-    .replace(/\\/g, '\\\\')
-    .replace(/\|/g, '\\|')
-    .replace(/[\r\n]+/g, ' ');
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[!"#$'()*+\-.:[\\\]^_`{|}~]/g, '\\$&')
+    .replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
 }
 
 /**
@@ -485,7 +488,7 @@ function cell(text: string): string {
  * Triangles is one part's.
  */
 export function partsMarkdown(root: PartNode): string {
-  const rows = new Map<string, { name: string; path: string; qty: number; triangles: number }>();
+  const rows = new Map<string, { name: string; path: string[]; qty: number; triangles: number }>();
   const walk = (node: PartNode, path: string[]) => {
     if (node.children.length > 0) {
       for (const child of node.children) {
@@ -494,13 +497,13 @@ export function partsMarkdown(root: PartNode): string {
       return;
     }
     const triangles = rangeTriangles(node.ranges);
-    const assembly = path.join(' / ');
-    const key = `${assembly}\u0000${node.name}\u0000${triangles}`;
+    // A structured key: a name that itself holds " / " cannot collide with a path.
+    const key = JSON.stringify([path, node.name, triangles]);
     const row = rows.get(key);
     if (row) {
       row.qty++;
     } else {
-      rows.set(key, { name: node.name, path: assembly, qty: 1, triangles });
+      rows.set(key, { name: node.name, path, qty: 1, triangles });
     }
   };
   for (const child of root.children) {
@@ -508,7 +511,9 @@ export function partsMarkdown(root: PartNode): string {
   }
   const lines = ['| Part | Assembly | Qty | Triangles |', '| --- | --- | ---: | ---: |'];
   for (const row of rows.values()) {
-    lines.push(`| ${cell(row.name)} | ${cell(row.path)} | ${row.qty} | ${row.triangles} |`);
+    lines.push(
+      `| ${cell(row.name)} | ${cell(row.path.join(' / '))} | ${row.qty} | ${row.triangles} |`,
+    );
   }
   return lines.join('\n');
 }
@@ -516,79 +521,37 @@ export function partsMarkdown(root: PartNode): string {
 // ---------------------------------------------------------------------------
 // STL: one part per `solid`
 // ---------------------------------------------------------------------------
-const isSpace = (b: number) => b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d;
-
-function wordAt(bytes: Uint8Array, at: number, word: string): boolean {
-  if (at + word.length > bytes.length || (at > 0 && !isSpace(bytes[at - 1]))) {
-    return false;
-  }
-  for (let i = 0; i < word.length; i++) {
-    if (bytes[at + i] !== word.charCodeAt(i)) {
-      return false;
-    }
-  }
-  const after = bytes[at + word.length];
-  return after === undefined || isSpace(after);
-}
-
 /**
- * The `solid <name>` blocks of an ASCII STL and how many facets each holds, in
- * file order, or null when the file does not read as a clean run of solids.
- * Scans bytes, so a few hundred megabytes of text is not decoded a second time.
+ * The part tree of an STL: one part per solid, in file order. The ranges and
+ * names are STLLoader's own (`geometry.groups`, in vertices, and
+ * `geometry.userData.groupNames`), so they agree with what is drawn whatever the
+ * loader accepts (a byte order mark, a closing name made of syntax words). A file
+ * with no more than one solid, or whose groups do not tile `total` triangles, is
+ * one part.
  */
-export function readStlSolids(
-  bytes: Uint8Array,
-): Array<{ name: string; triangles: number }> | null {
-  const solids: Array<{ name: string; triangles: number }> = [];
-  let open: { name: string; triangles: number } | null = null;
-  const decoder = new TextDecoder();
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i];
-    if (b === 0x73 /* s */ && wordAt(bytes, i, 'solid')) {
-      if (open) {
-        return null;
-      }
-      let end = i + 5;
-      while (end < bytes.length && bytes[end] !== 0x0a && bytes[end] !== 0x0d && end - i < 4096) {
-        end++;
-      }
-      open = { name: decoder.decode(bytes.subarray(i + 5, end)), triangles: 0 };
-      i = end;
-    } else if (b === 0x65 /* e */ && wordAt(bytes, i, 'endsolid')) {
-      if (!open) {
-        return null;
-      }
-      solids.push(open);
-      open = null;
-      i += 7;
-    } else if (b === 0x66 /* f */ && wordAt(bytes, i, 'facet')) {
-      if (!open) {
-        return null;
-      }
-      open.triangles++;
-      i += 4;
-    }
-  }
-  if (open) {
-    solids.push(open);
-  }
-  return solids;
-}
-
-/**
- * The part tree of an ASCII STL: one part per solid, in file order. A file with
- * one solid, or whose facets do not add up to `total`, is one part.
- */
-export function stlPartTree(bytes: Uint8Array, total: number): PartNode {
+export function stlPartTree(
+  groups: ReadonlyArray<{ start: number; count: number }>,
+  groupNames: unknown,
+  total: number,
+): PartNode {
   const builder = new PartTreeBuilder(total);
-  const solids = readStlSolids(bytes);
-  const counted = solids?.reduce((sum, solid) => sum + solid.triangles, 0);
-  if (solids && solids.length > 1 && counted === total) {
-    let start = 0;
-    for (const solid of solids) {
-      builder.leaf(solid.name, [[start, solid.triangles]]);
-      start += solid.triangles;
+  let tiled = groups.length > 1;
+  let cursor = 0;
+  for (const group of groups) {
+    if (group.start !== cursor || group.count % 3 !== 0 || group.count === 0) {
+      tiled = false;
+      break;
     }
+    cursor += group.count;
+  }
+  if (tiled && cursor / 3 === total) {
+    const given = Array.isArray(groupNames) ? groupNames : [];
+    groups.forEach((group, i) => {
+      // The loader reads `solid\s(.+)`: an unnamed solid takes the next line as its name.
+      const raw = typeof given[i] === 'string' ? given[i].trim() : '';
+      const name = /^(facet\s+normal|endsolid)(\s|$)/.test(raw) ? '' : raw;
+      builder.leaf(name, [[group.start / 3, group.count / 3]]);
+    });
   } else {
     builder.leaf('', [[0, total]]);
   }

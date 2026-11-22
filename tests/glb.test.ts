@@ -541,3 +541,103 @@ describe('readGlb', () => {
     ).rejects.toThrow(/not glTF 2.0/);
   });
 });
+
+describe('parts of a multi-primitive mesh', () => {
+  // Two one-triangle primitives (two materials) in one mesh.
+  const twoPrimitives = (): Json => {
+    const json = triangleJson();
+    json.meshes = [
+      {
+        primitives: [
+          { attributes: { POSITION: 0 }, material: 0 },
+          { attributes: { POSITION: 0 }, material: 1 },
+        ],
+      },
+    ];
+    json.materials = [
+      { pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1] } },
+      { pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1] } },
+    ];
+    return json;
+  };
+
+  it('keeps one node with two materials as one part', async () => {
+    const model = await readGlb(glb(twoPrimitives(), TRIANGLE_BIN));
+    expect(model.positions.length).toBe(2 * 9);
+    expect(model.parts.children).toHaveLength(1);
+    expect(model.parts.children[0].ranges).toEqual([
+      [0, 1],
+      [1, 1],
+    ]);
+  });
+
+  it('keeps each node with two materials as one part holding both primitives', async () => {
+    const json = twoPrimitives();
+    json.nodes = [
+      { name: 'A', mesh: 0 },
+      { name: 'B', mesh: 0, translation: [5, 0, 0] },
+    ];
+    (json.scenes as Json[])[0].nodes = [0, 1];
+    const model = await readGlb(glb(json, TRIANGLE_BIN));
+    expect(model.parts.children.map((c) => [c.name, c.ranges.length])).toEqual([
+      ['A', 2],
+      ['B', 2],
+    ]);
+    const all = model.parts.children.flatMap((c) => c.ranges.map((r) => r[1]));
+    expect(all.reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it('makes each instance of a two-material node one part', async () => {
+    const bin = Buffer.concat([
+      TRIANGLE_BIN,
+      Buffer.from(new Float32Array([0, 0, 0, 5, 0, 0, 10, 0, 0]).buffer),
+    ]);
+    const json = twoPrimitives();
+    json.nodes = [
+      {
+        name: 'Bolt',
+        mesh: 0,
+        extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 1 } } },
+      },
+    ];
+    json.extensionsUsed = ['EXT_mesh_gpu_instancing'];
+    (json.accessors as Json[]).push({ bufferView: 1, componentType: 5126, count: 3, type: 'VEC3' });
+    json.bufferViews = [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 36 },
+    ];
+    json.buffers = [{ byteLength: 72 }];
+    const model = await readGlb(glb(json, bin));
+    expect(model.positions.length).toBe(6 * 9);
+    expect(model.parts.children.map((c) => c.ranges)).toEqual([
+      [
+        [0, 1],
+        [3, 1],
+      ],
+      [
+        [1, 1],
+        [4, 1],
+      ],
+      [
+        [2, 1],
+        [5, 1],
+      ],
+    ]);
+  });
+});
+
+describe('part names from the source', () => {
+  it('names an unnamed node after its mesh, spaces intact', async () => {
+    const json = triangleJson();
+    (json.meshes as Json[])[0].name = 'Rear Wheel';
+    const model = await readGlb(glb(json, TRIANGLE_BIN));
+    expect(model.parts.children[0].name).toBe('Rear Wheel');
+  });
+
+  it('keeps a source name that looks like one three generates', async () => {
+    const json = triangleJson();
+    (json.meshes as Json[])[0].name = 'mesh_42';
+    const model = await readGlb(glb(json, TRIANGLE_BIN));
+    expect(model.parts.children[0].name).toBe('mesh_42');
+  });
+});

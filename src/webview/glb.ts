@@ -19,7 +19,7 @@
 // so the merged geometry is turned from Y-up to Z-up here, once, and the model
 // is flagged Z-up like a 3MF is. See the note on `yUpToZUp` below.
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { glbHeaderProblem } from './modelSniff';
 import { MAX_TRIANGLES } from './stlInfo';
 import { PartTreeBuilder, type PartNode } from './parts';
@@ -722,7 +722,13 @@ function encodeGlb(pruned: Gltf, bin: Uint8Array | null): ArrayBuffer {
   return out.buffer;
 }
 
-function loadScene(data: ArrayBuffer): Promise<THREE.Object3D> {
+interface Loaded {
+  scene: THREE.Object3D;
+  /** The loader's map from each object it made to the glTF node, mesh and primitive it came from. */
+  associations: ReadonlyMap<unknown, { nodes?: number } | undefined>;
+}
+
+function loadScene(data: ArrayBuffer): Promise<Loaded> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new GlbError('Reading this GLB file timed out.')),
@@ -738,7 +744,9 @@ function loadScene(data: ArrayBuffer): Promise<THREE.Object3D> {
       new GLTFLoader().parse(
         data,
         '',
-        done((gltf: { scene: THREE.Object3D }) => resolve(gltf.scene)),
+        done((gltf: GLTF) =>
+          resolve({ scene: gltf.scene, associations: gltf.parser.associations }),
+        ),
         done((err: unknown) =>
           reject(new GlbError(`Could not read this GLB file (${errorText(err)}).`)),
         ),
@@ -763,9 +771,23 @@ interface Piece {
   matrices: THREE.Matrix4[];
   /** `[first triangle, count]` per placement, filled in by bake. */
   ranges: Array<[number, number]>;
+  /** The (pruned) source node this was drawn for, when the loader says. */
+  node?: number;
 }
 
-function collect(scene: THREE.Object3D): Piece[] {
+// The glTF node an object belongs to: its own association, or the nearest
+// ancestor's (a multi-primitive mesh is a Group holding one Mesh per primitive).
+function nodeOf(object: THREE.Object3D, associations: Loaded['associations']): number | undefined {
+  for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+    const node = associations.get(o)?.nodes;
+    if (node !== undefined) {
+      return node;
+    }
+  }
+  return undefined;
+}
+
+function collect(scene: THREE.Object3D, associations: Loaded['associations']): Piece[] {
   scene.updateMatrixWorld(true);
   const pieces: Piece[] = [];
   scene.traverse((object) => {
@@ -781,9 +803,14 @@ function collect(scene: THREE.Object3D): Piece[] {
         instanced.getMatrixAt(i, local);
         matrices.push(new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, local));
       }
-      pieces.push({ mesh, matrices, ranges: [] });
+      pieces.push({ mesh, matrices, ranges: [], node: nodeOf(object, associations) });
     } else {
-      pieces.push({ mesh, matrices: [mesh.matrixWorld.clone()], ranges: [] });
+      pieces.push({
+        mesh,
+        matrices: [mesh.matrixWorld.clone()],
+        ranges: [],
+        node: nodeOf(object, associations),
+      });
     }
   });
   return pieces;
@@ -910,57 +937,74 @@ export async function readGlb(bytes: Uint8Array, options: GlbOptions = {}): Prom
     );
   }
   const pruned = pruneGlb(json, bin ? bin.byteLength : null, max, options.fallbackColor);
-  const scene = await loadScene(encodeGlb(pruned, bin));
-  const pieces = collect(scene);
+  const { scene, associations } = await loadScene(encodeGlb(pruned, bin));
+  const pieces = collect(scene, associations);
   const model = bake(pieces, triangles);
   if (model.positions.length === 0) {
     throw new GlbError('This GLB file holds no triangle meshes to show.');
   }
-  return { ...model, parts: glbParts(scene, pieces, model.positions.length / 9) };
+  return { ...model, parts: glbParts(pruned, pieces, model.positions.length / 9) };
 }
 
-// The node hierarchy as parts. three names a node after glTF's name with spaces
-// made underscores; the file's own spelling is kept in userData.name. A node
-// that places a mesh many times (EXT_mesh_gpu_instancing) is one part per copy,
-// and an instanced node with nothing under it puts them straight into its
-// parent, so the quantity row is the part itself.
-function glbParts(scene: THREE.Object3D, pieces: Piece[], total: number): PartNode {
+// The node hierarchy as parts, read from the pruned source JSON rather than from
+// three's objects (which are not one per node: a mesh with several materials is a
+// Group of Meshes). The loader's associations say which source node each drawn
+// mesh came from. A node is one part holding the ranges of all its primitives; a
+// node that places a mesh many times (EXT_mesh_gpu_instancing) is one part per
+// copy, and an instanced node with nothing under it puts them straight into its
+// parent, so the quantity row is the part itself. A name is the node's, else its
+// mesh's, else left for "Part N".
+function glbParts(pruned: Gltf, pieces: Piece[], total: number): PartNode {
   const builder = new PartTreeBuilder(total);
-  const pieceOf = new Map(pieces.map((piece) => [piece.mesh as THREE.Object3D, piece]));
-  // A node's own name is in userData.name. Without one three has named the object
-  // after its mesh, making copies unique with an `_instance_N` suffix and
-  // calling an unnamed mesh `mesh_N`: take those off so they read as unnamed.
-  const nameOf = (object: THREE.Object3D): unknown => {
-    const given: unknown = object.userData?.name;
-    if (typeof given === 'string') {
-      return given;
-    }
-    const bare = String(object.name).replace(/_instance_\d+$/, '');
-    return /^mesh_\d+$/.test(bare) ? '' : bare;
-  };
-  // The depth is bounded by countGlbTriangles (64 nodes), before this runs.
-  const visit = (object: THREE.Object3D): void => {
-    const piece = pieceOf.get(object);
-    const kids = object.children;
-    if (piece && kids.length === 0) {
-      for (const range of piece.ranges) {
-        builder.leaf(nameOf(object), [range]);
+  const byNode = new Map<number, Piece[]>();
+  for (const piece of pieces) {
+    if (piece.node !== undefined) {
+      const list = byNode.get(piece.node);
+      if (list) {
+        list.push(piece);
+      } else {
+        byNode.set(piece.node, [piece]);
       }
+    }
+  }
+  const nodes = (pruned.nodes ?? []) as unknown as OutNode[];
+  const meshes = (pruned.meshes ?? []) as unknown as Array<{ name?: string }>;
+  const seen = new Set<number>();
+  const leaves = (index: number, name: string): void => {
+    const list = byNode.get(index) ?? [];
+    // Every primitive of a placement has the same number of placements.
+    const placements = list.length > 0 ? Math.min(...list.map((p) => p.ranges.length)) : 0;
+    for (let k = 0; k < placements; k++) {
+      builder.leaf(
+        name,
+        list.map((p) => p.ranges[k]),
+      );
+    }
+  };
+  // Depth is bounded by countGlbTriangles (64 nodes), before this runs; `seen`
+  // keeps a hostile cycle from being walked twice.
+  const visit = (index: number): void => {
+    const node = nodes[index];
+    if (!node || seen.has(index)) {
       return;
     }
-    builder.begin(nameOf(object));
-    if (piece) {
-      for (const range of piece.ranges) {
-        builder.leaf(nameOf(object), [range]);
-      }
+    seen.add(index);
+    const meshName = node.mesh !== undefined ? meshes[node.mesh]?.name : undefined;
+    const name = node.name ?? meshName ?? '';
+    const kids = node.children ?? [];
+    if (kids.length === 0) {
+      leaves(index, name);
+      return;
     }
+    builder.begin(node.name ?? '');
+    leaves(index, name);
     for (const child of kids) {
       visit(child);
     }
     builder.end();
   };
-  for (const child of scene.children) {
-    visit(child);
+  for (const root of pruned.scenes?.[0]?.nodes ?? []) {
+    visit(root);
   }
   return builder.finish();
 }

@@ -233,8 +233,10 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--mc-stl-bg); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
   #viewport { position: fixed; inset: 0; }
-  /* The section panel takes the right of the window and the 3D view the rest. */
-  body.mc-section #viewport { right: 46%; }
+  /* The dock on the right of the window (Section, and Parts, stacked above it) takes
+     --mc-dock-w and the 3D view the rest. */
+  body { --mc-dock-w: 46%; }
+  body.mc-section #viewport { right: var(--mc-dock-w); }
   #viewport canvas { display: block; outline: none; }
   #toolbar { position: fixed; top: 8px; left: 8px; z-index: 10; display: flex; gap: 6px; }
   #toolbar button {
@@ -310,7 +312,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     top: 0;
     right: 0;
     bottom: 0;
-    width: 46%;
+    width: var(--mc-dock-w);
     z-index: 5;
     display: flex;
     flex-direction: column;

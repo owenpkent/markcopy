@@ -175,7 +175,7 @@ A section is not available for a sliced print (the button is disabled).
 
 ### Parts and assemblies
 
-A model with two or more parts opens with a **Parts** panel on the left, and the 3D view takes the rest. A STEP file brings its assembly tree, a GLB its node hierarchy (copies placed by `EXT_mesh_gpu_instancing` are parts of one node), a 3MF its build items, objects and components, and an ASCII STL with several `solid <name>` blocks one part per solid. Any other STL is one part, and a sliced `.gcode.3mf` has no model, so neither shows the panel. Unnamed nodes are called `Part 1`, `Assembly 1` and so on.
+A model with two or more parts opens with a **Parts** panel in the dock on the right, the same width as the Section panel, and the 3D view takes the rest. With Section open too, Parts sits above Section in the one dock (each scrolls on its own), so the 3D view is no narrower than with Section alone. A STEP file brings its assembly tree, a GLB its node hierarchy (a node with several materials is still one part, and copies placed by `EXT_mesh_gpu_instancing` are one part per copy; an unnamed node takes its mesh's name), a 3MF its build items, objects and components, and an ASCII STL with several `solid <name>` blocks one part per solid. Any other STL is one part, and a sliced `.gcode.3mf` has no model, so neither shows the panel. Unnamed nodes are called `Part 1`, `Assembly 1` and so on.
 
 Every control is a visible button or checkbox at least 44 px square, so nothing needs a double-click or the keyboard (though a double-click on a row, the arrow keys, Enter and Space work as shortcuts):
 
@@ -188,7 +188,7 @@ Every control is a visible button or checkbox at least 44 px square, so nothing 
 
 The panel opens by itself for two or more parts. The toolbar button (the one after Section) and **View > Parts** open and close it, and so does the close button in its header; with one part the button is hidden and **View > Parts** is greyed out. Hiding a part leaves the 3D view and the section cut (its outline and measurements), so a section across an assembly shows only the parts that are shown. It does not change the model's bounds: the grid, the print bed fit check, the dimensions, the triangle count and the section's range stay those of the whole file, and Compare with still overlays the other model on the whole one.
 
-Right-click > **Copy parts list** puts a Markdown table on the clipboard, `| Part | Assembly | Qty | Triangles |`, one row per distinct part with the path of assemblies above it joined by `/`, and a pipe or backslash in a name escaped. It lists every part whether or not it is shown.
+Right-click > **Copy parts list** puts a Markdown table on the clipboard, `| Part | Assembly | Qty | Triangles |`, one row per distinct part with the path of assemblies above it joined by `/`, and and Markdown or HTML characters in a name (`<M6>`, `**Retainer**`, a pipe, a backslash) escaped so each name pastes and renders as the literal text. It lists every part whether or not it is shown.
 
 A file's names are cut to 200 characters with control and direction-override characters removed. A model with more than 20,000 nodes keeps the first 20,000 and gathers the rest under one `More parts` row, which hides, isolates and selects as a unit; nesting deeper than 64 levels is flattened into the 64th.
 

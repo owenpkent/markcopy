@@ -17,7 +17,6 @@ import {
   VIEW_PRESETS,
   checkStl,
   createRightClickGate,
-  sniffStl,
   toBytes,
   viewFileName,
   type ViewPreset,
@@ -335,7 +334,7 @@ function buildStl(name: string, raw: Uint8Array, color: THREE.Color, swatch: str
       mmPerUnit: 1,
       fixedZUp: false,
       colored: false,
-      parts: stlParts(raw, positions.length / 9),
+      parts: stlPartTree(geometry.groups, geometry.userData.groupNames, positions.length / 9),
     });
   } catch (err) {
     return `Could not parse this STL file (${String(err)}).`;
@@ -423,12 +422,6 @@ function meshModel(
     swatch,
     dims: sizeText(bounds(positions), unit),
   };
-}
-
-// An ASCII STL with several `solid` blocks is one part per solid; anything else
-// is one part.
-function stlParts(raw: Uint8Array, triangles: number): PartNode {
-  return stlPartTree(sniffStl(raw).format === 'ascii' ? raw : new Uint8Array(0), triangles);
 }
 
 // The selected part's tint: the theme's accent as a glow over its own color.
@@ -1221,7 +1214,8 @@ const CLICK_SLOP = 4;
 
 function pickPart(clientX: number, clientY: number): number {
   const parts = partsPanel.model();
-  if (!primary || primary.kind !== 'mesh' || !parts) {
+  // Three still intersects an invisible object: a model hidden by Compare with is not pickable.
+  if (!primary || primary.kind !== 'mesh' || !parts || !primary.object.visible) {
     return -1;
   }
   const rect = renderer.domElement.getBoundingClientRect();
