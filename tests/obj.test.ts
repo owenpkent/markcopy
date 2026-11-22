@@ -104,7 +104,7 @@ describe('scanObj, before the loader', () => {
     const parse = vi.spyOn(OBJLoader.prototype, 'parse');
     for (const face of ['f 1 2 9', 'f 1 2 0', 'f 1 2 -9', 'f 1 2 x', 'f 1 2 3 4']) {
       expect(() => readObj(bytes(`v 0 0 0\nv 1 0 0\nv 0 1 0\n${face}\n`))).toThrow(
-        /vertex that has not been declared/,
+        /vertex that has not been declared|not a vertex index/,
       );
     }
     // A forward reference is the same: only what is declared so far counts.
@@ -564,17 +564,15 @@ describe('OBJ review fixes', () => {
     // A backslash, CR, backslash, LF, LF: joining the continuation makes a new
     // CRLF, which the loader would turn into another join.
     const seam = String.fromCharCode(92, 13, 92, 10, 10);
-    const source = `${TRI}f 1 2 3${seam}f 1 2 3\n`;
+    // After a face its `3\` corner is refused outright; after a comment the
+    // text must come out stable, with what the loader builds what was counted.
+    expect(() => scanObj(`${TRI}f 1 2 3${seam}f 1 2 3\n`, { maxTriangles: 2 })).toThrow(ObjError);
+    const source = `${TRI}# note${seam}f 1 2 3\nf 1 3 2\n`;
     const scan = scanObj(source, { maxTriangles: 2 });
     expect(scan.text.includes('\r\n')).toBe(false);
     expect(scan.text.includes('\\\n')).toBe(false);
-    let made = -1;
-    try {
-      made = readObj(bytes(source), { limits: { maxTriangles: 2 } }).positions.length / 9;
-    } catch (e) {
-      expect(e).toBeInstanceOf(ObjError);
-    }
-    expect(made).toBeLessThanOrEqual(scan.triangles);
+    const made = readObj(bytes(source), { limits: { maxTriangles: 2 } }).positions.length / 9;
+    expect(made).toBe(scan.triangles);
     // Nested seams and stray CRs leave nothing for the loader's passes either.
     // (A seam that joins two faces into one malformed line is refused instead.)
     for (const tail of ['\\\r\r\n', '\\\\\n\n', '\r\\\r\n\\\n', '\\\r\\\r\\\n\n\n']) {
@@ -584,6 +582,32 @@ describe('OBJ review fixes', () => {
       } catch (e) {
         expect(e).toBeInstanceOf(ObjError);
       }
+    }
+  });
+
+  it('refuses a face corner with junk after its index, so a rewritten face cannot be rejoined', () => {
+    const L = [
+      [3, 0, 0],
+      [3, 1, 0],
+      [1, 1, 0],
+      [1, 3, 0],
+      [0, 3, 0],
+      [0, 0, 0],
+    ];
+    const vertices = L.map((p) => 'v ' + p.join(' ')).join('\n') + '\n';
+    // Each corner ends in a backslash; the concave face is rewritten as triangles.
+    const corners = [1, 2, 3, 4, 5, 6].map((n) => `${n}\\`).join(' ');
+    const source = `${vertices}f ${corners} \n`;
+    expect(() => scanObj(source, { maxTriangles: 4 })).toThrow(ObjError);
+    expect(() => readObj(bytes(source), { limits: { maxTriangles: 4 } })).toThrow(
+      /not a vertex index/,
+    );
+    for (const junk of ['3f', '3x/1', '3/1/1/1', '3/a', '3//']) {
+      expect(() => scanObj(`${TRI}f 1 2 ${junk}\n`)).toThrow(ObjError);
+    }
+    // Every spelling exporters use still reads.
+    for (const ok of ['3', '3/1', '3//1', '3/1/1', '-1', '+3']) {
+      expect(scanObj(`${TRI}vt 0 0\nvn 0 0 1\nf 1 2 ${ok}\n`).triangles).toBe(1);
     }
   });
 

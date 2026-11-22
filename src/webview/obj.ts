@@ -78,6 +78,9 @@ const MAX_EARCUT_CORNERS = 4096;
 // A face index resolved against the count declared so far, as OBJLoader does:
 // 1 is the first, -1 the last. Zero and anything out of range point at nothing
 // (returns -1), else the zero-based vertex.
+/** A face corner: v, v/vt, v//vn or v/vt/vn, each a whole signed integer. */
+const CORNER = /^[+-]?\d+(?:\/(?:[+-]?\d+)?(?:\/[+-]?\d+)?)?$/;
+
 function resolveIndex(token: string, count: number): number {
   const index = parseInt(token, 10);
   if (!Number.isFinite(index) || index === 0) {
@@ -299,6 +302,13 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
         .filter((t) => t.length > 0);
       const corners: number[] = [];
       for (const token of tokens) {
+        // Whole tokens only: the loader's parseInt would read `3\` or `3f` as
+        // 3, and a rewritten face must not carry such a suffix to a line end.
+        if (!CORNER.test(token)) {
+          throw new ObjError(
+            `Line ${lineNo} of this OBJ file has a face corner that is not a vertex index (${token.slice(0, 40)}).`,
+          );
+        }
         const parts = token.split('/');
         const corner = resolveIndex(parts[0], vertices);
         if (corner < 0) {
@@ -403,6 +413,12 @@ export function scanObj(text: string, limits: ScanLimits = {}): ObjScan {
       : (facesBeforeMaterial ? `usemtl ${initialMaterial}\n` : '') +
         chunks.join('') +
         source.slice(copied);
+  // The count above holds only if the loader's own CRLF and continuation passes
+  // leave this text alone. Checked on the final text, rewritten faces included,
+  // so a future rewrite that breaks it is refused rather than trusted.
+  if (rewritten.indexOf('\r\n') !== -1 || rewritten.indexOf('\\\n') !== -1) {
+    throw new ObjError('This OBJ file has line breaks the preview cannot read reliably.');
+  }
   return {
     vertices,
     triangles,
