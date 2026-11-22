@@ -7,11 +7,14 @@ import { parseStlMessage } from './messages/stl';
 import { isStlSetting } from './messages/settings';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 import { isModelFile, rankSiblings } from './stlSiblings';
+import { glbHeaderProblem, stepHeaderProblem } from './webview/modelSniff';
 
-// A read-only custom editor that renders STL and 3MF files with Three.js in a
-// webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
+// A read-only custom editor that renders STL, 3MF, GLB and STEP files with
+// Three.js in a webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
 // src/webview/stl.ts). A 3MF is a zip of XML parts, which the webview unpacks
-// (src/webview/threeMf.ts): the host only stats it and checks it is a zip.
+// (src/webview/threeMf.ts), a GLB is read by glb.ts and a STEP file is
+// tessellated by an Open CASCADE WebAssembly engine (step.ts): the host only
+// stats each one and checks its first bytes.
 //
 // Its right-click menu carries a handful of copy actions (the current view as a
 // PNG, the file name and path, the dimensions and triangle count) plus view
@@ -180,7 +183,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
       defaultUri: vscode.Uri.joinPath(uri, '..'),
-      filters: { 'STL and 3MF models': ['stl', '3mf'] },
+      filters: { '3D models': ['stl', '3mf', 'glb', 'step', 'stp'] },
       openLabel: 'Compare',
       title: `Compare ${basename(uri)} with`,
     });
@@ -201,7 +204,12 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       // The bundle is a single entry point with no code splitting, so a bare
       // nonce is enough here (no 'strict-dynamic', unlike src/previewShell.ts).
-      `script-src 'nonce-${nonce}'`,
+      // 'wasm-unsafe-eval' lets the STEP engine (Open CASCADE, WebAssembly)
+      // compile; it allows WebAssembly only, not eval() or new Function(). No
+      // other webview has it. See .github/SECURITY.md.
+      `script-src 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+      // The one fetch the viewer makes: the gzipped STEP engine, from media/.
+      `connect-src ${webview.cspSource}`,
       `font-src ${webview.cspSource}`,
     ].join('; ');
 
@@ -375,14 +383,18 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 }
 
-type ReadModel = { format: 'stl' | '3mf'; bytes: string } | { error: string };
+export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step';
+
+type ReadModel = { format: ModelFormat; bytes: string } | { error: string };
+
+const LABELS: Record<ModelFormat, string> = { stl: 'STL', '3mf': '3MF', glb: 'GLB', step: 'STEP' };
 
 // One model off disk, checked and base64-encoded for the webview, or the reason
 // it was refused. Throws only when the file cannot be read at all.
 async function readModel(uri: vscode.Uri): Promise<ReadModel> {
   const name = basename(uri);
-  const format = is3mf(uri) ? '3mf' : 'stl';
-  const label = format === '3mf' ? '3MF' : 'STL';
+  const format = modelFormat(uri);
+  const label = LABELS[format];
   // Size first, off stat, before a byte is read. Every guard used to live
   // in the webview, which meant a hostile file was read whole, base64'd
   // (1.33x, as a string), serialized through postMessage, and decoded on
@@ -408,6 +420,18 @@ async function readModel(uri: vscode.Uri): Promise<ReadModel> {
   if (format === '3mf') {
     if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
       return { error: `${name} is not a 3MF package (it is not a zip archive).` };
+    }
+  } else if (format === 'glb') {
+    // The JSON chunk, the compression and the triangle count are read in the
+    // webview (src/webview/glb.ts); here only the 12-byte header.
+    const problem = glbHeaderProblem(bytes);
+    if (problem) {
+      return { error: `${name} is not a GLB file: ${problem}` };
+    }
+  } else if (format === 'step') {
+    const problem = stepHeaderProblem(bytes);
+    if (problem) {
+      return { error: `${name} is not a STEP file: ${problem}` };
     }
   } else {
     const check = checkStl(bytes);
@@ -462,6 +486,18 @@ async function findSiblings(uri: vscode.Uri): Promise<Array<[string, vscode.Uri]
     label,
     found.get(label) as vscode.Uri,
   ]);
+}
+
+/** Which model format the document is, by its extension; anything else is STL. */
+export function modelFormat(uri: vscode.Uri): ModelFormat {
+  const path = uri.path.toLowerCase();
+  if (path.endsWith('.3mf')) {
+    return '3mf';
+  }
+  if (path.endsWith('.glb')) {
+    return 'glb';
+  }
+  return path.endsWith('.step') || path.endsWith('.stp') ? 'step' : 'stl';
 }
 
 /** Whether the document is a 3MF package rather than an STL, by its extension. */

@@ -1,6 +1,6 @@
-// Browser-side 3D viewer for the MarkCopy STL and 3MF previews. Bundled on its
-// own into media/stl.js (see esbuild.web.js) so Three.js only loads when an .stl
-// or .3mf file is opened, never for the Markdown, CSV, or PDF previews.
+// Browser-side 3D viewer for the MarkCopy STL, 3MF, GLB and STEP previews.
+// Bundled on its own into media/stl.js (see esbuild.web.js) so Three.js only
+// loads when a model is opened, never for the Markdown, CSV, or PDF previews.
 //
 // Every model stays in its file's own coordinates. One group, `modelRoot`,
 // carries the turn that makes the file's up axis the viewer's and the shift that
@@ -22,6 +22,8 @@ import {
   type ViewPreset,
 } from './stlInfo';
 import { ThreeMfError, UNIT_LABELS, read3mf } from './threeMf';
+import { GlbError, readGlb } from './glb';
+import { StepError, loadStepEngine, readStep } from './step';
 import { formatDuration, parseGcode, readSliceInfo, type Toolpath } from './gcode';
 import {
   AXIS_NAMES,
@@ -45,7 +47,7 @@ interface VsCodeApi {
   postMessage(message: unknown): void;
 }
 
-type Format = 'stl' | '3mf';
+type Format = 'stl' | '3mf' | 'glb' | 'step';
 
 interface LoadMessage {
   type: 'load';
@@ -190,7 +192,8 @@ interface Model {
   // The unit as shown ('mm'), or '' when the format has none (STL).
   unit: string;
   mmPerUnit: number;
-  // 3MF and G-code are Z-up by definition; an STL follows markcopy.stl.upAxis.
+  // 3MF and G-code are Z-up by definition, and a GLB is turned Z-up when it is
+  // read; an STL and a STEP file follow markcopy.stl.upAxis.
   fixedZUp: boolean;
   // CSS color that stands for this model in the readouts and the section.
   swatch: string;
@@ -329,10 +332,22 @@ function meshModel(
   swatch: string,
   // `colored`: whether the geometry's per-vertex colors are the file's own and
   // are to be drawn.
-  about: { unit: string; mmPerUnit: number; fixedZUp: boolean; colored: boolean },
+  // `keepNormals`: the geometry's normals are the file's own smooth ones (STEP,
+  // GLB) and are kept. Otherwise they are worked out from the triangles: an STL
+  // always gets that, since STLLoader attaches facet normals that a file may
+  // leave zero or wrong.
+  about: {
+    unit: string;
+    mmPerUnit: number;
+    fixedZUp: boolean;
+    colored: boolean;
+    keepNormals?: boolean;
+  },
 ): Model {
   const { unit, mmPerUnit, fixedZUp, colored: vertexColors } = about;
-  geometry.computeVertexNormals();
+  if (!about.keepNormals || !geometry.getAttribute('normal')) {
+    geometry.computeVertexNormals();
+  }
   // A colored 3MF carries its colors per vertex, with markcopy.stl.meshColor
   // already filled in where the file gives none, so the material stays white.
   const material = new THREE.MeshStandardMaterial({
@@ -437,14 +452,106 @@ function toolpathModel(
   };
 }
 
-function build(format: Format | undefined, name: string, raw: Uint8Array, css: string): Built {
-  let color: THREE.Color;
+// A GLB is read by three's GLTFLoader after glb.ts has refused what it cannot
+// show and bounded the triangle count (see glb.ts). It comes back Z-up, with
+// every node's transform and each material's color baked in, so it is a single
+// geometry like a 3MF's. glTF fixes its up axis, so markcopy.stl.upAxis does not
+// apply (fixedZUp). glTF's unit is the metre but files rarely mean it, so the
+// readout is unitless like an STL's.
+async function buildGlb(
+  name: string,
+  raw: Uint8Array,
+  color: THREE.Color,
+  swatch: string,
+): Promise<Built> {
   try {
-    color = new THREE.Color(css);
-  } catch {
-    color = new THREE.Color('#8ab4f8');
+    const content = await readGlb(raw, { fallbackColor: [color.r, color.g, color.b] });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(content.positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(content.colors, 3));
+    if (content.normals) {
+      geometry.setAttribute('normal', new THREE.BufferAttribute(content.normals, 3));
+    }
+    return meshModel(name, geometry, content.positions, color, swatch, {
+      unit: '',
+      mmPerUnit: 1,
+      fixedZUp: true,
+      colored: true,
+      keepNormals: true,
+    });
+  } catch (err) {
+    return err instanceof GlbError ? err.message : `Could not read this GLB file (${String(err)}).`;
   }
-  return format === '3mf' ? build3mf(name, raw, color, css) : buildStl(name, raw, color, css);
+}
+
+// A STEP file is tessellated by the Open CASCADE engine (step.ts), started
+// once per webview. The engine is asked for millimetres. STEP does not fix an up
+// axis (CAD systems differ: SOLIDWORKS defaults to Y-up), so the model follows
+// markcopy.stl.upAxis like an STL, Z-up by default.
+async function buildStep(
+  name: string,
+  raw: Uint8Array,
+  color: THREE.Color,
+  swatch: string,
+): Promise<Built> {
+  try {
+    showProgress(`Loading STEP engine…`);
+    const engine = await loadStepEngine();
+    showProgress(`Reading ${name}…`);
+    // Let that paint before the tessellation holds the thread.
+    await new Promise((resolve) => window.setTimeout(resolve, 16));
+    const content = readStep(engine, raw, { fallbackColor: [color.r, color.g, color.b] });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(content.positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(content.colors, 3));
+    if (content.normals) {
+      geometry.setAttribute('normal', new THREE.BufferAttribute(content.normals, 3));
+    }
+    return meshModel(name, geometry, content.positions, color, swatch, {
+      unit: 'mm',
+      mmPerUnit: 1,
+      fixedZUp: false,
+      colored: content.colored,
+      keepNormals: true,
+    });
+  } catch (err) {
+    return err instanceof StepError
+      ? err.message
+      : `Could not read this STEP file (${String(err)}).`;
+  }
+}
+
+// The status line while a model is read, or the toast when it is a comparison.
+let progress: (text: string) => void = (text) => showStats([text]);
+function showProgress(text: string): void {
+  progress(text);
+}
+
+function parseColor(css: string): THREE.Color {
+  try {
+    return new THREE.Color(css);
+  } catch {
+    return new THREE.Color('#8ab4f8');
+  }
+}
+
+async function build(
+  format: Format | undefined,
+  name: string,
+  raw: Uint8Array,
+  css: string,
+): Promise<Built> {
+  const color = parseColor(css);
+  switch (format) {
+    case '3mf':
+      return build3mf(name, raw, color, css);
+    case 'glb':
+      return buildGlb(name, raw, color, css);
+    case 'step':
+      return buildStep(name, raw, color, css);
+    default:
+      return buildStl(name, raw, color, css);
+  }
 }
 
 function disposeModel(model: Model): void {
@@ -742,6 +849,7 @@ function loadModel(msg: LoadMessage): void {
   showBedSetting = msg.showBed === true;
   bedSizeSetting = typeof msg.bedSize === 'string' ? msg.bedSize : '256x256x256';
   upAxis = msg.upAxis === 'y' ? 'y' : 'z';
+  compareGeneration++;
   siblings = Array.isArray(msg.siblings)
     ? msg.siblings.filter((s): s is string => typeof s === 'string').slice(0, 20)
     : [];
@@ -757,15 +865,17 @@ function loadModel(msg: LoadMessage): void {
   }
 
   const css = msg.meshColor || '#8ab4f8';
-  if (msg.format !== '3mf') {
-    showPrimary(build(msg.format, msg.name, raw, css));
+  if (!msg.format || msg.format === 'stl') {
+    showPrimary(buildStl(msg.name, raw, parseColor(css), css));
     return;
   }
-  // Unpacking and reading a slicer project runs to seconds for a few million
-  // triangles, all on this thread. Say so first, and give the browser a frame
-  // to paint it before the parse holds the thread.
+  // Unpacking and reading a slicer project, a GLB or a STEP file runs to
+  // seconds for a few million triangles, all on this thread. Say so first, and
+  // give the browser a frame to paint it before the parse holds the thread.
+  progress = (text) => showStats([text]);
   showStats([`Reading ${msg.name}…`]);
-  window.setTimeout(() => showPrimary(build('3mf', msg.name, raw, css)), 16);
+  const format = msg.format;
+  window.setTimeout(() => void build(format, msg.name, raw, css).then(showPrimary), 16);
 }
 
 function showPrimary(built: Built): void {
@@ -773,6 +883,7 @@ function showPrimary(built: Built): void {
     showError(built);
     return;
   }
+  compareGeneration++;
   closeSection();
   for (const model of models()) {
     disposeModel(model);
@@ -804,8 +915,19 @@ function loadCompare(msg: CompareMessage): void {
   }
   const raw = toBytes(msg.bytes);
   toast(`Reading ${msg.name}…`, 60000);
-  window.setTimeout(() => {
-    const built = build(msg.format, msg.name, raw, OTHER_COLOR);
+  progress = (text) => toast(text, 60000);
+  const generation = ++compareGeneration;
+  window.setTimeout(async () => {
+    const built = await build(msg.format, msg.name, raw, OTHER_COLOR);
+    if (generation !== compareGeneration) {
+      // Superseded while it was being built (a newer comparison, Stop
+      // Comparing, or a new primary model): drop it without showing anything.
+      if (typeof built !== 'string') {
+        built.object.geometry.dispose();
+        (built.object.material as THREE.Material).dispose();
+      }
+      return;
+    }
     if (typeof built === 'string') {
       toast(built, 5000);
       return;
@@ -818,6 +940,16 @@ function loadCompare(msg: CompareMessage): void {
     setOther(built);
     toast(`Comparing with ${msg.name}`);
   }, 16);
+}
+
+// Counts comparison requests. A build is asynchronous (a STEP file waits for
+// its engine), so each one remembers the number it started under and is
+// discarded if that is no longer the latest.
+let compareGeneration = 0;
+
+function stopComparing(): void {
+  compareGeneration++;
+  setOther(null);
 }
 
 function setOther(model: Model | null): void {
@@ -1289,7 +1421,7 @@ function compareEntries(): MenuEntry[] {
     entries.push({ kind: 'divider' }, shown(primary), shown(other), {
       kind: 'item',
       label: 'Stop Comparing',
-      run: () => setOther(null),
+      run: () => stopComparing(),
     });
   }
   return entries;
@@ -1317,7 +1449,8 @@ function viewEntries(): MenuEntry[] {
     { kind: 'checkbox', label: 'Grid', checked: showGridSetting, run: toggleGrid },
     { kind: 'checkbox', label: 'Print Bed', checked: showBedSetting, run: toggleBed },
   );
-  // Only an STL leaves the question open; 3MF and G-code are Z-up by definition.
+  // An STL and a STEP file leave the question open; 3MF and G-code are Z-up by
+  // definition, and a GLB is turned Z-up when it is read.
   if (primary && !primary.fixedZUp) {
     const axis = (label: string, value: 'z' | 'y'): MenuEntry => ({
       kind: 'radio',

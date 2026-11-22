@@ -8,6 +8,8 @@ media/webview.js.map
 media/chunk-*.js
 media/chunk-*.js.map
 media/katex/
+media/occt-import-js.wasm.gz
+media/license.occt*.txt
 media/pdf.js
 media/pdf.js.map
 media/pdf.worker.js

@@ -334,6 +334,27 @@ suite('MarkCopy custom editors', () => {
     assert.strictEqual(tab.viewType, STL_VIEW, 'part.3mf opened in some other custom editor');
   });
 
+  test('.glb, .step and .stp files open in the same 3D preview as STL', async () => {
+    // Only the claim is under test, so the bytes need not be a real model: the
+    // viewer reports an unreadable one in its own panel.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    for (const name of ['part.glb', 'part.step', 'PART.STP']) {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      fs.writeFileSync(uri.fsPath, Buffer.from('ISO-10303-21;'));
+
+      await vscode.commands.executeCommand('vscode.open', uri);
+
+      const tab = await waitFor(() =>
+        customTabs().find((candidate) => candidate.uri === uri.toString()),
+      );
+      assert.ok(
+        tab,
+        `expected a custom-editor tab for ${name}, saw: ${JSON.stringify(customTabs())}`,
+      );
+      assert.strictEqual(tab.viewType, STL_VIEW, `${name} opened in some other custom editor`);
+    }
+  });
+
   test('a .mov file opens in the video preview rather than as binary', async () => {
     // sample.mov is a real two-second H.264 clip, so this also proves the file
     // survives the round trip through a resource root outside the workspace.

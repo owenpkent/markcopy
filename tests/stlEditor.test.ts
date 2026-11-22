@@ -199,6 +199,91 @@ describe('StlEditorProvider', () => {
     expect(posted.find((m) => m.type === 'error')?.message).toContain('not a 3MF package');
   });
 
+  it('sends a GLB and a STEP file as theirs, with the engine address', async () => {
+    const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 12, 0, 0, 0]);
+    readFile.mockResolvedValue(glb);
+    stat.mockResolvedValue({ size: glb.length });
+    const first = await open('/models/part.GLB');
+    await first.send({ type: 'ready' });
+    expect(first.posted.find((m) => m.type === 'load')).toMatchObject({
+      format: 'glb',
+      bytes: Buffer.from(glb).toString('base64'),
+    });
+
+    const step = new Uint8Array(Buffer.from('﻿ISO-10303-21;\nHEADER;'));
+    readFile.mockResolvedValue(step);
+    stat.mockResolvedValue({ size: step.length });
+    for (const file of ['/models/part.step', '/models/part.STP']) {
+      const { send, posted } = await open(file);
+      await send({ type: 'ready' });
+      expect(posted.find((m) => m.type === 'load')).toMatchObject({ format: 'step' });
+    }
+  });
+
+  it('refuses a GLB with a wrong header and a STEP file with no STEP magic, naming them', async () => {
+    readFile.mockResolvedValue(new Uint8Array(Buffer.from('definitely not a glb')));
+    stat.mockResolvedValue({ size: 20 });
+    const glb = await open('/models/part.glb');
+    await glb.send({ type: 'ready' });
+    expect(glb.posted.find((m) => m.type === 'load')).toBeUndefined();
+    expect(glb.posted.find((m) => m.type === 'error')?.message).toMatch(
+      /part.glb is not a GLB file/,
+    );
+    const step = await open('/models/part.step');
+    await step.send({ type: 'ready' });
+    expect(step.posted.find((m) => m.type === 'load')).toBeUndefined();
+    expect(step.posted.find((m) => m.type === 'error')?.message).toMatch(
+      /part.step is not a STEP file/,
+    );
+  });
+
+  it('names GLB and STEP in the size refusal', async () => {
+    stat.mockResolvedValue({ size: 300 * 1024 * 1024 });
+    for (const [file, label] of [
+      ['/models/a.glb', 'GLB'],
+      ['/models/a.stp', 'STEP'],
+    ]) {
+      const { send, posted } = await open(file);
+      await send({ type: 'ready' });
+      expect(posted.find((m) => m.type === 'error')?.message).toContain(
+        `limit for ${label} previews`,
+      );
+    }
+  });
+
+  it('allows WebAssembly and the engine fetch in the 3D viewer only', async () => {
+    const { webview } = await open();
+    expect(webview.html).toContain("script-src 'nonce-");
+    expect(webview.html).toMatch(/script-src 'nonce-[^']+' 'wasm-unsafe-eval';/);
+    expect(webview.html).toContain('connect-src vscode-resource:');
+    expect(webview.html).not.toContain("'unsafe-eval'");
+    expect(webview.html).not.toContain('img-src');
+  });
+
+  it('keeps wasm-unsafe-eval out of every other source file', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = join(__dirname, '..', 'src');
+    const found: string[] = [];
+    // The entry kind comes from the listing itself, so there is no separate
+    // stat of a path that could change before it is read.
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (
+          /\.ts$/.test(entry.name) &&
+          readFileSync(full, 'utf8').includes("'wasm-unsafe-eval'")
+        ) {
+          found.push(entry.name);
+        }
+      }
+    };
+    walk(root);
+    expect(found).toEqual(['stlEditor.ts']);
+  });
+
   it('names 3MF in the size refusal for a 3MF', async () => {
     stat.mockResolvedValue({ size: 300 * 1024 * 1024 });
     const { send, posted } = await open('/models/part.3mf');
