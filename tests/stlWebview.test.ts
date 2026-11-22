@@ -917,21 +917,19 @@ describe('3D viewer parts panel', () => {
     expect(el<HTMLButtonElement>('btn-parts').hidden).toBe(true);
     expect(document.body.classList.contains('mc-parts')).toBe(false);
     openMenuAt();
+    expect(menuRow('Parts')).toBeUndefined();
     menuRow('View')!.click();
-    const parts = menuRow('Parts')!;
-    expect(parts.getAttribute('aria-disabled')).toBe('true');
-    parts.click();
-    expect(el('parts').hidden).toBe(true);
+    expect(menuRow('Parts')).toBeUndefined();
   });
 
-  it('opens and closes from the toolbar, the close button and View > Parts', async () => {
+  it('opens and closes from the toolbar, the close button and the menu', async () => {
     await import('../src/webview/stl');
     load({ name: 'two.stl', bytes: TWO_BOXES() });
     el('btn-parts').click();
     expect(el('parts').hidden).toBe(true);
     expect(el('btn-parts').classList.contains('active')).toBe(false);
     openMenuAt();
-    menuRow('View')!.click();
+    // Top level of the menu, not under View.
     expect(menuRow('Parts')!.getAttribute('aria-disabled')).toBeNull();
     menuRow('Parts')!.click();
     expect(el('parts').hidden).toBe(false);

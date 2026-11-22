@@ -186,7 +186,7 @@ Every control is a visible button or checkbox at least 44 px square, so nothing 
 - **Show all** in the header shows every part again. The header also counts the parts (`12 parts`, or `3 of 12 shown`).
 - **Click a part in the 3D view** (a click, not a drag, so orbiting never selects) to select its row: its assemblies open and the row scrolls into view. Click empty space to clear the selection. A hidden part cannot be picked, and neither can the part of a model a section has cut away.
 
-The panel opens by itself for two or more parts. The toolbar button (the one after Section) and **View > Parts** open and close it, and so does the close button in its header; with one part the button is hidden and **View > Parts** is greyed out. Hiding a part leaves the 3D view and the section cut (its outline and measurements), so a section across an assembly shows only the parts that are shown. It does not change the model's bounds: the grid, the print bed fit check, the dimensions, the triangle count and the section's range stay those of the whole file, and Compare with still overlays the other model on the whole one.
+The panel opens by itself for two or more parts. The toolbar button (the one after Section) and the **Parts** entry at the top level of the right-click menu open and close it, and so does the close button in its header; with one part the button and the menu entry are hidden. Hiding a part leaves the 3D view and the section cut (its outline and measurements), so a section across an assembly shows only the parts that are shown. It does not change the model's bounds: the grid, the print bed fit check, the dimensions, the triangle count and the section's range stay those of the whole file, and Compare with still overlays the other model on the whole one.
 
 Right-click > **Copy parts list** puts a Markdown table on the clipboard, `| Part | Assembly | Qty | Triangles |`, one row per distinct part with the path of assemblies above it joined by `/`, and and Markdown or HTML characters in a name (`<M6>`, `**Retainer**`, a pipe, a backslash) escaped so each name pastes and renders as the literal text. It lists every part whether or not it is shown.
 
@@ -248,7 +248,7 @@ Limits: no more than about 5.4 million triangles, 16 million vertices, 20,000 ob
 
 - **Copy View as PNG** and **Save View as PNG…** capture the model from the current camera angle. **Copy Section as PNG** is added at the top while a section is open.
 - **Copy as** gives the file name, full path, dimensions, and triangle count (or the print summary for a sliced print or G-code file), plus the section measurements while a section is open. **Copy parts list** (top level) copies the parts as a Markdown table.
-- **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Parts, Grid and Print Bed checkboxes (Wireframe, Section, Parts and Grid match the toolbar), plus **Up Axis > Z / Y** for an STL, a STEP file and an OBJ (not shown for the formats that fix their own).
+- **View** has Fit View, the Front, Back, Left, Right, Top, Bottom and Isometric presets, and Wireframe, Section, Grid and Print Bed checkboxes (Wireframe, Section and Grid match the toolbar), plus **Up Axis > Z / Y** for an STL, a STEP file and an OBJ (not shown for the formats that fix their own).
 - **Compare with** lists nearby models to overlay (above), then Show, Hide and Stop Comparing.
 - **Preferences > Theme** sets `markcopy.theme`.
 - **Open in Default App** and **Reveal in File Explorer** act on the file.

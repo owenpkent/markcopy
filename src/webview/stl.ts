@@ -1863,13 +1863,6 @@ function viewEntries(): MenuEntry[] {
     entries.push(
       { kind: 'checkbox', label: 'Wireframe', checked: wireframeActive, run: toggleWireframe },
       { kind: 'checkbox', label: 'Section', checked: sectionOn, run: toggleSection },
-      {
-        kind: 'checkbox',
-        label: 'Parts',
-        checked: partsOpen,
-        run: togglePartsPanel,
-        disabled: !partsAvailable(),
-      },
     );
   }
   entries.push(
@@ -1916,6 +1909,11 @@ function buildMenu(): MenuEntry[] {
     { kind: 'divider' },
     { kind: 'submenu', label: 'View', entries: viewEntries() },
   );
+  // Top level, not under View: the parts panel is the way into an assembly, so
+  // it is one click from the right-click menu. Absent for a one-part model.
+  if (partsAvailable()) {
+    menu.push({ kind: 'checkbox', label: 'Parts', checked: partsOpen, run: togglePartsPanel });
+  }
   if (primary?.kind === 'mesh') {
     menu.push({ kind: 'submenu', label: 'Compare with', entries: compareEntries() });
   }
