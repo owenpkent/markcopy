@@ -524,6 +524,10 @@ Open [sample.gcode](../sample.gcode) (repo root, excluded from the VSIX; generat
 - [ ] A `.bgcode` file (or any file starting `GCDE`) renamed `.gcode` says `binary G-code (.bgcode) is not supported`. A binary file renamed `.gcode` mentions a NUL byte. Neither leaves a blank canvas.
 - [ ] A large file (about 50 MB) opens with `Reading ...` first and then draws. Record the open-to-drawn time (the unit-test environment measured 37 ms host read and 295 ms parse for 50.1 MB, without transport or drawing): ___ s.
 - [ ] A G-code file in a folder of models does not appear under **Compare with**, and picking one with Browse shows a toast.
+- [ ] ★ Playback: the bar above the layer bar shows a Play button, a slider, a speed list and **Travel moves**, and a blue cone at the end of the print. Press Play (or Space with the viewer focused): the print is cleared as it restarts and builds up with the cone at the nozzle, the layer bar steps up as new layers begin, and at the end it pauses itself. Space does not toggle while the speed list or a button has focus. Record: ___.
+- [ ] Playback: drag the slider and the print follows with no lag; pick a layer on the layer bar and the slider jumps to that layer's end; with **This layer only** on, playing shows just the layer being drawn. With **Travel moves** on, thin dim lines show the current layer's hops up to the nozzle, and nothing from other layers.
+- [ ] Playback on a large file (about 50 MB, about 2 million moves): scrubbing and playing at 100k moves/s stay smooth, and the frame rate does not drop as the print builds. Record the frame rate while playing: ___ fps.
+- [ ] Playback with a keyboard only: Tab reaches Play, the slider, the speed list and **Travel moves** in turn; Play and Pause are announced by a screen reader; with OS reduced motion on, the file still opens paused.
 
 ### Theming and settings
 

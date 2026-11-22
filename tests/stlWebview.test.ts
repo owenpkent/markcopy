@@ -106,6 +106,13 @@ const BODY = `
     <span id="layer-label"></span>
     <input id="layer-only" type="checkbox" />
   </div>
+  <div id="playback" hidden>
+    <button id="play-toggle"></button>
+    <input id="play-range" type="range" min="0" max="1" step="1" value="0" />
+    <select id="play-speed"></select>
+    <input id="play-travel" type="checkbox" />
+    <span id="play-label"></span>
+  </div>
   <div id="parts" hidden>
     <span id="parts-count"></span>
     <button id="parts-show-all"></button>
@@ -1181,6 +1188,140 @@ describe('3D viewer plain G-code', () => {
     expect(el<HTMLButtonElement>('btn-parts').hidden).toBe(true);
     expect(el<HTMLButtonElement>('btn-section').disabled).toBe(true);
     expect(toolpath()).toBeDefined();
+  });
+
+  it('offers playback paused at the end, with the whole print drawn', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    expect(el('playback').hidden).toBe(false);
+    const total = Number(el<HTMLInputElement>('play-range').max);
+    expect(total).toBeGreaterThan(0);
+    expect(el<HTMLInputElement>('play-range').value).toBe(String(total));
+    expect(el('play-label').textContent).toMatch(/^Move [\d,]+ \/ [\d,]+/);
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Play');
+    expect(el<HTMLSelectElement>('play-speed').options.length).toBeGreaterThan(3);
+    const range = toolpath()?.geometry.drawRange;
+    expect(range).toEqual({ start: 0, count: total * 2 });
+  });
+
+  it('is hidden for a model that is not G-code', async () => {
+    await import('../src/webview/stl');
+    load({ bytes: boxStl([0, 0, 0], [1, 1, 1]) });
+    await vi.waitFor(() => expect(meshes().length).toBeGreaterThan(0));
+    expect(el('playback').hidden).toBe(true);
+    // Space does nothing there.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    expect(el('play-toggle').getAttribute('aria-label')).not.toBe('Pause');
+  });
+
+  it('scrubbing moves the draw range, the nozzle and the layer bar together', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    const range = el<HTMLInputElement>('play-range');
+    const total = Number(range.max);
+
+    range.value = '10';
+    range.dispatchEvent(new Event('input'));
+    expect(toolpath()?.geometry.drawRange).toEqual({ start: 0, count: 20 });
+    expect(el('play-label').textContent).toMatch(/^Move 10 \//);
+    expect(el('layer-label').textContent).toMatch(/^Layer 1 \/ 5/);
+
+    // The nozzle is the cone, a child of the toolpath, at the end of segment 10.
+    const lines = toolpath()!;
+    const positions = lines.geometry.getAttribute('position');
+    const nozzle = lines.children.find((child) => (child as Three.Mesh).isMesh)!;
+    expect(nozzle.position.x).toBeCloseTo(positions.getX(19), 4);
+    expect(nozzle.position.y).toBeCloseTo(positions.getY(19), 4);
+
+    // Scrubbing to the end shows the last layer on the layer bar.
+    range.value = String(total);
+    range.dispatchEvent(new Event('input'));
+    expect(el('layer-label').textContent).toMatch(/^Layer 5 \/ 5/);
+    expect(el<HTMLInputElement>('layer-range').value).toBe('5');
+
+    // Picking a layer moves the playhead to its end, and "this layer only" starts at its start.
+    el('layer-down').click();
+    const layerEnd = Number(range.value);
+    expect(layerEnd).toBeGreaterThan(0);
+    expect(layerEnd).toBeLessThan(total);
+    expect(toolpath()?.geometry.drawRange).toEqual({ start: 0, count: layerEnd * 2 });
+    const only = el<HTMLInputElement>('layer-only');
+    only.checked = true;
+    only.dispatchEvent(new Event('change'));
+    const drawRange = toolpath()!.geometry.drawRange;
+    expect(drawRange.start).toBeGreaterThan(0);
+    expect(drawRange.start + drawRange.count).toBe(layerEnd * 2);
+  });
+
+  it('plays on the render loop, stops at the end, and Space toggles it', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    const range = el<HTMLInputElement>('play-range');
+    const total = Number(range.max);
+    range.value = '0';
+    range.dispatchEvent(new Event('input'));
+    expect(toolpath()?.geometry.drawRange.count).toBe(0);
+
+    const now = vi.spyOn(performance, 'now');
+    now.mockReturnValue(1000);
+    const space = () =>
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }),
+      );
+    space();
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Pause');
+    // Typing in a field does not toggle.
+    const field = document.createElement('input');
+    field.type = 'number';
+    document.body.appendChild(field);
+    field.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Pause');
+
+    now.mockReturnValue(1050);
+    frame?.();
+    const first = Number(range.value);
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(total);
+
+    // A long run ends at the end and pauses itself.
+    let t = 1050;
+    for (let i = 0; i < 400 && el('play-toggle').getAttribute('aria-label') === 'Pause'; i++) {
+      t += 100;
+      now.mockReturnValue(t);
+      frame?.();
+    }
+    expect(range.value).toBe(String(total));
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Play');
+    now.mockRestore();
+
+    // Space pauses a run too.
+    space();
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Pause');
+    space();
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Play');
+  });
+
+  it('shows the travel moves near the nozzle only when asked', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    const travelLines = () =>
+      toolpath()!.children.find((child) => (child as Three.LineSegments).isLineSegments) as
+        Three.LineSegments | undefined;
+    const box = el<HTMLInputElement>('play-travel');
+    expect(box.disabled).toBe(false);
+    expect(travelLines()!.visible).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    const lines = travelLines()!;
+    expect(lines.visible).toBe(true);
+    // Only the last layer's travel: fewer vertices than the whole list.
+    const all = lines.geometry.getAttribute('position').count;
+    expect(lines.geometry.drawRange.count).toBeGreaterThan(0);
+    expect(lines.geometry.drawRange.count).toBeLessThan(all);
   });
 
   it('draws the bed the file names, with no setting asking for one', async () => {
