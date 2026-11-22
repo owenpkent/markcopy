@@ -298,6 +298,10 @@ const tooBig = () =>
   new GlbError('This GLB file declares an accessor larger than MarkCopy will allocate.');
 const outside = () =>
   new GlbError('This GLB file has an accessor that reaches outside the data it points at.');
+const overlapping = () =>
+  new GlbError(
+    'This GLB file points several buffer views at the same bytes, more than MarkCopy will copy.',
+  );
 const malformed = (what: string) => new GlbError(`This GLB file has a malformed ${what}.`);
 
 function wholeNumber(value: unknown): value is number {
@@ -360,6 +364,11 @@ export function pruneGlb(
   const accessorMap = new Map<number, number>();
   const outViews: BufferViewDef[] = [];
   const viewMap = new Map<number, number>();
+  // The loader copies every buffer view it is given whole, one copy per view
+  // entry, so views that overlap would each copy the same bytes again. Views
+  // that do not overlap fit in the BIN chunk, so the kept views together may not
+  // exceed it: that bounds the loader's copies by the file's own size.
+  let viewBytes = 0;
 
   const useView = (index: unknown, needBytes: number, offset: number): number => {
     if (!wholeNumber(index)) {
@@ -378,6 +387,10 @@ export function pruneGlb(
     }
     let slot = viewMap.get(index);
     if (slot === undefined) {
+      viewBytes += byteLength;
+      if (viewBytes > binLength) {
+        throw overlapping();
+      }
       const out: BufferViewDef = { buffer: 0, byteOffset, byteLength };
       if (wholeNumber(byteStride)) {
         out.byteStride = byteStride;
@@ -600,6 +613,31 @@ export function pruneGlb(
         if (instancing[name] !== undefined) {
           attributes[name] = useAccessor(instancing[name], 'instance');
         }
+      }
+      // The instance count, read as countGlbTriangles reads it: the first
+      // attribute's count, which the extension requires every attribute to share.
+      const first = Object.values(instancing)[0];
+      const copies = typeof first === 'number' ? accessors[first]?.count : undefined;
+      for (const index of Object.values(instancing)) {
+        if (!wholeNumber(index) || accessors[index]?.count !== copies) {
+          throw malformed('instancing attribute');
+        }
+      }
+      // An instanced node may carry only custom attributes (such as _ID), all
+      // three transforms being optional. Those are dropped above, and three
+      // would then draw one plain mesh, losing the other instances. Give it a
+      // zero TRANSLATION of the same count instead: an accessor with no buffer
+      // view is zero-filled, and it is budgeted like any other.
+      if (Object.keys(attributes).length === 0 && wholeNumber(copies)) {
+        if (copies > vertexLimit) {
+          throw tooBig();
+        }
+        elements += copies * 3;
+        if (elements > elementLimit) {
+          throw tooBig();
+        }
+        attributes.TRANSLATION =
+          outAccessors.push({ type: 'VEC3', componentType: 5126, count: copies }) - 1;
       }
       usesInstancing = true;
       out.extensions = { EXT_mesh_gpu_instancing: { attributes } };

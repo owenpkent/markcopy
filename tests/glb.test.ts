@@ -261,6 +261,88 @@ describe('readGlb', () => {
       expect(parse).not.toHaveBeenCalled();
     });
 
+    it('refuses many buffer views over the same bytes, which the loader would copy each time', async () => {
+      // The reviewer's probe: ten one-triangle primitives, each with its own
+      // buffer view covering the same 64 KiB of BIN. Every accessor and range
+      // is in bounds, but the loader would copy the 64 KiB ten times.
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const bin = Buffer.concat([TRIANGLE_BIN, Buffer.alloc(65_536 - TRIANGLE_BIN.length)]);
+      const n = 10;
+      const json = triangleJson({
+        nodes: [{ children: Array.from({ length: n }, (_, i) => i + 1) }].concat(
+          Array.from({ length: n }, (_, i) => ({ mesh: i }) as never),
+        ),
+        meshes: Array.from({ length: n }, (_, i) => ({
+          primitives: [{ attributes: { POSITION: i } }],
+        })),
+        accessors: Array.from({ length: n }, (_, i) => ({ bufferView: i, ...f32(3) })),
+        bufferViews: Array.from({ length: n }, () => ({
+          buffer: 0,
+          byteOffset: 0,
+          byteLength: 65_536,
+        })),
+        buffers: [{ byteLength: 65_536 }],
+      });
+      await expect(readGlb(glb(json, bin), { maxTriangles: n })).rejects.toThrow(
+        /several buffer views at the same bytes/,
+      );
+      expect(parse).not.toHaveBeenCalled();
+    });
+
+    it('still reads views that share one buffer view entry, or sit side by side', async () => {
+      const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
+      const bin = Buffer.concat([TRIANGLE_BIN, TRIANGLE_BIN]);
+      const json = triangleJson({
+        nodes: [{ children: [1, 2, 3] }, { mesh: 0 }, { mesh: 1 }, { mesh: 2 }],
+        meshes: [0, 0, 1].map((a) => ({ primitives: [{ attributes: { POSITION: a } }] })),
+        accessors: [
+          { bufferView: 0, ...f32(3) },
+          { bufferView: 1, ...f32(3) },
+        ],
+        bufferViews: [
+          { buffer: 0, byteOffset: 0, byteLength: 36 },
+          { buffer: 0, byteOffset: 36, byteLength: 36 },
+        ],
+        buffers: [{ byteLength: 72 }],
+      });
+      const model = await readGlb(glb(json, bin), { maxTriangles: 3 });
+      expect(model.positions.length).toBe(3 * 9);
+      expect(parse).toHaveBeenCalledOnce();
+    });
+
+    it('keeps every instance of a node whose instancing has only custom attributes', async () => {
+      // EXT_mesh_gpu_instancing makes TRANSLATION, ROTATION and SCALE optional:
+      // a node may carry only _ID. Two identity instances of one triangle.
+      const json = triangleJson(
+        {
+          accessors: [
+            { bufferView: 0, ...f32(3) },
+            { componentType: 5125, count: 2, type: 'SCALAR' },
+          ],
+          extensionsUsed: ['EXT_mesh_gpu_instancing'],
+        },
+        { extensions: { EXT_mesh_gpu_instancing: { attributes: { _ID: 1 } } } },
+      );
+      const model = await readGlb(glb(json, TRIANGLE_BIN), { maxTriangles: 2 });
+      expect(model.positions.length).toBe(2 * 9);
+    });
+
+    it('refuses instancing attributes whose counts disagree', async () => {
+      const json = triangleJson(
+        {
+          accessors: [
+            { bufferView: 0, ...f32(3) },
+            f32(2),
+            { componentType: 5125, count: 5, type: 'SCALAR' },
+          ],
+        },
+        { extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 1, _ID: 2 } } } },
+      );
+      await expect(readGlb(glb(json, TRIANGLE_BIN), { maxTriangles: 10 })).rejects.toThrow(
+        /malformed instancing attribute/,
+      );
+    });
+
     it('refuses a normal accessor that is large but matches its positions', async () => {
       const parse = vi.spyOn(GLTFLoader.prototype, 'parse');
       const json = triangleJson({
