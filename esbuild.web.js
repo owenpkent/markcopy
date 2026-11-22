@@ -2,7 +2,7 @@
 //   media/webview.js     markdown preview (esm module, code-split chunks)
 //   media/pdf.js         PDF preview (esm, <script type="module">)
 //   media/pdf.worker.js  pdf.js worker (esm module worker)
-//   media/stl.js         3D preview: STL, 3MF, GLB, STEP (esm, bundles Three.js
+//   media/stl.js         3D preview: STL, 3MF, GLB, STEP, OBJ (esm, bundles Three.js
 //                        and the STEP engine's JS glue)
 //   media/video.js       video preview (esm)
 //   media/gif.js         GIF preview (esm)

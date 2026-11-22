@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { strToU8, zipSync } from 'fflate';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as Three from 'three';
 import type * as StepModule from '../src/webview/step';
 
@@ -1301,5 +1301,206 @@ describe('3D viewer plain G-code', () => {
     await vi.waitFor(() => expect(stats()).toMatch(/^Sliced print/));
     openMenuAt();
     expect(menuRow('Open as Text')).toBeUndefined();
+  });
+});
+
+describe('3D viewer OBJ', () => {
+  const read = (name: string) => readFileSync(join(__dirname, '..', name));
+  const objBytes = (text: string) => Buffer.from(text).toString('base64');
+  const sample = () => ({
+    format: 'obj',
+    name: 'sample.obj',
+    bytes: read('sample.obj').toString('base64'),
+    mtl: [{ name: 'sample.mtl', text: read('sample.mtl').toString('utf8') }],
+    materialNotes: [],
+  });
+  const rotation = () => meshes()[0].parent?.rotation.x;
+
+  afterEach(() => vi.restoreAllMocks());
+
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: () => 600,
+    });
+  });
+
+  const openMenu = (): void => {
+    document.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+    const view = [...document.querySelectorAll<HTMLElement>('.mc-menu-item')].find((item) =>
+      (item.textContent ?? '').startsWith('View'),
+    );
+    view?.dispatchEvent(new MouseEvent('mouseenter'));
+  };
+  const menuItem = (label: string): HTMLElement | undefined =>
+    [...document.querySelectorAll<HTMLElement>('.mc-menu-item')].find(
+      (item) => item.textContent?.replace('✓', '').replace('▸', '').trim() === label,
+    );
+
+  // A triangle in the XY plane whose vn says +Y: a recomputed normal would be +Z,
+  // so which one the geometry holds says whether the file's was kept.
+  const normalOfFirstVertex = (): number[] =>
+    Array.from(meshes()[0].geometry.getAttribute('normal').array.slice(0, 3));
+  const slanted = (face: string) => objBytes(`v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 1 0\n${face}\n`);
+
+  it('reads the sample: colored, unitless, with the file normals and its two parts', async () => {
+    await import('../src/webview/stl');
+    load(sample());
+    expect(stats()).toBe('Reading sample.obj…');
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    // 18 triangles; 5 wide, 5 tall, 5 deep in the file's own X Y Z, no unit.
+    expect(stats()).toMatch(/^18 triangles\n5\.00 × 5\.00 × 5\.00\nGrid /);
+    expect(material(meshes()[0]).vertexColors).toBe(true);
+    expect(meshes()[0].geometry.hasAttribute('normal')).toBe(true);
+    // Two objects: the Parts panel opens by itself, one row each.
+    expect(el('parts').hidden).toBe(false);
+    expect(
+      [...document.querySelectorAll('#parts-list .mc-part-name')].map((n) => n.textContent),
+    ).toEqual(['walls', 'roof']);
+  });
+
+  it('keeps the normals the file gives when every face vertex has one', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'obj', name: 'tri.obj', bytes: slanted('f 1//1 2//1 3//1') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(normalOfFirstVertex()).toEqual([0, 1, 0]);
+  });
+
+  it('computes the normals when a face vertex has none', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'obj', name: 'tri.obj', bytes: slanted('f 1//1 2//1 3') });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(normalOfFirstVertex()[2]).toBeCloseTo(1);
+  });
+  it('draws in markcopy.stl.meshColor when there is no .mtl, and says the file was not found', async () => {
+    await import('../src/webview/stl');
+    load({
+      ...sample(),
+      mtl: [],
+      materialNotes: ['Materials file not found: sample.mtl'],
+      meshColor: '#ff0000',
+    });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(material(meshes()[0]).vertexColors).toBe(false);
+    expect(material(meshes()[0]).color.getHexString()).toBe('ff0000');
+    expect(stats()).toMatch(/\nMaterials file not found: sample\.mtl$/);
+  });
+
+  it('starts Y-up whatever markcopy.stl.upAxis says, and the menu switches it without writing the setting', async () => {
+    await import('../src/webview/stl');
+    load({ ...sample(), upAxis: 'z' });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    // No turn: the file's Y is the viewer's up.
+    expect(rotation()).toBeCloseTo(0);
+    openMenu();
+    expect(menuItem('Up Axis')).toBeDefined();
+    menuItem('Up Axis')!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(menuItem('Y')!.textContent).toContain('✓');
+    menuItem('Z')!.click();
+    expect(rotation()).toBeCloseTo(-Math.PI / 2);
+    // The window's own choice: the shared STL and STEP setting is left alone.
+    expect(posted.filter((m) => m.type === 'updateSetting')).toEqual([]);
+    // Back to Y, and a newly opened OBJ starts Y-up again.
+    openMenu();
+    menuItem('Up Axis')!.dispatchEvent(new MouseEvent('mouseenter'));
+    menuItem('Y')!.click();
+    expect(rotation()).toBeCloseTo(0);
+  });
+
+  it('starts the next OBJ Y-up again after one was switched to Z', async () => {
+    await import('../src/webview/stl');
+    load(sample());
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    openMenu();
+    menuItem('Up Axis')!.dispatchEvent(new MouseEvent('mouseenter'));
+    menuItem('Z')!.click();
+    load(sample());
+    await vi.waitFor(() => expect(stats()).toMatch(/^18 triangles/));
+    expect(rotation()).toBeCloseTo(0);
+  });
+
+  it('leaves an STL on markcopy.stl.upAxis, which still writes it', async () => {
+    await import('../src/webview/stl');
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]), upAxis: 'z' });
+    expect(rotation()).toBeCloseTo(-Math.PI / 2);
+    openMenu();
+    menuItem('Up Axis')!.dispatchEvent(new MouseEvent('mouseenter'));
+    menuItem('Y')!.click();
+    expect(posted.filter((m) => m.type === 'updateSetting')).toEqual([
+      { type: 'updateSetting', key: 'stl.upAxis', value: 'y' },
+    ]);
+  });
+
+  it('says why an OBJ could not be read, and refuses one past the bounds', async () => {
+    await import('../src/webview/stl');
+    load({ format: 'obj', name: 'bad.obj', bytes: objBytes('v 0 0 0\nf 1 2 3\n') });
+    await vi.waitFor(() => expect(stats()).toMatch(/vertex that has not been declared/));
+    load({ format: 'obj', name: 'none.obj', bytes: objBytes('# nothing\n') });
+    await vi.waitFor(() => expect(stats()).toMatch(/no faces to show/));
+    load({
+      format: 'obj',
+      name: 'compiled.obj',
+      bytes: Buffer.from([0x64, 0x86, 0, 0, 1]).toString('base64'),
+    });
+    await vi.waitFor(() => expect(stats()).toMatch(/compiled object file/));
+  });
+
+  it('shows the host refusal of a compiled .obj with a button that asks for the text editor', async () => {
+    await import('../src/webview/stl');
+    send({
+      type: 'error',
+      name: 'main.obj',
+      path: '/src/main.obj',
+      message: 'This .obj is a compiled object file, not a 3D model.',
+      openAsText: true,
+    });
+    expect(stats()).toContain('compiled object file');
+    const button = el('stats').querySelector('button') as HTMLButtonElement;
+    expect(button.textContent).toBe('Open as text');
+    // The readout lets the pointer through; the button has to take it.
+    expect(button.style.pointerEvents).toBe('auto');
+    button.click();
+    expect(posted).toContainEqual({ type: 'openAsText' });
+    // No other error carries one.
+    send({ type: 'error', message: 'Too big.' });
+    expect(el('stats').querySelector('button')).toBeNull();
+  });
+
+  it('ignores a .mtl payload that is not what the host sends', async () => {
+    await import('../src/webview/stl');
+    load({
+      ...sample(),
+      mtl: [
+        { name: 5, text: 'x' },
+        null,
+        { name: 'big.mtl', text: 'x'.repeat(4 * 1024 * 1024 + 1) },
+        'text',
+      ],
+      materialNotes: [7, 'one note'],
+    });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    expect(material(meshes()[0]).vertexColors).toBe(false);
+    expect(stats()).toMatch(/\none note$/);
+  });
+
+  it('compares an OBJ with an STL, in the compared model color', async () => {
+    await import('../src/webview/stl');
+    load({ bytes: boxStl([0, 0, 0], [4, 4, 4]), siblings: ['sample.obj'] });
+    send({ type: 'compare', ...sample() });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    expect(stats()).toContain('sample.obj  18 triangles');
+  });
+
+  it('compares an STL with an OBJ and keeps the OBJ Y-up default for the OBJ when it is first', async () => {
+    await import('../src/webview/stl');
+    load(sample());
+    await vi.waitFor(() => expect(meshes()).toHaveLength(1));
+    send({ type: 'compare', format: 'stl', name: 'a.stl', bytes: boxStl([0, 0, 0], [1, 1, 1]) });
+    await vi.waitFor(() => expect(meshes()).toHaveLength(2));
+    expect(rotation()).toBeCloseTo(0);
   });
 });

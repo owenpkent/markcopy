@@ -312,6 +312,10 @@ describe('parseStlMessage', () => {
       expect(parseStlMessage({ type: 'saveFrame', data, name: 'f.png' })).toBeUndefined();
     }
     expect(parseStlMessage({ type: 'copyText', text: 'x' })).toBeUndefined();
+    // The text editor button carries nothing: the host reopens its own document.
+    expect(parseStlMessage({ type: 'openAsText', path: '/etc/passwd' })).toEqual({
+      type: 'openAsText',
+    });
     expect(parseStlMessage({ type: 'compareBrowse', path: '/etc/passwd' })).toEqual({
       type: 'compareBrowse',
     });

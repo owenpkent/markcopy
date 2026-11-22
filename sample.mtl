@@ -1,0 +1,8 @@
+# MarkCopy sample materials. Kd is the color; texture maps are never read.
+newmtl plaster
+Kd 0.92 0.88 0.78
+d 1.0
+newmtl slab
+Kd 0.45 0.45 0.5
+newmtl tiles
+Kd 0.7 0.22 0.15

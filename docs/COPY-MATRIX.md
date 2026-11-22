@@ -1,6 +1,6 @@
 # Copy Matrix
 
-Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document actions. (The STL viewer has a short menu of its own; see [3D models](#3d-models-stl-3mf-glb-step-stp). The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
+Every action the preview's right-click menu can offer, the clipboard flavor it writes, and where it pastes cleanly. The menu is adaptive: only the rows relevant to what you clicked appear, plus the always-available document actions. (The STL viewer has a short menu of its own; see [3D models](#3d-models-stl-3mf-glb-step-stp-obj). The video player has its own short menu; see [Video](#video-mov--mp4--m4v). The LaTeX preview offers exactly the PDF preview's menu, since it renders through that same viewer; see [A page in the LaTeX preview](#a-page-in-the-latex-preview).)
 
 The top level is short: it names whatever you clicked ("Copy Email Address", "Copy Link", "Copy Selection", "Copy Code", "Copy Table", "Copy Diagram", "Copy Equation", or "Copy Block") and copies it in its most useful format. Every other format for that element lives one level down, in the **Copy as** submenu. Precedence when more than one element could apply is Link > Selection > Code > a grid cell whose own text is a recognized email address or URL > Table > Diagram > Equation > Block. An ordinary grid cell, with no recognized address of its own, remains behind "Copy Table" and is reachable under **Copy as** > **Cell Text**. Thus a selection inside a table still gets "Copy Selection" at the top, not "Copy Table", and a link takes the top from both: right-clicking one names a single element, where a selection names a range that may not have been aimed at anything.
 
@@ -216,22 +216,22 @@ Differences worth stating:
 - **Save as Word from a Word preview** offers a file name based on the source, so check the destination before saving over the original.
 - There is no editing and no writeback: MarkCopy never writes to the document.
 
-## 3D models (.stl, .3mf, .glb, .step, .stp, .gcode, .gco)
+## 3D models (.stl, .3mf, .glb, .step, .stp, .obj, .gcode, .gco)
 
-The 3D viewer (which opens `.stl`, `.3mf`, `.glb`, `.step`, `.stp`, `.gcode` and `.gco`) has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
+The 3D viewer (which opens `.stl`, `.3mf`, `.glb`, `.step`, `.stp`, `.obj`, `.gcode` and `.gco`) has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
 
-| Action                             | Clipboard flavor | Pastes cleanly into                                                                                                                                |
-| ---------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Copy View as PNG**               | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors                                                                                            |
-| **Save View as PNG…**              | (writes a file)  | Anywhere, via a save dialog                                                                                                                        |
-| **Copy as > File Name**            | `text/plain`     | Anywhere                                                                                                                                           |
-| **Copy as > Full Path**            | `text/plain`     | A terminal, a script, another editor                                                                                                               |
-| **Copy as > Dimensions**           | `text/plain`     | Anywhere (the file's own `X × Y × Z`, two decimals, as the overlay; 3MF and STEP add the unit, e.g. `mm`; a GLB has none and is shown turned Z-up) |
-| **Copy as > Triangle Count**       | `text/plain`     | Anywhere (a plain integer, no thousands separators)                                                                                                |
-| **Copy parts list**                | `text/plain`     | Anywhere that takes Markdown tables (GitHub, Notion, Obsidian, a Markdown preview); `                                                              | Part | Assembly | Qty | Triangles | `, one row per distinct part |
-| **Copy Section as PNG**            | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors (only while a section is open)                                                             |
-| **Copy as > Section Measurements** | `text/plain`     | Anywhere (only while a section is open; layout below)                                                                                              |
-| **Copy as > Print Summary**        | `text/plain`     | Anywhere (a sliced `.gcode.3mf` or a plain G-code file only; replaces Dimensions and Triangle Count)                                               |
+| Action                             | Clipboard flavor | Pastes cleanly into                                                                                                                                                                            |
+| ---------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Copy View as PNG**               | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors                                                                                                                                        |
+| **Save View as PNG…**              | (writes a file)  | Anywhere, via a save dialog                                                                                                                                                                    |
+| **Copy as > File Name**            | `text/plain`     | Anywhere                                                                                                                                                                                       |
+| **Copy as > Full Path**            | `text/plain`     | A terminal, a script, another editor                                                                                                                                                           |
+| **Copy as > Dimensions**           | `text/plain`     | Anywhere (the file's own `X × Y × Z`, two decimals, as the overlay; 3MF and STEP add the unit, e.g. `mm`; a GLB and an OBJ have none; a GLB is shown turned Z-up, an OBJ Y-up unless switched) |
+| **Copy as > Triangle Count**       | `text/plain`     | Anywhere (a plain integer, no thousands separators)                                                                                                                                            |
+| **Copy parts list**                | `text/plain`     | Anywhere that takes Markdown tables (GitHub, Notion, Obsidian, a Markdown preview); `                                                                                                          | Part | Assembly | Qty | Triangles | `, one row per distinct part |
+| **Copy Section as PNG**            | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors (only while a section is open)                                                                                                         |
+| **Copy as > Section Measurements** | `text/plain`     | Anywhere (only while a section is open; layout below)                                                                                                                                          |
+| **Copy as > Print Summary**        | `text/plain`     | Anywhere (a sliced `.gcode.3mf` or a plain G-code file only; replaces Dimensions and Triangle Count)                                                                                           |
 
 Notes:
 

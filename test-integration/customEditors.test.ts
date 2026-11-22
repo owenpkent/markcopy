@@ -334,11 +334,19 @@ suite('MarkCopy custom editors', () => {
     assert.strictEqual(tab.viewType, STL_VIEW, 'part.3mf opened in some other custom editor');
   });
 
-  test('.glb, .step, .stp, .gcode and .gco files open in the same 3D preview as STL', async () => {
+  test('.glb, .step, .stp, .gcode, .gco and .obj files open in the same 3D preview as STL', async () => {
     // Only the claim is under test, so the bytes need not be a real model: the
     // viewer reports an unreadable one in its own panel.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
-    for (const name of ['part.glb', 'part.step', 'PART.STP', 'part.gcode', 'PART.GCO']) {
+    for (const name of [
+      'part.glb',
+      'part.step',
+      'PART.STP',
+      'part.gcode',
+      'PART.GCO',
+      'part.obj',
+      'PART.OBJ',
+    ]) {
       const uri = vscode.Uri.file(path.join(dir, name));
       fs.writeFileSync(uri.fsPath, Buffer.from('ISO-10303-21;'));
 
