@@ -42,7 +42,8 @@ vi.mock('vscode', () => {
         asUri(`${base.path}/${segments.join('/')}`),
     },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
-    FileType: { File: 1, Directory: 2 },
+    FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
+    commands: { executeCommand },
     env: { openExternal: vi.fn() },
     commands: { executeCommand },
     workspace: {
@@ -518,5 +519,203 @@ describe('StlEditorProvider with G-code', () => {
     expect(editor.priority).toBe('default');
     const ignore = readFileSync(join(__dirname, '..', '.vscodeignore'), 'utf8');
     expect(ignore).toMatch(/^sample\.gcode\r?$/m);
+  });
+});
+
+describe('OBJ models', () => {
+  const OBJ = 'mtllib house.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
+  const files = new Map<string, { data: Uint8Array; type?: number; size?: number }>();
+  const readPaths: string[] = [];
+
+  // The OBJ and the files beside it, keyed by the path the mocked joinPath builds.
+  function setFiles(): void {
+    stat.mockImplementation((async (uri: { path: string }) => {
+      const file = files.get(uri.path);
+      if (!file) {
+        throw new Error('ENOENT');
+      }
+      return { size: file.size ?? file.data.length, type: file.type ?? 1 };
+    }) as never);
+    readFile.mockImplementation((async (uri: { path: string }) => {
+      readPaths.push(uri.path);
+      const file = files.get(uri.path);
+      if (!file) {
+        throw new Error('ENOENT');
+      }
+      return file.data;
+    }) as never);
+  }
+  const enc = (text: string) => new Uint8Array(Buffer.from(text));
+  const NEXT = '/models/house.obj/..';
+
+  beforeEach(() => {
+    files.clear();
+    readPaths.length = 0;
+    files.set('/models/house.obj', { data: enc(OBJ) });
+    setFiles();
+  });
+
+  const load = async (file = '/models/house.obj') => {
+    const harness = await open(file);
+    await harness.send({ type: 'ready' });
+    return { ...harness, loaded: harness.posted.find((m) => m.type === 'load') };
+  };
+
+  it('sends an OBJ as obj, with the .mtl read from its own folder', async () => {
+    files.set(`${NEXT}/house.mtl`, { data: enc('newmtl a\nKd 1 0 0\n') });
+    const { loaded } = await load();
+    expect(loaded).toMatchObject({
+      format: 'obj',
+      name: 'house.obj',
+      bytes: Buffer.from(OBJ).toString('base64'),
+      mtl: [{ name: 'house.mtl', text: 'newmtl a\nKd 1 0 0\n' }],
+      materialNotes: [],
+    });
+    expect(readPaths).toEqual(['/models/house.obj', `${NEXT}/house.mtl`]);
+  });
+
+  it('opens an upper-case .OBJ the same way', async () => {
+    files.set('/models/HOUSE.OBJ', { data: enc(OBJ) });
+    expect((await load('/models/HOUSE.OBJ')).loaded).toMatchObject({ format: 'obj' });
+  });
+
+  it('says so, and goes on, when the materials file is missing', async () => {
+    const { loaded } = await load();
+    expect(loaded).toMatchObject({
+      format: 'obj',
+      mtl: [],
+      materialNotes: ['Materials file not found: house.mtl'],
+    });
+  });
+
+  it('reads no file a mtllib line points outside the folder, and says it did not', async () => {
+    const names = [
+      '../secret.mtl',
+      '..\\secret.mtl',
+      'sub/a.mtl',
+      'C:\\Windows\\a.mtl',
+      '/etc/passwd',
+      'file:///etc/a.mtl',
+      'https://example.com/a.mtl',
+      'notes.txt',
+    ];
+    files.set('/models/house.obj', {
+      data: enc(`${names.map((n) => `mtllib ${n}`).join('\n')}\nv 0 0 0\n`),
+    });
+    const { loaded } = await load();
+    expect(loaded?.mtl).toEqual([]);
+    expect((loaded?.materialNotes as string[]).length).toBe(names.length);
+    expect(readPaths).toEqual(['/models/house.obj']);
+    // Only the OBJ itself was statted: none of the names got that far.
+    expect(stat).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads at most eight .mtl files, each of at most 4 MiB, text only, never a symlink', async () => {
+    const many = Array.from({ length: 11 }, (_, i) => `m${i}.mtl`);
+    files.set('/models/house.obj', { data: enc(many.map((n) => `mtllib ${n}`).join('\n')) });
+    for (const name of many) {
+      files.set(`${NEXT}/${name}`, { data: enc('newmtl a\nKd 1 1 1\n') });
+    }
+    let { loaded } = await load();
+    expect((loaded?.mtl as unknown[]).length).toBe(8);
+    expect(loaded?.materialNotes).toEqual(['Only the first 8 materials files are read']);
+
+    files.set('/models/house.obj', {
+      data: enc('mtllib big.mtl\nmtllib bin.mtl\nmtllib link.mtl\nmtllib dir.mtl\nmtllib ok.mtl\n'),
+    });
+    files.set(`${NEXT}/big.mtl`, { data: enc('x'), size: 4 * 1024 * 1024 + 1 });
+    files.set(`${NEXT}/bin.mtl`, { data: Uint8Array.from([110, 0, 1, 2]) });
+    files.set(`${NEXT}/link.mtl`, { data: enc('newmtl a'), type: 65 });
+    files.set(`${NEXT}/dir.mtl`, { data: enc('newmtl a'), type: 2 });
+    files.set(`${NEXT}/ok.mtl`, { data: enc('newmtl ok\nKd 1 0 0\n') });
+    readPaths.length = 0;
+    ({ loaded } = await load());
+    expect(loaded?.mtl).toEqual([{ name: 'ok.mtl', text: 'newmtl ok\nKd 1 0 0\n' }]);
+    expect((loaded?.materialNotes as string[]).length).toBe(4);
+    // The oversized, symlinked and directory entries were never read.
+    expect(readPaths).not.toContain(`${NEXT}/big.mtl`);
+    expect(readPaths).not.toContain(`${NEXT}/link.mtl`);
+    expect(readPaths).not.toContain(`${NEXT}/dir.mtl`);
+  });
+
+  it('names a compiled object file for what it is, with a button to the text editor', async () => {
+    for (const data of [
+      Uint8Array.from([0x64, 0x86, 0x04, 0x00, 0x00, 0x00]), // COFF x64
+      Uint8Array.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]), // ELF
+      Uint8Array.from([...enc('v 0 0 0\n'), 0, 1]), // a NUL
+    ]) {
+      files.set('/models/house.obj', { data });
+      const { posted } = await load();
+      expect(posted.find((m) => m.type === 'load')).toBeUndefined();
+      expect(posted.find((m) => m.type === 'error')).toEqual({
+        type: 'error',
+        name: 'house.obj',
+        path: '/models/house.obj',
+        message: 'This .obj is a compiled object file, not a 3D model.',
+        openAsText: true,
+      });
+    }
+    // No other refusal offers the button.
+    files.set('/models/house.obj', { data: enc(OBJ), size: 300 * 1024 * 1024 });
+    const big = await open('/models/house.obj');
+    await big.send({ type: 'ready' });
+    expect(big.posted.find((m) => m.type === 'error')).not.toHaveProperty('openAsText');
+  });
+
+  it('reopens its own document in the default editor on openAsText, and nothing else', async () => {
+    const { send } = await open('/models/house.obj');
+    await send({ type: 'openAsText', uri: 'file:///etc/passwd' });
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledWith(
+      'vscode.openWith',
+      expect.objectContaining({ path: '/models/house.obj' }),
+      'default',
+    );
+  });
+
+  it('compares an OBJ, with its materials, and refuses a compiled one as a toast', async () => {
+    files.set('/models/part.stl', { data: enc(TRIANGLE) });
+    readDirectory.mockResolvedValue([
+      ['part.stl', 1],
+      ['house.obj', 1],
+    ]);
+    files.set('/models/part.stl/../house.obj', { data: enc(OBJ) });
+    files.set('/models/part.stl/../house.obj/../house.mtl', { data: enc('newmtl a\nKd 1 0 0\n') });
+    const { send, posted } = await open('/models/part.stl');
+    await send({ type: 'ready' });
+    await send({ type: 'compare', name: 'house.obj' });
+    expect(posted.find((m) => m.type === 'compare')).toMatchObject({
+      format: 'obj',
+      name: 'house.obj',
+      mtl: [{ name: 'house.mtl', text: 'newmtl a\nKd 1 0 0\n' }],
+    });
+
+    files.set('/models/part.stl/../house.obj', { data: Uint8Array.from([0x64, 0x86, 0, 0]) });
+    posted.length = 0;
+    await send({ type: 'compare', name: 'house.obj' });
+    expect(posted).toEqual([
+      { type: 'toast', message: 'This .obj is a compiled object file, not a 3D model.' },
+    ]);
+  });
+
+  it('offers .obj in the compare dialog and the sibling list', async () => {
+    const { send } = await open('/models/house.obj');
+    showOpenDialog.mockResolvedValueOnce(undefined);
+    await send({ type: 'compareBrowse' });
+    expect(showOpenDialog.mock.calls.at(-1)?.[0].filters['3D models']).toContain('obj');
+    const { isModelFile } = await import('../src/stlSiblings');
+    expect(isModelFile('a.OBJ')).toBe(true);
+  });
+
+  it('claims .obj and .OBJ in package.json, at default priority', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+    const editor = pkg.contributes.customEditors.find(
+      (e: { viewType: string }) => e.viewType === 'markcopy.stlPreview',
+    );
+    const patterns = editor.selector.map((s: { filenamePattern: string }) => s.filenamePattern);
+    expect(patterns).toEqual(expect.arrayContaining(['*.obj', '*.OBJ']));
+    expect(editor.priority).toBe('default');
   });
 });

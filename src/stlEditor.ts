@@ -7,15 +7,26 @@ import { parseStlMessage } from './messages/stl';
 import { isStlSetting } from './messages/settings';
 import { MAX_STL_BYTES, checkStl } from './webview/stlInfo';
 import { isModelFile, rankSiblings } from './stlSiblings';
-import { gcodeProblem, glbHeaderProblem, stepHeaderProblem } from './webview/modelSniff';
+import {
+  MAX_MTL_BYTES,
+  MAX_MTL_FILES,
+  OBJ_BINARY_MESSAGE,
+  gcodeProblem,
+  glbHeaderProblem,
+  mtlNameProblem,
+  objIsBinary,
+  objMtlNames,
+  stepHeaderProblem,
+} from './webview/modelSniff';
 
-// A read-only custom editor that renders STL, 3MF, GLB, STEP and plain G-code files with
-// Three.js in a webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
+// A read-only custom editor that renders STL, 3MF, GLB, STEP, OBJ and plain G-code files
+// with Three.js in a webview. Mouse-only orbit/pan/zoom; see media/stl.js (built from
 // src/webview/stl.ts). A 3MF is a zip of XML parts, which the webview unpacks
 // (src/webview/threeMf.ts), a GLB is read by glb.ts and a STEP file is
-// tessellated by an Open CASCADE WebAssembly engine (step.ts) and G-code is
-// drawn as toolpaths (gcode.ts): the host only stats each one and checks its
-// first bytes.
+// tessellated by an Open CASCADE WebAssembly engine (step.ts), an OBJ is
+// counted and read by obj.ts and G-code is drawn as toolpaths (gcode.ts): the host
+// only stats each one and checks its first bytes. For an OBJ it also reads the .mtl
+// files its `mtllib` lines name, from the OBJ's own folder only (readMaterials).
 //
 // Its right-click menu carries a handful of copy actions (the current view as a
 // PNG, the file name and path, the dimensions and triangle count) plus view
@@ -127,7 +138,13 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     try {
       const model = await readModel(uri);
       if ('error' in model) {
-        void webview.postMessage({ type: 'error', name, path, message: model.error });
+        void webview.postMessage({
+          type: 'error',
+          name,
+          path,
+          message: model.error,
+          ...(model.openAsText ? { openAsText: true } : {}),
+        });
         return;
       }
       // The folder listing is a convenience for the Compare with menu; a folder
@@ -144,6 +161,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
         name,
         path,
         bytes: model.bytes,
+        ...model.materials,
         showGrid: cfg.get<boolean>('stl.showGrid', true),
         meshColor: cfg.get<string>('stl.meshColor', '#8ab4f8'),
         upAxis: cfg.get<string>('stl.upAxis', 'z'),
@@ -183,7 +201,13 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
         void webview.postMessage({ type: 'toast', message: model.error });
         return;
       }
-      void webview.postMessage({ type: 'compare', format: model.format, name, bytes: model.bytes });
+      void webview.postMessage({
+        type: 'compare',
+        format: model.format,
+        name,
+        bytes: model.bytes,
+        ...model.materials,
+      });
     } catch (err) {
       void webview.postMessage({
         type: 'toast',
@@ -196,7 +220,7 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const picked = await vscode.window.showOpenDialog({
       canSelectMany: false,
       defaultUri: vscode.Uri.joinPath(uri, '..'),
-      filters: { '3D models': ['stl', '3mf', 'glb', 'step', 'stp', 'gcode', 'gco'] },
+      filters: { '3D models': ['stl', '3mf', 'glb', 'step', 'stp', 'gcode', 'gco', 'obj'] },
       openLabel: 'Compare',
       title: `Compare ${basename(uri)} with`,
     });
@@ -408,9 +432,18 @@ export class StlEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 }
 
-export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step' | 'gcode';
+export type ModelFormat = 'stl' | '3mf' | 'glb' | 'step' | 'gcode' | 'obj';
 
-type ReadModel = { format: ModelFormat; bytes: string } | { error: string };
+// An OBJ also carries the .mtl files it names and what to say about those it
+// could not use; `openAsText` asks the viewer for its button to the text editor.
+type ReadModel =
+  | { format: ModelFormat; bytes: string; materials?: Materials }
+  | { error: string; openAsText?: boolean };
+
+interface Materials {
+  mtl: Array<{ name: string; text: string }>;
+  materialNotes: string[];
+}
 
 const LABELS: Record<ModelFormat, string> = {
   stl: 'STL',
@@ -418,6 +451,7 @@ const LABELS: Record<ModelFormat, string> = {
   glb: 'GLB',
   step: 'STEP',
   gcode: 'G-code',
+  obj: 'OBJ',
 };
 
 // One model off disk, checked and base64-encoded for the webview, or the reason
@@ -466,6 +500,12 @@ async function readModel(uri: vscode.Uri): Promise<ReadModel> {
     if (problem) {
       return { error: `${name} cannot be previewed: ${problem}.` };
     }
+  } else if (format === 'obj') {
+    // A .obj is also what MSVC and other compilers name an object file. Text
+    // is counted and read in the webview (src/webview/obj.ts).
+    if (objIsBinary(bytes)) {
+      return { error: OBJ_BINARY_MESSAGE, openAsText: true };
+    }
   } else if (format === 'step') {
     const problem = stepHeaderProblem(bytes);
     if (problem) {
@@ -479,6 +519,7 @@ async function readModel(uri: vscode.Uri): Promise<ReadModel> {
   }
   return {
     format,
+    ...(format === 'obj' ? { materials: await readMaterials(uri, bytes) } : {}),
     // Base64, not the raw Uint8Array. The webview transport JSON-encodes
     // messages, and JSON turns a typed array into a numeric-keyed object
     // ~13x the size of the file (a 5 MB STL becomes ~67 MB of JSON and
@@ -486,6 +527,61 @@ async function readModel(uri: vscode.Uri): Promise<ReadModel> {
     // string end to end. toBytes() in src/webview/stlInfo.ts decodes it.
     bytes: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
   };
+}
+
+// A name safe to put in a message: no controls, no more than 60 characters.
+function shown(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  const clean = name.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+  return clean.length > 60 ? `${clean.slice(0, 59)}...` : clean;
+}
+
+// The .mtl files an OBJ names, read from the OBJ's own folder and nowhere else:
+// a name is a bare file name ending in .mtl (mtlNameProblem refuses a separator,
+// a drive, a URI, a leading dot or "..", an absolute path), at most
+// MAX_MTL_FILES are read, each a regular file (not a symlink) of at most
+// MAX_MTL_BYTES that is text. Whatever is not read is said in a note for the
+// viewer's readout; a missing file is not an error, the model is drawn in
+// markcopy.stl.meshColor. The webview parses them and ignores every texture.
+async function readMaterials(uri: vscode.Uri, bytes: Uint8Array): Promise<Materials> {
+  const names = objMtlNames(bytes);
+  const folder = vscode.Uri.joinPath(uri, '..');
+  const mtl: Materials['mtl'] = [];
+  const notes: string[] = [];
+  for (const name of names.slice(0, MAX_MTL_FILES)) {
+    const problem = mtlNameProblem(name);
+    if (problem) {
+      notes.push(`Materials file ${shown(name)} not read: ${problem}`);
+      continue;
+    }
+    try {
+      const target = vscode.Uri.joinPath(folder, name);
+      const stat = await vscode.workspace.fs.stat(target);
+      if (
+        (stat.type & vscode.FileType.File) === 0 ||
+        (stat.type & vscode.FileType.SymbolicLink) !== 0
+      ) {
+        notes.push(`Materials file ${shown(name)} not read: not a regular file`);
+        continue;
+      }
+      if (stat.size > MAX_MTL_BYTES) {
+        notes.push(`Materials file ${shown(name)} not read: over ${mib(MAX_MTL_BYTES)}`);
+        continue;
+      }
+      const data = await vscode.workspace.fs.readFile(target);
+      if (data.length > MAX_MTL_BYTES || data.includes(0)) {
+        notes.push(`Materials file ${shown(name)} not read: not a text file`);
+        continue;
+      }
+      mtl.push({ name, text: new TextDecoder().decode(data) });
+    } catch {
+      notes.push(`Materials file not found: ${shown(name)}`);
+    }
+  }
+  if (names.length > MAX_MTL_FILES) {
+    notes.push(`Only the first ${MAX_MTL_FILES} materials files are read`);
+  }
+  return { mtl, materialNotes: notes };
 }
 
 // How many entries of one folder are looked at for the Compare with menu. A
@@ -537,6 +633,9 @@ export function modelFormat(uri: vscode.Uri): ModelFormat {
   }
   if (path.endsWith('.gcode') || path.endsWith('.gco')) {
     return 'gcode';
+  }
+  if (path.endsWith('.obj')) {
+    return 'obj';
   }
   return path.endsWith('.step') || path.endsWith('.stp') ? 'step' : 'stl';
 }

@@ -1,4 +1,4 @@
-// Browser-side 3D viewer for the MarkCopy STL, 3MF, GLB and STEP previews.
+// Browser-side 3D viewer for the MarkCopy STL, 3MF, GLB, STEP and OBJ previews.
 // Bundled on its own into media/stl.js (see esbuild.web.js) so Three.js only
 // loads when a model is opened, never for the Markdown, CSV, or PDF previews.
 //
@@ -33,6 +33,8 @@ import {
   type GcodeBed,
   type Toolpath,
 } from './gcode';
+import { ObjError, readObj, type MtlFile } from './obj';
+import { MAX_MTL_BYTES, MAX_MTL_FILES } from './modelSniff';
 import {
   AXIS_NAMES,
   bounds,
@@ -71,7 +73,7 @@ interface VsCodeApi {
   postMessage(message: unknown): void;
 }
 
-type Format = 'stl' | '3mf' | 'glb' | 'step' | 'gcode';
+type Format = 'stl' | '3mf' | 'glb' | 'step' | 'gcode' | 'obj';
 
 interface LoadMessage {
   type: 'load';
@@ -90,6 +92,10 @@ interface LoadMessage {
   bedSize?: string;
   // The models the host offers under Compare with, as the labels to show.
   siblings?: unknown;
+  // An OBJ's .mtl files, read by the host from the OBJ's own folder, and what to say
+  // when one could not be. Both are checked again here (objExtras).
+  mtl?: unknown;
+  materialNotes?: unknown;
 }
 
 // A second model to lay over the first (Compare with).
@@ -98,6 +104,8 @@ interface CompareMessage {
   format?: Format;
   name: string;
   bytes: unknown;
+  mtl?: unknown;
+  materialNotes?: unknown;
 }
 
 interface ThemeMessage {
@@ -114,6 +122,9 @@ interface ErrorMessage {
   message: string;
   name?: string;
   path?: string;
+  // Offer a button that reopens the file in VS Code's text editor (a .obj that is
+  // really a compiled object file).
+  openAsText?: boolean;
 }
 
 // The host's confirmation after Save View as PNG writes the file, or its reason
@@ -246,6 +257,11 @@ interface Model {
   // 3MF and G-code are Z-up by definition, and a GLB is turned Z-up when it is
   // read; an STL and a STEP file follow markcopy.stl.upAxis.
   fixedZUp: boolean;
+  // An OBJ is Y-up until the Up Axis menu says otherwise, whatever
+  // markcopy.stl.upAxis is (that setting is for STL and STEP).
+  yUpDefault?: boolean;
+  // Lines under the readout: an OBJ's missing materials file.
+  notes?: string[];
   // CSS color that stands for this model in the readouts and the section.
   swatch: string;
   toolpath?: Toolpath;
@@ -405,6 +421,8 @@ function meshModel(
     colored: boolean;
     keepNormals?: boolean;
     parts: PartNode;
+    yUpDefault?: boolean;
+    notes?: string[];
   },
 ): Model {
   const { unit, mmPerUnit, fixedZUp, colored: vertexColors } = about;
@@ -436,6 +454,8 @@ function meshModel(
     unit,
     mmPerUnit,
     fixedZUp,
+    yUpDefault: about.yUpDefault,
+    notes: about.notes,
     swatch,
     dims: sizeText(bounds(positions), unit),
   };
@@ -599,6 +619,75 @@ async function buildStep(
   }
 }
 
+// A Wavefront OBJ is read by three's OBJLoader after obj.ts has counted what it
+// holds and refused it past the caps, and colored from the .mtl files the host
+// sent (parsed in obj.ts, textures ignored). OBJ has no unit, so the readout is
+// unitless. Most exporters (Blender, Maya, 3ds Max) write Y-up, so an OBJ starts
+// Y-up whatever markcopy.stl.upAxis says, and the Up Axis menu switches it for
+// this window only (yUpDefault); it is not fixed like a GLB's.
+function buildObj(
+  name: string,
+  raw: Uint8Array,
+  color: THREE.Color,
+  swatch: string,
+  extras: ObjExtras = {},
+): Built {
+  try {
+    const content = readObj(raw, { mtl: extras.mtl, fallbackColor: [color.r, color.g, color.b] });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(content.positions, 3));
+    if (content.colors) {
+      geometry.setAttribute('color', new THREE.BufferAttribute(content.colors, 3));
+    }
+    if (content.normals) {
+      geometry.setAttribute('normal', new THREE.BufferAttribute(content.normals, 3));
+    }
+    return meshModel(name, geometry, content.positions, color, swatch, {
+      unit: '',
+      mmPerUnit: 1,
+      fixedZUp: false,
+      yUpDefault: true,
+      colored: content.colors !== null,
+      keepNormals: content.normals !== null,
+      parts: content.parts,
+      notes: extras.notes,
+    });
+  } catch (err) {
+    return err instanceof ObjError ? err.message : `Could not read this OBJ file (${String(err)}).`;
+  }
+}
+
+// What the host sends with an OBJ, validated again: the .mtl files (text, at most
+// MAX_MTL_FILES of MAX_MTL_BYTES) and the notes for the readout.
+interface ObjExtras {
+  mtl?: MtlFile[];
+  notes?: string[];
+}
+
+function objExtras(msg: { mtl?: unknown; materialNotes?: unknown }): ObjExtras {
+  const mtl: MtlFile[] = [];
+  if (Array.isArray(msg.mtl)) {
+    for (const entry of msg.mtl.slice(0, MAX_MTL_FILES)) {
+      const file = entry as Partial<MtlFile> | null;
+      if (
+        file &&
+        typeof file.name === 'string' &&
+        typeof file.text === 'string' &&
+        file.text.length <= MAX_MTL_BYTES
+      ) {
+        mtl.push({ name: file.name, text: file.text });
+      }
+    }
+  }
+  const notes = Array.isArray(msg.materialNotes)
+    ? msg.materialNotes
+        .filter((n): n is string => typeof n === 'string')
+        .slice(0, 4)
+        .map((n) => n.slice(0, 300))
+    : [];
+  return { mtl, notes };
+}
+
 // The status line while a model is read, or the toast when it is a comparison.
 let progress: (text: string) => void = (text) => showStats([text]);
 function showProgress(text: string): void {
@@ -618,6 +707,7 @@ async function build(
   name: string,
   raw: Uint8Array,
   css: string,
+  extras: ObjExtras = {},
 ): Promise<Built> {
   const color = parseColor(css);
   switch (format) {
@@ -629,6 +719,8 @@ async function build(
       return buildStep(name, raw, color, css);
     case 'gcode':
       return buildGcode(name, raw);
+    case 'obj':
+      return buildObj(name, raw, color, css, extras);
     default:
       return buildStl(name, raw, color, css);
   }
@@ -668,8 +760,15 @@ function models(): Model[] {
 // ---------------------------------------------------------------------------
 // Placement, grid and bed
 // ---------------------------------------------------------------------------
+// Which way is up for the first model: Z when its format says so, else the one
+// the person chose. An OBJ starts Y-up and takes its own choice (objUpAxis).
 function zUp(): boolean {
-  return primary?.fixedZUp === true || upAxis === 'z';
+  return primary?.fixedZUp === true || currentUpAxis() === 'z';
+}
+
+let objUpAxis: 'z' | 'y' = 'y';
+function currentUpAxis(): 'z' | 'y' {
+  return primary?.yUpDefault ? objUpAxis : upAxis;
 }
 
 function sceneBox(): Bounds {
@@ -872,8 +971,13 @@ function toggleBed(): void {
 }
 
 function setUpAxis(value: 'z' | 'y'): void {
-  upAxis = value;
-  vscode.postMessage({ type: 'updateSetting', key: 'stl.upAxis', value });
+  if (primary?.yUpDefault) {
+    // An OBJ's choice is for this window; markcopy.stl.upAxis is the STL and STEP setting.
+    objUpAxis = value;
+  } else {
+    upAxis = value;
+    vscode.postMessage({ type: 'updateSetting', key: 'stl.upAxis', value });
+  }
   if (primary) {
     place();
     fitView();
@@ -886,12 +990,22 @@ function setUpAxis(value: 'z' | 'y'): void {
 // ---------------------------------------------------------------------------
 type StatLine = string | { swatch: string; text: string };
 
-function showError(message: string): void {
+function showError(message: string, openAsText = false): void {
   statsEl.textContent = message;
   // Wrap: an error sentence under `white-space: pre` would otherwise run off the
   // side of the viewport. The stats readout still needs pre for its own newline.
   statsEl.style.whiteSpace = 'pre-wrap';
   statsEl.style.maxWidth = 'calc(100vw - 32px)';
+  if (openAsText) {
+    // The stats box ignores the pointer so it never gets in the way of the model;
+    // this one button has to take it.
+    const button = document.createElement('button');
+    button.textContent = 'Open as text';
+    button.title = "Open this file in VS Code's text editor";
+    button.style.cssText = 'display:block;margin-top:6px;pointer-events:auto;cursor:pointer;';
+    button.addEventListener('click', () => vscode.postMessage({ type: 'openAsText' }));
+    statsEl.append(button);
+  }
 }
 
 function showStats(lines: StatLine[]): void {
@@ -943,6 +1057,7 @@ function renderStats(): void {
   if (floorNote) {
     lines.push(floorNote);
   }
+  lines.push(...(primary.notes ?? []));
   showStats(lines);
 }
 
@@ -983,7 +1098,10 @@ function loadModel(msg: LoadMessage): void {
   progress = (text) => showStats([text]);
   showStats([`Reading ${msg.name}…`]);
   const format = msg.format;
-  window.setTimeout(() => void build(format, msg.name, raw, css).then(showPrimary), 16);
+  window.setTimeout(
+    () => void build(format, msg.name, raw, css, objExtras(msg)).then(showPrimary),
+    16,
+  );
 }
 
 function showPrimary(built: Built): void {
@@ -998,6 +1116,7 @@ function showPrimary(built: Built): void {
   }
   other = null;
   primary = built;
+  objUpAxis = 'y';
   modelRoot.add(built.object);
   setParts(built);
 
@@ -1029,7 +1148,7 @@ function loadCompare(msg: CompareMessage): void {
   progress = (text) => toast(text, 60000);
   const generation = ++compareGeneration;
   window.setTimeout(async () => {
-    const built = await build(msg.format, msg.name, raw, OTHER_COLOR);
+    const built = await build(msg.format, msg.name, raw, OTHER_COLOR, objExtras(msg));
     if (generation !== compareGeneration) {
       // Superseded while it was being built (a newer comparison, Stop
       // Comparing, or a new primary model): drop it without showing anything.
@@ -1744,26 +1863,19 @@ function viewEntries(): MenuEntry[] {
     entries.push(
       { kind: 'checkbox', label: 'Wireframe', checked: wireframeActive, run: toggleWireframe },
       { kind: 'checkbox', label: 'Section', checked: sectionOn, run: toggleSection },
-      {
-        kind: 'checkbox',
-        label: 'Parts',
-        checked: partsOpen,
-        run: togglePartsPanel,
-        disabled: !partsAvailable(),
-      },
     );
   }
   entries.push(
     { kind: 'checkbox', label: 'Grid', checked: showGridSetting, run: toggleGrid },
     { kind: 'checkbox', label: 'Print Bed', checked: showBedSetting, run: toggleBed },
   );
-  // An STL and a STEP file leave the question open; 3MF and G-code are Z-up by
-  // definition, and a GLB is turned Z-up when it is read.
+  // An STL, a STEP file and an OBJ leave the question open (an OBJ starts Y-up);
+  // 3MF and G-code are Z-up by definition, and a GLB is turned Z-up when it is read.
   if (primary && !primary.fixedZUp) {
     const axis = (label: string, value: 'z' | 'y'): MenuEntry => ({
       kind: 'radio',
       label,
-      checked: upAxis === value,
+      checked: currentUpAxis() === value,
       run: () => setUpAxis(value),
     });
     entries.push(
@@ -1797,6 +1909,11 @@ function buildMenu(): MenuEntry[] {
     { kind: 'divider' },
     { kind: 'submenu', label: 'View', entries: viewEntries() },
   );
+  // Top level, not under View: the parts panel is the way into an assembly, so
+  // it is one click from the right-click menu. Absent for a one-part model.
+  if (partsAvailable()) {
+    menu.push({ kind: 'checkbox', label: 'Parts', checked: partsOpen, run: togglePartsPanel });
+  }
   if (primary?.kind === 'mesh') {
     menu.push({ kind: 'submenu', label: 'Compare with', entries: compareEntries() });
   }
@@ -1956,7 +2073,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
   } else if (msg?.type === 'error') {
     fileName = msg.name ?? fileName;
     filePath = msg.path ?? filePath;
-    showError(msg.message);
+    showError(msg.message, msg.openAsText === true);
   } else if (msg?.type === 'toast') {
     toast(msg.message);
   }
