@@ -1653,7 +1653,12 @@ document.addEventListener('keydown', (e) => {
   if (e.code !== 'Space' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) {
     return;
   }
-  if (playbackEl.hidden || !spaceTogglesPlayback(e.target as HTMLElement | null)) {
+  // The shared context menu handles Space on its own rows.
+  const target = e.target as HTMLElement | null;
+  if (e.defaultPrevented || target?.closest?.('.mc-menu, [role^="menuitem"]')) {
+    return;
+  }
+  if (playbackEl.hidden || !spaceTogglesPlayback(target)) {
     return;
   }
   e.preventDefault();

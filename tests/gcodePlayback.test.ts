@@ -2,6 +2,7 @@
 // 3D viewer's G-code playback (nozzle position, layer mapping, travel window,
 // speed stepping, the Space-key rule).
 import { describe, expect, it } from 'vitest';
+import { parseGcode } from '../src/webview/gcode';
 import {
   SPEEDS,
   advance,
@@ -151,6 +152,18 @@ describe('travel window', () => {
     expect(window(15)).toEqual([2, 5]);
     expect(window(35)).toEqual([5, 7]);
     expect(window(19)).toEqual([5, 6]);
+  });
+
+  it('agrees with the nozzle: a hop appears only once the nozzle has left', () => {
+    const tp = parseGcode(['M83', 'G1 X10 E1', 'G0 X20', 'G1 X30 E1', ''].join('\n'));
+    const at = (head: number) => {
+      const o = { first: 0, last: 0 };
+      travelRange(tp.travelAt, tp.travelMoves, tp.layerEnd, head, o);
+      return o.last - o.first;
+    };
+    expect(tp.travelMoves).toBe(1);
+    expect(at(1)).toBe(0);
+    expect(at(1.5)).toBe(1);
   });
 
   it('is empty with no travel', () => {

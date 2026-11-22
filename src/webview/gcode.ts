@@ -268,6 +268,20 @@ export function parseGcode(
     count++;
   };
 
+  const travelChord = (
+    x1: number,
+    y1: number,
+    z1: number,
+    x2: number,
+    y2: number,
+    z2: number,
+  ): void => {
+    if (travelAt.length < maxTravel) {
+      travel.push6(x1, y1, z1, x2, y2, z2);
+      travelAt.push(count);
+    }
+  };
+
   const arc = (
     x0: number,
     y0: number,
@@ -278,10 +292,11 @@ export function parseGcode(
     i: number,
     j: number,
     clockwise: boolean,
+    sink: typeof emit = emit,
   ): void => {
     const radius = Math.hypot(i, j);
     if (!(radius > 1e-6)) {
-      emit(x0, y0, z0, x1, y1, z1);
+      sink(x0, y0, z0, x1, y1, z1);
       return;
     }
     const cx = x0 + i;
@@ -302,6 +317,9 @@ export function parseGcode(
     let py = y0;
     let pz = z0;
     for (let k = 1; k <= chords && !done; k++) {
+      if (sink === travelChord && travelAt.length >= maxTravel) {
+        break;
+      }
       let nx = x1;
       let ny = y1;
       let nz = z1;
@@ -312,7 +330,7 @@ export function parseGcode(
         ny = cy + radius * Math.sin(angle);
         nz = z0 + (z1 - z0) * t;
       }
-      emit(px, py, pz, nx, ny, nz);
+      sink(px, py, pz, nx, ny, nz);
       px = nx;
       py = ny;
       pz = nz;
@@ -470,13 +488,26 @@ export function parseGcode(
             emit(x, y, z, nx, ny, nz);
           }
         } else if (!extruding && (nx !== x || ny !== y || nz !== z)) {
-          if (travelAt.length < maxTravel) {
+          if (cmdNumber >= 2) {
+            arc(x, y, z, nx, ny, nz, hasI ? wi : 0, hasJ ? wj : 0, cmdNumber === 2, travelChord);
+          } else if (travelAt.length < maxTravel) {
             travel.push6(x, y, z, nx, ny, nz);
             travelAt.push(count);
           }
-        } else if (extruding && cmdNumber >= 2 && (hasI || hasJ)) {
+        } else if (cmdNumber >= 2 && (hasI || hasJ)) {
           // A full circle ends where it began, so it did not move.
-          arc(x, y, z, nx, ny, nz, hasI ? wi : 0, hasJ ? wj : 0, cmdNumber === 2);
+          arc(
+            x,
+            y,
+            z,
+            nx,
+            ny,
+            nz,
+            hasI ? wi : 0,
+            hasJ ? wj : 0,
+            cmdNumber === 2,
+            extruding ? emit : travelChord,
+          );
         }
         x = nx;
         y = ny;

@@ -420,6 +420,21 @@ describe('StlEditorProvider', () => {
     expect(webview.html).toContain('id="mc-toast"');
   });
 
+  it('lays the playback bar out to wrap in a narrow editor', async () => {
+    // jsdom cannot measure layout, so this pins the rules that do it: the bars
+    // stack in one column, the controls wrap, and the readout gets its own row
+    // and is ellipsized instead of clipped off screen.
+    const { webview } = await open();
+    const css = webview.html.replace(/\s+/g, ' ');
+    expect(css).toMatch(/#bars \{[^}]*flex-direction: column/);
+    expect(css).toMatch(/#playback \{ flex-wrap: wrap; \}/);
+    expect(css).toMatch(/#play-range \{ flex: 1 1 80px; min-width: 60px; \}/);
+    expect(css).toMatch(
+      /#play-label \{[^}]*flex: 1 1 100%;[^}]*min-width: 0;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/,
+    );
+    expect(webview.html).toMatch(/<div id="bars">\s*<div id="playback"[\s\S]*<div id="layers"/);
+  });
+
   it('links preview.css, which styles the context menu and toast', async () => {
     const { webview } = await open();
     expect(webview.html).toMatch(/<link href="[^"]*preview\.css[^"]*" rel="stylesheet"/);

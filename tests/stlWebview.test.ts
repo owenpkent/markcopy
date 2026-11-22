@@ -139,7 +139,25 @@ let posted: Array<Record<string, unknown>> = [];
 // recomputed.
 let frame: (() => void) | undefined;
 
+// Each test loads a fresh copy of the viewer, which adds its own document-level
+// key handler. Remove the last copy's, or its Space handler would run first.
+const documentKeyHandlers: EventListenerOrEventListenerObject[] = [];
+const realAddListener = document.addEventListener.bind(document);
+document.addEventListener = ((
+  type: string,
+  handler: EventListenerOrEventListenerObject,
+  ...rest: unknown[]
+) => {
+  if (type === 'keydown') {
+    documentKeyHandlers.push(handler);
+  }
+  return (realAddListener as (...a: unknown[]) => void)(type, handler, ...rest);
+}) as typeof document.addEventListener;
+
 beforeEach(() => {
+  for (const handler of documentKeyHandlers.splice(0)) {
+    document.removeEventListener('keydown', handler);
+  }
   vi.resetModules();
   document.body.innerHTML = BODY;
   document.body.className = '';
@@ -1302,6 +1320,26 @@ describe('3D viewer plain G-code', () => {
     expect(el('play-toggle').getAttribute('aria-label')).toBe('Pause');
     space();
     expect(el('play-toggle').getAttribute('aria-label')).toBe('Play');
+  });
+
+  it('leaves Space on a context menu row to the menu, not playback', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    const range = el<HTMLInputElement>('play-range');
+    range.value = '5';
+    range.dispatchEvent(new Event('input'));
+    openMenuAt();
+    menuRow('View')!.click();
+    const grid = menuRow('Grid')!;
+    const before = grid.getAttribute('aria-checked');
+    grid.focus();
+    grid.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }),
+    );
+    expect(menuRow('Grid')?.getAttribute('aria-checked')).not.toBe(before);
+    expect(el('play-toggle').getAttribute('aria-label')).toBe('Play');
+    expect(range.value).toBe('5');
   });
 
   it('shows the travel moves near the nozzle only when asked', async () => {

@@ -50,3 +50,38 @@ describe('travel moves', () => {
     expect(tp.segments).toBe(10);
   });
 });
+
+describe('travel arcs', () => {
+  const chord = (tp: Toolpath, n: number) => Array.from(tp.travel.subarray(n * 6, n * 6 + 6));
+
+  it('tessellates a spiral Z-hop, circling and rising', () => {
+    const tp = parseGcode(lines('M83', 'G1 X10 E1', 'G17', 'G3 Z1 I1 J0 P1', 'G1 X11 E1'));
+    expect(tp.travelMoves).toBeGreaterThan(8);
+    const first = chord(tp, 0);
+    const last = chord(tp, tp.travelMoves - 1);
+    expect([first[0], first[1], first[2]].map((v) => Math.round(v * 1000) / 1000)).toEqual([
+      10, 0, 0,
+    ]);
+    expect([last[3], last[4], last[5]].map((v) => Math.round(v * 1000) / 1000)).toEqual([10, 0, 1]);
+    let maxX = -Infinity;
+    for (let i = 0; i < tp.travelMoves; i++) {
+      maxX = Math.max(maxX, chord(tp, i)[3]);
+    }
+    expect(maxX).toBeGreaterThan(11.5);
+    expect(new Set(Array.from(tp.travelAt))).toEqual(new Set([1]));
+  });
+
+  it('draws a closed arc with no XYZ change as a full circle', () => {
+    const tp = parseGcode(lines('M83', 'G1 X10 E1', 'G3 I1 J0', 'G1 X11 E1'));
+    expect(tp.travelMoves).toBeGreaterThan(8);
+    const first = chord(tp, 0);
+    const last = chord(tp, tp.travelMoves - 1);
+    expect(last[3]).toBeCloseTo(first[0], 3);
+    expect(last[4]).toBeCloseTo(first[1], 3);
+  });
+
+  it('respects the travel cap when an arc would exceed it', () => {
+    const tp = parseGcode(lines('M83', 'G1 X10 E1', 'G3 I50 J0', 'G1 X11 E1'), { maxTravel: 5 });
+    expect(tp.travelMoves).toBe(5);
+  });
+});

@@ -193,7 +193,11 @@ export function travelRange(
   const start = layerStart(layerEnd, layer);
   const end = layerEnd.length === 0 ? 0 : layerEnd[layer - 1];
   // Moves at `end` belong to the next layer's approach.
-  const limit = Math.min(Math.floor(head), end - 1);
+  // A move tagged n is made just before segment n is drawn. At a whole head h
+  // the nozzle is parked at the end of segment h - 1, so a move tagged h is not
+  // made yet; part way into segment h it is. Head 0 keeps the first approach.
+  const done = Number.isInteger(head) && head > 0 ? head - 1 : Math.floor(head);
+  const limit = Math.min(done, end - 1);
   out.first = lowerBound(travelAt, travelMoves, start);
   out.last = Math.max(out.first, upperBound(travelAt, travelMoves, limit));
 }
