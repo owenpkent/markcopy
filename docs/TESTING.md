@@ -511,6 +511,19 @@ Open a `.gcode.3mf` from Bambu Studio or OrcaSlicer.
 - [ ] Right-click > **Copy as** > **Print Summary** pastes the summary lines with the file name. Wireframe, Section and Compare with do not apply.
 - [ ] A multi-plate file shows plate 1 and says `plate 1 of N`.
 
+### Plain G-code
+
+Open [sample.gcode](../sample.gcode) (repo root, excluded from the VSIX; generated, five 0.2 mm layers of a 20 mm square with PrusaSlicer `;TYPE:` comments and a `; bed_shape` of 250 x 210 at the end), then real files from each slicer.
+
+- [ ] ★ `sample.gcode` opens in the 3D viewer, not the text editor, with colored walls and infill, a layer bar reading `Layer 5 / 5 · Z 1.00 mm`, a `250 × 210 × 210` bed outline around it that fits, and no Parts button. Record: ___.
+- [ ] ★ Right-click > **Open as Text** opens the same file in the text editor, and **Reopen Editor With...** can bring the viewer back.
+- [ ] A real PrusaSlicer file: external perimeters orange, perimeters yellow, infill red, solid infill purple, top solid infill red, support green, skirt teal; the bed matches the printer profile. Record the file and anything gray: ___.
+- [ ] A real Cura file: `WALL-OUTER` orange, `WALL-INNER` yellow, `FILL` red, `SKIN` red, `SUPPORT` green. Cura writes no bed in its header: with `markcopy.stl.showBed` off, no bed outline appears, and with it on the `bedSize` outline does. Record whether your Cura version wrote any machine settings comment: ___.
+- [ ] A real Bambu Studio or OrcaSlicer plain `.gcode` (not `.gcode.3mf`): the bed is the printer's `printable_area`, features are colored, layers step. Record: ___.
+- [ ] A `.bgcode` file (or any file starting `GCDE`) renamed `.gcode` says `binary G-code (.bgcode) is not supported`. A binary file renamed `.gcode` mentions a NUL byte. Neither leaves a blank canvas.
+- [ ] A large file (about 50 MB) opens with `Reading ...` first and then draws. Record the open-to-drawn time (the unit-test environment measured 37 ms host read and 295 ms parse for 50.1 MB, without transport or drawing): ___ s.
+- [ ] A G-code file in a folder of models does not appear under **Compare with**, and picking one with Browse shows a toast.
+
 ### Theming and settings
 
 - [ ] ★ With `markcopy.theme` on Auto, switching the VS Code color theme between a light and a dark one changes the viewport background to match.

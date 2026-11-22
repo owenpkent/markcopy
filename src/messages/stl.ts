@@ -16,6 +16,7 @@ export type StlMessage =
   | { type: 'revealInOS' }
   | SaveFrameMessage
   | { type: 'openExternal' }
+  | { type: 'openAsText' }
   | { type: 'compare'; name: string }
   | { type: 'compareBrowse' }
   | UpdateSettingMessage;
@@ -29,6 +30,7 @@ export function parseStlMessage(raw: unknown): StlMessage | undefined {
     case 'ready':
     case 'revealInOS':
     case 'openExternal':
+    case 'openAsText':
     case 'compareBrowse':
       return { type: msg.type };
     case 'compare':

@@ -26,6 +26,7 @@ const readDirectory = vi.hoisted(() =>
   vi.fn(async (_dir: { path: string }): Promise<Array<[string, number]>> => []),
 );
 const showOpenDialog = vi.hoisted(() => vi.fn());
+const executeCommand = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('vscode', () => {
   const asUri = (fsPath: string) => ({
@@ -43,6 +44,7 @@ vi.mock('vscode', () => {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     FileType: { File: 1, Directory: 2 },
     env: { openExternal: vi.fn() },
+    commands: { executeCommand },
     workspace: {
       getConfiguration: vi.fn(() => ({
         get: (_key: string, fallback: unknown) => fallback,
@@ -420,5 +422,101 @@ describe('StlEditorProvider', () => {
   it('links preview.css, which styles the context menu and toast', async () => {
     const { webview } = await open();
     expect(webview.html).toMatch(/<link href="[^"]*preview\.css[^"]*" rel="stylesheet"/);
+  });
+});
+
+describe('StlEditorProvider with G-code', () => {
+  const GCODE = 'G21\nG1 X1 Y1 E1\n; bed_shape = 0x0,250x0,250x210,0x210\n';
+
+  it('sends plain G-code as text, in either case of either extension', async () => {
+    const bytes = new Uint8Array(Buffer.from(GCODE));
+    readFile.mockResolvedValue(bytes);
+    stat.mockResolvedValue({ size: bytes.length });
+    for (const file of ['/p/a.gcode', '/p/A.GCODE', '/p/a.gco', '/p/A.Gco']) {
+      const { send, posted } = await open(file);
+      await send({ type: 'ready' });
+      expect(posted.find((m) => m.type === 'load')).toMatchObject({
+        format: 'gcode',
+        bytes: Buffer.from(bytes).toString('base64'),
+      });
+    }
+  });
+
+  it('refuses a NUL byte in the first 64 KiB with a clear message, and sends nothing', async () => {
+    const bytes = new Uint8Array(Buffer.from('G1 X1\u0000 Y1\n', 'latin1'));
+    readFile.mockResolvedValue(bytes);
+    stat.mockResolvedValue({ size: bytes.length });
+    const { send, posted } = await open('/p/a.gcode');
+    await send({ type: 'ready' });
+    expect(posted.find((m) => m.type === 'load')).toBeUndefined();
+    expect(posted.find((m) => m.type === 'error')?.message).toMatch(
+      /^a\.gcode cannot be previewed: .*NUL byte/,
+    );
+  });
+
+  it('refuses Prusa binary G-code whatever the extension', async () => {
+    const bytes = new Uint8Array([0x47, 0x43, 0x44, 0x45, 1, 0, 0, 0]);
+    readFile.mockResolvedValue(bytes);
+    stat.mockResolvedValue({ size: bytes.length });
+    for (const file of ['/p/a.gcode', '/p/a.gco']) {
+      const { send, posted } = await open(file);
+      await send({ type: 'ready' });
+      expect(posted.find((m) => m.type === 'load')).toBeUndefined();
+      expect(posted.find((m) => m.type === 'error')?.message).toBe(
+        `${file.slice(3)} cannot be previewed: binary G-code (.bgcode) is not supported.`,
+      );
+    }
+  });
+
+  it('applies the size cap before reading, naming G-code', async () => {
+    stat.mockResolvedValue({ size: 300 * 1024 * 1024 });
+    readFile.mockClear();
+    const { send, posted } = await open('/p/a.gcode');
+    await send({ type: 'ready' });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(posted.find((m) => m.type === 'error')?.message).toContain('limit for G-code previews');
+  });
+
+  it('opens the document as text on openAsText, never another URI', async () => {
+    const { send } = await open('/p/a.gcode');
+    await send({ type: 'openAsText', path: '/etc/passwd' });
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledWith(
+      'vscode.openWith',
+      expect.objectContaining({ fsPath: '/p/a.gcode' }),
+      'default',
+    );
+  });
+
+  it('refuses to compare against G-code without reading it', async () => {
+    readDirectory.mockResolvedValue([['b.gcode', 1]]);
+    const { send, posted } = await open('/p/a.stl');
+    await send({ type: 'ready' });
+    readFile.mockClear();
+    showOpenDialog.mockResolvedValueOnce([{ path: '/p/b.gcode', fsPath: '/p/b.gcode' }]);
+    await send({ type: 'compareBrowse' });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(posted.find((m) => m.type === 'toast')?.message).toMatch(/b\.gcode is G-code/);
+    // The Browse dialog lists G-code among the models it filters for.
+    expect(showOpenDialog.mock.calls.at(-1)?.[0]).toMatchObject({
+      filters: { '3D models': expect.arrayContaining(['gcode', 'gco']) },
+    });
+  });
+
+  it('claims .gcode and .gco in either case in package.json, at default priority', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+    const editor = pkg.contributes.customEditors.find(
+      (e: { viewType: string }) => e.viewType === 'markcopy.stlPreview',
+    );
+    const patterns = editor.selector.map((s: { filenamePattern: string }) => s.filenamePattern);
+    for (const pattern of ['*.gcode', '*.GCODE', '*.gco', '*.GCO']) {
+      expect(patterns).toContain(pattern);
+    }
+    expect(patterns).not.toContain('*.g');
+    expect(editor.priority).toBe('default');
+    const ignore = readFileSync(join(__dirname, '..', '.vscodeignore'), 'utf8');
+    expect(ignore).toMatch(/^sample\.gcode\r?$/m);
   });
 });

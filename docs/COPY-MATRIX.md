@@ -216,9 +216,9 @@ Differences worth stating:
 - **Save as Word from a Word preview** offers a file name based on the source, so check the destination before saving over the original.
 - There is no editing and no writeback: MarkCopy never writes to the document.
 
-## 3D models (.stl, .3mf, .glb, .step, .stp)
+## 3D models (.stl, .3mf, .glb, .step, .stp, .gcode, .gco)
 
-The 3D viewer (which opens `.stl`, `.3mf`, `.glb`, `.step` and `.stp`) has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
+The 3D viewer (which opens `.stl`, `.3mf`, `.glb`, `.step`, `.stp`, `.gcode` and `.gco`) has one thing worth putting on a clipboard: the model as you are looking at it. The rest is the file's name, path and measurements, plus camera presets.
 
 | Action                             | Clipboard flavor | Pastes cleanly into                                                                                                                                |
 | ---------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -231,14 +231,14 @@ The 3D viewer (which opens `.stl`, `.3mf`, `.glb`, `.step` and `.stp`) has one t
 | **Copy parts list**                | `text/plain`     | Anywhere that takes Markdown tables (GitHub, Notion, Obsidian, a Markdown preview); `                                                              | Part | Assembly | Qty | Triangles | `, one row per distinct part |
 | **Copy Section as PNG**            | `image/png`      | Word, Outlook, Gmail, Google Docs, Slack, image editors (only while a section is open)                                                             |
 | **Copy as > Section Measurements** | `text/plain`     | Anywhere (only while a section is open; layout below)                                                                                              |
-| **Copy as > Print Summary**        | `text/plain`     | Anywhere (a sliced `.gcode.3mf` only; replaces Dimensions and Triangle Count)                                                                      |
+| **Copy as > Print Summary**        | `text/plain`     | Anywhere (a sliced `.gcode.3mf` or a plain G-code file only; replaces Dimensions and Triangle Count)                                               |
 
 Notes:
 
 - **The view is the canvas as it is on screen**, at the canvas's pixel size, with the viewport background (so the theme shows). The grid and wireframe appear if they are on. **Save View as PNG…** proposes `part.png` for `part.stl` or `part.3mf`.
 - **Copy Section as PNG** is the flat section drawing on the viewport background, not the 3D view. It is at the top of the menu while the section is open.
 - **Section Measurements** is laid out like a slicing script's output: a header line `part.stl, Z = 12.00` (`Z = 12.00 mm` for a 3MF or STEP file), then `Y = 0.00: -8.85 -6.35 6.35 8.85 (spans 2.50 | 12.70 | 2.50)` and the same for the vertical line. It measures where the crosshair is, or through the middle of the model when nothing is pointed at. With a comparison running, each model gets its own report.
-- **Print Summary** is the overlay's lines for a sliced print (`Sliced print`, time, weight and filament, layer and move counts, extents, grid and bed) with the file name.
+- **Print Summary** is the overlay's lines for a sliced print or a G-code file (`Sliced print` or `G-code`, time, weight and filament (sliced prints only), layer and move counts, extents, grid and bed) with the file name.
 - **Copy parts list** writes a Markdown table of the model's parts with the columns `| Part | Assembly | Qty | Triangles |`. Assembly is the path of assemblies above the part joined by `/` (empty at the top level). Parts with the same name, path and triangle count are one row with their quantity, and Triangles is one part's. Names are written as literal text: ASCII Markdown punctuation is backslash-escaped, `<`, `>` and `&` become HTML entities (the preview renders HTML), and newlines are folded to spaces, so `<M6>` or `**Retainer**` renders as typed and a name cannot break the table. Rows are keyed on the assembly path as a list, so an assembly named `Machine / Arm` is not merged with Machine > Arm. It is in the viewer's own clipboard path (the same `copy` event as File Name), so it sends nothing to the host and needs no entry in the host's message allow-list. It is offered for every model, listing every part whether or not it is hidden, and not for a sliced print.
 - **Both view actions and Dimensions and Triangle Count are greyed out until a model has loaded.** File Name and Full Path work even when the file was refused.
 - **View** holds Fit View, the camera presets (Front, Back, Left, Right, Top, Bottom, Isometric), Wireframe, Section, Parts and Grid checkboxes that mirror the toolbar buttons (Parts is greyed out for a one-part model), Print Bed, and Up Axis (an STL only). **Compare with** lists nearby models to overlay. **Preferences > Theme** writes `markcopy.theme`. **Open in Default App** and **Reveal in File Explorer** (Finder on macOS) act on the file.

@@ -1142,3 +1142,151 @@ describe('3D viewer parts panel', () => {
     }, 30000);
   });
 });
+
+describe('3D viewer plain G-code', () => {
+  const sample = () => readFileSync(join(__dirname, '..', 'sample.gcode'));
+  const encode = (text: string) => Buffer.from(text).toString('base64');
+  const gcodeLoad = (text: string | Buffer, extra: Record<string, unknown> = {}) =>
+    load({
+      format: 'gcode',
+      name: 'part.gcode',
+      bytes: typeof text === 'string' ? encode(text) : text.toString('base64'),
+      ...extra,
+    });
+  const lineSets = (): Three.LineSegments[] => {
+    const found: Three.LineSegments[] = [];
+    drawn.scene?.traverse((object) => {
+      if ((object as Three.LineSegments).isLineSegments) {
+        found.push(object as Three.LineSegments);
+      }
+    });
+    return found;
+  };
+  // The toolpath's own lines, the one with a color per vertex.
+  const toolpath = () => lineSets().find((lines) => lines.geometry.hasAttribute('color'));
+
+  it('reads sample.gcode: layers, the print summary, and no parts panel', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    expect(stats()).toBe('Reading sample.gcode…');
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    const lines = stats().split('\n');
+    expect(lines[0]).toBe('G-code');
+    expect(lines[1]).toMatch(/^5 layers, [\d,]+ moves$/);
+    // A 20 mm square from its outer perimeter's centreline, over layers at Z 0.2 to 1.0.
+    expect(lines[2]).toBe('19.60 × 19.60 × 0.80 mm');
+    expect(el('layers').hidden).toBe(false);
+    expect(el('layer-label').textContent).toBe('Layer 5 / 5 · Z 1.00 mm');
+    el('layer-down').click();
+    expect(el('layer-label').textContent).toBe('Layer 4 / 5 · Z 0.80 mm');
+    expect(el('parts').hidden).toBe(true);
+    expect(el<HTMLButtonElement>('btn-parts').hidden).toBe(true);
+    expect(el<HTMLButtonElement>('btn-section').disabled).toBe(true);
+    expect(toolpath()).toBeDefined();
+  });
+
+  it('draws the bed the file names, with no setting asking for one', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode', showBed: false, bedSize: '10x10x10' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    // sample.gcode ends with a bed_shape of 250 x 210 and a max_print_height of 210.
+    expect(stats()).toMatch(/Bed 250 × 210 × 210 mm: fits$/);
+  });
+
+  it('puts the bed where the file puts it, and says when the print is off it', async () => {
+    await import('../src/webview/stl');
+    const text = [
+      'M83',
+      ';LAYER_CHANGE',
+      ';Z:0.2',
+      'G1 X-120 Y-100',
+      'G1 X-100 Y-100 E1',
+      '; bed_shape = -110x-110,110x-110,110x110,-110x110',
+      '',
+    ].join('\n');
+    gcodeLoad(text);
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    // The print starts 10 mm past the bed's edge.
+    expect(stats()).toMatch(/Bed 220 × 220 mm: does not fit$/);
+  });
+
+  it('shows no bed when the file names none and showBed is off', async () => {
+    await import('../src/webview/stl');
+    const text = 'M83\n;LAYER_CHANGE\n;Z:0.2\nG1 X10 Y10\nG1 X20 Y10 E1\n';
+    gcodeLoad(text, { showBed: false });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    expect(stats()).not.toMatch(/Bed /);
+  });
+
+  it('falls back to markcopy.stl.bedSize when the file names none and showBed is on', async () => {
+    await import('../src/webview/stl');
+    const text = 'M83\n;LAYER_CHANGE\n;Z:0.2\nG1 X10 Y10\nG1 X20 Y10 E1\n';
+    gcodeLoad(text, { showBed: true, bedSize: '180x180x180' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    expect(stats()).toMatch(/Bed 180 × 180 × 180 mm: fits$/);
+  });
+
+  it('colors Prusa and Cura feature names, and the fallback for an unknown one', async () => {
+    await import('../src/webview/stl');
+    const text = [
+      'M83',
+      ';LAYER:0',
+      ';TYPE:WALL-OUTER',
+      'G1 X10 Y10',
+      'G1 X20 Y10 E1',
+      ';TYPE:Top solid infill',
+      'G1 X20 Y20 E1',
+      ';TYPE:SOMETHING-NEW',
+      'G1 X10 Y20 E1',
+      '',
+    ].join('\n');
+    gcodeLoad(text);
+    await vi.waitFor(() => expect(toolpath()).toBeDefined());
+    const THREE = await import('three');
+    const colors = toolpath()!.geometry.getAttribute('color').array;
+    const expectColor = (segment: number, hex: number) => {
+      const want = new THREE.Color(hex);
+      expect(colors[segment * 6]).toBeCloseTo(want.r, 5);
+      expect(colors[segment * 6 + 1]).toBeCloseTo(want.g, 5);
+      expect(colors[segment * 6 + 2]).toBeCloseTo(want.b, 5);
+    };
+    expectColor(0, 0xff7d38);
+    expectColor(1, 0xf04a4a);
+    expectColor(2, 0x8a8f98);
+  });
+
+  it('says so when there is nothing to draw, and for a file that is not G-code at all', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad('G21\nG90\nM104 S200\n');
+    await vi.waitFor(() =>
+      expect(stats()).toBe('This G-code file has no extrusion moves to show.'),
+    );
+    gcodeLoad('this is a readme, not G-code\n');
+    await vi.waitFor(() =>
+      expect(stats()).toBe('This G-code file has no extrusion moves to show.'),
+    );
+  });
+
+  it('offers Open as Text for G-code only, and asks the host for it', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad(sample(), { name: 'sample.gcode' });
+    await vi.waitFor(() => expect(stats()).toMatch(/^G-code/));
+    openMenuAt();
+    const row = menuRow('Open as Text');
+    expect(row).toBeDefined();
+    row!.click();
+    expect(posted).toContainEqual({ type: 'openAsText' });
+
+    load({ bytes: boxStl([0, 0, 0], [10, 20, 30]) });
+    openMenuAt();
+    expect(menuRow('Open as Text')).toBeUndefined();
+  });
+
+  it('does not offer Open as Text for a sliced print file', async () => {
+    await import('../src/webview/stl');
+    load({ format: '3mf', name: 'part.gcode.3mf', bytes: slicedPrint() });
+    await vi.waitFor(() => expect(stats()).toMatch(/^Sliced print/));
+    openMenuAt();
+    expect(menuRow('Open as Text')).toBeUndefined();
+  });
+});

@@ -77,7 +77,7 @@ const TYPES = {
   ],
   pdf: ['ready', 'revealInOS', 'openExternal', 'saveComments', 'updateSetting'],
   tex: ['ready', 'revealInOS', 'openExternal', 'texRecompile', 'saveComments', 'updateSetting'],
-  stl: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'updateSetting'],
+  stl: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'openAsText', 'updateSetting'],
   video: [
     'ready',
     'revealInOS',

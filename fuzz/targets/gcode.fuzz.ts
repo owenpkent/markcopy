@@ -1,4 +1,4 @@
-import { formatDuration, parseGcode, readSliceInfo } from '../../src/webview/gcode';
+import { formatDuration, parseGcode, readGcodeBed, readSliceInfo } from '../../src/webview/gcode';
 
 // Neither reader throws on purpose: parseGcode skips what it cannot read and
 // readSliceInfo returns what it had before the XML went wrong. The output is
@@ -24,6 +24,11 @@ export function fuzz(data: Buffer): void {
     if (index >= path.features.length) {
       throw new Error('a segment names a feature that is not listed');
     }
+  }
+
+  const bed = readGcodeBed(text);
+  if (bed && !(bed.size[0] > 0 && bed.size[1] > 0 && bed.size[2] > 0)) {
+    throw new Error('a bed with no area');
   }
 
   const info = readSliceInfo(text);

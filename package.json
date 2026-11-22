@@ -56,6 +56,8 @@
     "step",
     "step viewer",
     "cad",
+    "gcode",
+    "g-code",
     "3d",
     "mesh",
     "three.js",
@@ -315,6 +317,18 @@
           },
           {
             "filenamePattern": "*.STP"
+          },
+          {
+            "filenamePattern": "*.gcode"
+          },
+          {
+            "filenamePattern": "*.GCODE"
+          },
+          {
+            "filenamePattern": "*.gco"
+          },
+          {
+            "filenamePattern": "*.GCO"
           }
         ],
         "priority": "default"
@@ -764,7 +778,7 @@
         "markcopy.stl.showBed": {
           "type": "boolean",
           "default": false,
-          "description": "Show the outline of the print bed under the model in the 3D preview, and say whether the model fits. A sliced print file always shows it."
+          "description": "Show the outline of the print bed under the model in the 3D preview, and say whether the model fits. A sliced print file always shows it, and so does a G-code file whose own settings name a bed."
         },
         "markcopy.stl.bedSize": {
           "type": "string",
