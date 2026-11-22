@@ -210,7 +210,7 @@ Limits: only plate 1 is drawn for a multi-plate file (the overlay says `plate 1 
 
 A `.gcode` or `.gco` file (either letter case) opens in the same viewer, by default, and is drawn exactly as a sliced print is: the extrusion moves as lines colored by feature, a layer bar with **This layer only**, and the overlay (`G-code`, the layer and move counts, the extents, grid and bed). There is no mesh, so the Parts panel, Section, Wireframe and Compare with do not apply. The right-click menu has **Open as Text** to read the file in the text editor instead (**Reopen Editor With...** reaches it too). `.g` files are not claimed.
 
-Only text G-code opens. A file with a NUL byte in its first 64 KiB, and Prusa's binary G-code (`.bgcode`, which starts with `GCDE` whatever its extension), are refused with a message; the 256 MiB size cap applies. A file with no extrusion moves says so instead of drawing nothing.
+Only text G-code opens. A file with a NUL byte in its first 64 KiB, and Prusa's binary G-code (`.bgcode`, which starts with `GCDE` whatever its extension), are refused with a message; the 256 MiB size cap applies. A file with no extrusion moves says so instead of drawing nothing, and the right-click menu still offers **Open as Text**. Cura 5 writes its machine settings across several `;SETTING_3` lines; they are joined before the bed size is read.
 
 The bed outline comes from the slicer settings the file carries as comments, read from the last and first 256 KiB only:
 

@@ -53,6 +53,8 @@ const Z_EPSILON = 1e-4;
 
 // Feature indices are stored in a byte; index 0 is 'Unknown'.
 const MAX_FEATURES = 256;
+/** Longest feature name kept; longer ones are cut. */
+const MAX_FEATURE_NAME = 256;
 
 // A word larger than this is not a coordinate on any printer, it is garbage (or
 // an attempt to overflow the float arrays), so the word is ignored.
@@ -333,7 +335,8 @@ export function parseGcode(text: string, options: { maxSegments?: number } = {})
     }
   };
 
-  const setFeature = (name: string): void => {
+  const setFeature = (raw: string): void => {
+    const name = raw.length > MAX_FEATURE_NAME ? raw.slice(0, MAX_FEATURE_NAME) : raw;
     if (name !== currentFeature) {
       currentFeature = name;
       featureStale = true;
@@ -603,7 +606,6 @@ export function formatDuration(seconds: number): string {
 // PrusaSlicer and SuperSlicer (`;TYPE:External perimeter`) and Cura
 // (`;TYPE:WALL-OUTER`, `FILL`, `SKIN`).
 const FEATURE_COLORS: Array<[RegExp, number]> = [
-  [/support.*interface/i, 0x1f8a3b],
   [/support/i, 0x3fd65b],
   [/overhang/i, 0x4f6bed],
   [/outer|external/i, 0xff7d38],
@@ -622,6 +624,13 @@ const FEATURE_COLORS: Array<[RegExp, number]> = [
 
 /** The color (0xRRGGBB) for a slicer's feature name, or undefined for a name it does not know. */
 export function featureColor(feature: string): number | undefined {
+  // An ordered-substring test: `/support.*interface/` is quadratic on a long
+  // name made of many "support" words.
+  const lower = feature.toLowerCase();
+  const support = lower.indexOf('support');
+  if (support !== -1 && lower.indexOf('interface', support + 7) !== -1) {
+    return 0x1f8a3b;
+  }
   return FEATURE_COLORS.find(([pattern]) => pattern.test(feature))?.[1];
 }
 
@@ -665,8 +674,31 @@ function bedFromShape(list: string): { origin: [number, number]; size: [number, 
   return { origin: [x0, y0], size: [w, d] };
 }
 
-function numberAfter(text: string, pattern: RegExp): number | undefined {
-  const m = pattern.exec(text);
+/** Most of a Cura settings block that is reassembled. */
+const MAX_SETTINGS_CHARS = 128 * 1024;
+
+/**
+ * Cura 5 writes its settings as JSON, escaped (a backslash-n for a newline)
+ * and cut into fixed-width ;SETTING_3 lines, so a key or a number can span two
+ * lines. Join the consecutive payloads and undo the escapes; the result reads
+ * like the older key = value lines.
+ */
+function curaSettings(text: string): string {
+  const parts: string[] = [];
+  let total = 0;
+  const lineRe = /^;SETTING_3 ([^\r\n]*)/gm;
+  let m: RegExpExecArray | null;
+  while (total < MAX_SETTINGS_CHARS && (m = lineRe.exec(text)) !== null) {
+    parts.push(m[1]);
+    total += m[1].length;
+  }
+  return parts
+    .join('')
+    .replace(/\\+([nr"])/g, (_m, c: string) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
+}
+
+function numberAfter(text: string, pattern: RegExp, extra = ''): number | undefined {
+  const m = pattern.exec(text) ?? (extra ? pattern.exec(extra) : null);
   if (!m) {
     return undefined;
   }
@@ -693,11 +725,19 @@ function bedInWindow(text: string): GcodeBed | undefined {
   // settings, either as `;MACHINE_WIDTH:` lines or inside the serialized
   // `;SETTING_3` block, they give the size; a printer whose origin is the bed's
   // middle says so with machine_center_is_zero.
-  const w = numberAfter(text, /(?:;MACHINE_WIDTH:|machine_width[ \t]*=[ \t]*)(\d+(?:\.\d+)?)/i);
-  const d = numberAfter(text, /(?:;MACHINE_DEPTH:|machine_depth[ \t]*=[ \t]*)(\d+(?:\.\d+)?)/i);
+  const settings = curaSettings(text);
+  const field = (header: string, key: string): number | undefined =>
+    numberAfter(
+      text,
+      new RegExp(String.raw`(?:;${header}:|\b${key}[ \t]*=[ \t]*)(\d+(?:\.\d+)?)(?![\d.])`, 'i'),
+      settings,
+    );
+  const w = field('MACHINE_WIDTH', 'machine_width');
+  const d = field('MACHINE_DEPTH', 'machine_depth');
   if (w !== undefined && d !== undefined) {
-    const h = numberAfter(text, /(?:;MACHINE_HEIGHT:|machine_height[ \t]*=[ \t]*)(\d+(?:\.\d+)?)/i);
-    const centered = /machine_center_is_zero[ \t]*=[ \t]*true/i.test(text);
+    const h = field('MACHINE_HEIGHT', 'machine_height');
+    const centerRe = /\bmachine_center_is_zero[ \t]*=[ \t]*true\b/i;
+    const centered = centerRe.test(text) || centerRe.test(settings);
     return { origin: centered ? [-w / 2, -d / 2] : [0, 0], size: [w, d, h ?? Infinity] };
   }
   return undefined;

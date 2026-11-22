@@ -276,6 +276,9 @@ const OTHER_COLOR = '#f0883e';
 const SECTION_COLOR = 0xffd33d;
 
 let primary: Model | null = null;
+// Whether the loaded document is a plain G-code file, set before it is built so
+// that Open as Text is offered even when no model could be drawn from it.
+let documentIsGcode = false;
 let other: Model | null = null;
 let siblings: string[] = [];
 let showGridSetting = true;
@@ -948,6 +951,7 @@ function renderStats(): void {
 // ---------------------------------------------------------------------------
 function loadModel(msg: LoadMessage): void {
   fileName = msg.name;
+  documentIsGcode = msg.format === 'gcode';
   filePath = msg.path ?? '';
   showGridSetting = msg.showGrid !== false;
   showBedSetting = msg.showBed === true;
@@ -1800,7 +1804,7 @@ function buildMenu(): MenuEntry[] {
     { kind: 'divider' },
     { kind: 'submenu', label: 'Preferences', entries: themeItems() },
     { kind: 'divider' },
-    ...(primary?.plainGcode
+    ...(documentIsGcode
       ? [
           {
             kind: 'item' as const,

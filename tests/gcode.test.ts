@@ -512,6 +512,69 @@ describe('readGcodeBed', () => {
     });
   });
 
+  describe('Cura settings wrapped over ;SETTING_3 lines', () => {
+    // Cura's GCodeWriter escapes backslashes, newlines and carriage returns,
+    // then cuts the JSON into 69-character chunks, each prefixed ';SETTING_3 '.
+    const WIDTH = 69;
+    const escaped = (settings: string): string =>
+      JSON.stringify({ global_quality: settings })
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+    const wrap = (settings: string): string => {
+      const json = escaped(settings);
+      const out: string[] = [];
+      for (let i = 0; i < json.length; i += WIDTH) {
+        out.push(';SETTING_3 ' + json.slice(i, i + WIDTH));
+      }
+      return out.join('\n');
+    };
+    // Settings text whose escaped JSON puts a chunk boundary 'offset' characters
+    // into the first occurrence of 'needle'.
+    const splitInside = (needle: string, offset: number, tail: string): string => {
+      const head = '[values]\n';
+      const body = (pad: number): string => head + 'x'.repeat(pad) + '\n' + tail;
+      for (let pad = 0; pad < WIDTH; pad++) {
+        const settings = body(pad);
+        const json = escaped(settings);
+        if ((json.indexOf(needle) + offset) % WIDTH === 0) {
+          return settings;
+        }
+      }
+      throw new Error('no padding found');
+    };
+    const tail = 'machine_width = 220\nmachine_depth = 200\nmachine_height = 250\n';
+    const centered = tail + 'machine_center_is_zero = True\n';
+
+    it('reads a key split across two lines', () => {
+      const settings = splitInside('machine_width', 11, tail);
+      const text = wrap(settings);
+      expect(text).toContain('machine_wid\n;SETTING_3 th');
+      expect(readGcodeBed(text)).toEqual({ origin: [0, 0], size: [220, 200, 250] });
+    });
+
+    it('reads a number split across two lines completely', () => {
+      const settings = splitInside('machine_width = 220', 'machine_width = 2'.length, tail);
+      const text = wrap(settings);
+      expect(text).toContain('machine_width = 2\n;SETTING_3 20');
+      expect(readGcodeBed(text)?.size).toEqual([220, 200, 250]);
+    });
+
+    it('reads machine_center_is_zero split across two lines', () => {
+      const settings = splitInside('machine_center_is_zero', 12, centered);
+      const text = wrap(settings);
+      expect(text).toContain('machine_cent\n;SETTING_3 er_is_zero');
+      expect(readGcodeBed(text)).toEqual({ origin: [-110, -100], size: [220, 200, 250] });
+    });
+
+    it('does not take a prefix of a key or a number for a whole one', () => {
+      const text = wrap(
+        '[values]\nxmachine_width = 999\nmachine_width = 220.5\nmachine_depth = 200\n',
+      );
+      expect(readGcodeBed(text)?.size).toEqual([220.5, 200, Infinity]);
+    });
+  });
+
   it('gives nothing for a file that names no bed, or a bed that is not a rectangle of numbers', () => {
     expect(readGcodeBed(lines('G1 X1 Y1 E1', ';MINX:0', ';MAXX:20'))).toBeUndefined();
     expect(readGcodeBed(lines('; bed_shape = nonsense'))).toBeUndefined();
@@ -542,6 +605,15 @@ describe('featureColor', () => {
   const BRIDGE = 0x4d9ad9;
   const SUPPORT = 0x3fd65b;
   const SKIRT = 0x00a085;
+
+  it('classifies a long name of repeated words in linear time', () => {
+    const long = 'support '.repeat(8192).trim();
+    const start = performance.now();
+    expect(featureColor(long)).toBe(SUPPORT);
+    expect(featureColor(long + ' interface')).toBe(0x1f8a3b);
+    expect(featureColor('interface support')).toBe(SUPPORT);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
 
   it('maps the PrusaSlicer names', () => {
     expect(featureColor('External perimeter')).toBe(ORANGE);

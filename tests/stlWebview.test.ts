@@ -1267,6 +1267,19 @@ describe('3D viewer plain G-code', () => {
     );
   });
 
+  it('still offers Open as Text when the G-code has nothing to draw', async () => {
+    await import('../src/webview/stl');
+    gcodeLoad('G21\nG90\nM104 S200\n');
+    await vi.waitFor(() =>
+      expect(stats()).toBe('This G-code file has no extrusion moves to show.'),
+    );
+    openMenuAt();
+    const row = menuRow('Open as Text');
+    expect(row).toBeDefined();
+    row!.click();
+    expect(posted).toContainEqual({ type: 'openAsText' });
+  });
+
   it('offers Open as Text for G-code only, and asks the host for it', async () => {
     await import('../src/webview/stl');
     gcodeLoad(sample(), { name: 'sample.gcode' });
