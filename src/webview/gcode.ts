@@ -692,9 +692,16 @@ function curaSettings(text: string): string {
     parts.push(m[1]);
     total += m[1].length;
   }
-  return parts
-    .join('')
-    .replace(/\\+([nr"])/g, (_m, c: string) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
+  return (
+    parts
+      .join('')
+      // The optional escape letter makes every backslash run match once, whatever
+      // follows it, so a long run with no escape after it is not retried from
+      // each of its backslashes (which made decoding quadratic).
+      .replace(/\\+([nr"]?)/g, (run: string, c: string) =>
+        c === '' ? run : c === 'n' ? '\n' : c === 'r' ? '\r' : c,
+      )
+  );
 }
 
 function numberAfter(text: string, pattern: RegExp, extra = ''): number | undefined {

@@ -516,6 +516,17 @@ describe('readGcodeBed', () => {
     // Cura's GCodeWriter escapes backslashes, newlines and carriage returns,
     // then cuts the JSON into 69-character chunks, each prefixed ';SETTING_3 '.
     const WIDTH = 69;
+    it('decodes a long backslash run with no escape after it in linear time', () => {
+      // Each doubling of the run used to take four times as long (332 ms at 32 KiB).
+      const run = ';SETTING_3 ' + '\\'.repeat(65536) + 'x\n';
+      const started = performance.now();
+      expect(readGcodeBed(run)).toBeUndefined();
+      expect(performance.now() - started).toBeLessThan(50);
+      // A run before a real escape still decodes, and the size reads after it.
+      const settings =
+        ';SETTING_3 ' + '\\'.repeat(9) + 'x\\\\nmachine_width = 220\\\\nmachine_depth = 210\n';
+      expect(readGcodeBed(settings)?.size.slice(0, 2)).toEqual([220, 210]);
+    });
     const escaped = (settings: string): string =>
       JSON.stringify({ global_quality: settings })
         .replace(/\\/g, '\\\\')
