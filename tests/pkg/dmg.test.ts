@@ -67,7 +67,7 @@ describe('readDmg: disk image', () => {
     expect(image['Checksum']).toBe('CRC-32');
     expect(image['Encrypted']).toBe('No');
     expect(image['Segment']).toBeUndefined();
-    expect(image['Licence agreement']).toBeUndefined();
+    expect(image['License agreement']).toBeUndefined();
     expect(tableOf(info, 'Partitions')).toEqual([
       ['Protective Master Boot Record (MBR : 0)', '512 bytes', 'zlib'],
       ['Install App (Apple_HFS : 1)', '1.00 MB (1,048,576 bytes)', 'zlib'],
@@ -126,7 +126,7 @@ describe('readDmg: disk image', () => {
     });
     const image = rowsOf(info, 'Disk image');
     expect(image['Segment']).toBe('2 of 3');
-    expect(image['Licence agreement']).toContain('Yes');
+    expect(image['License agreement']).toContain('Yes');
     expect(image['Checksum']).toBe('CRC-28');
     expect(image['Internet-enabled']).toBe('Yes');
   });

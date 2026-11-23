@@ -81,7 +81,7 @@ describe('readXar: product archive', () => {
     expect(pkg['Installed size']).toContain('5.00 MB');
     expect(pkg['Files installed']).toBe('32');
     expect(pkg['Installation checks']).toContain('JavaScript');
-    expect(pkg['Licence']).toBe('license.html');
+    expect(pkg['License']).toBe('license.html');
     expect(pkg['Read me']).toBe('readme.html');
     expect(pkg['Created']).toBe('2024-03-05 10:20:30 UTC');
   });
@@ -133,6 +133,36 @@ describe('readXar: product archive', () => {
 
   it('shows no signature section for an unsigned archive', async () => {
     expect(section(await product(), 'Signature')).toBeUndefined();
+  });
+});
+
+// pkgbuild describes a bundle under the root and repeats only its id under
+// <bundle-version>. Reading the second place alone left the version and path
+// blank on every real package tried.
+describe('readXar: bundles as pkgbuild writes them', () => {
+  it('takes the version and path from the described bundle, not the bare reference', async () => {
+    const info = await read(
+      buildXar({
+        files: [
+          {
+            name: 'PackageInfo',
+            data: packageInfoXml({
+              identifier: 'com.flat',
+              version: '9',
+              pkgbuildLayout: true,
+              bundles: [
+                { id: 'com.example.app', version: '4.3.0', path: './Applications/Example.app' },
+                { id: 'com.example.helper', version: '1.1', path: './Library/Helper.bundle' },
+              ],
+            }),
+          },
+        ],
+      }),
+    );
+    expect(tableOf(info, 'Bundles')).toEqual([
+      ['com.example.app', '4.3.0', './Applications/Example.app'],
+      ['com.example.helper', '1.1', './Library/Helper.bundle'],
+    ]);
   });
 });
 

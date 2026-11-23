@@ -73,13 +73,13 @@ describe('readZipPackage: a NuGet package', () => {
     expect(value(info, 'Package', 'Version')).toBe('3.1.0-beta.2');
     expect(value(info, 'Package', 'Authors')).toBe('Contoso, Ada');
     expect(value(info, 'Package', 'Owners')).toBe('contoso');
-    expect(value(info, 'Package', 'Licence')).toBe('MIT');
+    expect(value(info, 'Package', 'License')).toBe('MIT');
     expect(value(info, 'Package', 'Homepage')).toBe('https://contoso.example/widgets');
     expect(value(info, 'Package', 'Repository')).toBe('https://github.com/contoso/widgets');
     expect(value(info, 'Package', 'Repository type')).toBe('git');
     expect(value(info, 'Package', 'Commit')).toBe('abc123');
     expect(value(info, 'Package', 'Tags')).toBe('widgets ui contoso');
-    expect(value(info, 'Package', 'Requires licence acceptance')).toBe('false');
+    expect(value(info, 'Package', 'Requires license acceptance')).toBe('false');
     expect(value(info, 'Package', 'Development dependency')).toBe('true');
     expect(value(info, 'Package', 'Minimum NuGet client')).toBe('4.3.0');
     expect(value(info, 'Package', 'Package types')).toBe('Dependency, DotnetTool');
@@ -109,11 +109,11 @@ describe('readZipPackage: a NuGet package', () => {
     const file = await readZip(
       pkg(nuspec('<id>a</id><version>1</version><license type="file">LICENSE.txt</license>')),
     );
-    expect(value(file, 'Package', 'Licence')).toBe('LICENSE.txt (file)');
+    expect(value(file, 'Package', 'License')).toBe('LICENSE.txt (file)');
     const url = await readZip(
       pkg(nuspec('<id>a</id><version>1</version><licenseUrl>https://x/l</licenseUrl>')),
     );
-    expect(value(url, 'Package', 'Licence')).toBe('https://x/l');
+    expect(value(url, 'Package', 'License')).toBe('https://x/l');
   });
 
   it('lists the target frameworks and runtimes in the layout', async () => {

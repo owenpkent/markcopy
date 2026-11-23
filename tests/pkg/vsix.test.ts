@@ -88,7 +88,7 @@ describe('readZipPackage: a VS Code extension', () => {
     expect(value(info, 'Package', 'Categories')).toBe('Visualization, Other');
     expect(value(info, 'Package', 'Tags')).toBe('markdown, preview, csv');
     expect(value(info, 'Package', 'Gallery flags')).toBe('Public Preview');
-    expect(value(info, 'Package', 'Licence file')).toBe('extension/LICENSE.txt');
+    expect(value(info, 'Package', 'License file')).toBe('extension/LICENSE.txt');
     expect(value(info, 'Package', 'Icon')).toBe('extension/icon.png');
     expect(value(info, 'Package', 'Source')).toBe('https://github.com/acme/demo.git');
     expect(value(info, 'Extension', 'Extension kind')).toBe('workspace');

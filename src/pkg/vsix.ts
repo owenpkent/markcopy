@@ -177,7 +177,7 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
       ['Tags', csv(metadata ? child(metadata, 'Tags') : undefined)],
       ['Gallery flags', csv(metadata ? child(metadata, 'GalleryFlags') : undefined)],
       [
-        'Licence file',
+        'License file',
         textOf(metadata ? child(metadata, 'License') : undefined) ??
           asset('Microsoft.VisualStudio.Services.Content.License'),
       ],
@@ -186,7 +186,7 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
         textOf(metadata ? child(metadata, 'Icon') : undefined) ??
           asset('Microsoft.VisualStudio.Services.Icons.Default'),
       ],
-      ['Licence', str(pkg?.license)],
+      ['License', str(pkg?.license)],
       ['Homepage', str(pkg?.homepage)],
       ['Source', property('Microsoft.VisualStudio.Services.Links.Source') ?? repository],
     ]),

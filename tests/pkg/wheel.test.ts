@@ -100,7 +100,7 @@ describe('readZipPackage: a Python wheel', () => {
     expect(value(info, 'Package', 'Author')).toBe('Ada Lovelace');
     expect(value(info, 'Package', 'Author email')).toBe('ada@example.org');
     expect(value(info, 'Package', 'Maintainer')).toBe('Charles B');
-    expect(value(info, 'Package', 'Licence')).toBe('MIT');
+    expect(value(info, 'Package', 'License')).toBe('MIT');
     expect(value(info, 'Package', 'Homepage')).toBe('https://example.org/demo');
     expect(value(info, 'Package', 'Requires Python')).toBe('>=3.9');
     expect(value(info, 'Package', 'Keywords')).toBe('demo,example');
@@ -111,7 +111,7 @@ describe('readZipPackage: a Python wheel', () => {
     const info = await readZip(wheel());
     expect(value(info, 'Package', 'Classifiers')).toBe('4');
     expect(value(info, 'Package', 'Programming languages')).toBe('Python :: 3; Python :: 3.12');
-    expect(value(info, 'Package', 'Licence classifiers')).toBe('OSI Approved :: MIT License');
+    expect(value(info, 'Package', 'License classifiers')).toBe('OSI Approved :: MIT License');
   });
 
   it('lists project links', async () => {

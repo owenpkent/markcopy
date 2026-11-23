@@ -85,9 +85,9 @@ export async function readNupkg(
       ['Version', version],
       ['Authors', field('authors')],
       ['Owners', field('owners')],
-      ['Licence', license],
-      ['Licence URL', licenseNode ? field('licenseUrl') : undefined],
-      ['Requires licence acceptance', field('requireLicenseAcceptance')],
+      ['License', license],
+      ['License URL', licenseNode ? field('licenseUrl') : undefined],
+      ['Requires license acceptance', field('requireLicenseAcceptance')],
       ['Homepage', field('projectUrl')],
       ['Repository', repository ? printable(repository.attrs.url ?? '').slice(0, 500) : undefined],
       [

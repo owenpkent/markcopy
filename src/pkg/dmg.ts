@@ -322,7 +322,7 @@ export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
         ],
         ['Segment', segmentCount > 1 ? `${segmentNumber} of ${segmentCount}` : undefined],
         ['Encrypted', 'No'],
-        ['Licence agreement', licence ? 'Yes (shown before the image mounts)' : undefined],
+        ['License agreement', licence ? 'Yes (shown before the image mounts)' : undefined],
         ['Internet-enabled', flags & 4 ? 'Yes' : undefined],
       ]),
       ...tableSection(

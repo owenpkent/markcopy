@@ -117,23 +117,29 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
       ['Author email', first('author-email')],
       ['Maintainer', first('maintainer')],
       ['Maintainer email', first('maintainer-email')],
-      ['Licence', first('license-expression') ?? first('license')],
+      ['License', first('license-expression') ?? first('license')],
       ['Homepage', first('home-page')],
       ['Requires Python', first('requires-python')],
       ['Keywords', first('keywords')],
       ['Provides extras', all('provides-extra').join(', ')],
       ['Programming languages', classifierWith('Programming Language ::')],
-      ['Licence classifiers', classifierWith('License ::')],
+      ['License classifiers', classifierWith('License ::')],
       ['Classifiers', classifiers.length > 0 ? formatNumber(classifiers.length) : undefined],
       ['Metadata version', first('metadata-version')],
     ]),
   ];
   // The long description is the project's README; only its opening is shown.
   const long = (headers.find(([n]) => n === 'description')?.[1] ?? body).trim();
+  // A README very often opens with badges, an image, a heading or a rule
+  // rather than a sentence, so the opening is the first paragraph that starts
+  // with a letter or a digit and is not just a title over its underline.
   const opening = printable(long.slice(0, MAX_VALUE_CHARS * 4), true)
-    .split(/\n\s*\n/)[0]
-    ?.trim()
-    .slice(0, MAX_PARAGRAPH_CHARS);
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .find(
+      (paragraph) => /^[\p{L}\p{N}]/u.test(paragraph) && !/\n[=\-~^"#*]{3,}\s*$/.test(paragraph),
+    )
+    ?.slice(0, MAX_PARAGRAPH_CHARS);
   if (opening) {
     before.push({ kind: 'text', heading: 'Description', paragraphs: [opening] });
   }

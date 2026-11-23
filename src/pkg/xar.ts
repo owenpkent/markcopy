@@ -180,11 +180,26 @@ function readComponent(root: XNode, dir: string, entries: Map<string, Entry>): C
   const payload = child(root, 'payload');
   const scripts = child(root, 'scripts');
   const versions = child(root, 'bundle-version');
-  const bundles = (versions ? findAll(versions, 'bundle') : []).slice(0, MAX_BUNDLES).map((b) => ({
-    id: attrText(b, 'id') ?? '',
-    version: attrText(b, 'CFBundleShortVersionString') ?? attrText(b, 'CFBundleVersion'),
-    path: attrText(b, 'path'),
-  }));
+  // pkgbuild describes a bundle in a <bundle> directly under the root (its
+  // path and versions) and then lists the same id again, bare, under
+  // <bundle-version>. Older tools put the whole description in the second
+  // place. Both are read and merged by id, so neither layout leaves the
+  // version and path blank.
+  const merged = new Map<string, { id: string; version?: string; path?: string }>();
+  const mentions = [...children(root, 'bundle'), ...(versions ? findAll(versions, 'bundle') : [])];
+  for (const b of mentions.slice(0, MAX_BUNDLES * 2)) {
+    const id = attrText(b, 'id') ?? '';
+    const prior = merged.get(id);
+    merged.set(id, {
+      id,
+      version:
+        attrText(b, 'CFBundleShortVersionString') ??
+        attrText(b, 'CFBundleVersion') ??
+        prior?.version,
+      path: attrText(b, 'path') ?? prior?.path,
+    });
+  }
+  const bundles = [...merged.values()].slice(0, MAX_BUNDLES);
   return {
     dir,
     identifier: attrText(root, 'identifier'),
@@ -443,7 +458,7 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
             ? 'Yes (runs JavaScript to decide whether it can install)'
             : undefined,
         ],
-        ['Licence', distribution?.licence],
+        ['License', distribution?.licence],
         ['Read me', distribution?.readme],
         ['Created', created],
       ]),

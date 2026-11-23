@@ -116,6 +116,11 @@ export interface PackageInfoSpec {
   preinstall?: boolean;
   postinstall?: boolean;
   bundles?: { id: string; version?: string; path?: string }[];
+  /**
+   * Write the bundles the way pkgbuild does: described in a <bundle> directly
+   * under the root, and listed again by id alone under <bundle-version>.
+   */
+  pkgbuildLayout?: boolean;
 }
 
 export function packageInfoXml(spec: PackageInfoSpec = {}): string {
@@ -138,10 +143,11 @@ export function packageInfoXml(spec: PackageInfoSpec = {}): string {
         `<bundle id="${xmlEscape(b.id)}" CFBundleShortVersionString="${xmlEscape(b.version ?? '')}" path="${xmlEscape(b.path ?? '')}"/>`,
     )
     .join('');
+  const references = (spec.bundles ?? []).map((b) => `<bundle id="${xmlEscape(b.id)}"/>`).join('');
   return (
     `<?xml version="1.0" encoding="utf-8"?><pkg-info ${attrs}>` +
     `<payload installKBytes="${spec.installKBytes ?? 2048}" numberOfFiles="${spec.numberOfFiles ?? 12}"/>` +
-    `${scripts}<bundle-version>${bundles}</bundle-version></pkg-info>`
+    `${scripts}${spec.pkgbuildLayout ? bundles : ''}<bundle-version>${spec.pkgbuildLayout ? references : bundles}</bundle-version></pkg-info>`
   );
 }
 
