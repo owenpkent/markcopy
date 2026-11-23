@@ -7,7 +7,7 @@ MarkCopy turns VS Code into a document workspace where you read any file, make l
 - [Copying out](copy.md): rich text, per-element right-click copy, raw Markdown, and how the copy works.
 - [Export](export.md): Save as PDF, Save as Word, and Save as PowerPoint.
 - [Spreadsheets](spreadsheets.md): the editable CSV and TSV grid and the Excel preview.
-- [Documents](documents.md): Word, PowerPoint, PDF, and LaTeX previews.
+- [Documents](documents.md): Word, PowerPoint, PDF, and LaTeX previews, and the executable info page for `.exe` and `.dll` files.
 - [Media](media.md): image, GIF, video, audio, and STL, 3MF, GLB, STEP, OBJ and G-code 3D previews (with sections, comparing, sliced prints, and plain G-code toolpaths).
 - [Commands and settings](settings.md): the command list, every setting, and the in-preview Preferences menu.
 

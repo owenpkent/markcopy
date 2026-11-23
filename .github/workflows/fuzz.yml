@@ -42,6 +42,7 @@ jobs:
             video-probe,
             messages,
             docx,
+            pe,
             links,
             markdown-html,
             paste-export,

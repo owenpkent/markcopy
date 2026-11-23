@@ -94,7 +94,7 @@ CI runs them on every pull request. A local run opens a second VS Code window fo
 
 ### Manual testing
 
-The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the PDF viewer, the STL viewer, the video player, the GIF viewer, the image viewer, the LaTeX preview, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, `sample.docx`, `sample.pptx`, `sample.tex`, `sample.stl`, and `sample.mov` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
+The manual test plan is [docs/TESTING.md](../docs/TESTING.md): checklists for the Markdown preview, the CSV/TSV grid, the spreadsheet preview, the executable info preview, the PDF viewer, the STL viewer, the video player, the GIF viewer, the image viewer, the LaTeX preview, and the paste targets outside VS Code. It is the pre-release gate (see [RELEASING.md](../docs/RELEASING.md)). Rows marked ☑ there are covered by one of the automated layers above and want a glance rather than a careful pass; what is left is the part that needs a real browser or a real eye. Its fixtures are `sample.md`, `sample.csv`, `sample.xlsx`, `sample.docx`, `sample.pptx`, `sample.tex`, `sample.stl`, and `sample.mov` (all committed), plus `sample.pdf` from `node scripts/make-sample-pdf.js` (gitignored).
 
 ## Debug
 
@@ -130,6 +130,7 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/pptxEditor.ts`                                               | Host: read-only custom editor for `.pptx` / `.pptm` files.                                                                          |
 | `src/pptx/`                                                       | Host: the deck reader (`read/`) and the Save as PowerPoint writer (`write/`).                                                       |
 | `src/docxExport.ts`, `src/docx/`                                  | Host: Save as Word, the `.docx` writer.                                                                                             |
+| `src/exeEditor.ts`, `src/pe/`                                     | Host: read-only custom editor for `.exe`, `.dll` and related files, and the PE reader behind it.                                    |
 | `src/stlEditor.ts`                                                | Host: read-only custom editor for `.stl` files.                                                                                     |
 | `src/webview/stl.ts`                                              | STL webview: the Three.js scene, orbit controls, and the toolbar.                                                                   |
 | `src/webview/stlInfo.ts`                                          | STL sniffing and the pre-allocation guards (pure, unit-tested).                                                                     |

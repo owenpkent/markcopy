@@ -1048,11 +1048,16 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
   entries.push({ kind: 'divider' });
-  entries.push({
-    kind: 'item',
-    label: 'Open in Default App',
-    run: () => vscode.postMessage({ type: 'openExternal' }),
-  });
+  // The default app for an executable is the executable: this row would run
+  // the file the reader opened a preview to avoid running. The host refuses the
+  // message for that kind too (opensInDefaultApp in src/ooxmlEditor.ts).
+  if (document.body.dataset.mcKind !== 'exe') {
+    entries.push({
+      kind: 'item',
+      label: 'Open in Default App',
+      run: () => vscode.postMessage({ type: 'openExternal' }),
+    });
+  }
   entries.push({
     kind: 'item',
     label: revealLabel(),
