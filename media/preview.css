@@ -2520,6 +2520,14 @@ body[data-mc-kind='package'] .markdown-body {
 .mc-exe > .mc-info-section {
   column-span: none;
   break-inside: avoid;
+  padding-top: 24px;
+}
+
+/* The space above a heading is the section's padding, not the heading's
+   margin: a margin is dropped at the top of the second column and kept at the
+   top of the first, which left the two columns' headings 24px out of line. */
+.mc-exe > .mc-info-section > h2 {
+  margin-top: 0;
 }
 
 .mc-exe > .mc-info-section.mc-info-wide {
