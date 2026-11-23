@@ -37,6 +37,7 @@ import { htmlToPptx, reportSummary as pptxReportSummary, type PptxReport } from 
 import { XlsxEditorProvider } from './xlsxEditor';
 import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
+import { ExeEditorProvider } from './exeEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { GifEditorProvider } from './gifEditor';
@@ -157,6 +158,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       DocxEditorProvider.viewType,
       new DocxEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Windows executables open as a page of their metadata (a read-only custom
+    // editor). The file is read as bytes and never run.
+    vscode.window.registerCustomEditorProvider(
+      ExeEditorProvider.viewType,
+      new ExeEditorProvider(
         context,
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),

@@ -1,0 +1,901 @@
+// Reads the metadata of a Windows PE image (.exe, .dll, .sys and friends): the
+// headers, the version resource, the manifest, the import and export tables,
+// the debug record, the .NET header, and who an embedded Authenticode
+// signature names as its signer.
+//
+// Nothing here executes, loads or maps the file. It is read as bytes through a
+// ByteSource, in ranges, so a 2 GB installer costs a few hundred kilobytes of
+// reads rather than 2 GB of extension-host memory. Every offset the file
+// supplies is bounds-checked against the file's real size, every loop has a
+// cap, and the total that may be read is budgeted, because the whole point of
+// previewing an executable instead of running it is that the file may be
+// hostile.
+//
+// No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
+import { child, findAll, parseXml } from '../ooxml/xnode';
+import { iconToPng, pickIcon, type PeIcon } from './icon';
+import { isSignedData, readSigner, signerCount, type Signer } from './signer';
+import { printable } from './text';
+import { readVersionResource, type VersionInfo } from './version';
+
+/** An error whose message is written to be shown to the reader as is. */
+export class PeError extends Error {}
+
+/** Random access to the file. `read` may return fewer bytes only at the end of the file. */
+export interface ByteSource {
+  readonly size: number;
+  read(offset: number, length: number): Promise<Uint8Array>;
+}
+
+/** A ByteSource over bytes already in memory. */
+export function bytesSource(bytes: Uint8Array): ByteSource {
+  return {
+    size: bytes.length,
+    read: (offset, length) => Promise.resolve(bytes.subarray(offset, offset + length)),
+  };
+}
+
+export interface PeSection {
+  name: string;
+  virtualAddress: number;
+  virtualSize: number;
+  rawOffset: number;
+  rawSize: number;
+  /** Readable, writable, executable, in that order, as the loader will map it. */
+  read: boolean;
+  write: boolean;
+  execute: boolean;
+  /** What the section says it holds: code, initialized data, uninitialized data. */
+  contents: string[];
+}
+
+export interface PeImport {
+  library: string;
+  functions: number;
+  delayLoaded: boolean;
+}
+
+export interface PeExports {
+  /** The name the image exports under, which survives a rename of the file. */
+  name: string;
+  /** The ordinal of the address table's first slot. Usually 1, and not always. */
+  base: number;
+  /**
+   * Entries of the export address table that hold an address: what the image
+   * really exports. Absent when the table could not be read to count them.
+   */
+  functions?: number;
+  /**
+   * How long the export address table is. Ordinals index it, so a library
+   * whose ordinals have gaps has more slots than functions.
+   */
+  slots: number;
+  named: number;
+  /** The first names, in table order. `named` says how many there are in all. */
+  names: string[];
+}
+
+export interface PeDebug {
+  pdbPath?: string;
+  guid?: string;
+  age?: number;
+}
+
+export interface PeDotNet {
+  /** The runtime the metadata was built for, such as "v4.0.30319". */
+  runtime?: string;
+  ilOnly: boolean;
+  requires32Bit: boolean;
+  prefers32Bit: boolean;
+  strongNamed: boolean;
+}
+
+export interface PeManifest {
+  executionLevel?: string;
+  uiAccess?: string;
+  dpiAware?: string;
+  identity?: string;
+}
+
+export interface PeSignature {
+  /** Bytes of the certificate table. */
+  size: number;
+  /**
+   * Whether the table holds a PKCS #7 SignedData entry with at least one
+   * signer, the form an Authenticode signature takes. A table can exist
+   * without one: a bare X.509 certificate signs nothing, and neither does
+   * SignedData that only carries certificates.
+   */
+  signedData: boolean;
+  /** What each entry of the table says it is, in table order. */
+  entries: string[];
+  /** Who the signature names. Absent when there is no SignedData, or it cannot be walked. */
+  signer?: Signer;
+}
+
+export interface PeInfo {
+  fileSize: number;
+  format: 'PE32' | 'PE32+';
+  machine: number;
+  machineName: string;
+  /** "Application", "Dynamic-link library", "Driver" and so on. */
+  kind: string;
+  subsystem: number;
+  subsystemName: string;
+  /** Seconds since 1970 as the linker wrote it. Not a date when `reproducible`. */
+  timestamp: number;
+  /** A deterministic build puts a hash where the link time would be. */
+  reproducible: boolean;
+  linkerVersion: string;
+  osVersion: string;
+  subsystemVersion: string;
+  imageVersion: string;
+  imageBase: string;
+  entryPoint: number;
+  sizeOfImage: number;
+  checksum: number;
+  largeAddressAware: boolean;
+  /** Loader-enforced mitigations, each as [label, enabled]. */
+  mitigations: [string, boolean][];
+  sections: PeSection[];
+  version?: VersionInfo;
+  /** The largest image of the file's first icon, as a PNG. */
+  icon?: PeIcon;
+  manifest?: PeManifest;
+  imports: PeImport[];
+  exports?: PeExports;
+  debug?: PeDebug;
+  dotnet?: PeDotNet;
+  signature?: PeSignature;
+  /** Bytes after the last section that no header accounts for, as an installer's payload is. */
+  overlay?: { offset: number; size: number };
+  /** Parts of the file that were present but could not be read. */
+  warnings: string[];
+}
+
+const PAGE = 0x10000;
+// 16 MiB of distinct pages. A real image needs well under one: the headers,
+// the directories and a version resource. A file built to send the reader all
+// over itself runs out of budget instead of out of memory.
+const MAX_PAGES = 256;
+const MAX_READ = 4 * 1024 * 1024;
+const MAX_SECTIONS = 96;
+const MAX_IMPORTS = 1024;
+const MAX_THUNKS = 16384;
+const MAX_EXPORT_NAMES = 100;
+// An export is addressed by a 16-bit ordinal, so a table has no use for more
+// slots than that, and a header that claims more is not counted.
+const MAX_EXPORT_SLOTS = 0x10000;
+const MAX_RESOURCE_ENTRIES = 4096;
+const MAX_VERSION_BYTES = 512 * 1024;
+const MAX_MANIFEST_BYTES = 256 * 1024;
+const MAX_SIGNATURE_BYTES = 1024 * 1024;
+// A signed file has one entry, a dual-signed one two.
+const MAX_CERTIFICATES = 16;
+
+const CERTIFICATE_TYPES: Record<number, string> = {
+  1: 'X.509 certificate',
+  2: 'PKCS #7 SignedData',
+  4: 'Terminal Server certificate',
+};
+// A 256 pixel, 32-bit bitmap with its mask is about 270 KB; a PNG is smaller.
+const MAX_ICON_BYTES = 1024 * 1024;
+
+const TRUNCATED = 'the file ends before the data its headers point to.';
+
+class Reader {
+  private readonly pages = new Map<number, Uint8Array>();
+
+  constructor(private readonly source: ByteSource) {}
+
+  get size(): number {
+    return this.source.size;
+  }
+
+  private async page(index: number): Promise<Uint8Array> {
+    let page = this.pages.get(index);
+    if (!page) {
+      if (this.pages.size >= MAX_PAGES) {
+        throw new PeError('its tables point to more of the file than MarkCopy will read.');
+      }
+      const start = index * PAGE;
+      page = await this.source.read(start, Math.min(PAGE, this.size - start));
+      this.pages.set(index, page);
+    }
+    return page;
+  }
+
+  async bytes(offset: number, length: number): Promise<Uint8Array> {
+    if (
+      !Number.isSafeInteger(offset) ||
+      !Number.isSafeInteger(length) ||
+      offset < 0 ||
+      length < 0 ||
+      length > MAX_READ ||
+      offset + length > this.size
+    ) {
+      throw new PeError(TRUNCATED);
+    }
+    const out = new Uint8Array(length);
+    let done = 0;
+    while (done < length) {
+      const pos = offset + done;
+      const index = Math.floor(pos / PAGE);
+      const page = await this.page(index);
+      const within = pos - index * PAGE;
+      const take = Math.min(length - done, page.length - within);
+      if (take <= 0) {
+        // The source returned less than the size it reported.
+        throw new PeError(TRUNCATED);
+      }
+      out.set(page.subarray(within, within + take), done);
+      done += take;
+    }
+    return out;
+  }
+
+  async view(offset: number, length: number): Promise<DataView> {
+    const bytes = await this.bytes(offset, length);
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+
+  /** As much as exists of `length` bytes at `offset`: for data whose end the file may cut short. */
+  async upTo(offset: number, length: number): Promise<Uint8Array> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= this.size) {
+      throw new PeError(TRUNCATED);
+    }
+    return this.bytes(offset, Math.max(0, Math.min(length, this.size - offset)));
+  }
+
+  /** A NUL-terminated string, decoded as UTF-8 (a superset of the ASCII the format specifies). */
+  async cstr(offset: number, max = 512): Promise<string> {
+    const bytes = await this.upTo(offset, max);
+    const end = bytes.indexOf(0);
+    return printable(new TextDecoder().decode(end < 0 ? bytes : bytes.subarray(0, end)));
+  }
+}
+
+const MACHINES: Record<number, string> = {
+  0x014c: 'x86 (32-bit)',
+  0x0200: 'Itanium (64-bit)',
+  0x8664: 'x64 (64-bit)',
+  0x01c0: 'ARM (32-bit)',
+  0x01c2: 'ARM Thumb (32-bit)',
+  0x01c4: 'ARM Thumb-2 (32-bit)',
+  0xaa64: 'ARM64 (64-bit)',
+  0x0ebc: 'EFI byte code',
+  0x5032: 'RISC-V (32-bit)',
+  0x5064: 'RISC-V (64-bit)',
+  0x6232: 'LoongArch (32-bit)',
+  0x6264: 'LoongArch (64-bit)',
+};
+
+const SUBSYSTEMS: Record<number, string> = {
+  0: 'Unknown',
+  1: 'Native',
+  2: 'Windows GUI',
+  3: 'Windows console',
+  5: 'OS/2 console',
+  7: 'POSIX console',
+  9: 'Windows CE',
+  10: 'EFI application',
+  11: 'EFI boot service driver',
+  12: 'EFI runtime driver',
+  13: 'EFI ROM',
+  14: 'Xbox',
+  16: 'Windows boot application',
+};
+
+const DIR_EXPORT = 0;
+const DIR_IMPORT = 1;
+const DIR_RESOURCE = 2;
+const DIR_SECURITY = 4;
+const DIR_DEBUG = 6;
+const DIR_DELAY_IMPORT = 13;
+const DIR_CLR = 14;
+
+const RT_VERSION = 16;
+const RT_MANIFEST = 24;
+// CREATEPROCESS_MANIFEST_RESOURCE_ID and ISOLATIONAWARE_MANIFEST_RESOURCE_ID.
+const PROCESS_MANIFEST_ID = 1;
+const ISOLATION_MANIFEST_ID = 2;
+const RT_ICON = 3;
+const RT_GROUP_ICON = 14;
+
+interface Directory {
+  address: number;
+  size: number;
+}
+
+function hex(value: number, width = 8): string {
+  return `0x${value.toString(16).toUpperCase().padStart(width, '0')}`;
+}
+
+function kindOf(isDll: boolean, subsystem: number): string {
+  if (subsystem >= 10 && subsystem <= 13) {
+    return SUBSYSTEMS[subsystem];
+  }
+  if (subsystem === 1) {
+    return isDll ? 'Native library' : 'Driver or native image';
+  }
+  if (isDll) {
+    return 'Dynamic-link library';
+  }
+  return subsystem === 3 ? 'Console application' : 'Application';
+}
+
+/** The label of the NX_COMPAT row in `PeInfo.mitigations`, which the page words specially. */
+export const NX_COMPAT_LABEL = 'DEP compatible (NX_COMPAT)';
+
+export async function readPe(source: ByteSource): Promise<PeInfo> {
+  const reader = new Reader(source);
+  if (reader.size < 64) {
+    throw new PeError('it is too small to be a Windows executable.');
+  }
+  const dos = await reader.view(0, 64);
+  if (dos.getUint16(0, true) !== 0x5a4d) {
+    throw new PeError('it does not start with the "MZ" signature every Windows executable has.');
+  }
+  const peOffset = dos.getUint32(0x3c, true);
+  // Signature (4) + COFF header (20) + the part of the optional header that
+  // PE32 and PE32+ lay out identically, up to its magic and a little beyond.
+  if (peOffset + 24 + 2 > reader.size) {
+    throw new PeError(
+      'it is a DOS or 16-bit program, which has none of the headers this preview reads.',
+    );
+  }
+  const coff = await reader.view(peOffset, 24);
+  if (coff.getUint32(0, true) !== 0x00004550) {
+    throw new PeError(
+      'it is a DOS or 16-bit program, which has none of the headers this preview reads.',
+    );
+  }
+  const machine = coff.getUint16(4, true);
+  const sectionCount = coff.getUint16(6, true);
+  const timestamp = coff.getUint32(8, true);
+  const optionalSize = coff.getUint16(20, true);
+  const characteristics = coff.getUint16(22, true);
+
+  const optOffset = peOffset + 24;
+  if (optionalSize < 96) {
+    throw new PeError('its optional header is too short to describe an image.');
+  }
+  const opt = await reader.view(optOffset, optionalSize);
+  const magic = opt.getUint16(0, true);
+  if (magic !== 0x10b && magic !== 0x20b) {
+    throw new PeError(`its optional header has an unknown format (${hex(magic, 4)}).`);
+  }
+  const plus = magic === 0x20b;
+  const dirCountOffset = plus ? 108 : 92;
+  if (optionalSize < dirCountOffset + 4) {
+    throw new PeError('its optional header is too short to describe an image.');
+  }
+  const subsystem = opt.getUint16(68, true);
+  const dllFlags = opt.getUint16(70, true);
+  const imageBase = plus ? opt.getBigUint64(24, true) : BigInt(opt.getUint32(28, true));
+  const sizeOfHeaders = opt.getUint32(60, true);
+
+  const dirCount = Math.min(opt.getUint32(dirCountOffset, true), 16);
+  const directories: Directory[] = [];
+  for (let i = 0; i < dirCount; i++) {
+    const at = dirCountOffset + 4 + i * 8;
+    if (at + 8 > optionalSize) {
+      break;
+    }
+    directories.push({ address: opt.getUint32(at, true), size: opt.getUint32(at + 4, true) });
+  }
+  const directory = (index: number): Directory | undefined => {
+    const dir = directories[index];
+    return dir && dir.address !== 0 && dir.size !== 0 ? dir : undefined;
+  };
+
+  if (sectionCount > MAX_SECTIONS) {
+    throw new PeError(`it declares ${sectionCount} sections, more than a real image has.`);
+  }
+  const table = await reader.view(optOffset + optionalSize, sectionCount * 40);
+  const sections: PeSection[] = [];
+  for (let i = 0; i < sectionCount; i++) {
+    const at = i * 40;
+    const nameBytes = new Uint8Array(table.buffer, table.byteOffset + at, 8);
+    const nameEnd = nameBytes.indexOf(0);
+    const flags = table.getUint32(at + 36, true);
+    const contents: string[] = [];
+    if (flags & 0x20) {
+      contents.push('code');
+    }
+    if (flags & 0x40) {
+      contents.push('data');
+    }
+    if (flags & 0x80) {
+      contents.push('uninitialized data');
+    }
+    sections.push({
+      name: printable(
+        new TextDecoder().decode(nameEnd < 0 ? nameBytes : nameBytes.subarray(0, nameEnd)),
+      ),
+      virtualSize: table.getUint32(at + 8, true),
+      virtualAddress: table.getUint32(at + 12, true),
+      rawSize: table.getUint32(at + 16, true),
+      rawOffset: table.getUint32(at + 20, true),
+      read: (flags & 0x40000000) !== 0,
+      write: (flags & 0x80000000) !== 0,
+      execute: (flags & 0x20000000) !== 0,
+      contents,
+    });
+  }
+
+  /** Where in the file a relative virtual address lives, if it is backed by file data at all. */
+  const toOffset = (rva: number): number | undefined => {
+    for (const s of sections) {
+      if (rva >= s.virtualAddress && rva - s.virtualAddress < s.rawSize) {
+        const offset = s.rawOffset + (rva - s.virtualAddress);
+        return offset < reader.size ? offset : undefined;
+      }
+    }
+    // The headers are mapped at the image base, one to one.
+    return rva < sizeOfHeaders && rva < reader.size ? rva : undefined;
+  };
+  const need = (rva: number): number => {
+    const offset = toOffset(rva);
+    if (offset === undefined) {
+      throw new PeError(TRUNCATED);
+    }
+    return offset;
+  };
+
+  const isDll = (characteristics & 0x2000) !== 0;
+  const info: PeInfo = {
+    fileSize: reader.size,
+    format: plus ? 'PE32+' : 'PE32',
+    machine,
+    machineName: MACHINES[machine] ?? `Unknown (${hex(machine, 4)})`,
+    kind: kindOf(isDll, subsystem),
+    subsystem,
+    subsystemName: SUBSYSTEMS[subsystem] ?? `Unknown (${subsystem})`,
+    timestamp,
+    reproducible: false,
+    linkerVersion: `${opt.getUint8(2)}.${opt.getUint8(3)}`,
+    osVersion: `${opt.getUint16(40, true)}.${opt.getUint16(42, true)}`,
+    imageVersion: `${opt.getUint16(44, true)}.${opt.getUint16(46, true)}`,
+    subsystemVersion: `${opt.getUint16(48, true)}.${opt.getUint16(50, true)}`,
+    imageBase: `0x${imageBase
+      .toString(16)
+      .toUpperCase()
+      .padStart(plus ? 16 : 8, '0')}`,
+    entryPoint: opt.getUint32(16, true),
+    sizeOfImage: opt.getUint32(56, true),
+    checksum: opt.getUint32(64, true),
+    largeAddressAware: (characteristics & 0x20) !== 0,
+    mitigations: [
+      ['Address space layout randomization (ASLR)', (dllFlags & 0x40) !== 0],
+      ['High-entropy ASLR', (dllFlags & 0x20) !== 0],
+      // The header flag, under its own name. Whether DEP is in force is not
+      // this bit's to say: 64-bit Windows enforces it for every native 64-bit
+      // program whatever the flag holds. The page words the row accordingly.
+      [NX_COMPAT_LABEL, (dllFlags & 0x100) !== 0],
+      ['Control Flow Guard', (dllFlags & 0x4000) !== 0],
+      ['Forced integrity checks', (dllFlags & 0x80) !== 0],
+      ['AppContainer only', (dllFlags & 0x1000) !== 0],
+    ],
+    sections,
+    imports: [],
+    warnings: [],
+  };
+
+  // A damaged table costs that table, not the preview: the headers above are
+  // already worth showing, and a truncated download is exactly when someone
+  // wants to see what the file claims to be.
+  const attempt = async (what: string, work: () => Promise<void>): Promise<void> => {
+    try {
+      await work();
+    } catch {
+      info.warnings.push(`The ${what} could not be read.`);
+    }
+  };
+
+  const resources = directory(DIR_RESOURCE);
+  if (resources) {
+    await attempt('version resource', async () => {
+      const data = await findResource(reader, toOffset, need(resources.address), RT_VERSION);
+      if (data) {
+        info.version = readVersionResource(
+          await reader.upTo(data.offset, Math.min(data.size, MAX_VERSION_BYTES)),
+        );
+      }
+    });
+    await attempt('icon', async () => {
+      const root = need(resources.address);
+      // The first group is the one Explorer shows for the file.
+      const group = await findResource(reader, toOffset, root, RT_GROUP_ICON);
+      if (!group) {
+        return;
+      }
+      const choice = pickIcon(
+        await reader.upTo(group.offset, Math.min(group.size, 4096)),
+        MAX_ICON_BYTES,
+      );
+      const image = choice && (await findResource(reader, toOffset, root, RT_ICON, choice.id));
+      if (image) {
+        info.icon = iconToPng(
+          await reader.upTo(image.offset, Math.min(image.size, MAX_ICON_BYTES)),
+        );
+      }
+    });
+    await attempt('manifest', async () => {
+      // The manifest Windows applies to the process is resource ID 1 in an
+      // executable and ID 2 in a library, which is where the linker puts
+      // them. A file may carry others, and named ones sort first in the
+      // directory: taking the first found showed a secondary activation
+      // context's "asInvoker" for a program whose own manifest asks for
+      // administrator rights. Only the process manifest is read, and a file
+      // with none at its ID is shown as having none.
+      const root = need(resources.address);
+      const ids = isDll ? [ISOLATION_MANIFEST_ID, PROCESS_MANIFEST_ID] : [PROCESS_MANIFEST_ID];
+      let data: { offset: number; size: number } | undefined;
+      for (const id of ids) {
+        data = await findResource(reader, toOffset, root, RT_MANIFEST, id);
+        if (data) {
+          break;
+        }
+      }
+      if (data) {
+        info.manifest = readManifest(
+          await reader.upTo(data.offset, Math.min(data.size, MAX_MANIFEST_BYTES)),
+        );
+      }
+    });
+  }
+
+  const imports = directory(DIR_IMPORT);
+  if (imports) {
+    await attempt('import table', async () => {
+      info.imports.push(...(await readImports(reader, need, need(imports.address), plus)));
+    });
+  }
+  const delayed = directory(DIR_DELAY_IMPORT);
+  if (delayed) {
+    await attempt('delay-load import table', async () => {
+      info.imports.push(...(await readDelayImports(reader, need, need(delayed.address), plus)));
+    });
+  }
+
+  const exported = directory(DIR_EXPORT);
+  if (exported) {
+    await attempt('export table', async () => {
+      info.exports = await readExports(reader, need, need(exported.address));
+    });
+  }
+
+  const debug = directory(DIR_DEBUG);
+  if (debug) {
+    await attempt('debug directory', async () => {
+      const count = Math.min(Math.floor(debug.size / 28), 32);
+      const entries = await reader.view(need(debug.address), count * 28);
+      for (let i = 0; i < count; i++) {
+        const type = entries.getUint32(i * 28 + 12, true);
+        const size = entries.getUint32(i * 28 + 16, true);
+        const pointer = entries.getUint32(i * 28 + 24, true);
+        if (type === 16) {
+          info.reproducible = true;
+        } else if (type === 2 && size >= 24 && !info.debug) {
+          const head = await reader.view(pointer, 24);
+          // "RSDS": the PDB 7.0 record every toolchain of the last two decades writes.
+          if (head.getUint32(0, true) === 0x53445352) {
+            info.debug = {
+              guid: guidAt(head, 4),
+              age: head.getUint32(20, true),
+              pdbPath: await reader.cstr(pointer + 24, Math.min(size - 24, 1024)),
+            };
+          }
+        }
+      }
+    });
+  }
+
+  const clr = directory(DIR_CLR);
+  if (clr) {
+    await attempt('.NET header', async () => {
+      const head = await reader.view(need(clr.address), 20);
+      const flags = head.getUint32(16, true);
+      const dotnet: PeDotNet = {
+        ilOnly: (flags & 0x1) !== 0,
+        requires32Bit: (flags & 0x2) !== 0 && (flags & 0x20000) === 0,
+        prefers32Bit: (flags & 0x20000) !== 0,
+        strongNamed: (flags & 0x8) !== 0,
+      };
+      info.dotnet = dotnet;
+      const metadata = toOffset(head.getUint32(8, true));
+      if (metadata !== undefined) {
+        const root = await reader.view(metadata, 16);
+        // "BSJB", then a length-prefixed runtime version string.
+        if (root.getUint32(0, true) === 0x424a5342) {
+          const length = Math.min(root.getUint32(12, true), 255);
+          dotnet.runtime = (await reader.cstr(metadata + 16, length)) || undefined;
+        }
+      }
+    });
+  }
+
+  // The one directory whose address is a file offset, not an RVA: the
+  // certificate table is not mapped into memory, so it has no virtual address.
+  const security = directory(DIR_SECURITY);
+  if (security) {
+    await attempt('signature', async () => {
+      // The table is a run of WIN_CERTIFICATE entries, each padded to eight
+      // bytes. Only type 2, PKCS #7 SignedData, is an Authenticode signature;
+      // the table existing says nothing by itself. Every entry is looked at,
+      // within the table's declared size and the file's real one.
+      if (security.address + 8 > reader.size) {
+        // A directory pointing past the end of the file is a damaged file, not
+        // an empty certificate table.
+        throw new PeError(TRUNCATED);
+      }
+      const signature: PeSignature = { size: security.size, signedData: false, entries: [] };
+      info.signature = signature;
+      const end = Math.min(security.address + security.size, reader.size);
+      let at = security.address;
+      for (let i = 0; i < MAX_CERTIFICATES && at + 8 <= end; i++) {
+        const head = await reader.view(at, 8);
+        const length = head.getUint32(0, true);
+        const type = head.getUint16(6, true);
+        // An entry is its 8-byte header and its content, and it lies inside
+        // the table. A length that says otherwise is damage, and is not
+        // followed: stepping by it would carry the walk out of the table and
+        // read whatever lies there as certificate entries.
+        if (length < 8 || length > end - at) {
+          break;
+        }
+        signature.entries.push(CERTIFICATE_TYPES[type] ?? `Type ${type}`);
+        if (type === 2 && !signature.signedData) {
+          const der = await reader.upTo(
+            at + 8,
+            Math.min(length - 8, MAX_SIGNATURE_BYTES, end - at - 8),
+          );
+          // SignedData with no signer is a bundle of certificates, not a
+          // signature: something has to have signed.
+          if (isSignedData(der) && signerCount(der) > 0) {
+            signature.signedData = true;
+            signature.signer = readSigner(der);
+          }
+        }
+        // Entries are padded to eight bytes. Arithmetic, not a bit mask: a
+        // mask works on 32-bit signed values, and turned a length near the
+        // top of the range into a step backwards.
+        at += Math.ceil(length / 8) * 8;
+      }
+    });
+  }
+
+  let end = sizeOfHeaders;
+  for (const s of sections) {
+    if (s.rawSize > 0) {
+      end = Math.max(end, s.rawOffset + s.rawSize);
+    }
+  }
+  const tail = security && security.address >= end ? security.address : reader.size;
+  if (end < tail && tail <= reader.size) {
+    info.overlay = { offset: end, size: tail - end };
+  }
+
+  return info;
+}
+
+function guidAt(view: DataView, at: number): string {
+  const h = (value: number, width: number): string => value.toString(16).padStart(width, '0');
+  let tail = '';
+  for (let i = 8; i < 16; i++) {
+    tail += h(view.getUint8(at + i), 2);
+    if (i === 9) {
+      tail += '-';
+    }
+  }
+  return `${h(view.getUint32(at, true), 8)}-${h(view.getUint16(at + 4, true), 4)}-${h(view.getUint16(at + 6, true), 4)}-${tail}`.toUpperCase();
+}
+
+// The resource tree is three levels deep: type, then name, then language. This
+// takes the first language of the resource of `type` numbered `name`, or of
+// the first resource of that type when no name is asked for, which for a
+// version resource or a manifest is the only one a normal image has.
+async function findResource(
+  reader: Reader,
+  toOffset: (rva: number) => number | undefined,
+  root: number,
+  type: number,
+  name?: number,
+): Promise<{ offset: number; size: number } | undefined> {
+  let table = root;
+  for (let level = 0; level < 3; level++) {
+    const head = await reader.view(table, 16);
+    const named = head.getUint16(12, true);
+    const ids = head.getUint16(14, true);
+    const count = Math.min(named + ids, MAX_RESOURCE_ENTRIES);
+    const entries = await reader.view(table + 16, count * 8);
+    let target: number | undefined;
+    for (let i = 0; i < count; i++) {
+      const id = entries.getUint32(i * 8, true);
+      // Levels 0 and 1 match by number; a named entry (high bit set) is never one.
+      const wanted = level === 0 ? type : level === 1 ? name : undefined;
+      if (wanted === undefined || id === wanted) {
+        target = entries.getUint32(i * 8 + 4, true);
+        break;
+      }
+    }
+    if (target === undefined) {
+      return undefined;
+    }
+    const isTable = (target & 0x80000000) !== 0;
+    const at = root + (target & 0x7fffffff);
+    if (!isTable) {
+      const leaf = await reader.view(at, 16);
+      const offset = toOffset(leaf.getUint32(0, true));
+      return offset === undefined ? undefined : { offset, size: leaf.getUint32(4, true) };
+    }
+    table = at;
+  }
+  return undefined;
+}
+
+/** Count a NUL-terminated array of import thunks, 4 bytes each in PE32 and 8 in PE32+. */
+async function countThunks(reader: Reader, offset: number, plus: boolean): Promise<number> {
+  const width = plus ? 8 : 4;
+  const chunk = 512;
+  let count = 0;
+  while (count < MAX_THUNKS) {
+    const bytes = await reader.upTo(offset + count * width, chunk * width);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const entries = Math.floor(bytes.length / width);
+    if (entries === 0) {
+      break;
+    }
+    for (let i = 0; i < entries; i++) {
+      const zero = plus
+        ? view.getBigUint64(i * width, true) === 0n
+        : view.getUint32(i * width, true) === 0;
+      if (zero) {
+        return count;
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+async function readImports(
+  reader: Reader,
+  need: (rva: number) => number,
+  offset: number,
+  plus: boolean,
+): Promise<PeImport[]> {
+  const out: PeImport[] = [];
+  for (let i = 0; i < MAX_IMPORTS; i++) {
+    const entry = await reader.view(offset + i * 20, 20);
+    const lookup = entry.getUint32(0, true);
+    const name = entry.getUint32(12, true);
+    const address = entry.getUint32(16, true);
+    if (lookup === 0 && name === 0 && address === 0) {
+      break;
+    }
+    out.push({
+      library: await reader.cstr(need(name), 260),
+      // The lookup table is the one a bound image leaves untouched; the
+      // address table is all an old linker wrote.
+      functions: await countThunks(reader, need(lookup || address), plus),
+      delayLoaded: false,
+    });
+  }
+  return out;
+}
+
+async function readDelayImports(
+  reader: Reader,
+  need: (rva: number) => number,
+  offset: number,
+  plus: boolean,
+): Promise<PeImport[]> {
+  const out: PeImport[] = [];
+  for (let i = 0; i < MAX_IMPORTS; i++) {
+    const entry = await reader.view(offset + i * 32, 32);
+    const attributes = entry.getUint32(0, true);
+    const name = entry.getUint32(4, true);
+    const names = entry.getUint32(16, true);
+    if (name === 0) {
+      break;
+    }
+    // Without this bit the fields are absolute addresses, a layout nothing has
+    // emitted since Visual C++ 6. Stop rather than misread them as RVAs.
+    if ((attributes & 1) === 0) {
+      break;
+    }
+    out.push({
+      library: await reader.cstr(need(name), 260),
+      functions: names === 0 ? 0 : await countThunks(reader, need(names), plus),
+      delayLoaded: true,
+    });
+  }
+  return out;
+}
+
+async function readExports(
+  reader: Reader,
+  need: (rva: number) => number,
+  offset: number,
+): Promise<PeExports> {
+  const head = await reader.view(offset, 40);
+  const nameRva = head.getUint32(12, true);
+  const base = head.getUint32(16, true);
+  const slots = head.getUint32(20, true);
+  const named = head.getUint32(24, true);
+  const namesRva = head.getUint32(32, true);
+  // The header gives the length of the address table, not how many of its
+  // entries are in use: shell32.dll has 2,001 slots and 843 exports. The
+  // unused ordinals are zero, so the functions are the entries that are not.
+  let functions: number | undefined;
+  if (slots <= MAX_EXPORT_SLOTS) {
+    try {
+      const table = await reader.view(need(head.getUint32(28, true)), slots * 4);
+      functions = 0;
+      for (let i = 0; i < slots; i++) {
+        if (table.getUint32(i * 4, true) !== 0) {
+          functions++;
+        }
+      }
+    } catch {
+      // The names below may still be readable; the page says the slots were not counted.
+      functions = undefined;
+    }
+  }
+  const shown = Math.min(named, MAX_EXPORT_NAMES);
+  const names: string[] = [];
+  if (shown > 0) {
+    const pointers = await reader.view(need(namesRva), shown * 4);
+    for (let i = 0; i < shown; i++) {
+      names.push(await reader.cstr(need(pointers.getUint32(i * 4, true)), 512));
+    }
+  }
+  return {
+    name: nameRva === 0 ? '' : await reader.cstr(need(nameRva), 260),
+    base,
+    functions,
+    slots,
+    named,
+    names,
+  };
+}
+
+// An application manifest is a small XML document, and it is parsed as one.
+// Matching its text instead reads the wrong thing in two ordinary cases: the
+// stock Visual Studio manifest keeps a commented-out example of every
+// execution level above the live element, so the first textual match for
+// requestedExecutionLevel is the comment's asInvoker whatever the program
+// really asks for; and the first assemblyIdentity in the text of many
+// manifests is a dependency's (the common controls library), not the
+// program's own.
+function readManifest(bytes: Uint8Array): PeManifest | undefined {
+  // A manifest is UTF-8 unless a byte order mark says UTF-16.
+  const encoding =
+    bytes[0] === 0xff && bytes[1] === 0xfe
+      ? 'utf-16le'
+      : bytes[0] === 0xfe && bytes[1] === 0xff
+        ? 'utf-16be'
+        : 'utf-8';
+  const root = parseXml(new TextDecoder(encoding).decode(bytes));
+  const clean = (value: string | undefined): string | undefined => {
+    const text = value === undefined ? '' : printable(value).trim().slice(0, 200);
+    return text || undefined;
+  };
+  const first = (name: string) => findAll(root, name)[0];
+  // The program's own identity is the one directly under <assembly>. Those
+  // nested in <dependency> name what it depends on.
+  const assembly = child(root, 'assembly');
+  const own = assembly && child(assembly, 'assemblyIdentity');
+  const name = clean(own?.attrs.name);
+  const version = clean(own?.attrs.version);
+  const level = first('requestedExecutionLevel');
+  const manifest: PeManifest = {
+    executionLevel: clean(level?.attrs.level),
+    uiAccess: clean(level?.attrs.uiAccess),
+    dpiAware: clean(first('dpiAwareness')?.text) ?? clean(first('dpiAware')?.text),
+    identity: name ? (version ? `${name} ${version}` : name) : undefined,
+  };
+  return Object.values(manifest).some((value) => value !== undefined) ? manifest : undefined;
+}

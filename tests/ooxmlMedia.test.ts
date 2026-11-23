@@ -56,6 +56,13 @@ describe('addMedia', () => {
     expect(imgs[2].hasAttribute('src')).toBe(false);
   });
 
+  it('accepts the id and type the executable preview sends for a file icon', () => {
+    beginMediaSet('exe');
+    const el = root('<p><img data-mc-media="m1" alt="File icon" width="48" height="48"></p>');
+    expect(addMedia('exe', [{ id: 'm1', mime: 'image/png', base64: PNG_B64 }], el)).toBe(1);
+    expect(el.querySelector('img')?.getAttribute('src')).toBe(created[0]);
+  });
+
   it('drops media for a set other than the current one', () => {
     beginMediaSet('s2');
     const el = root('<img data-mc-media="m1">');

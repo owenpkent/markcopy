@@ -149,7 +149,7 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 
 ### Open in Default App
 
-Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
+Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. The executable info preview is the exception: the default app for an executable is the executable, so it has no such row. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
 
 ### Always available
 
@@ -215,6 +215,19 @@ Differences worth stating:
 - **Unsupported content copies as its placeholder.** An EMF or WMF picture, a linked picture, and one past the image budget are labelled boxes, not images.
 - **Save as Word from a Word preview** offers a file name based on the source, so check the destination before saving over the original.
 - There is no editing and no writeback: MarkCopy never writes to the document.
+
+## Executable info (.exe, .dll, ...)
+
+The page is ordinary semantic HTML in the shared shell, like the Word preview: headings and tables, so a selection offers **Copy Selection** and **Copy as** > **Markdown**, a table (Version, File, Permissions and protections, Sections, Imports, Exports) offers the full [table](#table) menu (**Copy Table** as rich text, **Copy as** > Markdown, CSV, TSV, PNG), and **Search Google** appears on a selection, as everywhere. It covers `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` and `.efi`.
+
+Differences worth stating:
+
+- **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole page.** What you copy is what rendered: a table the reader capped (the first 100 export names, for one) is copied as shown.
+- **The SHA-256 and every other value are text.** Select a cell and **Copy Selection**, or copy the File table as CSV or TSV.
+- **The icon is a picture like any other.** It is the one image on the page, sent the way a Word document's pictures are, so it is part of a whole-document copy and of the exports.
+- **There is no Open in Default App row.** The default app for an executable is the file itself, so the row is removed from this preview's menu and the host ignores the message. **Reveal in file manager** is still there.
+- **Strings from the file are cleaned before they are shown**, so control and bidirectional-override characters are not in any copy.
+- There is no editing and no writeback: MarkCopy never writes to the file, and never runs it.
 
 ## 3D models (.stl, .3mf, .glb, .step, .stp, .obj, .gcode, .gco)
 

@@ -23,6 +23,7 @@ const IMAGE_VIEW = 'markcopy.imagePreview';
 const MARKDOWN_VIEW = 'markcopy.markdownPreview';
 const CSV_VIEW = 'markcopy.csvPreview';
 const TEX_VIEW = 'markcopy.texPreview';
+const EXE_VIEW = 'markcopy.exePreview';
 
 /**
  * Poll `probe` until it returns something, or give up.
@@ -260,6 +261,34 @@ suite('MarkCopy custom editors', () => {
       customTabs().some((tab) => tab.viewType === DOCX_VIEW && tab.uri === upper.toString()),
       `expected a ${DOCX_VIEW} tab for Report.DOCX, saw: ${JSON.stringify(customTabs())}`,
     );
+  });
+
+  test('.exe and .DLL files open in the executable preview, not as binary', async () => {
+    // Two files with different base names, for the reason the .docm test gives.
+    // "MZ" plus padding is enough: the editor claims the tab on the filename and
+    // reports a file it cannot read as a notice in the panel. Nothing here is a
+    // real program, and nothing is checked into the repo.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    const lower = vscode.Uri.file(path.join(dir, 'tool.exe'));
+    const upper = vscode.Uri.file(path.join(dir, 'Library.DLL'));
+    fs.writeFileSync(lower.fsPath, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]));
+    fs.writeFileSync(upper.fsPath, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126)]));
+
+    await vscode.commands.executeCommand('vscode.open', lower);
+    const first = await waitFor(() => customTabs().find((tab) => tab.uri === lower.toString()));
+    assert.ok(
+      first,
+      `expected a custom-editor tab for tool.exe, saw: ${JSON.stringify(customTabs())}`,
+    );
+    assert.strictEqual(first.viewType, EXE_VIEW, 'tool.exe opened in some other editor');
+
+    await vscode.commands.executeCommand('vscode.open', upper);
+    const second = await waitFor(() => customTabs().find((tab) => tab.uri === upper.toString()));
+    assert.ok(
+      second,
+      `expected a custom-editor tab for Library.DLL, saw: ${JSON.stringify(customTabs())}`,
+    );
+    assert.strictEqual(second.viewType, EXE_VIEW, 'Library.DLL opened in some other editor');
   });
 
   test('a file that is not a document still opens rather than failing to load', async () => {
