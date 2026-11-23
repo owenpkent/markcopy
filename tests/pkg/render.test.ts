@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { propertySection, rows, tableSection, type PackageInfo } from '../../src/pkg/model';
+import {
+  propertySection,
+  rows,
+  tableSection,
+  type InfoSection,
+  type PackageInfo,
+} from '../../src/pkg/model';
 import { renderPackageHtml } from '../../src/pkg/render';
 import { signatureSection } from '../../src/pkg/signature';
 
@@ -316,5 +322,44 @@ describe('signatureSection', () => {
     expect(section.rows).toEqual([
       ['Status', 'APK Signature Scheme v2 signature present, not verified by MarkCopy'],
     ]);
+  });
+});
+
+// The page lays its sections out in two columns (media/preview.css): each is
+// wrapped, and a grid that is long or has several columns takes the full width.
+describe('renderPackageHtml: sections for the two-column layout', () => {
+  const grid = (columns: string[], count: number): InfoSection => ({
+    kind: 'table',
+    heading: `Grid ${columns.length}x${count}`,
+    columns,
+    rows: Array.from({ length: count }, (_, i) => columns.map((c) => `${c}${i}`)),
+  });
+  const html = renderPackageHtml(
+    {
+      format: 'Test package',
+      sections: [
+        { kind: 'properties', heading: 'Package', rows: [['Name', 'demo']] },
+        { kind: 'text', heading: 'Description', paragraphs: ['A demo.'] },
+        grid(['Library'], 5),
+        grid(['Library'], 13),
+        grid(['Relation', 'Package', 'Version'], 4),
+        grid(['Relation', 'Package', 'Version'], 1),
+      ],
+      warnings: [],
+    },
+    { fileName: 'demo.deb', fileSize: 10 },
+  );
+
+  it('keeps property tables, text and short narrow grids in the columns', () => {
+    expect(html).toContain('<div class="mc-info-section"><h2>Package</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>Description</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>Grid 1x5</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>Grid 3x1</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>File</h2>');
+  });
+
+  it('gives a long grid, or one with several columns, the full width', () => {
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 1x13</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 3x4</h2>');
   });
 });
