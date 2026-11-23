@@ -274,17 +274,29 @@ function sectionsSection(info: PeInfo): string {
   );
 }
 
+// The most import rows drawn. The reader allows 1,024 libraries and as many
+// again delay-loaded, each with a name of up to 260 characters, which made a
+// page of 3 MB from a file under 1 MB. A real program imports a few dozen
+// libraries, a browser about a hundred.
+const MAX_IMPORT_ROWS = 500;
+// A library or symbol name longer than this is not one a linker wrote.
+const MAX_NAME_CHARS = 256;
+
 // Two columns, each value complete in itself, so that a long import table can
 // be drawn as a list (see grid). A library is loaded when the program starts
 // unless it says otherwise, so only the exception is spelled out.
 function importsSection(info: PeInfo): string {
-  return grid(
+  const shown = info.imports.slice(0, MAX_IMPORT_ROWS);
+  const html = grid(
     ['Library', 'Functions'],
-    info.imports.map((entry) => [
-      entry.library,
+    shown.map((entry) => [
+      entry.library.slice(0, MAX_NAME_CHARS),
       `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}${entry.delayLoaded ? ', loaded on first use' : ''}`,
     ]),
   );
+  return info.imports.length > shown.length
+    ? `${html}<p class="mc-exe-note">Showing the first ${number(shown.length)} of ${number(info.imports.length)} libraries.</p>`
+    : html;
 }
 
 function exportsSection(info: PeInfo): string {
@@ -310,7 +322,7 @@ function exportsSection(info: PeInfo): string {
   if (exported.names.length > 0) {
     html += grid(
       ['Exported name'],
-      exported.names.map((name) => [name]),
+      exported.names.map((name) => [name.slice(0, MAX_NAME_CHARS)]),
     );
     if (exported.named > exported.names.length) {
       html += `<p class="mc-exe-note">Showing the first ${number(exported.names.length)} of ${number(exported.named)} names.</p>`;

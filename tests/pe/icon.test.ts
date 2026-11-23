@@ -369,3 +369,42 @@ describe('pickIcon', () => {
     expect(pickIcon(bytes.subarray(0, 6), 1 << 20)).toBeUndefined();
   });
 });
+
+// A PNG icon is handed to the webview's image decoder as it is, so the reader
+// has to be sure it is one. It once checked the signature and the size alone.
+describe('iconToPng: only passes through what a PNG icon is', () => {
+  const patched = (change: (bytes: Uint8Array) => void): Uint8Array => {
+    const bytes = pngStub(256, 256);
+    change(bytes);
+    return bytes;
+  };
+
+  it('accepts a whole header chunk at eight bits a channel', () => {
+    expect(iconToPng(pngStub(256, 256))).toMatchObject({ width: 256, height: 256 });
+    expect(iconToPng(patched((b) => (b[24] = 1)))).toBeDefined();
+  });
+
+  it('refuses sixteen bits a channel, which doubles what a decoder allocates', () => {
+    expect(iconToPng(patched((b) => (b[24] = 16)))).toBeUndefined();
+  });
+
+  it('refuses a file whose first chunk is not the header', () => {
+    // "IDAT" where "IHDR" belongs.
+    expect(iconToPng(patched((b) => b.set([0x49, 0x44, 0x41, 0x54], 12)))).toBeUndefined();
+    // A header chunk that claims a different length.
+    expect(iconToPng(patched((b) => (b[11] = 14)))).toBeUndefined();
+  });
+
+  it('refuses a header cut short', () => {
+    expect(iconToPng(pngStub(256, 256).subarray(0, 32))).toBeUndefined();
+    expect(iconToPng(pngStub(256, 256).subarray(0, 24))).toBeUndefined();
+  });
+
+  it('refuses more bytes than an icon needs', () => {
+    const header = pngStub(256, 256);
+    const padded = new Uint8Array(512 * 1024 + 1);
+    padded.set(header);
+    expect(iconToPng(padded)).toBeUndefined();
+    expect(iconToPng(padded.subarray(0, 512 * 1024))).toBeDefined();
+  });
+});

@@ -258,3 +258,35 @@ describe('renderPeHtml: sections for the two-column layout', () => {
     expect(html.match(/<h2>/g)).toHaveLength(html.match(/class="mc-info-section/g)?.length ?? 0);
   });
 });
+
+// The reader allows 1,024 libraries and as many again delay-loaded. Drawn in
+// full, with long names, that was a 3 MB page from a file under 1 MB.
+describe('renderPeHtml: caps the import rows it draws', () => {
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ library: `lib${i}.dll`, functions: 1 }));
+
+  it('draws every library of an ordinary program, with no note', async () => {
+    const html = await render({ imports: many(40) });
+    expect(html).toContain('<td>lib39.dll</td>');
+    expect(html).not.toContain('Showing the first');
+  });
+
+  it('draws the first 500 of more, says how many there are, and stays small', async () => {
+    const html = await render({ plus: true, imports: many(700) });
+    expect(html).toContain('<td>lib499.dll</td>');
+    expect(html).not.toContain('<td>lib500.dll</td>');
+    expect(html).toContain('Showing the first 500 of 700 libraries.');
+    expect(html).toContain('700 libraries.');
+    expect(html.length).toBeLessThan(256 * 1024);
+  });
+
+  it('cuts a name no linker would write', async () => {
+    const html = await render({ imports: [{ library: `${'&'.repeat(250)}.dll`, functions: 1 }] });
+    expect(html).toContain('&amp;'.repeat(250));
+    const long = await render({
+      exports: { dllName: 'x.dll', names: ['n'.repeat(400)] },
+    });
+    expect(long).toContain(`<td>${'n'.repeat(256)}</td>`);
+    expect(long).not.toContain('n'.repeat(257));
+  });
+});

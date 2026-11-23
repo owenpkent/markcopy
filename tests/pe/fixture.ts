@@ -461,22 +461,27 @@ export function iconBitmap(spec: BitmapSpec): Uint8Array {
 
 /** The first 24 bytes of a PNG: signature, then an IHDR chunk header and its size fields. */
 export function pngStub(width: number, height: number): Uint8Array {
-  return new Bytes()
-    .raw([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    .raw([0, 0, 0, 13])
-    .raw(ascii('IHDR'))
-    .raw([
-      width >>> 24,
-      width >>> 16,
-      width >>> 8,
-      width,
-      height >>> 24,
-      height >>> 16,
-      height >>> 8,
-      height,
-    ])
-    .raw([8, 6, 0, 0, 0])
-    .bytes();
+  return (
+    new Bytes()
+      .raw([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      .raw([0, 0, 0, 13])
+      .raw(ascii('IHDR'))
+      .raw([
+        width >>> 24,
+        width >>> 16,
+        width >>> 8,
+        width,
+        height >>> 24,
+        height >>> 16,
+        height >>> 8,
+        height,
+      ])
+      .raw([8, 6, 0, 0, 0])
+      // The header chunk's CRC. The reader does not verify it, but it does need
+      // the chunk to be whole.
+      .raw([0, 0, 0, 0])
+      .bytes()
+  );
 }
 
 export interface IconSpec {
