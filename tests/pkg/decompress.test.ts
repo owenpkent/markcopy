@@ -129,7 +129,11 @@ describe('readCompressed', () => {
 
   it('reads a range larger than one piece', async () => {
     const out = await readCompressed(reader, 7, 2 * MIB + 100, 8 * MIB);
-    expect(out).toEqual(data.subarray(7, 7 + 2 * MIB + 100));
+    // Compared as buffers: toEqual walks two megabytes element by element,
+    // which took over six seconds on a CI runner and timed the test out.
+    const expected = data.subarray(7, 7 + 2 * MIB + 100);
+    expect(out).toHaveLength(expected.length);
+    expect(Buffer.compare(out, expected)).toBe(0);
   });
 
   it('refuses a length over the cap before reading anything', async () => {
