@@ -426,6 +426,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     'Property',
     'Binary',
     'ModuleSignature',
+    'ModuleComponents',
     ...COUNTED.map(([table]) => table),
   ]);
   const tables = new Map<string, CfbEntry>();
@@ -489,19 +490,18 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   }
 
   // The root CLSID names the kind of storage (Windows Installer's registered
-  // classes for a package, a patch and a transform). A merge module is a package
-  // database that carries a ModuleSignature table. A file with an unrecognised
+  // classes for a package, a patch and a transform). A file with an unrecognised
   // CLSID but a string pool is called a database, which is all that is known.
+  // Whether a package is really a merge module is decided below, once the tables
+  // are counted.
   const patchOrTransform = cfb.rootClsid === CLSID_PATCH || cfb.rootClsid === CLSID_TRANSFORM;
-  const kind =
+  let kind: string | undefined =
     cfb.rootClsid === CLSID_PATCH
       ? 'Windows Installer patch'
       : cfb.rootClsid === CLSID_TRANSFORM
         ? 'Windows Installer transform'
         : cfb.rootClsid === CLSID_MSI
-          ? tables.has('ModuleSignature')
-            ? 'Windows Installer merge module'
-            : 'Windows Installer package'
+          ? 'Windows Installer package'
           : tables.has('_StringPool')
             ? 'Windows Installer database'
             : undefined;
@@ -570,7 +570,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     const columnsBytes = await tryRead(cfb, tables.get('_Columns'), MAX_COLUMNS_STREAM);
     if (columnsBytes) {
       const widths = rowWidths(columnsBytes, strings);
-      for (const [table] of COUNTED) {
+      for (const table of [...COUNTED.map(([name]) => name), 'ModuleSignature']) {
         const entry = tables.get(table);
         const width = widths.get(table);
         if (entry && width) {
@@ -585,6 +585,24 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     }
   }
 
+  // Microsoft's "Merge Module Database" and "ModuleSignature Table" pages: a
+  // standalone module has exactly one ModuleSignature row, has ModuleComponents,
+  // and "does not contain a Feature table" (so it "cannot be installed alone");
+  // an installer that has had modules merged in has one ModuleSignature row per
+  // module, and also has a Feature table and a ProductCode. So a package is
+  // called a merge module only with the positive evidence and none of the
+  // contrary evidence; anything else stays a package.
+  const mergedModules = counts.get('ModuleSignature');
+  if (
+    kind === 'Windows Installer package' &&
+    mergedModules === 1 &&
+    tables.has('ModuleComponents') &&
+    !tables.has('Feature') &&
+    !properties.has('ProductCode')
+  ) {
+    kind = 'Windows Installer merge module';
+  }
+
   if (propertyRows > MAX_PROPERTIES) {
     warnings.push(
       `The Property table has ${formatNumber(propertyRows)} rows; only the first ${formatNumber(MAX_PROPERTIES)} were read.`,
@@ -595,28 +613,50 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   }
 
   // Package section.
+  // A patch's Template property lists the product codes it applies to, not a platform.
+  const isPatch = cfb.rootClsid === CLSID_PATCH;
   const template = text(7);
   const [platformText, languageText] = template ? template.split(';') : [];
-  const platform = platformText
-    ? (PLATFORMS[platformText.trim().toLowerCase()] ?? platformText)
-    : undefined;
+  const platform =
+    platformText && !isPatch
+      ? (PLATFORMS[platformText.trim().toLowerCase()] ?? platformText)
+      : undefined;
   const words = num(15);
   const allUsers = properties.get('ALLUSERS');
-  // ALLUSERS is a property the package can also set or change while it runs
-  // (conditions, custom actions, the command line), so this reports the value
-  // the database stores, not what an install will do.
+  // What the Property table declares about the installation context, from
+  // Microsoft's ALLUSERS and MSIINSTALLPERUSER pages:
+  //   ALLUSERS not set (absent or "")  -> "the system uses the per-user installation context"
+  //   ALLUSERS=1                       -> "specifies the per-machine installation context"
+  //   ALLUSERS=2                       -> the installer resets ALLUSERS and picks the context from
+  //                                       the user's privileges and the Windows version; with
+  //                                       Windows Installer 5.0 (Windows 7 and later) the
+  //                                       MSIINSTALLPERUSER property decides:
+  //     MSIINSTALLPERUSER=1            -> requests per-user
+  //     MSIINSTALLPERUSER="" (empty)   -> requests per-machine
+  //     MSIINSTALLPERUSER absent       -> not stated; privileges and Windows version decide
+  //     MSIINSTALLPERUSER, any value, with ALLUSERS other than 2 -> ignored
+  //     MSIINSTALLPERUSER with Windows Installer 4.5 or earlier  -> ignored
+  //   any other ALLUSERS value         -> not documented
+  // These values can also be set at install time, on the command line or by the
+  // package's own logic, so the row states the declaration and nothing more.
+  const fromOlder = 'earlier Windows Installer versions ignore MSIINSTALLPERUSER';
+  const perUser = properties.get('MSIINSTALLPERUSER');
   const scope =
     properties.size === 0
       ? undefined
-      : allUsers === undefined
-        ? 'ALLUSERS not set (per-user by default)'
+      : allUsers === undefined || allUsers === ''
+        ? 'ALLUSERS not set: the per-user context'
         : allUsers === '1'
-          ? 'ALLUSERS=1 (per-machine)'
-          : allUsers === '2'
-            ? properties.get('MSIINSTALLPERUSER') === '1'
-              ? 'ALLUSERS=2 with MSIINSTALLPERUSER=1 (per-user by default, per-machine when elevated)'
-              : 'ALLUSERS=2 (per-machine when elevated, otherwise per-user)'
-            : `ALLUSERS=${JSON.stringify(allUsers)}`;
+          ? 'ALLUSERS=1: the per-machine context'
+          : allUsers !== '2'
+            ? `ALLUSERS=${JSON.stringify(allUsers)}: not a documented value`
+            : perUser === '1'
+              ? `ALLUSERS=2 and MSIINSTALLPERUSER=1: requests per-user (Windows Installer 5.0 and later; ${fromOlder})`
+              : perUser === ''
+                ? `ALLUSERS=2 and MSIINSTALLPERUSER empty: requests per-machine (Windows Installer 5.0 and later; ${fromOlder})`
+                : perUser === undefined
+                  ? 'ALLUSERS=2, MSIINSTALLPERUSER not set: dual-purpose, the context depends on the privileges of the user and the Windows version'
+                  : `ALLUSERS=2, MSIINSTALLPERUSER=${JSON.stringify(perUser)}: not a documented value`;
   const productName = properties.get('ProductName') || text(3);
   const productVersion = properties.get('ProductVersion');
   const manufacturer = properties.get('Manufacturer') || text(4);
@@ -631,20 +671,25 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
       ['Upgrade code', properties.get('UpgradeCode')],
       ['Package code', text(9)],
       ['Platform (from the summary template)', platform],
-      ['Languages', languages(languageText) ?? languages(properties.get('ProductLanguage'))],
+      [
+        'Languages',
+        isPatch
+          ? undefined
+          : (languages(languageText) ?? languages(properties.get('ProductLanguage'))),
+      ],
       ['Install scope (from ALLUSERS)', scope],
       ['Minimum installer version', installerVersion(num(14))],
       [
-        'Marked as not needing elevation',
-        words === undefined ? undefined : (words & 8) !== 0 ? 'Yes' : 'No',
+        'Elevation (summary flag)',
+        words === undefined ? undefined : (words & 8) !== 0 ? 'Not required' : 'Can be required',
       ],
       [
-        'Source files compressed (summary flag)',
-        words === undefined ? undefined : (words & 2) !== 0 ? 'Yes' : 'No',
+        'Source files (summary flag)',
+        words === undefined ? undefined : (words & 2) !== 0 ? 'Compressed' : 'Uncompressed',
       ],
       [
-        'Administrative image (summary flag)',
-        words !== undefined && (words & 4) !== 0 ? 'Yes' : undefined,
+        'Source is (summary flag)',
+        words !== undefined && (words & 4) !== 0 ? 'An administrative image' : undefined,
       ],
       ['Created with', text(18)],
       ['Created', text(12)],
@@ -675,6 +720,13 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     } else if (tables.has(table)) {
       installs.push([label, 'present']);
     }
+  }
+  if (
+    kind !== 'Windows Installer merge module' &&
+    mergedModules !== undefined &&
+    mergedModules > 0
+  ) {
+    installs.push(['Merged modules (ModuleSignature rows)', formatNumber(mergedModules)]);
   }
   if (tables.has('Binary')) {
     installs.push(['Binary table', 'present']);

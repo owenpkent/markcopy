@@ -201,6 +201,7 @@ describe('readZipPackage: a hostile NuGet package', () => {
     const table = section(info, 'Dependencies') as { rows: string[][]; note?: string };
     expect(table.rows.length).toBe(200);
     expect(table.note).toBe('Showing the first 200 of 2,000 dependencies.');
+    expect(info.warnings.join(' ')).toContain('more dependencies than MarkCopy reads');
   });
 
   it('caps the framework folder names', async () => {
@@ -263,6 +264,7 @@ describe('readZipPackage: bounded XML in a NuGet package', () => {
     const table = section(info, 'Dependencies') as { rows: string[][]; note?: string };
     expect(table.rows.length).toBe(200);
     expect(table.note).toBe('Showing the first 200 of 2,000 dependencies.');
+    expect(info.warnings.join(' ')).toContain('more dependencies than MarkCopy reads');
   });
 });
 

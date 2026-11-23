@@ -9,6 +9,7 @@ import {
   section,
   tableRows,
   value,
+  type FixtureEntry,
 } from './zipFixture';
 
 const RLO = String.fromCharCode(0x202e);
@@ -190,6 +191,7 @@ describe('readZipPackage: a hostile wheel', () => {
     const deps = section(info, 'Dependencies') as { rows: string[][]; note?: string };
     expect(deps.rows.length).toBe(200);
     expect(deps.note).toBe('Showing the first 200 of 2,000 requirements.');
+    expect(info.warnings.join(' ')).toContain('repeats requires-dist more often');
   });
 
   it('cuts a huge description to its first paragraph and a bounded length', async () => {
@@ -239,57 +241,175 @@ describe('readZipPackage: wheel entry identity', () => {
 describe('readZipPackage: what a wheel runs at startup', () => {
   const rowFor = (info: Awaited<ReturnType<typeof readZip>>, name: string): string =>
     value(info, 'Code that runs', name) ?? '';
+  const withFiles = (...files: FixtureEntry[]): Promise<Awaited<ReturnType<typeof readZip>>> =>
+    readZip(wheel(METADATA, files));
 
   it('lists a .start file as the only startup hook, with its Python version scope', async () => {
-    const info = await readZip(
-      wheel(METADATA, [{ name: 'demo.start', data: 'demo:initialize\n' }]),
-    );
+    const info = await withFiles({ name: 'demo.start', data: 'demo:initialize\n' });
     expect(rowFor(info, 'demo.start')).toContain('Python 3.15 and later');
     expect(rowFor(info, 'demo.start')).toContain('demo:initialize');
   });
 
-  it('says a matching .start makes the .pth import line inert on 3.15 and later', async () => {
-    const info = await readZip(
-      wheel(METADATA, [
-        { name: 'demo.pth', data: 'import demo\n' },
-        { name: 'demo.start', data: '# comment\n\ndemo:go\n' },
-      ]),
-    );
-    expect(rowFor(info, 'demo.pth')).toContain('ignore');
-    expect(rowFor(info, 'demo.pth')).not.toContain('Runs code');
-    expect(rowFor(info, 'demo.start')).toContain('demo:go');
-    expect(rowFor(info, 'demo.start')).not.toContain('comment');
+  it('scans every line of a startup file, not the first 200', async () => {
+    const pth = await withFiles({ name: 'demo.pth', data: `${'#\n'.repeat(200)}import math\n` });
+    expect(rowFor(pth, 'demo.pth')).toContain('Runs code at every Python start');
+    expect(rowFor(pth, 'demo.pth')).not.toContain('nothing here runs code');
+    const start = await withFiles({
+      name: 'demo.start',
+      data: `${'#\n'.repeat(200)}demo:initialize\n`,
+    });
+    expect(rowFor(start, 'demo.start')).toContain('demo:initialize');
+    expect(rowFor(start, 'demo.start')).not.toContain('No entry points');
   });
 
-  it('does not say a .pth with only path lines runs code', async () => {
-    const info = await readZip(
-      wheel(METADATA, [{ name: 'paths.pth', data: '# libs\nlib\n../other\n' }]),
-    );
+  it('counts entry points but shows only the first few', async () => {
+    const info = await withFiles({
+      name: 'many.start',
+      data: Array.from({ length: 10 }, (_, i) => `m${i}:f`).join('\n'),
+    });
+    expect(rowFor(info, 'many.start')).toContain('10 entry points');
+    expect(rowFor(info, 'many.start')).toContain('and more');
+  });
+
+  it('recognises an import line after leading white space as running on 3.15 and later only', async () => {
+    for (const lead of ['  ', '\t', ' \t ']) {
+      const info = await withFiles({ name: 'sp.pth', data: `${lead}import math\n` });
+      const row = rowFor(info, 'sp.pth');
+      expect(row).toContain('Runs on Python 3.15 and later');
+      expect(row).toContain('earlier versions read it as a path');
+      expect(row).not.toContain('nothing here runs code');
+    }
+  });
+
+  it('says a plain import line runs on every version that runs import lines', async () => {
+    const info = await withFiles({ name: 'a.pth', data: 'import\tos\n' });
+    expect(rowFor(info, 'a.pth')).toContain('Runs code at every Python start');
+    expect(rowFor(info, 'a.pth')).not.toContain('3.15 and later (an import');
+  });
+
+  it('follows str.splitlines, CRLF, a byte order mark and unusual line breaks', async () => {
+    const crlf = await withFiles({ name: 'a.pth', data: 'lib\r\nimport x\r\n' });
+    expect(rowFor(crlf, 'a.pth')).toContain('Runs code');
+    const bom = await withFiles({
+      name: 'b.pth',
+      data: Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('import b\n')]),
+    });
+    expect(rowFor(bom, 'b.pth')).toContain('Runs code');
+    const ls = await withFiles({
+      name: 'c.pth',
+      data: `lib${String.fromCharCode(0x2028)}import c\n`,
+    });
+    expect(rowFor(ls, 'c.pth')).toContain('Runs code');
+    const fs = await withFiles({
+      name: 'd.pth',
+      data: `lib${String.fromCharCode(0x1c)}import d\n`,
+    });
+    expect(rowFor(fs, 'd.pth')).toContain('Runs code');
+  });
+
+  it('does not say a .pth with only path lines or comments runs code', async () => {
+    const info = await withFiles({
+      name: 'paths.pth',
+      data: '# libs\nlib\n../other\nimports/dir\n  # note\n',
+    });
     expect(rowFor(info, 'paths.pth')).toContain('Path entries only');
-    expect(rowFor(info, 'paths.pth')).not.toContain('Runs code');
   });
 
   it('shows the first import line of a .pth that has one', async () => {
-    const info = await readZip(
-      wheel(METADATA, [{ name: 'evil.pth', data: 'lib\nimport os; os.system("x")\nimport b\n' }]),
-    );
-    expect(rowFor(info, 'evil.pth')).toContain('Runs code at every Python start');
+    const info = await withFiles({
+      name: 'evil.pth',
+      data: 'lib\nimport os; os.system("x")\nimport b\n',
+    });
     expect(rowFor(info, 'evil.pth')).toContain('import os; os.system("x")');
     expect(rowFor(info, 'evil.pth')).not.toContain('import b');
   });
 
-  it('does not treat a line that merely starts with the letters import as code', async () => {
-    const info = await readZip(wheel(METADATA, [{ name: 'a.pth', data: 'imports/dir\n' }]));
-    expect(rowFor(info, 'a.pth')).toContain('Path entries only');
+  it('notes an import line that holds a NUL byte as rejected', async () => {
+    const info = await withFiles({ name: 'n.pth', data: `import os${String.fromCharCode(0)}x\n` });
+    expect(rowFor(info, 'n.pth')).toContain('NUL');
+  });
+
+  it('skips the import lines of a .pth only when a readable .start of the same name is beside it', async () => {
+    const pair = await withFiles(
+      { name: 'demo.pth', data: 'import demo\n' },
+      { name: 'demo.start', data: 'demo:go\n' },
+    );
+    expect(rowFor(pair, 'demo.pth')).toContain('Python 3.15 and later skip it');
+    expect(rowFor(pair, 'demo.pth')).toContain('Runs code');
+    expect(rowFor(pair, 'demo.start')).toContain('demo:go');
+
+    // A .start that is not UTF-8 is rejected by site.py and suppresses nothing.
+    const bad = await withFiles(
+      { name: 'demo.pth', data: 'import math\n' },
+      { name: 'demo.start', data: Uint8Array.from([0xff]) },
+    );
+    expect(rowFor(bad, 'demo.pth')).toContain('Runs code');
+    expect(rowFor(bad, 'demo.pth')).not.toContain('skip');
+    expect(rowFor(bad, 'demo.start')).toContain('Not valid UTF-8');
+
+    // An empty or comment-only .start still registers.
+    for (const content of ['', '# nothing\n\n']) {
+      const quiet = await withFiles(
+        { name: 'demo.pth', data: 'import math\n' },
+        { name: 'demo.start', data: content },
+      );
+      expect(rowFor(quiet, 'demo.pth')).toContain('Python 3.15 and later skip it');
+      expect(rowFor(quiet, 'demo.start')).toContain('No entry points');
+    }
+  });
+
+  it('does not claim suppression when the matching .start was not inspected', async () => {
+    const info = await withFiles(
+      { name: 'demo.pth', data: 'import math\n' },
+      { name: 'demo.start', data: `${'a:b\n'.repeat(5000)}` },
+    );
+    expect(rowFor(info, 'demo.pth')).toContain('was not established');
+    expect(rowFor(info, 'demo.pth')).not.toContain('skip it because');
+    expect(rowFor(info, 'demo.start')).toContain('not inspected');
+  });
+
+  it('matches the .start by exact name in the same install folder', async () => {
+    const other = await withFiles(
+      { name: 'demo.pth', data: 'import math\n' },
+      { name: 'Demo.start', data: 'x:y\n' },
+    );
+    expect(rowFor(other, 'demo.pth')).not.toContain('skip');
+    expect(rowFor(other, 'demo.pth')).not.toContain('not established');
+    const sameFolder = await withFiles(
+      { name: 'demo.pth', data: 'import math\n' },
+      { name: 'demo_pkg-1.4.0.data/purelib/demo.start', data: 'x:y\n' },
+    );
+    expect(rowFor(sameFolder, 'demo.pth')).toContain('skip');
+  });
+
+  it('marks a .pth that is not UTF-8, or too large, as possibly running code', async () => {
+    const latin = await withFiles({ name: 'l.pth', data: Uint8Array.from([0xe9, 0x0a]) });
+    expect(rowFor(latin, 'l.pth')).toContain('May run code');
+    const big = await withFiles({ name: 'big.pth', data: `${'a'.repeat(20000)}\n` });
+    expect(rowFor(big, 'big.pth')).toContain('not inspected');
+    expect(rowFor(big, 'big.pth')).not.toContain('nothing here runs code');
+  });
+
+  it('ignores hidden files and other suffix cases, as site.py does', async () => {
+    const info = await withFiles(
+      { name: '.hidden.pth', data: 'import x\n' },
+      { name: 'UP.PTH', data: 'import y\n' },
+    );
+    expect(hasSection(info, 'Code that runs')).toBe(false);
+  });
+
+  it('says so when more startup files exist than were inspected', async () => {
+    const files = Array.from({ length: 25 }, (_, i) => ({ name: `f${i}.pth`, data: 'lib\n' }));
+    const info = await readZip(wheel(METADATA, files));
+    expect(rowFor(info, 'Other startup files')).toContain('5 more');
+    expect(rowFor(info, 'Other startup files')).toContain('cannot say');
   });
 
   it('finds startup files under the .data purelib and platlib folders, and scripts', async () => {
-    const info = await readZip(
-      wheel(METADATA, [
-        { name: 'demo_pkg-1.4.0.data/purelib/x.pth', data: 'import x\n' },
-        { name: 'demo_pkg-1.4.0.data/platlib/y.start', data: 'y:go\n' },
-        { name: 'demo_pkg-1.4.0.data/scripts/run.sh', data: 'x' },
-      ]),
+    const info = await withFiles(
+      { name: 'demo_pkg-1.4.0.data/purelib/x.pth', data: 'import x\n' },
+      { name: 'demo_pkg-1.4.0.data/platlib/y.start', data: 'y:go\n' },
+      { name: 'demo_pkg-1.4.0.data/scripts/run.sh', data: 'x' },
     );
     expect(rowFor(info, 'demo_pkg-1.4.0.data/purelib/x.pth')).toContain('Runs code');
     expect(rowFor(info, 'demo_pkg-1.4.0.data/platlib/y.start')).toContain('y:go');
@@ -297,13 +417,6 @@ describe('readZipPackage: what a wheel runs at startup', () => {
     expect((section(info, 'Code that runs') as { note?: string }).note).toContain(
       'Only a .pth line that starts with "import" runs code',
     );
-  });
-
-  it('marks a startup file larger than the read cap as not inspected', async () => {
-    const info = await readZip(
-      wheel(METADATA, [{ name: 'big.pth', data: `${'a'.repeat(20000)}\n` }]),
-    );
-    expect(rowFor(info, 'big.pth')).toContain('not inspected');
   });
 
   it('has no Code that runs section for an ordinary wheel', async () => {

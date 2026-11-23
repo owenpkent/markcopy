@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSignedData } from '../pe/fixture';
+import { embedSignatureFile } from './pkcsFixture';
 import { buildAxml, type AxmlAttr, type AxmlElement } from './axmlFixture';
 import {
   buildZip,
@@ -114,6 +115,7 @@ function apk(
   return buildZip(
     [
       { name: 'AndroidManifest.xml', data: xml },
+      { name: 'META-INF/MANIFEST.MF', data: 'Manifest-Version: 1.0\n' },
       { name: 'classes.dex', data: dex(1000) },
       { name: 'classes2.dex', data: dex(2000) },
       { name: 'lib/arm64-v8a/libx.so', data: 'x' },
@@ -320,6 +322,7 @@ describe('readZipPackage: a hostile Android package', () => {
     const table = section(info, 'Permissions') as { rows: string[][]; note?: string };
     expect(table.rows.length).toBe(200);
     expect(table.note).toBe('Showing the first 200 of 2,000 permissions.');
+    expect(info.warnings.join(' ')).toContain('more permissions or features than MarkCopy reads');
   });
 
   it('escapes markup and strips direction overrides', async () => {
@@ -447,7 +450,7 @@ describe('readZipPackage: v1 signature pairing in an APK', () => {
     const info = await readZip(
       apk(undefined, [{ name: 'META-INF/Release.RSA', data: signedBy('Release') }, sf('RELEASE')]),
     );
-    expect(value(info, 'Signature', 'Status')).toContain('no matching .SF');
+    expect(value(info, 'Signature', 'Status')).toContain('no signature file');
     expect(info.warnings.join(' ')).toContain('no matching .SF');
   });
 
@@ -455,5 +458,53 @@ describe('readZipPackage: v1 signature pairing in an APK', () => {
     const block = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x01]);
     const info = await readZip(apk(undefined, [sf('C'), { name: 'META-INF/C.RSA', data: block }]));
     expect(value(info, 'Signature', 'Status')).toContain('could not be read as a signature');
+  });
+});
+
+describe('readZipPackage: APK v1 rules follow apksig', () => {
+  const signedBy = (name: string): Uint8Array =>
+    buildSignedData({ subject: { commonName: name }, issuer: { commonName: 'CA' } });
+
+  it('accepts a pair in a nested META-INF folder, as apksig does', async () => {
+    const info = await readZip(
+      apk(undefined, [
+        { name: 'META-INF/sub/DEMO.SF', data: 'Signature-Version: 1.0\n' },
+        { name: 'META-INF/sub/DEMO.RSA', data: signedBy('Nested') },
+      ]),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Nested');
+  });
+
+  it('does not accept signature-file content inside the block in place of a .SF', async () => {
+    const info = await readZip(
+      apk(undefined, [
+        {
+          name: 'META-INF/DEMO.RSA',
+          data: embedSignatureFile(signedBy('Embedded'), 'Signature-Version: 1.0\r\n'),
+        },
+      ]),
+    );
+    expect(value(info, 'Signature', 'Status')).toContain('no signature file');
+  });
+
+  it('needs META-INF/MANIFEST.MF, as apksig does', async () => {
+    const bytes = buildZip([
+      { name: 'AndroidManifest.xml', data: buildAxml(manifest()) },
+      sf('DEMO'),
+      { name: 'META-INF/DEMO.RSA', data: signedBy('NoManifest') },
+    ]);
+    const info = await readZip(bytes);
+    expect(value(info, 'Signature', 'Status')).toContain('no META-INF/MANIFEST.MF');
+    expect(info.warnings.join(' ')).toContain('no META-INF/MANIFEST.MF');
+  });
+
+  it('does not say it is unsigned or not a signature when it could not examine every block', async () => {
+    const entries: FixtureEntry[] = [];
+    for (let i = 0; i < 20; i++) {
+      entries.push(sf(`B${i}`), { name: `META-INF/B${i}.RSA`, data: 'junk' });
+    }
+    const info = await readZip(apk(undefined, entries));
+    expect(value(info, 'Signature', 'Status')).toContain('not known');
+    expect(info.warnings).toContain('More signature blocks than MarkCopy reads were skipped.');
   });
 });

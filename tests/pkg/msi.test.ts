@@ -136,10 +136,10 @@ describe('readMsi: the package', () => {
     expect(f('Package code')).toBe('{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}');
     expect(f('Platform (from the summary template)')).toBe('x64 (64-bit)');
     expect(f('Languages')).toBe('English (US) (1033), German (1031)');
-    expect(f('Install scope (from ALLUSERS)')).toBe('ALLUSERS=1 (per-machine)');
+    expect(f('Install scope (from ALLUSERS)')).toBe('ALLUSERS=1: the per-machine context');
     expect(f('Minimum installer version')).toBe('5.0');
-    expect(f('Marked as not needing elevation')).toBe('No');
-    expect(f('Source files compressed (summary flag)')).toBe('Yes');
+    expect(f('Elevation (summary flag)')).toBe('Can be required');
+    expect(f('Source files (summary flag)')).toBe('Compressed');
     expect(f('Created with')).toBe('WiX Toolset (4.0)');
     expect(f('Created')).toBe('2023-11-14 22:13:20 UTC');
     expect(f('Last saved')).toBe('2023-11-15 22:13:20 UTC');
@@ -180,21 +180,44 @@ describe('readMsi: the package', () => {
     expect(field(info, 'What the tables define', 'File table rows')).toBe('present');
   });
 
-  it('works out the install scope', async () => {
+  it('states the install context the properties declare, cell by cell', async () => {
+    // From Microsoft's ALLUSERS and MSIINSTALLPERUSER pages: unset ALLUSERS is
+    // per-user, 1 is per-machine, 2 hands the choice to Windows Installer 5.0's
+    // MSIINSTALLPERUSER (1 per-user, empty per-machine); the property is ignored
+    // unless ALLUSERS is 2.
     const scope = async (properties: Record<string, string>) =>
       field(
-        await read({ properties: { ProductName: 'P', ...properties } }),
+        await read({
+          properties: { ProductName: 'P', ...properties },
+          summary: { pageCount: 500 },
+        }),
         'Package',
         'Install scope (from ALLUSERS)',
       );
-    expect(await scope({ ALLUSERS: '1' })).toBe('ALLUSERS=1 (per-machine)');
-    expect(await scope({})).toBe('ALLUSERS not set (per-user by default)');
-    expect(await scope({ ALLUSERS: '2' })).toBe(
-      'ALLUSERS=2 (per-machine when elevated, otherwise per-user)',
-    );
+    const older = 'earlier Windows Installer versions ignore MSIINSTALLPERUSER';
+    expect(await scope({})).toBe('ALLUSERS not set: the per-user context');
+    expect(await scope({ ALLUSERS: '' })).toBe('ALLUSERS not set: the per-user context');
+    expect(await scope({ ALLUSERS: '1' })).toBe('ALLUSERS=1: the per-machine context');
     expect(await scope({ ALLUSERS: '2', MSIINSTALLPERUSER: '1' })).toBe(
-      'ALLUSERS=2 with MSIINSTALLPERUSER=1 (per-user by default, per-machine when elevated)',
+      `ALLUSERS=2 and MSIINSTALLPERUSER=1: requests per-user (Windows Installer 5.0 and later; ${older})`,
     );
+    expect(await scope({ ALLUSERS: '2', MSIINSTALLPERUSER: '' })).toBe(
+      `ALLUSERS=2 and MSIINSTALLPERUSER empty: requests per-machine (Windows Installer 5.0 and later; ${older})`,
+    );
+    expect(await scope({ ALLUSERS: '2' })).toMatch(
+      /^ALLUSERS=2, MSIINSTALLPERUSER not set: dual-purpose/,
+    );
+    expect(await scope({ ALLUSERS: '2', MSIINSTALLPERUSER: 'x' })).toMatch(
+      /not a documented value/,
+    );
+    expect(await scope({ ALLUSERS: '7' })).toBe('ALLUSERS="7": not a documented value');
+    // Ignored unless ALLUSERS is 2, so it changes nothing here.
+    expect(await scope({ ALLUSERS: '1', MSIINSTALLPERUSER: '1' })).toBe(
+      'ALLUSERS=1: the per-machine context',
+    );
+    expect(await scope({ MSIINSTALLPERUSER: '1' })).toBe('ALLUSERS not set: the per-user context');
+    // Never says elevation changes a per-user declaration.
+    expect(await scope({ ALLUSERS: '2', MSIINSTALLPERUSER: '1' })).not.toMatch(/elevat/i);
   });
 
   it('names the platforms and the elevation and compression flags', async () => {
@@ -212,13 +235,13 @@ describe('readMsi: the package', () => {
 
     const words = async (wordCount: number) => read({ summary: { wordCount, pageCount: 301 } });
     const a = await words(8 | 2);
-    expect(field(a, 'Package', 'Marked as not needing elevation')).toBe('Yes');
-    expect(field(a, 'Package', 'Source files compressed (summary flag)')).toBe('Yes');
+    expect(field(a, 'Package', 'Elevation (summary flag)')).toBe('Not required');
+    expect(field(a, 'Package', 'Source files (summary flag)')).toBe('Compressed');
     expect(field(a, 'Package', 'Minimum installer version')).toBe('3.1');
     const b = await words(1 | 4);
-    expect(field(b, 'Package', 'Marked as not needing elevation')).toBe('No');
-    expect(field(b, 'Package', 'Source files compressed (summary flag)')).toBe('No');
-    expect(field(b, 'Package', 'Administrative image (summary flag)')).toBe('Yes');
+    expect(field(b, 'Package', 'Elevation (summary flag)')).toBe('Can be required');
+    expect(field(b, 'Package', 'Source files (summary flag)')).toBe('Uncompressed');
+    expect(field(b, 'Package', 'Source is (summary flag)')).toBe('An administrative image');
   });
 
   it('falls back to the summary for a package with no Property rows', async () => {
@@ -339,11 +362,56 @@ describe('readMsi: what the file is', () => {
     expect(transform.format).toBe('Windows Installer transform');
   });
 
-  it('calls a package with a ModuleSignature table a merge module', async () => {
-    const info = await read({
-      tables: [{ name: 'ModuleSignature', columns: ['s', 'i2', 's'], rows: 1 }],
-    });
+  const moduleTables = [
+    { name: 'ModuleSignature', columns: ['s', 'i2', 's'] as ('s' | 'i2')[], rows: 1 },
+    { name: 'ModuleComponents', columns: ['s', 's', 'i2'] as ('s' | 'i2')[], rows: 2 },
+  ];
+  const merged = 'Merged modules (ModuleSignature rows)';
+
+  it('calls a database a merge module only with the module evidence and none against', async () => {
+    // One ModuleSignature row, ModuleComponents, no Feature table, no ProductCode.
+    const info = await read({ tables: moduleTables });
     expect(info.format).toBe('Windows Installer merge module');
+    expect(field(info, 'What the tables define', merged)).toBeUndefined();
+  });
+
+  it('keeps a product installer with merged-module inventory a package', async () => {
+    const info = await read({
+      properties: { ProductName: 'P', ProductCode: '{11111111-2222-3333-4444-555555555555}' },
+      tables: [
+        { name: 'Feature', columns: ['s', 's', 's', 's', 'i2', 'i2', 's', 'i2'], rows: 2 },
+        { name: 'ModuleSignature', columns: ['s', 'i2', 's'], rows: 2 },
+        moduleTables[1],
+      ],
+    });
+    expect(info.format).toBe('Windows Installer package');
+    expect(field(info, 'What the tables define', merged)).toBe('2');
+  });
+
+  it('keeps a one-row ModuleSignature package a package when a contrary sign is present', async () => {
+    const withFeature = await read({
+      tables: [...moduleTables, { name: 'Feature', columns: ['s', 'i2'], rows: 1 }],
+    });
+    expect(withFeature.format).toBe('Windows Installer package');
+    const withProduct = await read({
+      properties: { ProductCode: '{11111111-2222-3333-4444-555555555555}' },
+      tables: moduleTables,
+    });
+    expect(withProduct.format).toBe('Windows Installer package');
+    const twoRows = await read({ tables: [{ ...moduleTables[0], rows: 2 }, moduleTables[1]] });
+    expect(twoRows.format).toBe('Windows Installer package');
+    const noComponents = await read({ tables: [moduleTables[0]] });
+    expect(noComponents.format).toBe('Windows Installer package');
+  });
+
+  it('leaves a patch template out of the platform and language rows', async () => {
+    const info = await read({
+      clsid: CLSID_PATCH,
+      noPool: true,
+      summary: { template: '{11111111-2222-3333-4444-555555555555}' },
+    });
+    expect(field(info, 'Package', 'Platform (from the summary template)')).toBeUndefined();
+    expect(field(info, 'Package', 'Languages')).toBeUndefined();
   });
 
   it('recognises a package by its string pool when the CLSID is missing', async () => {

@@ -1,6 +1,7 @@
 import { deflateSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { parseJarManifest } from '../../src/pkg/jar';
+import { embedSignatureFile } from './pkcsFixture';
 import { buildSignedData } from '../pe/fixture';
 import {
   buildZip,
@@ -397,7 +398,7 @@ describe('readZipPackage: JAR signature pairing', () => {
     expect(hasSection(lone, 'Signature')).toBe(false);
     expect(lone.warnings.join(' ')).toContain('no signature block');
     const bare = await readZip(jar([], [{ name: 'META-INF/B.RSA', data: signedBy('B') }]));
-    expect(value(bare, 'Signature', 'Status')).toContain('no matching .SF');
+    expect(value(bare, 'Signature', 'Status')).toContain('no signature file');
   });
 
   it('pairs a base name that differs only in case, as the JDK does', async () => {
@@ -405,5 +406,88 @@ describe('readZipPackage: JAR signature pairing', () => {
       jar([], [{ name: 'META-INF/Release.RSA', data: signedBy('Release') }, sf('RELEASE')]),
     );
     expect(value(info, 'Signature', 'Signer')).toBe('Release');
+  });
+});
+
+describe('readZipPackage: JAR signature rules follow OpenJDK', () => {
+  const signedBy = (name: string): Uint8Array =>
+    buildSignedData({ subject: { commonName: name }, issuer: { commonName: 'CA' } });
+  const sf = (base: string): FixtureEntry => ({
+    name: `META-INF/${base}.SF`,
+    data: 'Signature-Version: 1.0\n',
+  });
+
+  it('does not treat a pair in a nested META-INF folder as the JAR signature', async () => {
+    const info = await readZip(
+      jar(
+        [],
+        [
+          { name: 'META-INF/examples/DEMO.SF', data: 'Signature-Version: 1.0\n' },
+          { name: 'META-INF/examples/DEMO.RSA', data: signedBy('Nested') },
+        ],
+      ),
+    );
+    expect(hasSection(info, 'Signature')).toBe(false);
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('accepts a block that carries its own signature file, without an external .SF', async () => {
+    const block = embedSignatureFile(signedBy('Internal'), 'Signature-Version: 1.0\r\n');
+    const info = await readZip(jar([], [{ name: 'META-INF/DEMO.RSA', data: block }]));
+    expect(value(info, 'Signature', 'Signer')).toBe('Internal');
+    expect(value(info, 'Signature', 'Status')).toContain('JAR signing');
+  });
+
+  it('does not accept a block with an empty embedded signature file and no .SF', async () => {
+    const block = embedSignatureFile(signedBy('Empty'), '');
+    const info = await readZip(jar([], [{ name: 'META-INF/DEMO.RSA', data: block }]));
+    expect(value(info, 'Signature', 'Status')).toContain('no signature file');
+    expect(info.warnings.join(' ')).toContain('no signature file inside it');
+  });
+
+  it('does not accept an unpaired block with no embedded content', async () => {
+    const info = await readZip(jar([], [{ name: 'META-INF/DEMO.RSA', data: signedBy('Bare') }]));
+    expect(value(info, 'Signature', 'Status')).toContain('no signature file');
+  });
+
+  it('matches META-INF and the extensions without regard to case, as OpenJDK does', async () => {
+    const info = await readZip(
+      jar(
+        [],
+        [
+          { name: 'meta-inf/release.sf', data: 'Signature-Version: 1.0\n' },
+          { name: 'Meta-Inf/RELEASE.rsa', data: signedBy('Release') },
+        ],
+      ),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Release');
+  });
+
+  it('prefers a paired block but still finds an embedded one behind an unreadable one', async () => {
+    const info = await readZip(
+      jar(
+        [],
+        [
+          { name: 'META-INF/BAD.RSA', data: 'junk' },
+          {
+            name: 'META-INF/GOOD.RSA',
+            data: embedSignatureFile(signedBy('Good'), 'Signature-Version: 1.0\n'),
+          },
+        ],
+      ),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Good');
+    expect(info.warnings).toContain(
+      '1 signature block in META-INF could not be read as a signature.',
+    );
+  });
+
+  it('says it did not examine every block when there are more than it reads', async () => {
+    const entries: FixtureEntry[] = [];
+    for (let i = 0; i < 20; i++) {
+      entries.push(sf(`B${i}`), { name: `META-INF/B${i}.RSA`, data: 'junk' });
+    }
+    const info = await readZip(jar([], entries));
+    expect(value(info, 'Signature', 'Status')).toContain('not known');
   });
 });

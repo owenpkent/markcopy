@@ -222,8 +222,8 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   );
 
   const after: InfoSection[] = [];
-  // The JDK pairs META-INF/X.SF with X.RSA/.DSA/.EC without regard to case.
-  const v1 = await readV1Signatures(zip, true, warnings);
+  // OpenJDK pairs direct META-INF children without regard to case; see v1Name.
+  const v1 = await readV1Signatures(zip, 'jdk', warnings);
   if (v1.signed.length > 0) {
     after.push(v1Section('JAR signing', v1));
   } else if (v1.notEstablished) {
