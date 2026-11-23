@@ -29,6 +29,9 @@ const MAX_SIDE = 256;
 // A PNG states its own size. One much larger than an icon can be is refused
 // rather than handed to a decoder.
 const MAX_PNG_SIDE = 1024;
+// A 256 pixel icon as a PNG is tens of kilobytes; the largest seen in a real
+// program was under a hundred. Anything much larger is not an icon.
+const MAX_PNG_BYTES = 512 * 1024;
 
 /**
  * The best image in an icon group: the largest, and among equals the deepest.
@@ -212,11 +215,28 @@ function bitmapToPng(data: Uint8Array): PeIcon | undefined {
 
 /** One icon image resource as a PNG, or undefined when it is not something to draw. */
 export function iconToPng(data: Uint8Array): PeIcon | undefined {
-  if (data.length >= 24 && PNG_SIGNATURE.every((byte, i) => data[i] === byte)) {
+  if (data.length >= 33 && PNG_SIGNATURE.every((byte, i) => data[i] === byte)) {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const width = view.getUint32(16);
     const height = view.getUint32(20);
-    return width >= 1 && height >= 1 && width <= MAX_PNG_SIDE && height <= MAX_PNG_SIDE
+    // The bytes go to the webview's image decoder unchanged, so they are only
+    // sent when they are what a PNG icon is: the header chunk first and of the
+    // right length, eight bits a channel (sixteen doubles what the decoder
+    // allocates for the same size), a size an icon has, and no more bytes
+    // than an icon needs.
+    const headerFirst =
+      view.getUint32(8) === 13 &&
+      data[12] === 0x49 &&
+      data[13] === 0x48 &&
+      data[14] === 0x44 &&
+      data[15] === 0x52;
+    return headerFirst &&
+      data[24] <= 8 &&
+      data.length <= MAX_PNG_BYTES &&
+      width >= 1 &&
+      height >= 1 &&
+      width <= MAX_PNG_SIDE &&
+      height <= MAX_PNG_SIDE
       ? { width, height, png: data }
       : undefined;
   }
