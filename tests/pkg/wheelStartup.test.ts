@@ -56,7 +56,9 @@ describe('readZipPackage: where a wheel installs its startup files', () => {
     ]) {
       for (const folder of ['purelib', 'platlib']) {
         const info = await readZip(build(wheelText, [pth, quiet(`${DATA}/${folder}/demo.start`)]));
-        expect(rowFor(info, 'demo.pth')).toContain('depends on the installation scheme');
+        expect(rowFor(info, 'demo.pth')).toContain(
+          'whether it installs into the same directory as this file is not',
+        );
         expect(rowFor(info, 'demo.pth')).toContain('Root-Is-Purelib');
         expect(rowFor(info, 'demo.pth')).not.toContain(SKIPPED);
       }
@@ -202,5 +204,46 @@ describe('readZipPackage: .start copies split between purelib and platlib', () =
     expect(row).toContain('was not established');
     expect(row).not.toContain(SKIPPED);
     expect(row).not.toContain(ONE_DIRECTORY);
+  });
+});
+
+/** The archive with its last central-directory record's signature spoiled, so listing stops before it. */
+function cutListing(bytes: Uint8Array): Uint8Array {
+  const copy = bytes.slice();
+  for (let i = copy.length - 4; i >= 0; i--) {
+    if (copy[i] === 0x50 && copy[i + 1] === 0x4b && copy[i + 2] === 0x01 && copy[i + 3] === 0x02) {
+      copy[i + 2] = 0x7f;
+      return copy;
+    }
+  }
+  throw new Error('no central directory record');
+}
+
+describe('readZipPackage: startup verdicts that the archive does not settle', () => {
+  it('does not say the import is skipped when the listing is incomplete, even with a matching pair in view', async () => {
+    const bytes = build(PURE, [
+      pth,
+      { name: 'demo.start', data: '# comment\n' },
+      quiet('later.txt'),
+    ]);
+    const info = await readZip(cutListing(bytes));
+    const row = rowFor(info, 'demo.pth');
+    expect(row).toContain('Runs code');
+    expect(row).not.toContain(SKIPPED);
+    expect(row).toContain(
+      'the archive listing is incomplete and a copy of that .start may be unlisted',
+    );
+  });
+
+  it('keeps an unknown root folder unknown instead of choosing the split-scheme outcome', async () => {
+    const overCap = 'Wheel-Version: 1.0\nRoot-Is-Purelib: false\n' + '#'.repeat(300 * 1024) + '\n';
+    for (const wheelText of ['Wheel-Version: 1.0\n', overCap]) {
+      const info = await readZip(build(wheelText, [pth, quiet(`${DATA}/platlib/demo.start`)]));
+      const row = rowFor(info, 'demo.pth');
+      expect(row).toContain('whether it installs into the same directory as this file is not');
+      expect(row).toContain('skipped where the two share a directory and runs where they do not');
+      expect(row).not.toContain('runs where they differ');
+      expect(row).not.toContain(SKIPPED);
+    }
   });
 });

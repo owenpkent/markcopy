@@ -460,8 +460,32 @@ function semicolonList(value: string | undefined): string | undefined {
     : shown;
 }
 
-/** A patch's Revision Number: the patch code, then the codes it obsoletes. */
-function patchCodes(value: string | undefined): [string, string | undefined][] {
+/**
+ * Whether a patch carries the sequencing data that replaces its legacy obsolete
+ * list. Microsoft's Revision Number Summary page: "If there is sequencing
+ * information present in the MsiPatchSequence table, Windows Installer 3.0 uses
+ * the sequencing information in the table and ignores the list of obsolete
+ * patches included in the Revision Number Summary property. Windows Installer
+ * 3.0 can still use the obsolete patch information in the Revision Number
+ * Summary property if the package does not contain a MsiPatchSequence table."
+ */
+type PatchSequence = 'rows' | 'none' | 'unknown';
+
+const LEGACY_OBSOLETE = 'Obsolete patches (legacy list in the summary)';
+
+function obsoleteNote(sequence: PatchSequence): string {
+  return sequence === 'rows'
+    ? 'Windows Installer 3.0 and later ignore this list, because this patch has sequencing information in an MsiPatchSequence table'
+    : sequence === 'none'
+      ? 'used when the patch has no MsiPatchSequence sequencing information, and this patch has none'
+      : 'Windows Installer 3.0 and later ignore this list when the patch has MsiPatchSequence sequencing information, and whether this one has could not be read';
+}
+
+/** A patch's Revision Number: the patch code, then the legacy list of patches it obsoletes. */
+function patchCodes(
+  value: string | undefined,
+  sequence: PatchSequence,
+): [string, string | undefined][] {
   if (!value) {
     return [];
   }
@@ -472,14 +496,13 @@ function patchCodes(value: string | undefined): [string, string | undefined][] {
     return [['Revision number (from the summary)', trimmed]];
   }
   const obsolete = guids.slice(1);
+  const listed =
+    obsolete.length > MAX_LIST_ITEMS
+      ? `${obsolete.slice(0, MAX_LIST_ITEMS).join(', ')} (and ${formatNumber(obsolete.length - MAX_LIST_ITEMS)} more)`
+      : obsolete.join(', ');
   return [
     ['Patch code', guids[0]],
-    [
-      'Obsoletes patches',
-      obsolete.length > MAX_LIST_ITEMS
-        ? `${obsolete.slice(0, MAX_LIST_ITEMS).join(', ')} (and ${formatNumber(obsolete.length - MAX_LIST_ITEMS)} more)`
-        : obsolete.join(', ') || undefined,
-    ],
+    [LEGACY_OBSOLETE, listed ? `${listed} (${obsoleteNote(sequence)})` : undefined],
   ];
 }
 
@@ -544,6 +567,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     'Property',
     'Binary',
     'ModuleSignature',
+    'MsiPatchSequence',
     'ModuleComponents',
     ...COUNTED.map(([table]) => table),
   ]);
@@ -688,7 +712,11 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     const columnsBytes = await tryRead(cfb, tables.get('_Columns'), MAX_COLUMNS_STREAM);
     if (columnsBytes) {
       const widths = rowWidths(columnsBytes, strings);
-      for (const table of [...COUNTED.map(([name]) => name), 'ModuleSignature']) {
+      for (const table of [
+        ...COUNTED.map(([name]) => name),
+        'ModuleSignature',
+        'MsiPatchSequence',
+      ]) {
         const entry = tables.get(table);
         const width = widths.get(table);
         if (entry && width) {
@@ -743,6 +771,15 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   const isPatch = summaryKind === 'patch';
   const isTransform = summaryKind === 'transform';
   const isPackage = summaryKind === 'package';
+  // A table with no stream has no rows; one whose stream could not be measured is not known.
+  const sequenceRows = counts.get('MsiPatchSequence');
+  const patchSequence: PatchSequence = !tables.has('MsiPatchSequence')
+    ? 'none'
+    : sequenceRows === undefined
+      ? 'unknown'
+      : sequenceRows > 0
+        ? 'rows'
+        : 'none';
   const template = text(7);
   const [platformText, languageText] = template && !isPatch ? template.split(';') : [];
   const platform = platformText
@@ -809,7 +846,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
       ['Product code', properties.get('ProductCode')],
       ['Upgrade code', properties.get('UpgradeCode')],
       ...(isPatch
-        ? patchCodes(text(9))
+        ? patchCodes(text(9), patchSequence)
         : isTransform
           ? transformProducts(text(9))
           : [['Package code', text(9)] as [string, string | undefined]]),
