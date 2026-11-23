@@ -45,7 +45,8 @@ vi.mock('vscode', () => ({
 }));
 
 import { DocxEditorProvider } from '../src/docxEditor';
-import { ExeEditorProvider } from '../src/exeEditor';
+import { ExeEditorProvider, readRange } from '../src/exeEditor';
+import { readPe } from '../src/pe';
 import { buildPe, iconBitmap } from './pe/fixture';
 import type * as vscode from 'vscode';
 
@@ -264,5 +265,51 @@ describe('ExeEditorProvider icon', () => {
     const messages = await messagesFor(buildPe(), 'plain.exe');
     expect(messages.some((m) => m.type === 'media')).toBe(false);
     expect(messages.find((m) => m.type === 'render')?.html).not.toContain('<img');
+  });
+});
+
+// A file handle may hand back fewer bytes than it was asked for without being
+// at the end of the file (a network share does). The reader caches whatever a
+// page read returns as the whole page, so a short answer passed straight
+// through makes a complete file look truncated.
+describe('readRange', () => {
+  // A handle over `bytes` that never returns more than `most` bytes per read.
+  const stingy = (bytes: Uint8Array, most: number) => {
+    const calls: number[] = [];
+    return {
+      calls,
+      read: (buffer: Uint8Array, offset: number, length: number, position: number) => {
+        const take = Math.max(0, Math.min(length, most, bytes.length - position));
+        buffer.set(bytes.subarray(position, position + take), offset);
+        calls.push(take);
+        return Promise.resolve({ bytesRead: take, buffer });
+      },
+    } as unknown as Parameters<typeof readRange>[0] & { calls: number[] };
+  };
+
+  it('keeps reading until the range is full when each read comes back short', async () => {
+    const bytes = Uint8Array.from({ length: 1000 }, (_, i) => i % 251);
+    const handle = stingy(bytes, 128);
+    const got = await readRange(handle, 100, 600);
+    expect(got).toEqual(bytes.subarray(100, 700));
+    expect(handle.calls.length).toBeGreaterThan(4);
+  });
+
+  it('returns what there is when the file really ends inside the range', async () => {
+    const bytes = Uint8Array.from({ length: 300 }, (_, i) => i % 251);
+    const got = await readRange(stingy(bytes, 128), 200, 500);
+    expect(got).toEqual(bytes.subarray(200));
+    expect(await readRange(stingy(bytes, 128), 300, 64)).toHaveLength(0);
+  });
+
+  it('lets a complete image be read through a handle that short-reads', async () => {
+    const bytes = buildPe({ version: { strings: [['ProductName', 'Contoso']] } });
+    const handle = stingy(bytes, 128);
+    const info = await readPe({
+      size: bytes.length,
+      read: (offset, length) => readRange(handle, offset, length),
+    });
+    expect(info.warnings).toEqual([]);
+    expect(info.version?.strings).toContainEqual(['ProductName', 'Contoso']);
   });
 });

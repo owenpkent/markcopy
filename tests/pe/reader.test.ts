@@ -1,10 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { bytesSource, PeError, readPe, type ByteSource } from '../../src/pe';
+import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../../src/pe';
 import { readSigner } from '../../src/pe/signer';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
 
-const read = (spec: PeSpec = {}) => readPe(bytesSource(buildPe(spec)));
+const read = (spec: PeSpec = {}, patch: (bytes: Uint8Array) => Uint8Array = (b) => b) =>
+  readPe(bytesSource(patch(buildPe(spec))));
+
+// Overwrite NumberOfFunctions in a built image's export directory, found the
+// way a loader finds it: data directory 0, mapped through the section table.
+function patchExportSlots(bytes: Uint8Array, slots: number): Uint8Array {
+  const out = bytes.slice();
+  const view = new DataView(out.buffer);
+  const pe = view.getUint32(0x3c, true);
+  const optional = pe + 24;
+  const plus = view.getUint16(optional, true) === 0x20b;
+  const rva = view.getUint32(optional + (plus ? 112 : 96), true);
+  const table = optional + view.getUint16(pe + 20, true);
+  for (let i = 0; i < view.getUint16(pe + 6, true); i++) {
+    const at = table + i * 40;
+    const start = view.getUint32(at + 12, true);
+    if (rva >= start && rva - start < view.getUint32(at + 16, true)) {
+      view.setUint32(view.getUint32(at + 20, true) + (rva - start) + 20, slots, true);
+      return out;
+    }
+  }
+  throw new Error('the image has no export directory to patch');
+}
 
 const RLO = String.fromCharCode(0x202e);
 
@@ -275,6 +297,66 @@ describe('readPe: manifest', () => {
     });
   });
 
+  // The stock Visual Studio app.manifest keeps this comment above the live
+  // element. Reading the text instead of the document finds the comment first.
+  it('reads the live execution level, not the commented-out examples above it', async () => {
+    const commented = `<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="MyApplication.app"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <!-- UAC Manifest Options
+             If you want to change the Windows User Account Control level replace the
+             requestedExecutionLevel node with one of the following.
+
+        <requestedExecutionLevel  level="asInvoker" uiAccess="true" />
+        <requestedExecutionLevel  level="requireAdministrator" uiAccess="false" />
+        <requestedExecutionLevel  level="highestAvailable" uiAccess="false" />
+        -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <!-- <dpiAware>true</dpiAware> -->
+</assembly>`;
+    const info = await read({ manifest: commented });
+    expect(info.manifest).toEqual({
+      executionLevel: 'requireAdministrator',
+      uiAccess: 'false',
+      dpiAware: undefined,
+      identity: 'MyApplication.app 1.0.0.0',
+    });
+    expect(info.warnings).toEqual([]);
+    expect(renderPeHtml(info, { fileName: 'a.exe' })).toContain('asks for administrator rights');
+  });
+
+  it('takes the identity under <assembly>, not a dependency listed before it', async () => {
+    const dependencyFirst = `<assembly xmlns="urn:schemas-microsoft-com:asm.v1">
+  <dependency><dependentAssembly>
+    <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"/>
+  </dependentAssembly></dependency>
+  <assemblyIdentity name="Contoso.Tool" version="3.0.0.0"/>
+</assembly>`;
+    expect((await read({ manifest: dependencyFirst })).manifest?.identity).toBe(
+      'Contoso.Tool 3.0.0.0',
+    );
+    const dependencyOnly = `<assembly xmlns="urn:schemas-microsoft-com:asm.v1">
+  <dependency><dependentAssembly>
+    <assemblyIdentity name="Microsoft.Windows.Common-Controls" version="6.0.0.0"/>
+  </dependentAssembly></dependency>
+</assembly>`;
+    expect((await read({ manifest: dependencyOnly })).manifest).toBeUndefined();
+  });
+
+  it('warns instead of guessing when the manifest is not well-formed XML', async () => {
+    const info = await read({
+      manifest: '<assembly><requestedExecutionLevel level="asInvoker"></assembly>',
+    });
+    expect(info.manifest).toBeUndefined();
+    expect(info.warnings).toContain('The manifest could not be read.');
+  });
+
   it('prefers dpiAwareness, and accepts prefixed elements and single quotes', async () => {
     const prefixed = `<asmv1:assembly xmlns:asmv1="urn:schemas-microsoft-com:asm.v1">
   <asmv1:assemblyIdentity name='Only.Name'/>
@@ -342,6 +424,7 @@ describe('readPe: exports', () => {
     expect(info.exports).toEqual({
       name: 'tool.dll',
       functions: 2,
+      slots: 2,
       named: 2,
       names: ['Alpha', 'Beta'],
     });
@@ -349,7 +432,55 @@ describe('readPe: exports', () => {
 
   it('counts functions that are exported by ordinal only', async () => {
     const info = await read({ exports: { dllName: 'x.dll', names: ['One'], functions: 5 } });
-    expect(info.exports).toMatchObject({ functions: 5, named: 1, names: ['One'] });
+    expect(info.exports).toMatchObject({ functions: 5, slots: 5, named: 1, names: ['One'] });
+  });
+
+  // The header's count is the length of the address table. A library whose
+  // ordinals have gaps (shell32.dll: 2,001 slots, 843 exports) leaves the
+  // unused slots zero, and those are not functions.
+  it('does not count the unused ordinal slots of a sparse table as functions', async () => {
+    const info = await read({
+      dll: true,
+      exports: {
+        dllName: 'sparse.dll',
+        names: ['Only'],
+        functions: 10,
+        unused: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      },
+    });
+    expect(info.exports).toMatchObject({ functions: 1, slots: 10, named: 1 });
+    const html = renderPeHtml(info, { fileName: 'sparse.dll' });
+    expect(html).toContain('1 function as sparse.dll, 1 by name.');
+    expect(html).toContain('Its ordinals run to 10, with 9 unused.');
+    expect(html).not.toContain('10 functions');
+  });
+
+  it('says nothing about ordinals when every slot is in use', async () => {
+    const info = await read({ exports: { dllName: 'x.dll', names: ['A', 'B'] } });
+    const html = renderPeHtml(info, { fileName: 'x.dll' });
+    expect(html).toContain('2 functions as x.dll, 2 by name.');
+    expect(html).not.toContain('ordinals');
+  });
+
+  it('reports slots, not functions, when the address table cannot be read', async () => {
+    // A table of 60,000 slots in a file a few kilobytes long runs off its end.
+    const info = await read({ exports: { dllName: 'x.dll', names: ['A'], functions: 2 } }, (b) =>
+      patchExportSlots(b, 60000),
+    );
+    expect(info.exports?.functions).toBeUndefined();
+    expect(info.exports?.slots).toBe(60000);
+    expect(info.exports?.names).toEqual(['A']);
+    const html = renderPeHtml(info, { fileName: 'x.dll' });
+    expect(html).toContain('60,000 export table slots as x.dll, 1 by name.');
+    expect(html).not.toContain('60,000 functions');
+  });
+
+  it('does not try to count a table longer than ordinals can address', async () => {
+    const info = await read({ exports: { dllName: 'x.dll', names: ['A'] } }, (b) =>
+      patchExportSlots(b, 0x7fffffff),
+    );
+    expect(info.exports?.functions).toBeUndefined();
+    expect(info.exports?.slots).toBe(0x7fffffff);
   });
 
   it('lists at most 100 names but reports how many there are', async () => {
