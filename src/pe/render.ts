@@ -336,6 +336,16 @@ function exportsSection(info: PeInfo): string {
   return html;
 }
 
+/**
+ * One headed part of the page. The page lays these out in two columns when it
+ * is wide enough (see .mc-exe in media/preview.css), so a short table of
+ * properties does not sit beside half a screen of nothing. `wide` is for a
+ * grid that needs the whole width: many columns, or a long list.
+ */
+function block(heading: string, body: string, wide = false): string {
+  return `<div class="mc-info-section${wide ? ' mc-info-wide' : ''}"><h2>${escapeHtml(heading)}</h2>${body}</div>`;
+}
+
 export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   const description = info.version?.strings.find(([key]) => key === 'FileDescription')?.[1];
   const summary = `${info.kind}, ${architecture(info)}`;
@@ -357,10 +367,10 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   for (const warning of info.warnings) {
     parts.push(`<p class="mc-exe-note">${escapeHtml(warning)}</p>`);
   }
-  parts.push('<h2>Version</h2>', versionSection(info));
-  parts.push('<h2>File</h2>', fileSection(info, options));
-  parts.push('<h2>Signature</h2>', signatureSection(info));
-  parts.push('<h2>Permissions and protections</h2>', protectionSection(info));
+  parts.push(block('Version', versionSection(info)));
+  parts.push(block('File', fileSection(info, options)));
+  parts.push(block('Signature', signatureSection(info)));
+  parts.push(block('Permissions and protections', protectionSection(info)));
   if (info.debug?.pdbPath || info.debug?.guid) {
     const rows: Row[] = [];
     if (info.debug.pdbPath) {
@@ -369,20 +379,23 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
     if (info.debug.guid) {
       rows.push(['Symbol ID', `${info.debug.guid}, age ${info.debug.age ?? 0}`]);
     }
-    parts.push('<h2>Debug information</h2>', properties(rows));
+    parts.push(block('Debug information', properties(rows)));
   }
   if (info.sections.length > 0) {
-    parts.push('<h2>Sections</h2>', sectionsSection(info));
+    parts.push(block('Sections', sectionsSection(info), true));
   }
   if (info.imports.length > 0) {
     parts.push(
-      `<h2>Imports</h2>`,
-      `<p>${number(info.imports.length)} ${info.imports.length === 1 ? 'library' : 'libraries'}.</p>`,
-      importsSection(info),
+      block(
+        'Imports',
+        `<p>${number(info.imports.length)} ${info.imports.length === 1 ? 'library' : 'libraries'}.</p>` +
+          importsSection(info),
+        true,
+      ),
     );
   }
   if (info.exports) {
-    parts.push('<h2>Exports</h2>', exportsSection(info));
+    parts.push(block('Exports', exportsSection(info), true));
   }
   return `<div class="mc-exe">${parts.join('')}</div>`;
 }

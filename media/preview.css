@@ -2497,6 +2497,51 @@ ol.mc-pptx-body {
    values that have no spaces to break at (a SHA-256, a symbol path, a
    decorated export name), which would otherwise push the table off the page. */
 
+/* A page of short property tables in the 900px reading column is a narrow
+   strip of table beside a wide strip of nothing. These pages get a wider
+   column, their sections flow in two columns when there is room for two, and
+   every table fills the column it is in. A grid that needs the whole width
+   (many columns, or a long list) spans both. */
+body[data-mc-kind='exe'] .markdown-body,
+body[data-mc-kind='package'] .markdown-body {
+  max-width: 1280px;
+}
+
+.mc-exe {
+  columns: 2 420px;
+  column-gap: 36px;
+}
+
+/* The file name, the summary lines and any warning run across the top. */
+.mc-exe > * {
+  column-span: all;
+}
+
+.mc-exe > .mc-info-section {
+  column-span: none;
+  break-inside: avoid;
+}
+
+.mc-exe > .mc-info-section.mc-info-wide {
+  column-span: all;
+}
+
+.mc-exe table {
+  display: table;
+  width: 100%;
+}
+
+/* Labels in one column get the same share of every table in it, so the value
+   columns of neighbouring tables line up. */
+.mc-exe .mc-info-section:not(.mc-info-wide) th:first-child,
+.mc-exe .mc-info-section:not(.mc-info-wide) td:first-child {
+  width: 36%;
+}
+
+.mc-exe table th {
+  text-align: left;
+}
+
 .mc-exe table td {
   vertical-align: top;
   overflow-wrap: anywhere;
