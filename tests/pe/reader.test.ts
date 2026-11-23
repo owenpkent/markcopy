@@ -80,7 +80,7 @@ describe('readPe: headers', () => {
     expect(Object.fromEntries(info.mitigations)).toEqual({
       'Address space layout randomization (ASLR)': true,
       'High-entropy ASLR': true,
-      'Data execution prevention (DEP)': true,
+      'DEP compatible (NX_COMPAT)': true,
       'Control Flow Guard': true,
       'Forced integrity checks': false,
       'AppContainer only': false,
@@ -355,6 +355,63 @@ describe('readPe: manifest', () => {
     });
     expect(info.manifest).toBeUndefined();
     expect(info.warnings).toContain('The manifest could not be read.');
+  });
+
+  // Windows applies resource ID 1 to an executable's process. A file can hold
+  // other manifests, and named ones sort first in the directory, so "the first
+  // manifest" is not it.
+  describe("which manifest is the program's own", () => {
+    const manifestOf = (name: string, level: string): string =>
+      `<assembly xmlns="urn:schemas-microsoft-com:asm.v1"><assemblyIdentity name="${name}" version="1.0.0.0"/>` +
+      `<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges>` +
+      `<requestedExecutionLevel level="${level}" uiAccess="false"/></requestedPrivileges></security></trustInfo></assembly>`;
+
+    it('reads resource ID 1, not a named manifest that comes before it', async () => {
+      const info = await read({
+        manifest: manifestOf('Primary.Process', 'requireAdministrator'),
+        extraManifests: [{ name: 'ALTERNATE', xml: manifestOf('Secondary.Context', 'asInvoker') }],
+      });
+      expect(info.manifest?.identity).toBe('Primary.Process 1.0.0.0');
+      expect(info.manifest?.executionLevel).toBe('requireAdministrator');
+      expect(info.warnings).toEqual([]);
+      expect(renderPeHtml(info, { fileName: 'a.exe' })).toContain('asks for administrator rights');
+    });
+
+    it('reads resource ID 1 when a lower-sorting numbered manifest is also there', async () => {
+      const info = await read({
+        manifest: manifestOf('Primary.Process', 'highestAvailable'),
+        extraManifests: [
+          { name: 3, xml: manifestOf('Third', 'asInvoker') },
+          { name: 'A', xml: manifestOf('Named', 'asInvoker') },
+        ],
+      });
+      expect(info.manifest?.identity).toBe('Primary.Process 1.0.0.0');
+      expect(info.manifest?.executionLevel).toBe('highestAvailable');
+    });
+
+    it('shows no manifest for a program that has only a secondary one', async () => {
+      const info = await read({
+        extraManifests: [{ name: 'ALTERNATE', xml: manifestOf('Secondary.Context', 'asInvoker') }],
+      });
+      expect(info.manifest).toBeUndefined();
+      expect(info.warnings).toEqual([]);
+      const named = await read({ manifest: manifestOf('Other', 'asInvoker'), manifestId: 7 });
+      expect(named.manifest).toBeUndefined();
+    });
+
+    it("reads a library's manifest at ID 2, and falls back to ID 1", async () => {
+      const two = await read({
+        dll: true,
+        manifest: manifestOf('Library.Isolation', 'asInvoker'),
+        manifestId: 2,
+      });
+      expect(two.manifest?.identity).toBe('Library.Isolation 1.0.0.0');
+      const one = await read({ dll: true, manifest: manifestOf('Library.One', 'asInvoker') });
+      expect(one.manifest?.identity).toBe('Library.One 1.0.0.0');
+      // And an executable does not take ID 2 for its own.
+      const exe = await read({ manifest: manifestOf('Not.Mine', 'asInvoker'), manifestId: 2 });
+      expect(exe.manifest).toBeUndefined();
+    });
   });
 
   it('prefers dpiAwareness, and accepts prefixed elements and single quotes', async () => {

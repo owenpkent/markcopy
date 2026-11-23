@@ -408,3 +408,56 @@ describe('iconToPng: only passes through what a PNG icon is', () => {
     expect(iconToPng(padded.subarray(0, 512 * 1024))).toBeDefined();
   });
 });
+
+// A 24 or 32 bit bitmap needs no colour table and may carry one anyway
+// (biClrUsed). The pixels start after it. Skipping none drew the table's first
+// colour instead of the icon: Windows draws this file red, and the reader drew
+// it green.
+describe('iconToPng: a colour table in a direct-colour bitmap', () => {
+  const rgbaOf = (png: Uint8Array): number[] => {
+    const idat = png.subarray(8 + 25 + 8, png.length - 12 - 4);
+    return [...inflateSync(idat)].slice(1, 5);
+  };
+
+  it('draws the pixel, not the palette entry before it, at 24 bits', () => {
+    const icon = iconToPng(
+      iconBitmap({
+        width: 1,
+        height: 1,
+        bitCount: 24,
+        palette: [[0, 255, 0]],
+        rgba: [[255, 0, 0, 255]],
+      }),
+    );
+    expect(icon).toMatchObject({ width: 1, height: 1 });
+    expect(rgbaOf(icon!.png)).toEqual([255, 0, 0, 255]);
+  });
+
+  it('does the same at 32 bits, with several entries, and finds the mask after the pixels', () => {
+    const icon = iconToPng(
+      iconBitmap({
+        width: 2,
+        height: 1,
+        bitCount: 32,
+        palette: [
+          [0, 255, 0],
+          [0, 0, 255],
+          [9, 9, 9],
+        ],
+        rgba: [
+          [255, 0, 0, 255],
+          [1, 2, 3, 128],
+        ],
+      }),
+    );
+    expect(
+      [...inflateSync(icon!.png.subarray(8 + 25 + 8, icon!.png.length - 12 - 4))].slice(1, 9),
+    ).toEqual([255, 0, 0, 255, 1, 2, 3, 128]);
+  });
+
+  it('refuses a colour table that runs past the end of the data', () => {
+    const bytes = iconBitmap({ width: 1, height: 1, bitCount: 24, rgba: [[255, 0, 0, 255]] });
+    new DataView(bytes.buffer, bytes.byteOffset).setUint32(32, 200, true);
+    expect(iconToPng(bytes)).toBeUndefined();
+  });
+});
