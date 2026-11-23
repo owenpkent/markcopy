@@ -223,3 +223,15 @@ describe('readZipPackage: a hostile wheel', () => {
     await expectSafe(wheel(), 'x.whl');
   });
 });
+
+describe('readZipPackage: wheel entry identity', () => {
+  it('uses the real METADATA, not an earlier entry that cleans to the same name', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: `d-1.dist-info/METADATA${RLO}`, data: 'Name: decoy\nVersion: 9\n' },
+        { name: 'd-1.dist-info/METADATA', data: 'Name: real\nVersion: 1\n' },
+      ]),
+    );
+    expect(info.title).toBe('real 1');
+  });
+});

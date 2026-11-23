@@ -289,3 +289,50 @@ describe('readZipPackage: a hostile Android package', () => {
     );
   });
 });
+
+describe('readZipPackage: entry identity', () => {
+  const real = buildAxml(manifest());
+  const decoy = buildAxml(manifest({ package: 'decoy.app' }));
+  const withCamera = buildAxml({
+    ...manifest(),
+    children: [...manifest().children, named('uses-permission', 'android.permission.CAMERA')],
+  });
+
+  it('does not let an earlier entry whose name cleans to the manifest name stand in for it', async () => {
+    const bytes = buildZip([
+      { name: `AndroidManifest${RLO}.xml`, data: decoy },
+      { name: 'AndroidManifest.xml', data: withCamera },
+    ]);
+    const info = await readZip(bytes);
+    expect(value(info, 'Package', 'Package name')).toBe('com.example.app');
+    expect(tableRows(info, 'Permissions').map((r) => r[0])).toContain('android.permission.CAMERA');
+    // The decoy is still listed, under its cleaned display name.
+    expect(tableRows(info, 'Contents').map((r) => r[0])).toEqual([
+      'AndroidManifest.xml',
+      'AndroidManifest.xml',
+    ]);
+  });
+
+  it('is not an Android package when only a decoy has the manifest name', async () => {
+    const info = await readZip(buildZip([{ name: `AndroidManifest${RLO}.xml`, data: decoy }]));
+    expect(info.format).toBe('Zip archive');
+  });
+
+  it('reads the last of two entries with exactly the same name, and warns', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: 'AndroidManifest.xml', data: decoy },
+        { name: 'AndroidManifest.xml', data: real },
+      ]),
+    );
+    expect(value(info, 'Package', 'Package name')).toBe('com.example.app');
+    expect(info.warnings.join(' ')).toContain('more than once');
+  });
+
+  it('does not match a name that was cut for display', async () => {
+    const info = await readZip(
+      buildZip([{ name: `AndroidManifest.xml${'x'.repeat(600)}`, data: real }]),
+    );
+    expect(info.format).toBe('Zip archive');
+  });
+});

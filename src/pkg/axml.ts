@@ -235,7 +235,7 @@ export function parseAxml(bytes: Uint8Array, warnings: string[] = []): ManifestN
     throw new PackageError('its AndroidManifest.xml is not Android binary XML.');
   }
   let pool: StringPool | undefined;
-  let resourceIds: number[] = [];
+  let resourceIds: number[] | undefined;
   const root: ManifestNode = { name: '#root', attrs: {}, children: [] };
   const stack: ManifestNode[] = [root];
   // Elements deeper than MAX_DEPTH are walked but not kept, so the chunk
@@ -257,10 +257,24 @@ export function parseAxml(bytes: Uint8Array, warnings: string[] = []): ManifestN
     }
     const chunkEnd = pos + size;
     if (type === CHUNK_STRING_POOL) {
+      // One pool, before any element, as Android's own reader and every build
+      // tool produce. A second pool would start a second text budget while the
+      // nodes built so far keep strings from the first, so it is refused
+      // rather than allowed to reset the allowance.
+      if (pool || elements > 0) {
+        throw new PackageError(
+          'its AndroidManifest.xml has a second string table, or one after its elements.',
+        );
+      }
       pool = stringPool(view, pos, chunkEnd);
     } else if (type === CHUNK_RESOURCE_MAP) {
-      const count = Math.min(Math.floor((size - 8) / 4), MAX_STRINGS);
+      if (resourceIds || elements > 0) {
+        throw new PackageError(
+          'its AndroidManifest.xml has a second resource map, or one after its elements.',
+        );
+      }
       resourceIds = [];
+      const count = Math.min(Math.floor((size - 8) / 4), MAX_STRINGS);
       for (let i = 0; i < count; i++) {
         resourceIds.push(view.getUint32(pos + 8 + i * 4, true));
       }
@@ -296,7 +310,7 @@ export function parseAxml(bytes: Uint8Array, warnings: string[] = []): ManifestN
           const data = view.getUint32(at + 16, true);
           // The resource ID is the reliable name: a release build blanks the
           // string, and a hostile one could make the string say anything.
-          const id = resourceIds[attrName];
+          const id = resourceIds?.[attrName];
           const label =
             (id !== undefined ? ATTRIBUTE_NAMES[id] : undefined) ||
             pool?.get(attrName) ||

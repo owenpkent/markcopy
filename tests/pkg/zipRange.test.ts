@@ -325,7 +325,34 @@ describe('openZip: name budget', () => {
     const zip = await open(bytes);
     expect(zip.entries.length).toBe(count);
     expect(zip.entries[0].name.length).toBe(512);
-    expect(zip.entries[count - 1].name.length).toBe(64);
+    expect(zip.entries[count - 1].name.length).toBe(128);
     expect(zip.entries.reduce((n, e) => n + e.name.length, 0)).toBeLessThan(9_000_000);
+  });
+});
+
+describe('openZip: exact names', () => {
+  it('marks cleaned and cut names inexact and finds only exact ones', async () => {
+    const zip = await open(
+      buildZip([
+        { name: `a${RLO}.txt`, data: 'decoy' },
+        { name: 'a.txt', data: 'real' },
+        { name: 'b'.repeat(600), data: 'x' },
+      ]),
+    );
+    expect(zip.entries.map((e) => e.exact)).toEqual([false, true, false]);
+    expect(new TextDecoder().decode(await zip.readEntry(zip.find('a.txt')!, 10))).toBe('real');
+    expect(zip.find('b'.repeat(512))).toBeUndefined();
+  });
+
+  it('resolves a repeated name to the last entry and counts it', async () => {
+    const zip = await open(
+      buildZip([
+        { name: 'a', data: 'first' },
+        { name: 'a', data: 'second' },
+      ]),
+    );
+    expect(zip.duplicateNames).toBe(1);
+    expect(new TextDecoder().decode(await zip.readEntry(zip.find('a')!, 10))).toBe('second');
+    expect(zip.exactEntries.length).toBe(1);
   });
 });

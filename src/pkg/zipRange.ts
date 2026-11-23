@@ -38,7 +38,7 @@ const MAX_NAME_CHARS = 512;
 // Characters of names kept across the directory. Real archives use a few million;
 // past this, later names are kept short so a directory of long names stays small.
 const MAX_NAME_TOTAL = 8 * 1024 * 1024;
-const SHORT_NAME_CHARS = 64;
+const SHORT_NAME_CHARS = 128;
 // Inflate in small pushes: one push can expand about a thousandfold, so this
 // bounds the output of a single step to a few megabytes.
 const INFLATE_STEP = 8 * 1024;
@@ -63,6 +63,12 @@ export interface ZipEntry {
   crc: number;
   isDirectory: boolean;
   encrypted: boolean;
+  /**
+   * True when `name` is the archive's name byte for byte: not cut, and nothing
+   * removed by cleaning. Only such entries can be found by name, so a decoy whose
+   * display name cleans to a recognised one never stands in for it.
+   */
+  exact: boolean;
 }
 
 export interface ZipArchive {
@@ -75,6 +81,11 @@ export interface ZipArchive {
   totalCompressed: number;
   /** Absolute offset of the central directory in the file. */
   directoryOffset: number;
+  /** Entries with an exact name, one per name, the last of any duplicates (as Python's zipfile and Java's ZipFile resolve them). */
+  exactEntries: ZipEntry[];
+  /** How many exact names the directory lists more than once. */
+  duplicateNames: number;
+  /** The entry with exactly this name. */
   find(name: string): ZipEntry | undefined;
   /** The entry's data, refusing before reading anything when it is declared larger than `maxBytes`. */
   readEntry(entry: ZipEntry, maxBytes: number): Promise<Uint8Array>;
@@ -102,7 +113,7 @@ const u64 = (view: DataView, at: number): number => {
   return high >= 0x200000 ? Number.NaN : high * 2 ** 32 + view.getUint32(at, true);
 };
 
-function decodeName(raw: Uint8Array, utf8: boolean, max: number): string {
+function decodeName(raw: Uint8Array, utf8: boolean, max: number): { name: string; exact: boolean } {
   // Decode only what can be kept: a name field is up to 64 KiB and the
   // directory can hold a hundred thousand of them.
   let text: string;
@@ -111,10 +122,12 @@ function decodeName(raw: Uint8Array, utf8: boolean, max: number): string {
   } else {
     // Bit 11 clear means the legacy code page. Latin-1 is exact for ASCII,
     // which is nearly every name in practice.
-    const codes = Array.from(raw.subarray(0, max));
-    text = String.fromCharCode(...codes);
+    text = String.fromCharCode(...Array.from(raw.subarray(0, max)));
   }
-  return printable(text);
+  const name = printable(text);
+  // A name that was cut or cleaned is for display only: it must not compare
+  // equal to a name the readers look for.
+  return { name, exact: raw.length <= max && name === text };
 }
 
 interface Located {
@@ -307,7 +320,7 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       complete = false;
       continue;
     }
-    const name = decodeName(
+    const { name, exact } = decodeName(
       raw,
       (flags & 0x800) !== 0,
       nameBudget > 0 ? MAX_NAME_CHARS : SHORT_NAME_CHARS,
@@ -323,6 +336,7 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       isDirectory: raw.length > 0 && raw[raw.length - 1] === 0x2f,
       // Bit 0 is traditional or AES encryption, bit 6 strong encryption.
       encrypted: (flags & 0x41) !== 0,
+      exact,
     });
     totalUncompressed += uncompressedSize;
     totalCompressed += compressedSize;
@@ -331,9 +345,16 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
     complete = false;
   }
 
+  // Lookup is by exact name only. Where a name is listed twice the last entry
+  // wins, as it does in Python's zipfile and Java's ZipFile (and when unzip
+  // extracts over its own earlier output); the caller is told so it can warn.
   const byName = new Map<string, ZipEntry>();
+  let duplicateNames = 0;
   for (const entry of entries) {
-    if (!byName.has(entry.name)) {
+    if (entry.exact) {
+      if (byName.has(entry.name)) {
+        duplicateNames++;
+      }
       byName.set(entry.name, entry);
     }
   }
@@ -416,6 +437,8 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
     totalUncompressed,
     totalCompressed,
     directoryOffset: where.directoryOffset,
+    exactEntries: [...byName.values()],
+    duplicateNames,
     find: (name) => byName.get(name),
     readEntry: (entry, maxBytes) => read(entry, maxBytes, false),
     readEntryHead: (entry, maxBytes) => read(entry, maxBytes, true),
