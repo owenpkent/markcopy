@@ -10,6 +10,7 @@
 // are only displayed, after printable() has stripped what could disguise them.
 import type { RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
+import { asciiLower } from './ascii';
 import { Inflate } from 'fflate';
 import { PackageError, type InfoSection, type PropertySection } from './model';
 import { isSignedData, readSigner, signatureSection, signerCount, type Signer } from './signature';
@@ -622,6 +623,8 @@ export function hasEmbeddedSignatureFile(der: Uint8Array): boolean {
 
 type V1Rules = 'jdk' | 'apksig';
 
+const META_INF = 'meta-inf/';
+
 interface V1Name {
   kind: 'block' | 'sf';
   /** What a block and its .SF share. */
@@ -631,11 +634,20 @@ interface V1Name {
 /**
  * Which entry names are signature files, per implementation.
  *
- * OpenJDK (sun.security.util.SignatureFileVerifier, jdk-21+35):
- *   isInMetaInf: name starts with "META-INF/" ignoring case and has no
- *     further "/", so only direct children count;
- *   isBlockOrSF, on the upper-cased name: ends with .SF, .DSA, .RSA or .EC;
- *   a block and its .SF share the upper-cased name without the extension.
+ * OpenJDK, in two steps. The zip reader (ZipFile.Source.isMetaName and
+ * isSignatureRelated, jdk-21+35) decides which members are signature files at
+ * all, on the raw name bytes with ASCII-only case folding (`b | 0x20`):
+ *   the name has more than 9 bytes, does not end in "/", and starts with
+ *   "META-INF/" (letters folded, "-" and "/" exact);
+ *   the byte three from the end is "." and the last two are "ec" or "sf", or
+ *   else the byte four from the end is "." and the last three are "dsa" or
+ *   "rsa";
+ *   no "/" after the prefix, so only direct children count.
+ * SignatureFileVerifier then pairs a block with its .SF by the upper-cased name
+ * without the extension (toUpperCase(Locale.ENGLISH), full Unicode). That runs
+ * only on names the zip reader accepted, so a directory spelled with a dotless
+ * i (U+0131) in place of the "I" of "META-INF" is not a signature directory,
+ * even though its upper case reads "META-INF".
  *
  * apksig (V1SchemeVerifier): any name starting "META-INF/" (case-sensitive,
  *   nested paths included) that ends with .SF, or .RSA, .DSA or .EC (all
@@ -644,17 +656,33 @@ interface V1Name {
  */
 function v1Name(name: string, rules: V1Rules): V1Name | undefined {
   if (rules === 'jdk') {
-    const upper = name.toUpperCase();
-    if (!upper.startsWith('META-INF/') || name.lastIndexOf('/') >= 'META-INF/'.length) {
+    const length = name.length;
+    if (
+      length <= META_INF.length ||
+      name[length - 1] === '/' ||
+      asciiLower(name.slice(0, META_INF.length)) !== META_INF ||
+      name.indexOf('/', META_INF.length) >= 0
+    ) {
       return undefined;
     }
-    if (upper.endsWith('.SF')) {
-      return { kind: 'sf', key: upper.slice(0, -3) };
+    let extension: string;
+    let dotted: number;
+    if (name[length - 3] === '.') {
+      extension = asciiLower(name.slice(length - 2));
+      dotted = 3;
+    } else if (name[length - 4] === '.') {
+      extension = asciiLower(name.slice(length - 3));
+      dotted = 4;
+    } else {
+      return undefined;
     }
-    if (/\.(DSA|RSA|EC)$/.test(upper)) {
-      return { kind: 'block', key: upper.slice(0, upper.lastIndexOf('.')) };
+    const key = name.slice(0, length - dotted).toUpperCase();
+    if (extension === 'sf') {
+      return { kind: 'sf', key };
     }
-    return undefined;
+    return extension === 'ec' || extension === 'dsa' || extension === 'rsa'
+      ? { kind: 'block', key }
+      : undefined;
   }
   if (!name.startsWith('META-INF/')) {
     return undefined;
@@ -744,15 +772,22 @@ export async function readV1Signatures(
       unreadable++;
     }
   }
+  // A name missing from the listing is absent only when the listing is complete.
+  // A directory cut by a cap or by damage may hold the manifest, or the .SF of a
+  // block that looks unpaired, so those are reported as not established instead.
+  const listed = zip.complete;
   const noManifest = rules === 'apksig' && !manifest && signed.length > 0;
   if (noManifest) {
     // apksig reports JAR_SIG_NO_MANIFEST and stops: nothing is a v1 signature.
+    // Without a complete listing that is only what the inspected part shows.
     signed.length = 0;
   }
   const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
   if (unpaired > 0) {
     warnings.push(
-      `${unpaired} signature block${plural(unpaired, ' has', 's have')} no matching .SF file in META-INF${rules === 'jdk' ? ' and no signature file inside it' : ''}, so ${plural(unpaired, 'it was', 'they were')} ignored.`,
+      listed
+        ? `${unpaired} signature block${plural(unpaired, ' has', 's have')} no matching .SF file in META-INF${rules === 'jdk' ? ' and no signature file inside it' : ''}, so ${plural(unpaired, 'it was', 'they were')} ignored.`
+        : `${unpaired} signature block${plural(unpaired, ' has', 's have')} no matching .SF file in the part of META-INF that could be listed${rules === 'jdk' ? ' and no signature file inside it' : ''}, so ${plural(unpaired, 'it was', 'they were')} not counted; a matching file may be unlisted.`,
     );
   }
   if (unreadable > 0) {
@@ -762,7 +797,9 @@ export async function readV1Signatures(
   }
   if (orphanFiles > 0) {
     warnings.push(
-      `${orphanFiles} .SF file${plural(orphanFiles, ' has', 's have')} no signature block in META-INF.`,
+      listed
+        ? `${orphanFiles} .SF file${plural(orphanFiles, ' has', 's have')} no signature block in META-INF.`
+        : `${orphanFiles} .SF file${plural(orphanFiles, ' has', 's have')} no signature block in the part of META-INF that could be listed; a block may be unlisted.`,
     );
   }
   if (skipped > 0) {
@@ -770,18 +807,24 @@ export async function readV1Signatures(
   }
   if (noManifest) {
     warnings.push(
-      'The archive has no META-INF/MANIFEST.MF, so Android does not accept a v1 signature.',
+      listed
+        ? 'The archive has no META-INF/MANIFEST.MF, so Android does not accept a v1 signature.'
+        : 'META-INF/MANIFEST.MF was not found in the part of the archive that could be listed, so whether Android accepts a v1 signature could not be established.',
     );
   }
   let notEstablished: string | undefined;
   if (signed.length === 0 && (blocks.length > 0 || noManifest)) {
     notEstablished = noManifest
-      ? 'A META-INF signature block is present, but the archive has no META-INF/MANIFEST.MF, so it is not a v1 signature'
+      ? listed
+        ? 'A META-INF signature block is present, but the archive has no META-INF/MANIFEST.MF, so it is not a v1 signature'
+        : 'A META-INF signature block is present, but the v1 prerequisites (META-INF/MANIFEST.MF) could not be established in the part of the archive that could be listed, so whether it is a v1 signature is not known'
       : skipped > 0
         ? 'META-INF signature blocks are present, but more than MarkCopy reads, so whether any is a signature is not known'
         : unreadable > 0
           ? 'A META-INF signature block is present but could not be read as a signature, so nothing is known about it'
-          : 'A META-INF signature block has no signature file, so it does not form a signature';
+          : listed
+            ? 'A META-INF signature block has no signature file, so it does not form a signature'
+            : 'A META-INF signature block has no signature file in the part of the archive that could be listed, so whether it forms a signature is not known';
   }
   return { signed, notEstablished };
 }

@@ -42,7 +42,7 @@ Every page starts with the file's name, format and a one-line summary, and ends 
 - **Linux binaries (.so, .elf, .ko, .AppImage).** Type, architecture, interpreter, SONAME, build ID, whether it is stripped, its protections (PIE, non-executable stack, RELRO, RPATH or RUNPATH), the libraries it needs, its sections, kernel module information for a `.ko`, and the payload size of an AppImage.
 - **Java archive (.jar, .war, .ear).** The manifest, the Maven coordinates if the build left them, the class count and the Java version, and the JAR signer.
 - **VS Code extension (.vsix).** Identity, the engine it needs, activation events, and counts of what it contributes. An extension's Marketplace signature is a separate file, so it cannot be seen from the VSIX and the page says so.
-- **Python wheel (.whl).** The metadata, the requirements and the entry points.
+- **Python wheel (.whl).** The metadata, the requirements and the entry points. It also lists the startup files (`.pth` and `.start`) and says whether each runs code when Python starts; where that depends on the installer, on the installation scheme or on a part of the archive that could not be listed, the page says so.
 - **NuGet package (.nupkg, .snupkg).** The nuspec, the dependencies by framework, whether it carries build or install scripts, and the signer.
 - **Android package (.apk).** Package name, versions, SDK levels, permissions, components and how many of them are exported, native ABIs, and which signing schemes are present.
 - **Any other zip.** The contents only.

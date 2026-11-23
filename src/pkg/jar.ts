@@ -4,6 +4,7 @@
 // the build left one, names the coordinates; one class file's header says
 // which Java release compiled it. Nothing is loaded or run.
 import { printable } from '../binary/text';
+import { asciiLower, isJarManifestName } from './ascii';
 import { formatNumber } from '../binary/html';
 import { propertySection, tableSection, type InfoSection } from './model';
 import {
@@ -36,8 +37,8 @@ export function parseJarManifest(text: string): [string, string][] {
   const seen = new Set<string>();
   let current: [string, string] | undefined;
   const flush = (): void => {
-    if (current && !seen.has(current[0].toLowerCase()) && out.length < MAX_ATTRIBUTES) {
-      seen.add(current[0].toLowerCase());
+    if (current && !seen.has(asciiLower(current[0])) && out.length < MAX_ATTRIBUTES) {
+      seen.add(asciiLower(current[0]));
       out.push(current);
     }
     current = undefined;
@@ -131,15 +132,15 @@ async function classVersion(
 export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   const warnings: string[] = [];
   const manifestEntry =
-    zip.find(MANIFEST) ?? zip.exactEntries.find((e) => /^META-INF\/MANIFEST\.MF$/i.test(e.name));
+    zip.find(MANIFEST) ?? zip.exactEntries.find((e) => isJarManifestName(e.name));
   const text = manifestEntry
     ? await readTextEntry(zip, manifestEntry, MAX_MANIFEST_BYTES, warnings, 'The manifest')
     : undefined;
   const manifest = text ? parseJarManifest(text) : [];
   const used = new Set<string>();
   const get = (name: string): string | undefined => {
-    used.add(name.toLowerCase());
-    return manifest.find(([n]) => n.toLowerCase() === name.toLowerCase())?.[1];
+    used.add(asciiLower(name));
+    return manifest.find(([n]) => asciiLower(n) === asciiLower(name))?.[1];
   };
 
   const mavenEntry = zip.exactEntries.find((e) =>
@@ -212,7 +213,7 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   ];
   const handled = new Set(['manifest-version', 'name', 'sealed']);
   const other = manifest
-    .filter(([n]) => !used.has(n.toLowerCase()) && !handled.has(n.toLowerCase()))
+    .filter(([n]) => !used.has(asciiLower(n)) && !handled.has(asciiLower(n)))
     .map(([n, v]) => [n, v.length > MAX_CELL_CHARS ? `${v.slice(0, MAX_CELL_CHARS)}...` : v]);
   before.push(
     ...tableSection('Other manifest attributes', ['Attribute', 'Value'], other, {
@@ -239,7 +240,7 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
     title,
     summary:
       classes.length > 0
-        ? `Java archive with ${formatNumber(classes.length)} classes${bytecode ? `, class file version ${bytecode}` : ''}.`
+        ? `Java archive with ${formatNumber(classes.length)}${zip.complete ? '' : ' or more'} classes${bytecode ? `, class file version ${bytecode}` : ''}.`
         : 'Java archive.',
     before,
     after,

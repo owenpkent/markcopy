@@ -5,6 +5,7 @@
 import { formatBytes, formatNumber } from '../binary/html';
 import type { RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
+import { asciiLower } from './ascii';
 import { listAr, type ArMember } from './ar';
 import { gunzipBounded, readCompressed, unxzBounded, unzstdBounded, TOO_BIG } from './decompress';
 import {
@@ -285,9 +286,9 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
       if (fields.length === 0) {
         warnings.push('The control file holds no package fields.');
       }
-      const byName = new Map(fields.map((f) => [f.name.toLowerCase(), f]));
+      const byName = new Map(fields.map((f) => [asciiLower(f.name), f]));
       const get = (name: string): string | undefined => {
-        const field = byName.get(name.toLowerCase());
+        const field = byName.get(asciiLower(name));
         return field ? joined(field) : undefined;
       };
 
@@ -302,10 +303,10 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
         }
       }
       const shown = new Set(
-        [...PACKAGE_FIELDS, ...RELATION_FIELDS, 'Description'].map((n) => n.toLowerCase()),
+        [...PACKAGE_FIELDS, ...RELATION_FIELDS, 'Description'].map((n) => asciiLower(n)),
       );
       for (const field of fields) {
-        if (!shown.has(field.name.toLowerCase())) {
+        if (!shown.has(asciiLower(field.name))) {
           packageRows.push([printable(field.name), joined(field)]);
         }
       }
@@ -313,7 +314,7 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
       const name = get('Package');
       const version = get('Version');
       title = [name, version].filter(Boolean).join(' ') || undefined;
-      if (get('Package-Type')?.toLowerCase() === 'udeb') {
+      if (asciiLower(get('Package-Type') ?? '') === 'udeb') {
         format = 'Debian installer package';
       }
 

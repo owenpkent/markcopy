@@ -414,6 +414,153 @@ describe('readMsi: what the file is', () => {
     expect(field(info, 'Package', 'Languages')).toBeUndefined();
   });
 
+  const patchRead = (summary: MsiSpec['summary']) =>
+    read({ clsid: CLSID_PATCH, noPool: true, summary });
+  const pkg = (info: PackageInfo, label: string) => field(info, 'Package', label);
+
+  it('reads a patch Word Count as the minimum installer version, with no package flags', async () => {
+    // The reviewer's fixture: Word Count 4 and no Page Count.
+    const info = await patchRead({ wordCount: 4 });
+    expect(pkg(info, 'Minimum installer version')).toBe('3.0');
+    expect(pkg(info, 'Source is (summary flag)')).toBeUndefined();
+    expect(pkg(info, 'Source files (summary flag)')).toBeUndefined();
+    expect(pkg(info, 'Elevation (summary flag)')).toBeUndefined();
+    expect(JSON.stringify(info.sections)).not.toContain('An administrative image');
+    expect(JSON.stringify(info.sections)).not.toContain('Uncompressed');
+  });
+
+  it.each([
+    [2, '1.2'],
+    [3, '2.0'],
+    [4, '3.0'],
+    [5, '3.1'],
+  ])('maps patch Word Count %i to Windows Installer %s', async (wordCount, version) => {
+    const info = await patchRead({ wordCount });
+    expect(pkg(info, 'Minimum installer version')).toBe(version);
+  });
+
+  it('says a patch Word Count of 1 is the MSPATCH default, not a version', async () => {
+    const info = await patchRead({ wordCount: 1 });
+    expect(pkg(info, 'Minimum installer version')).toBe(
+      'Not stated (Word Count 1, the default: MSPATCH was used to create the patch)',
+    );
+  });
+
+  it('shows an undocumented patch Word Count as such, never as the package bit field', async () => {
+    for (const wordCount of [0, 6, 12]) {
+      const info = await patchRead({ wordCount });
+      expect(pkg(info, 'Minimum installer version')).toBe(
+        `Word Count ${wordCount}: not a documented value`,
+      );
+      expect(pkg(info, 'Elevation (summary flag)')).toBeUndefined();
+      expect(pkg(info, 'Source files (summary flag)')).toBeUndefined();
+      expect(pkg(info, 'Source is (summary flag)')).toBeUndefined();
+    }
+  });
+
+  it('ignores a patch Page Count, which is Null for a patch', async () => {
+    const info = await patchRead({ wordCount: 3, pageCount: 500 });
+    expect(pkg(info, 'Minimum installer version')).toBe('2.0');
+  });
+
+  it('reads a patch Template as product codes and Revision Number as patch codes', async () => {
+    const a = '{11111111-2222-3333-4444-555555555555}';
+    const b = '{66666666-7777-8888-9999-000000000000}';
+    const c = '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}';
+    const d = '{12345678-1234-1234-1234-123456789ABC}';
+    const info = await patchRead({
+      template: `${a};${b}`,
+      revision: `${c}${d}`,
+      keywords: 'https://example.test/one;\\\\server\\share',
+      lastSavedBy: 'T1;T2',
+      subject: 'Hotfix for Example',
+    });
+    expect(pkg(info, 'Applies to product codes (from the summary template)')).toBe(`${a}, ${b}`);
+    expect(pkg(info, 'Patch code')).toBe(c);
+    expect(pkg(info, 'Obsoletes patches')).toBe(d);
+    expect(pkg(info, 'Package code')).toBeUndefined();
+    expect(pkg(info, 'Patch sources (from Keywords)')).toBe(
+      'https://example.test/one, \\\\server\\share',
+    );
+    expect(pkg(info, 'Transforms applied, in order (from Last Saved By)')).toBe('T1, T2');
+    expect(pkg(info, 'Patch description (from Subject)')).toBe('Hotfix for Example');
+    expect(pkg(info, 'Product name')).toBeUndefined();
+    expect(info.title).toBe('Hotfix for Example');
+  });
+
+  it('shows a patch Revision Number that is not a run of GUIDs as it is', async () => {
+    const info = await patchRead({ revision: 'not a guid' });
+    expect(pkg(info, 'Revision number (from the summary)')).toBe('not a guid');
+    expect(pkg(info, 'Patch code')).toBeUndefined();
+  });
+
+  it('gives a transform its own definitions', async () => {
+    const info = await read({
+      clsid: CLSID_TRANSFORM,
+      noPool: true,
+      summary: {
+        template: 'Intel;1033',
+        revision: [
+          '{11111111-2222-3333-4444-555555555555} 1.0.0',
+          '{66666666-7777-8888-9999-000000000000} 2.0.0',
+          '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}',
+        ].join(';'),
+        subject: 'Original Product',
+        lastSavedBy: 'Intel;1031',
+        pageCount: 301,
+        wordCount: 2,
+        charCount: 0x00110002,
+      },
+    });
+    expect(info.format).toBe('Windows Installer transform');
+    expect(pkg(info, 'Platform (from the summary template)')).toBe('x86 (32-bit)');
+    expect(pkg(info, 'Languages')).toBe('English (US) (1033)');
+    expect(pkg(info, 'Original product (code and version)')).toBe(
+      '{11111111-2222-3333-4444-555555555555} 1.0.0',
+    );
+    expect(pkg(info, 'New product (code and version)')).toBe(
+      '{66666666-7777-8888-9999-000000000000} 2.0.0',
+    );
+    expect(pkg(info, 'Upgrade code')).toBe('{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}');
+    expect(pkg(info, 'Package code')).toBeUndefined();
+    expect(pkg(info, 'Minimum installer version to process')).toBe('3.1');
+    expect(pkg(info, 'Transform flags (from Character Count)')).toBe(
+      'Validation 0x0011, error conditions 0x0002 (not decoded)',
+    );
+    expect(pkg(info, 'Platform and language after the transform (from Last Saved By)')).toBe(
+      'Intel;1031',
+    );
+    expect(pkg(info, 'Original product name (from Subject)')).toBe('Original Product');
+    // Word Count is Null in a transform, so it gives no package flags.
+    expect(pkg(info, 'Source files (summary flag)')).toBeUndefined();
+    expect(pkg(info, 'Elevation (summary flag)')).toBeUndefined();
+  });
+
+  it('does not accept a non-ASCII look-alike as a platform', async () => {
+    // A dotless i in "intel" is not the ASCII letter, so it is not the x86 platform.
+    const lookAlike = 'INTEL'.replace('I', String.fromCharCode(0x131));
+    const info = await read({ summary: { template: `${lookAlike};1033` } });
+    const shown = pkg(info, 'Platform (from the summary template)');
+    expect(shown).not.toBe('x86 (32-bit)');
+    expect(shown).toMatch(/NTEL$/);
+    // Upper-case ASCII still folds.
+    const plain = await read({ summary: { template: 'INTEL;1033' } });
+    expect(pkg(plain, 'Platform (from the summary template)')).toBe('x86 (32-bit)');
+  });
+
+  it('leaves an ordinary package summary rows as they were', async () => {
+    const info = await read({
+      summary: { template: 'x64;1033', pageCount: 500, wordCount: 1 | 4, revision: '{X}' },
+    });
+    expect(pkg(info, 'Package code')).toBe('{X}');
+    expect(pkg(info, 'Minimum installer version')).toBe('5.0');
+    expect(pkg(info, 'Source files (summary flag)')).toBe('Uncompressed');
+    expect(pkg(info, 'Source is (summary flag)')).toBe('An administrative image');
+    expect(pkg(info, 'Elevation (summary flag)')).toBe('Can be required');
+    expect(pkg(info, 'Patch code')).toBeUndefined();
+    expect(pkg(info, 'Transform flags (from Character Count)')).toBeUndefined();
+  });
+
   it('recognises a package by its string pool when the CLSID is missing', async () => {
     const info = await read({ clsid: '{00000000-0000-0000-0000-000000000000}' });
     expect(info.format).toBe('Windows Installer database');
