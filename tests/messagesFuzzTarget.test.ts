@@ -29,6 +29,7 @@ describe('messages fuzz target', () => {
     { type: 'navigate', step: 1 },
     { type: 'navigate', step: -1 },
     { type: 'openAsText' },
+    { type: 'readFile' },
     { type: 'reviewEnable' },
     { type: 'reviewCopy' },
     { type: 'reviewAdd', at: 0, text: 'note' },

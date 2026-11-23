@@ -45,6 +45,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { formatBytes } from '../src/binary/html';
+import { runFileInfoTask } from '../src/fileInfoTask';
 import { PackageEditorProvider } from '../src/packageEditor';
 import { buildElf } from './pkg/elfFixture';
 import type * as vscode from 'vscode';
@@ -178,11 +179,16 @@ describe('Open in Default App', () => {
 describe('PackageEditorProvider render', () => {
   async function renderOf(path: string) {
     const provider = new PackageEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    // Read in this process: there is no bundled worker script under test.
+    provider.reader = (request) => runFileInfoTask(request);
     const { panel, post, posted } = createPanel();
     await provider.resolveCustomEditor(documentAt(path), panel);
+    // The page opens waiting; the reader's click is what reads the file.
     await post({ type: 'ready' });
-    await vi.waitFor(() => expect(posted().some((m) => m.type === 'render')).toBe(true));
-    return posted().find((m) => m.type === 'render') as { kind: string; html: string };
+    await post({ type: 'readFile' });
+    const renders = posted().filter((m) => m.type === 'render');
+    expect(renders).toHaveLength(2);
+    return renders[1] as { kind: string; html: string };
   }
 
   it('posts the file details, with the size and SHA-256 of the bytes on disk', async () => {

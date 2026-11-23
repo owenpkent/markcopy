@@ -222,6 +222,7 @@ The page is ordinary semantic HTML in the shared shell, like the Word preview: h
 
 Differences worth stating:
 
+- **The page has to be read first.** Until **Read this file** is pressed (or **MarkCopy: Read This File** is run, or `markcopy.fileInfo.confirm` is off), the page is only the file's name and size and the button, and there is nothing to copy but those.
 - **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole page.** What you copy is what rendered: a table the reader capped (the first 100 export names, for one) is copied as shown.
 - **The SHA-256 and every other value are text.** Select a cell and **Copy Selection**, or copy the File table as CSV or TSV.
 - **The icon is a picture like any other.** It is the one image on the page, sent the way a Word document's pictures are, so it is part of a whole-document copy and of the exports.
@@ -235,6 +236,7 @@ The page is ordinary semantic HTML in the shared shell, like the executable page
 
 Differences worth stating:
 
+- **The page has to be read first.** Until **Read this file** is pressed (or **MarkCopy: Read This File** is run, or `markcopy.fileInfo.confirm` is off), the page is only the file's name and size and the button, and there is nothing to copy but those.
 - **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole page.** What you copy is what rendered: a list the reader capped (a file list, say) is copied as shown, with its "first N of M" line.
 - **The SHA-256 and every other value are text.** Select a cell and **Copy Selection**, or copy the File table as CSV or TSV.
 - **There is no Open in Default App row.** The default app for a package is an installer, and for a `.jar` or an AppImage it is the file itself, so the row is removed from this preview's menu and the host ignores the message. **Reveal in file manager** is still there.

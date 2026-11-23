@@ -271,11 +271,17 @@ Open [sample.docx](../sample.docx) (repo root), then a real document of your own
 
 ## Executable info preview (.exe, .dll)
 
-Open a few real files from a Windows machine in the Extension Development Host: `notepad.exe` from System32, `kernel32.dll` (many exports, an embedded signature), a 32-bit `cmd.exe` from SysWOW64, a .NET Framework assembly such as `System.dll`, a large installer or application executable, and an unsigned `.exe` you built yourself. Never run any of them for this pass: the preview must not.
+Open a few real files from a Windows machine in the Extension Development Host (each opens on a confirmation page; press **Read this file** on each, as the first checklist rows below say): `notepad.exe` from System32, `kernel32.dll` (many exports, an embedded signature), a 32-bit `cmd.exe` from SysWOW64, a .NET Framework assembly such as `System.dll`, a large installer or application executable, and an unsigned `.exe` you built yourself. Never run any of them for this pass: the preview must not.
 
 Measured so far, manually on Windows 11 on 2026-11-22 with a script over the parser (not through the extension host): `notepad.exe`, `kernel32.dll` (1,698 exports, embedded signature), VS Code's `Code.exe` (237 MB; the metadata was read in 9 reads totalling about 555 KB), .NET Framework `System.dll` (IL-only, strong-named), and a 32-bit `cmd.exe`. Icons were extracted by the same script and looked at as PNG files: `hh.exe` (48 px), `winhlp32.exe` and `pifmgr.dll` (32 px), all three bitmap icons decoded with their transparency, and the 256 px PNG icons of `notepad.exe`, `cmd.exe`, `regedit.exe` and `Code.exe` passed through. Export counts were compared with the number of non-zero entries in each export address table, on the three libraries a review found miscounted: `shell32.dll` 843 functions in 2,001 ordinal slots, `comctl32.dll` 181 in 421, `ws2_32.dll` 196 in 500. The same run confirmed that `Code.exe`, whose manifest lists the common controls library before anything else, no longer shows that dependency as its own identity. **None of the rows below has been checked in the editor yet**: opening a file in a dev host, the menu, the themes and the exports are unverified.
 
-- [ ] Each file opens in the preview, not in VS Code's "file is binary" notice. An uppercase `.EXE` and a `.dll` do too.
+- [ ] Opening a file shows only its name, its size and a **Read this file** button, and says it has not been read: no version, hash, signer or table. Nothing else about the file is on the page.
+- [ ] Pressing the button (it changes to "Reading..." and cannot be pressed twice) replaces the page with the file's page.
+- [ ] Open a second file of the same kind after reading the first: it asks again. The first file's page stays read.
+- [ ] On a page waiting for confirmation, run **MarkCopy: Read This File** from the Command Palette, without the mouse: the file is read. The command is greyed out when any other editor is active.
+- [ ] Turn `markcopy.fileInfo.confirm` off in Settings: a file opened afterwards is read at once, and a page that was still waiting reads without being reopened. Turn it back on and a newly opened file asks again.
+- [ ] After a file has been read, change it on disk: the page redraws without asking again.
+- [ ] After the first step, each file reads into the preview, not VS Code's "file is binary" notice. An uppercase `.EXE` and a `.dll` do too.
 - [ ] The file's icon is above its name and matches the one Explorer shows, with a transparent background in every theme. `kernel32.dll` shows no icon and no gap. An old program with only small bitmap icons (`hh.exe`, `winhlp32.exe`) shows its icon at natural size, not blurred.
 - [ ] The Version table matches Explorer's Properties > Details for the same file: description, product, company, file and product versions, copyright, original file name.
 - [ ] The SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
@@ -291,7 +297,7 @@ Measured so far, manually on Windows 11 on 2026-11-22 with a script over the par
 
 ## Package info preview (.deb, .rpm, .msi, .dmg, .pkg, .apk, .jar, ...)
 
-Open real files in the Extension Development Host, one or two per family below. Never install, run, mount or open any of them outside the preview for this pass: the preview must not either. Get a Debian package from a distribution mirror, not from a build you trust less than the page's claims.
+Open real files in the Extension Development Host, one or two per family below, pressing **Read this file** on each. Never install, run, mount or open any of them outside the preview for this pass: the preview must not either. Get a Debian package from a distribution mirror, not from a build you trust less than the page's claims.
 
 Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the readers (not through the extension host):
 
@@ -326,13 +332,28 @@ Peak resident memory after the fixes was between 63 and 132 MB for every row, mo
 - **Redraws when the file changes.** A test with a file watcher that fires on demand showed 300 change events starting 301 simultaneous draws, each of which reads the file and, for these two previews, hashes all of it. `tests/ooxmlRedraw.test.ts` pins the fix in `src/ooxmlEditor.ts`: one draw at a time, a burst during a draw costs exactly one more, events with nothing running are gathered for 250 ms, and nothing draws or posts after the tab closes. This applies to every preview built on that scaffold, the workbook, deck and Word previews included.
 - **In the extension host itself.** `test-integration/hostileFiles.test.ts` runs inside the extension host of a real VS Code, in CI only, and measures the host from within. On the GitHub runner on 2026-11-23: the 250-byte Debian package grew the heap by 17 MB, the 642-byte Android package by under 1 MB, and the 1.3 KB macOS installer by 3 MB, with no stall over 18 ms; a 4 MB file rewritten 60 times with its preview open grew it by 1 MB with no stall over 1 ms. The test fails past 256 MB of heap growth, 768 MB of resident growth or a 3 s stall.
 
+Isolation, 2026-11-23: the readers now run in a worker thread (`src/isolate.ts`, a 256 MB heap limit and a 15 second limit) and a file's page is read only on request. Measured on Windows 11 by script in plain Node, not in the extension host:
+
+- Through the real bundled `dist/fileInfoWorker.js`, `notepad.exe` read in 33 ms and a Debian package in 40 ms.
+- A worker written to allocate without bound was ended at a 64 MB limit in 98 ms, and the starting process's memory was up 2 MB.
+- A worker written to loop forever was ended at its time limit.
+- A worker that exits without answering, and a missing worker script, each produce a notice.
+
+What this does not show: that worker threads behave the same inside VS Code's extension host (the integration tests check that, in CI, and had not run for this change when this was written, so it is not claimed to work in the editor); and nothing here bounds memory allocated outside the JavaScript heap (typed arrays, a WebAssembly memory), which the readers' own caps bound. A worker is a thread in the same process, not a sandbox.
+
 Still not measured: the extension host on Windows or macOS (the runner is Linux), and a preview open on a file that is rewritten for minutes rather than seconds.
 
 On 2026-11-23 a Debian package was opened in the Extension Development Host and its page drew, which is the only check made in the editor so far; that pass is what showed the page as a narrow table beside a wide empty panel. The layout that replaced it (two columns of sections, facts tables without a header row, long one and two column grids drawn several to a line, the size and hash second) was then checked by headless Chrome screenshots of the rendered markup with the real `media/preview.css`, not in the editor: a `.deb`, an `.rpm`, an `.msi`, an Android `.apk`, a macOS `.pkg`, `notepad.exe` and `kernel32.dll`, in the dark, light and green themes, at 1500, 1100 and 760 px wide. **The rows below are otherwise unchecked in the editor**: the menu, copy and the exports are unverified, and so is the icon, which the screenshots drew from an inline image where the editor sends it as a separate message.
 
 Every format:
 
-- [ ] Each file opens in the preview, not in VS Code's "file is binary" notice. An uppercase extension does too, and so does `libfoo.so.1`.
+- [ ] Opening a file shows only its name, its size and a **Read this file** button, and says it has not been read: no version, hash, signer or table. Nothing else about the file is on the page.
+- [ ] Pressing the button (it changes to "Reading..." and cannot be pressed twice) replaces the page with the file's page.
+- [ ] Open a second file of the same kind after reading the first: it asks again. The first file's page stays read.
+- [ ] On a page waiting for confirmation, run **MarkCopy: Read This File** from the Command Palette, without the mouse: the file is read. The command is greyed out when any other editor is active.
+- [ ] Turn `markcopy.fileInfo.confirm` off in Settings: a file opened afterwards is read at once, and a page that was still waiting reads without being reopened. Turn it back on and a newly opened file asks again.
+- [ ] After a file has been read, change it on disk: the page redraws without asking again.
+- [ ] After the first step, each file reads into the preview, not VS Code's "file is binary" notice. An uppercase extension does too, and so does `libfoo.so.1`.
 - [ ] The page ends with a File section whose format and size are right and whose SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
 - [ ] No row, link or menu item installs, runs or opens the file. Right-click: there is **no Open in Default App**; **Reveal in file manager** works.
 - [ ] A text file renamed to each extension shows a notice in the panel, not a crash and not a blank page. So does a truncated copy of a real package.

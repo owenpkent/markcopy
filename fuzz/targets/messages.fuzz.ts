@@ -75,6 +75,7 @@ const TYPES = {
     'toast',
     'openLink',
     'selectSheet',
+    'readFile',
   ],
   pdf: ['ready', 'revealInOS', 'openExternal', 'saveComments', 'updateSetting'],
   tex: ['ready', 'revealInOS', 'openExternal', 'texRecompile', 'saveComments', 'updateSetting'],

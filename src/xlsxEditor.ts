@@ -48,7 +48,7 @@ export class XlsxEditorProvider extends OoxmlEditorProvider {
     return {
       render: () => this.renderWorkbook(document.uri, sheetIndex),
       handleMessage: async (msg, redraw) => {
-        if (msg.index !== sheetIndex) {
+        if (msg.type === 'selectSheet' && msg.index !== sheetIndex) {
           sheetIndex = msg.index;
           await redraw();
         }

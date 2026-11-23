@@ -17,9 +17,13 @@ boundary.
   packages and installers (Debian, RPM, Alpine, Windows Installer, disk images, macOS
   installers, ELF, and zip-based formats) for the read-only `src/packageEditor.ts` preview.
   `src/binary/` and `src/fileInspect.ts` hold the ranged reader, text cleaning, HTML
-  helpers and SHA-256 that it and the executable preview share.
+  helpers and SHA-256 that it and the executable preview share. Both previews sit on
+  `src/fileInfoEditor.ts`, which shows a confirmation page and reads only when asked,
+  in a worker thread (`src/isolate.ts` starts it, `src/fileInfoWorker.ts` is its entry
+  and `src/fileInfoTask.ts` the task it runs). Keep the `vscode` module out of the
+  worker's imports.
 - Edit source files and `media/preview.css`, not generated bundles. `esbuild.js`
-  builds the host; `esbuild.web.js` builds webviews and copies KaTeX assets.
+  builds two host bundles (`dist/extension.js` and the worker `dist/fileInfoWorker.js`); `esbuild.web.js` builds webviews and copies KaTeX assets.
 - Keep `vscode` external to the host bundle. Preserve CSP, sanitization, and
   host-side validation of webview messages. See [SECURITY](.github/SECURITY.md).
 

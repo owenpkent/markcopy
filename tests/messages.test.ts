@@ -201,7 +201,14 @@ describe('parseMarkdownMessage', () => {
   });
 
   it('ignores types that belong to other surfaces', () => {
-    for (const type of ['ready', 'saveFrame', 'saveComments', 'texRecompile', 'selectSheet']) {
+    for (const type of [
+      'ready',
+      'saveFrame',
+      'saveComments',
+      'texRecompile',
+      'selectSheet',
+      'readFile',
+    ]) {
       expect(parseMarkdownMessage({ type })).toBeUndefined();
     }
   });
@@ -209,7 +216,7 @@ describe('parseMarkdownMessage', () => {
 
 describe('parseOoxmlMessage', () => {
   it('accepts the shared messages', () => {
-    for (const type of ['ready', 'revealInOS', 'openExternal', 'openSettings']) {
+    for (const type of ['ready', 'revealInOS', 'openExternal', 'openSettings', 'readFile']) {
       expect(parseOoxmlMessage({ type })).toEqual({ type });
     }
     expect(parseOoxmlMessage({ type: 'toast', text: 'hi' })).toEqual({ type: 'toast', text: 'hi' });
@@ -555,7 +562,14 @@ describe('parseVideoMessage', () => {
   });
 
   it('ignores types that belong to other surfaces', () => {
-    for (const type of ['saveComments', 'texRecompile', 'openLink', 'editCell', 'selectSheet']) {
+    for (const type of [
+      'saveComments',
+      'texRecompile',
+      'openLink',
+      'editCell',
+      'selectSheet',
+      'readFile',
+    ]) {
       expect(parseVideoMessage({ type })).toBeUndefined();
     }
   });

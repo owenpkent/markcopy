@@ -1,13 +1,18 @@
 // Hostile files, in a real VS Code.
 //
-// The file-information previews read untrusted packages in the extension host,
-// a process the reader's other extensions share. An audit on 2026-11-23 found
-// files of a few hundred bytes that took that process past 4 GB and aborted it.
-// The unit tests now pin each case, but they run the readers in a test worker.
-// This runs three of them where the damage would actually be done: these
-// tests execute inside the extension host, so process.memoryUsage() here is
-// the host's own memory, a host that dies takes the run with it, and a host
-// that stalls shows up as a timer that fires late.
+// The file-information previews read untrusted packages. Before they were
+// isolated they did it in the extension host, a process the reader's other
+// extensions share, and an audit on 2026-11-23 found files of a few hundred
+// bytes that took that process past 4 GB and aborted it. The unit tests pin
+// each case, but they run the readers in a test worker. This runs three of
+// them where the damage would actually be done: these tests execute inside the
+// extension host, so process.memoryUsage() here is the host's own memory, a
+// host that dies takes the run with it, and a host that stalls shows up as a
+// timer that fires late.
+//
+// Opening a file no longer reads it: the page waits for a "Read this file"
+// press. These tests press it the way the keyboard does, with the
+// markcopy.fileInfo.read command, which resolves with what the page then shows.
 //
 // The files are the audit's own, embedded so nothing binary is checked in.
 // They are inert: malformed metadata, with no code in them to run.
@@ -18,6 +23,14 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 const PACKAGE_VIEW = 'markcopy.packagePreview';
+const READ_COMMAND = 'markcopy.fileInfo.read';
+
+// What the command resolves with (FileInfoOutcome in src/fileInfoEditor.ts).
+interface Outcome {
+  state: 'waiting' | 'read' | 'failed';
+  warnings: number;
+  message?: string;
+}
 
 // A Debian package (250 bytes) whose control archive is nine skippable
 // Zstandard frames and then a frame declaring a 1.9 GiB window. The check once
@@ -78,6 +91,9 @@ const MAX_HEAP_GROWTH = 256 * MB;
 const MAX_RSS_GROWTH = 768 * MB;
 // A timer set for 50 ms that fires this late means the host was blocked.
 const MAX_STALL_MS = 3000;
+// A file that is only opened is not read at all, so the host has nothing to
+// spend memory on beyond opening a tab.
+const MAX_UNREAD_HEAP_GROWTH = 64 * MB;
 
 function customTabs(): { viewType: string; uri: string }[] {
   return vscode.window.tabGroups.all
@@ -134,6 +150,13 @@ function assertCheap(cost: Cost, what: string): void {
   assert.ok(cost.worstStall < MAX_STALL_MS, `the extension host stopped responding. ${text}`);
 }
 
+/** Press the page's "Read this file" button for `uri`, and say what the page then shows. */
+async function readFile(uri: vscode.Uri): Promise<Outcome> {
+  const outcome = await vscode.commands.executeCommand<Outcome | undefined>(READ_COMMAND, uri);
+  assert.ok(outcome, `no file information page is open for ${uri.fsPath}`);
+  return outcome;
+}
+
 async function openInPreview(uri: vscode.Uri): Promise<void> {
   await vscode.commands.executeCommand('vscode.open', uri);
   const deadline = Date.now() + 10000;
@@ -160,23 +183,50 @@ suite('hostile files in the package preview', () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
 
-  const cases: [name: string, file: string, base64: string][] = [
-    ['a Zstandard frame declaring a 1.9 GiB window', 'window.deb', ZSTD_WINDOW_DEB],
-    ['an Android string pool naming one string 100,000 times', 'pool.apk', STRING_POOL_APK],
-    ['a macOS installer whose directory name is a megabyte long', 'path.pkg', LONG_PATH_PKG],
+  // `state` and `warnings` are what readPackage makes of each file, found by
+  // running it over the bytes (not assumed): all three read, and the first two
+  // say what they refused to follow. None of them fails, because a hostile file
+  // is meant to be shown with its warnings, not turned away.
+  const cases: [name: string, file: string, base64: string, minWarnings: number][] = [
+    ['a Zstandard frame declaring a 1.9 GiB window', 'window.deb', ZSTD_WINDOW_DEB, 1],
+    ['an Android string pool naming one string 100,000 times', 'pool.apk', STRING_POOL_APK, 1],
+    ['a macOS installer whose directory name is a megabyte long', 'path.pkg', LONG_PATH_PKG, 0],
   ];
 
-  for (const [name, file, base64] of cases) {
+  for (const [name, file, base64, minWarnings] of cases) {
     test(`previewing ${name} costs the extension host almost nothing`, async () => {
       const uri = vscode.Uri.file(path.join(dir, file));
       fs.writeFileSync(uri.fsPath, Buffer.from(base64, 'base64'));
-      const cost = await measure(() => openInPreview(uri), 4000);
+      let outcome: Outcome | undefined;
+      const cost = await measure(async () => {
+        await openInPreview(uri);
+        outcome = await readFile(uri);
+      }, 4000);
       assertCheap(cost, file);
+      assert.strictEqual(outcome?.state, 'read', `${file}: ${outcome?.message ?? 'no message'}`);
+      assert.ok(
+        (outcome?.warnings ?? 0) >= minWarnings,
+        `${file} showed ${outcome?.warnings} warnings, expected at least ${minWarnings}`,
+      );
       // Still alive and answering: a command round-trips through the host.
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       assert.deepStrictEqual(customTabs(), []);
     });
   }
+
+  // The other half of the same promise: a file that is only opened is not read.
+  // The worst of the three files is opened and left alone, and the host's
+  // memory must not move.
+  test('merely opening a hostile file reads none of it', async () => {
+    const uri = vscode.Uri.file(path.join(dir, 'unread.deb'));
+    fs.writeFileSync(uri.fsPath, Buffer.from(ZSTD_WINDOW_DEB, 'base64'));
+    const cost = await measure(() => openInPreview(uri), 3000);
+    assertCheap(cost, 'unread.deb');
+    assert.ok(
+      cost.heapGrowth < MAX_UNREAD_HEAP_GROWTH,
+      `opening a file without reading it grew the host's heap by ${Math.round(cost.heapGrowth / MB)} MB`,
+    );
+  });
 
   // A file that changes on disk redraws its preview. Each change event once
   // started a read of its own, so a file rewritten in a loop (a build output
@@ -199,6 +249,10 @@ suite('hostile files in the package preview', () => {
 
     const cost = await measure(async () => {
       await openInPreview(uri);
+      // Asked for once, so that the rewrites below are redraws of a page that
+      // has been confirmed, which is the case that used to stack reads.
+      const outcome = await readFile(uri);
+      assert.strictEqual(outcome.state, 'read', outcome.message);
       for (let i = 0; i < 60; i++) {
         body.writeUInt32LE(i, body.length - 4);
         fs.writeFileSync(uri.fsPath, body);

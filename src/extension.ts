@@ -38,6 +38,7 @@ import { XlsxEditorProvider } from './xlsxEditor';
 import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
 import { ExeEditorProvider } from './exeEditor';
+import { readFileInfo } from './fileInfoEditor';
 import { PackageEditorProvider } from './packageEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
@@ -385,6 +386,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Open the MarkCopy settings (also reachable from the preview's title-bar gear
     // and the in-preview right-click menu).
+    // The keyboard's way to press "Read this file" on a file-information
+    // page, for the page in front or the file given. Resolves with what the
+    // page then shows, which is also how the integration tests know a read
+    // finished.
+    vscode.commands.registerCommand('markcopy.fileInfo.read', (uri?: vscode.Uri) => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const target = uri ?? (input instanceof vscode.TabInputCustom ? input.uri : undefined);
+      return target ? readFileInfo(target) : undefined;
+    }),
+
     vscode.commands.registerCommand('markcopy.openSettings', () => {
       vscode.commands.executeCommand('workbench.action.openSettings', '@ext:OwenPKent.markcopy');
     }),
