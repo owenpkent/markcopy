@@ -967,9 +967,14 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
    keep un-rendered pages dark to match. */
 
 /* ---- Context menu -------------------------------------------------------- */
+/* Fixed, so a menu is placed against the window and no scrolled or
+   overflow-clipped container can cut part of it off. menu.ts caps max-height
+   at the window, and a taller menu scrolls. */
 .mc-menu {
-  position: absolute;
+  position: fixed;
   z-index: 1000;
+  box-sizing: border-box;
+  overflow-y: auto;
   min-width: 220px;
   background: var(--vscode-menu-background, #fff);
   color: var(--vscode-menu-foreground, #1f2328);

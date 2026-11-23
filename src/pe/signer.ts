@@ -134,6 +134,27 @@ function date(der: Uint8Array, value: Tlv | undefined): string | undefined {
   return general ? `${general[1]}-${general[2]}-${general[3]}` : undefined;
 }
 
+// 1.2.840.113549.1.7.2, the PKCS #7 signedData content type.
+const SIGNED_DATA_OID = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02];
+
+/**
+ * Whether these bytes are a PKCS #7 ContentInfo that says it holds SignedData,
+ * which is the form an Authenticode signature takes. It says what the bytes
+ * claim to be, and nothing about whether the signature is good.
+ */
+export function isSignedData(der: Uint8Array): boolean {
+  const outer = tlvAt(der, 0, der.length);
+  if (outer?.tag !== 0x30) {
+    return false;
+  }
+  const oid = children(der, outer, 1)[0];
+  return (
+    oid?.tag === 0x06 &&
+    oid.end - oid.start === SIGNED_DATA_OID.length &&
+    SIGNED_DATA_OID.every((byte, i) => der[oid.start + i] === byte)
+  );
+}
+
 export function readSigner(der: Uint8Array): Signer | undefined {
   // ContentInfo ::= SEQUENCE { contentType OID, [0] EXPLICIT SignedData }
   const outer = tlvAt(der, 0, der.length);
