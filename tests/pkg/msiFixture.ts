@@ -94,6 +94,9 @@ export interface SummarySpec {
   saved?: bigint;
   pageCount?: number;
   wordCount?: number;
+  /** Character Count: transform validation flags (upper word) and error flags (lower word). */
+  charCount?: number;
+  lastSavedBy?: string;
   application?: string;
   /** Written as a VT_LPWSTR instead of VT_LPSTR. */
   wideComments?: string;
@@ -174,6 +177,7 @@ export function summaryStream(spec: SummarySpec): Uint8Array {
     [5, spec.keywords],
     [6, spec.wideComments === undefined ? spec.comments : undefined],
     [7, spec.template],
+    [8, spec.lastSavedBy],
     [9, spec.revision],
     [18, spec.application],
   ];
@@ -196,6 +200,9 @@ export function summaryStream(spec: SummarySpec): Uint8Array {
   }
   if (spec.wordCount !== undefined) {
     props.push([15, i4(spec.wordCount)]);
+  }
+  if (spec.charCount !== undefined) {
+    props.push([16, i4(spec.charCount)]);
   }
   props.sort((a, b) => a[0] - b[0]);
 

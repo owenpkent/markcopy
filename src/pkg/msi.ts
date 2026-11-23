@@ -12,6 +12,7 @@
 import { formatBytes, formatNumber } from '../binary/html';
 import { ReadError, type RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
+import { asciiLower } from './ascii';
 import { openCfb, STREAM, type Cfb, type CfbEntry } from './cfb';
 import { propertySection, rows, tableSection, type InfoSection, type PackageInfo } from './model';
 import { isSignedData, readSigner, signatureSection, signerCount } from './signature';
@@ -383,6 +384,123 @@ function installerVersion(value: number | undefined): string | undefined {
   return `${Math.floor(value / 100)}.${minor >= 10 && minor % 10 === 0 ? minor / 10 : minor}`;
 }
 
+// The summary information means different things in an installation package, a
+// transform and a patch, so each row follows the definition for the kind of file
+// in hand. From Microsoft's "Summary Property Descriptions" page and the page of
+// each property (all under learn.microsoft.com/en-us/windows/win32/msi/):
+//   Title, Comments, Create/Last Saved Time, Creating Application (same idea for
+//     all three kinds; shown as they are)
+//   Subject (subject-summary):
+//     package    the product name, the same as ProductName
+//     transform  the product name of the original package
+//     patch      "a short description of the patch that includes the name of the product"
+//   Author: the manufacturer of the package, the transform or the patch
+//   Keywords (keywords-summary):
+//     package, transform  a list of keywords
+//     patch      "a semicolon-delimited list of network or URL locations for the
+//                sources of the patch"
+//   Template (template-summary):
+//     package    the platform and languages, "[platform];[language id],[language id]"
+//     transform  the platform and one language the transform can be applied to; either may be blank
+//     patch      "a semicolon-delimited list of the product codes that can accept the patch"
+//   Last Saved By (last-saved-by-summary):
+//     package    a tool or LogonUser note, "never used by the installer"; not shown
+//     transform  the platform and language ID(s) the database has after the transform
+//     patch      "a semicolon-delimited list of transform substorage names in the order
+//                they are applied by this patch"
+//   Revision Number (revision-number-summary):
+//     package    the package code
+//     transform  "Original-Product-Code Original-Product-Version ; New-Product Code
+//                New-Product-Version; Upgrade-Code"
+//     patch      the patch code GUID, "followed by a list of patch code GUIDs for obsolete
+//                patches", "concatenated with no delimiters"
+//   Page Count (page-count-summary):
+//     package    the minimum installer version, as 200 for 2.0 or 301 for 3.1
+//     transform  the minimum installer version to process the transform
+//     patch      "set to Null"
+//   Word Count (word-count-summary):
+//     package    a bit field: 1 short file names, 2 compressed, 4 administrative image,
+//                8 elevated privileges not required
+//     transform  "should be Null"
+//     patch      the minimum installer version: 1 "the default value, which indicates that
+//                MSPATCH was used to create the patch", 2 is 1.2, 3 is 2.0, 4 is 3.0, 5 is 3.1
+//   Character Count (character-count-summary):
+//     transform  the upper 16-bit word holds the transform validation flags and the
+//                lower word the transform error condition flags
+//     package, patch  "should be Null"
+//   Security: not shown.
+// A file whose root CLSID is not one of the three keeps the package reading.
+type SummaryKind = 'package' | 'transform' | 'patch';
+
+const PATCH_WORD_COUNT: Record<number, string> = {
+  1: 'Not stated (Word Count 1, the default: MSPATCH was used to create the patch)',
+  2: '1.2',
+  3: '2.0',
+  4: '3.0',
+  5: '3.1',
+};
+
+const MAX_LIST_ITEMS = 50;
+const GUID = /\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}/g;
+
+function semicolonList(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const items = value
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+  if (items.length === 0) {
+    return undefined;
+  }
+  const shown = items.slice(0, MAX_LIST_ITEMS).join(', ');
+  return items.length > MAX_LIST_ITEMS
+    ? `${shown} (and ${formatNumber(items.length - MAX_LIST_ITEMS)} more)`
+    : shown;
+}
+
+/** A patch's Revision Number: the patch code, then the codes it obsoletes. */
+function patchCodes(value: string | undefined): [string, string | undefined][] {
+  if (!value) {
+    return [];
+  }
+  const trimmed = value.trim();
+  const guids = trimmed.match(GUID) ?? [];
+  if (guids.length === 0 || guids.join('').length !== trimmed.length) {
+    // Not the documented layout: show it as it is.
+    return [['Revision number (from the summary)', trimmed]];
+  }
+  const obsolete = guids.slice(1);
+  return [
+    ['Patch code', guids[0]],
+    [
+      'Obsoletes patches',
+      obsolete.length > MAX_LIST_ITEMS
+        ? `${obsolete.slice(0, MAX_LIST_ITEMS).join(', ')} (and ${formatNumber(obsolete.length - MAX_LIST_ITEMS)} more)`
+        : obsolete.join(', ') || undefined,
+    ],
+  ];
+}
+
+/** A transform's Revision Number: original product, new product, upgrade code. */
+function transformProducts(value: string | undefined): [string, string | undefined][] {
+  if (!value) {
+    return [];
+  }
+  const parts = value.split(';', 4).map((part) => part.trim());
+  if (parts.length !== 3) {
+    return [['Revision number (from the summary)', value.trim()]];
+  }
+  return [
+    ['Original product (code and version)', parts[0] || undefined],
+    ['New product (code and version)', parts[1] || undefined],
+    ['Upgrade code', parts[2] || undefined],
+  ];
+}
+
+const hex16 = (value: number): string => `0x${value.toString(16).toUpperCase().padStart(4, '0')}`;
+
 // Tables worth counting, and what a row of each is.
 const COUNTED: [table: string, label: string][] = [
   ['File', 'File table rows'],
@@ -613,15 +731,27 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   }
 
   // Package section.
-  // A patch's Template property lists the product codes it applies to, not a platform.
-  const isPatch = cfb.rootClsid === CLSID_PATCH;
+  // Each summary row follows the definition for the kind of file (see the table
+  // above SummaryKind). A patch's Template lists the product codes it applies to,
+  // not a platform.
+  const summaryKind: SummaryKind =
+    cfb.rootClsid === CLSID_PATCH
+      ? 'patch'
+      : cfb.rootClsid === CLSID_TRANSFORM
+        ? 'transform'
+        : 'package';
+  const isPatch = summaryKind === 'patch';
+  const isTransform = summaryKind === 'transform';
+  const isPackage = summaryKind === 'package';
   const template = text(7);
-  const [platformText, languageText] = template ? template.split(';') : [];
-  const platform =
-    platformText && !isPatch
-      ? (PLATFORMS[platformText.trim().toLowerCase()] ?? platformText)
-      : undefined;
+  const [platformText, languageText] = template && !isPatch ? template.split(';') : [];
+  const platform = platformText
+    ? (PLATFORMS[asciiLower(platformText.trim())] ?? platformText)
+    : undefined;
   const words = num(15);
+  const pages = num(14);
+  const subject = text(3);
+  const characters = num(16);
   const allUsers = properties.get('ALLUSERS');
   // What the Property table declares about the installation context, from
   // Microsoft's ALLUSERS and MSIINSTALLPERUSER pages:
@@ -641,8 +771,10 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   // package's own logic, so the row states the declaration and nothing more.
   const fromOlder = 'earlier Windows Installer versions ignore MSIINSTALLPERUSER';
   const perUser = properties.get('MSIINSTALLPERUSER');
+  // ALLUSERS is a property of an installation package. A patch or a transform
+  // that happens to carry a Property table declares no install context of its own.
   const scope =
-    properties.size === 0
+    !isPackage || properties.size === 0
       ? undefined
       : allUsers === undefined || allUsers === ''
         ? 'ALLUSERS not set: the per-user context'
@@ -657,46 +789,98 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
                 : perUser === undefined
                   ? 'ALLUSERS=2, MSIINSTALLPERUSER not set: dual-purpose, the context depends on the privileges of the user and the Windows version'
                   : `ALLUSERS=2, MSIINSTALLPERUSER=${JSON.stringify(perUser)}: not a documented value`;
-  const productName = properties.get('ProductName') || text(3);
+  // The Subject is the product name only in a package; in a transform it names
+  // the original product and in a patch it describes the patch.
+  const productName = properties.get('ProductName') || (isPackage ? subject : undefined);
   const productVersion = properties.get('ProductVersion');
   const manufacturer = properties.get('Manufacturer') || text(4);
+  const subjectRow: [string, string | undefined] = isPatch
+    ? ['Patch description (from Subject)', subject]
+    : isTransform
+      ? ['Original product name (from Subject)', subject]
+      : ['Subject', subject !== productName ? subject : undefined];
   const flag = (name: string): string | undefined => (properties.has(name) ? 'Yes' : undefined);
 
   const sections: InfoSection[] = [
     ...propertySection('Package', [
       ['Product name', productName],
       ['Version', productVersion],
-      ['Manufacturer', manufacturer],
+      [isPackage ? 'Manufacturer' : 'Author (from the summary)', manufacturer],
       ['Product code', properties.get('ProductCode')],
       ['Upgrade code', properties.get('UpgradeCode')],
-      ['Package code', text(9)],
+      ...(isPatch
+        ? patchCodes(text(9))
+        : isTransform
+          ? transformProducts(text(9))
+          : [['Package code', text(9)] as [string, string | undefined]]),
       ['Platform (from the summary template)', platform],
       [
         'Languages',
         isPatch
           ? undefined
-          : (languages(languageText) ?? languages(properties.get('ProductLanguage'))),
+          : isTransform
+            ? languages(languageText)
+            : (languages(languageText) ?? languages(properties.get('ProductLanguage'))),
+      ],
+      [
+        'Applies to product codes (from the summary template)',
+        isPatch ? semicolonList(template) : undefined,
       ],
       ['Install scope (from ALLUSERS)', scope],
-      ['Minimum installer version', installerVersion(num(14))],
+      // Page Count is the minimum version for a package and to process a transform,
+      // and Null in a patch, where Word Count carries it.
+      [
+        isTransform ? 'Minimum installer version to process' : 'Minimum installer version',
+        isPatch ? undefined : installerVersion(pages),
+      ],
+      [
+        'Minimum installer version',
+        isPatch && words !== undefined
+          ? (PATCH_WORD_COUNT[words] ?? `Word Count ${words}: not a documented value`)
+          : undefined,
+      ],
       [
         'Elevation (summary flag)',
-        words === undefined ? undefined : (words & 8) !== 0 ? 'Not required' : 'Can be required',
+        !isPackage || words === undefined
+          ? undefined
+          : (words & 8) !== 0
+            ? 'Not required'
+            : 'Can be required',
       ],
       [
         'Source files (summary flag)',
-        words === undefined ? undefined : (words & 2) !== 0 ? 'Compressed' : 'Uncompressed',
+        !isPackage || words === undefined
+          ? undefined
+          : (words & 2) !== 0
+            ? 'Compressed'
+            : 'Uncompressed',
       ],
       [
         'Source is (summary flag)',
-        words !== undefined && (words & 4) !== 0 ? 'An administrative image' : undefined,
+        isPackage && words !== undefined && (words & 4) !== 0
+          ? 'An administrative image'
+          : undefined,
+      ],
+      [
+        'Transform flags (from Character Count)',
+        isTransform && characters !== undefined
+          ? `Validation ${hex16(Math.floor(characters / 65536) & 0xffff)}, error conditions ${hex16(characters & 0xffff)} (not decoded)`
+          : undefined,
+      ],
+      [
+        'Transforms applied, in order (from Last Saved By)',
+        isPatch ? semicolonList(text(8)) : undefined,
+      ],
+      [
+        'Platform and language after the transform (from Last Saved By)',
+        isTransform ? text(8) : undefined,
       ],
       ['Created with', text(18)],
       ['Created', text(12)],
       ['Last saved', text(13)],
-      ['Subject', text(3) !== productName ? text(3) : undefined],
+      subjectRow,
       ['Comments', text(6)],
-      ['Keywords', text(5)],
+      isPatch ? ['Patch sources (from Keywords)', semicolonList(text(5))] : ['Keywords', text(5)],
       ['Contact', properties.get('ARPCONTACT')],
       ['Website', properties.get('ARPURLINFOABOUT')],
       ['Help link', properties.get('ARPHELPLINK')],
@@ -777,7 +961,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     }
   }
 
-  const name = productName;
+  const name = productName ?? (isPackage ? undefined : subject);
   return {
     format: kind,
     title: name ? `${name}${productVersion ? ' ' + productVersion : ''}` : undefined,
