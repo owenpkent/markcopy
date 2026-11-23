@@ -7,6 +7,7 @@
 // (src/pkg/zipRange.ts), so a 300 MB .jar costs its directory and a manifest.
 import { formatBytes, formatBytesShort, formatNumber } from '../binary/html';
 import { readApk } from './androidApk';
+import { isJarManifestName } from './ascii';
 import { readJar } from './jar';
 import { tableSection, type PackageInfo } from './model';
 import { readNupkg } from './nupkg';
@@ -51,9 +52,8 @@ async function flavour(zip: ZipArchive, fileName: string): Promise<ZipFlavour> {
   if (nuspec) {
     return readNupkg(zip, nuspec, fileName);
   }
-  // Java looks the manifest up without regard to case. The pattern has no `u`
-  // flag, so a non-ASCII letter never folds to an ASCII one.
-  if (zip.exactEntries.some((e) => /^META-INF\/MANIFEST\.MF$/i.test(e.name))) {
+  // Java looks the manifest up without regard to ASCII case, and only ASCII.
+  if (zip.exactEntries.some((e) => isJarManifestName(e.name))) {
     return readJar(zip);
   }
   return {

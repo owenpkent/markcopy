@@ -4,6 +4,7 @@
 // mail-style header block (core metadata), WHEEL says how it was built, and
 // entry_points.txt lists the commands it installs.
 import { clip, printable } from '../binary/text';
+import { asciiLower } from './ascii';
 import { formatNumber } from '../binary/html';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import { readTextEntry, type ZipArchive, type ZipEntry, type ZipFlavour } from './zipRange';
@@ -185,11 +186,164 @@ function pthFacts(text: string): PthFacts {
   return facts;
 }
 
-/** The folder a startup file installs into: the wheel root and the .data purelib and platlib folders. */
-const startupKey = (name: string): string =>
-  name.replace(/^[^/]+\.data\/(?:purelib|platlib)\//, '').replace(/\.(?:pth|start)$/, '');
+// Where a startup file installs. The wheel root goes to purelib or platlib as
+// WHEEL's Root-Is-Purelib says; <name>.data/purelib and <name>.data/platlib name
+// their folder. The wheel specification lets the two be different directories
+// (for example /usr/lib and /usr/lib64 on Fedora), and site.py matches a .pth to
+// its .start by the full path, so a .start in the other category pairs with
+// nothing where the two differ and with the .pth where they are one directory.
+type Dir = 'purelib' | 'platlib' | 'unknown';
 
-type StartState = { kind: 'none' } | { kind: 'registered' } | { kind: 'unknown' };
+interface Startup {
+  entry: ZipEntry;
+  /** "unknown" for a root file when WHEEL does not say where the root goes. */
+  dir: Dir;
+  /** The installed file name, without a .data folder in front. */
+  base: string;
+  isStart: boolean;
+  /** Present once the entry was read; absent when it was too large, unreadable or past the cap. */
+  text?: string;
+  read: boolean;
+  /** A .start that site.py registers; a .start that is not UTF-8 is rejected and registers nothing. */
+  registered: boolean;
+  points: string[];
+  facts?: PthFacts;
+  /**
+   * What this copy amounts to, so copies that install to one path can be compared.
+   * "unknown" never agrees with anything: the file was not read, or is a .pth in
+   * a system encoding MarkCopy cannot decode.
+   */
+  verdict: string;
+}
+
+const STARTUP_NAME = /^(?:[^/]+\.data\/(purelib|platlib)\/)?([^./][^/]*\.(?:pth|start))$/;
+
+/**
+ * Where the wheel root installs. pip reads a missing header as platlib, but
+ * another installer may not, so only a plain true or false in every copy of the
+ * header establishes it.
+ */
+function rootDir(wheel: Headers): Dir {
+  const values = wheel
+    .filter(([name]) => name === 'root-is-purelib')
+    .map(([, value]) => asciiLower(value.trim()));
+  if (values.length > 0 && values.every((v) => v === 'true')) {
+    return 'purelib';
+  }
+  if (values.length > 0 && values.every((v) => v === 'false')) {
+    return 'platlib';
+  }
+  return 'unknown';
+}
+
+// File systems that ignore case keep one file for names that differ only by case.
+const foldName = (base: string): string => base.toLowerCase();
+
+const agree = (a: Startup, b: Startup): boolean =>
+  a.verdict !== 'unknown' && a.verdict === b.verdict;
+
+const ROOT_NOTE =
+  ' (WHEEL has no readable Root-Is-Purelib, so the folder the wheel root installs into is not established)';
+
+/**
+ * Why a startup file's own outcome is not established, or undefined when a
+ * definite statement is allowed. Several archive entries can install to one
+ * path (a root copy and a .data copy, or the same name listed twice), and the
+ * outcome then depends on which copy the installer leaves in place: pip installs
+ * the root first and the .data folders after, replacing an existing file, but
+ * another installer may differ, so no order is assumed. A definite statement is
+ * made only when every copy that could land there leads to the same conclusion.
+ */
+function ambiguity(f: Startup, group: Startup[]): string | undefined {
+  const same: Startup[] = [];
+  const scheme: Startup[] = [];
+  for (const g of group) {
+    if (g === f) {
+      continue;
+    }
+    if (g.base !== f.base) {
+      return 'names that differ only by letter case are one file on a case-insensitive file system, so which copy is installed depends on the file system and the installer';
+    }
+    (g.dir === f.dir ? same : scheme).push(g);
+  }
+  const differs = (list: Startup[]): boolean => list.some((g) => !agree(f, g));
+  if (same.length > 0 && differs(same)) {
+    return 'the archive holds more than one copy that installs to this path and they differ, so the outcome depends on which copy the installer leaves in place (pip writes the .data copy last)';
+  }
+  if (scheme.length > 0 && differs(scheme)) {
+    const root = f.dir === 'unknown' || scheme.some((g) => g.dir === 'unknown');
+    return `a differing copy sits in the other of purelib and platlib, which are one directory on some systems and two on others, so the outcome depends on the installation scheme${root ? ROOT_NOTE : ''}`;
+  }
+  return undefined;
+}
+
+type Suppression =
+  | 'none'
+  | 'registered'
+  | 'unknown'
+  | 'unlisted'
+  | 'case'
+  | 'collision'
+  | 'scheme'
+  | 'scheme-root'
+  | 'mixed'
+  | 'mixed-root';
+
+/** Whether a .start of the same name takes this .pth's import lines away on Python 3.15 and later. */
+function suppression(pth: Startup, byName: Map<string, Startup[]>, complete: boolean): Suppression {
+  const name = `${pth.base.slice(0, -'.pth'.length)}.start`;
+  const group = byName.get(foldName(name)) ?? [];
+  const same = group.filter((g) => g.base === name && g.dir === pth.dir);
+  const scheme = group.filter((g) => g.base === name && g.dir !== pth.dir);
+  const kinds = (list: Startup[]): Set<string> =>
+    new Set(list.map((g) => (!g.read ? 'unknown' : g.registered ? 'registered' : 'none')));
+  let state: Suppression;
+  if (same.length + scheme.length === 0) {
+    // A start file whose name differs only by case never matches the .pth's path.
+    state = 'none';
+  } else if (group.some((g) => g.base !== name)) {
+    state = 'case';
+  } else {
+    // Every copy that could end up beside the .pth is weighed. Where purelib and
+    // platlib are one directory all of them land there; where they differ only
+    // the copies in the .pth's own folder do.
+    const all = kinds([...same, ...scheme]);
+    const rootUnknown = pth.dir === 'unknown' || scheme.some((g) => g.dir === 'unknown');
+    if (all.has('unknown')) {
+      // A copy that was not inspected supports no statement either way.
+      state = 'unknown';
+    } else if (all.size === 1 && all.has('none')) {
+      state = 'none';
+    } else if (all.size === 1) {
+      // Every copy registers. In the .pth's own folder that holds on any scheme.
+      state = same.length > 0 ? 'registered' : rootUnknown ? 'scheme-root' : 'scheme';
+    } else if (scheme.length === 0) {
+      state = 'collision';
+    } else {
+      state = rootUnknown ? 'mixed-root' : 'mixed';
+    }
+  }
+  // Without a complete listing a .start that would suppress may be unlisted.
+  return state === 'none' && !complete ? 'unlisted' : state;
+}
+
+const SUPPRESSION_TEXT: Record<Suppression, string> = {
+  none: '',
+  registered: '; Python 3.15 and later skip it because a .start file of the same name is beside it',
+  unknown:
+    '; whether a .start file of the same name makes Python 3.15 and later skip it was not established',
+  unlisted:
+    '; the archive listing is incomplete, so a .start file of the same name that would make Python 3.15 and later skip it may be unlisted',
+  case: '; whether a .start file of the same name makes Python 3.15 and later skip it is not established, because names that differ only by letter case are one file on a case-insensitive file system',
+  collision:
+    '; whether a .start file of the same name makes Python 3.15 and later skip it depends on which copy of that .start the installer leaves in place (pip writes the .data copy last)',
+  scheme:
+    '; whether Python 3.15 and later skip it depends on the installation scheme: a .start of the same name sits in the other of purelib and platlib, so it is skipped where they are one directory and runs where they differ',
+  'scheme-root': `; whether Python 3.15 and later skip it depends on the installation scheme: a .start of the same name may sit in the same folder or the other of purelib and platlib, so it is skipped where they are one directory and runs where they differ${ROOT_NOTE}`,
+  mixed:
+    '; whether Python 3.15 and later skip it depends on the installation scheme and on which copy the installer leaves in place: the archive holds differing .start files of the same name, at least one of them in the other of purelib and platlib',
+  'mixed-root': `; whether Python 3.15 and later skip it depends on the installation scheme and on which copy the installer leaves in place: the archive holds differing .start files of the same name, at least one of them in the other of purelib and platlib${ROOT_NOTE}`,
+};
 
 export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<ZipFlavour> {
   const warnings: string[] = [];
@@ -300,103 +454,129 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
       ['Built by', wheelFirst('generator')],
       ['Pure Python', wheelFirst('root-is-purelib')],
       ['Tags', tags.join(', ')],
-      ['File list (RECORD)', hasRecord ? 'Yes' : 'No'],
+      [
+        'File list (RECORD)',
+        hasRecord
+          ? 'Yes'
+          : zip.complete
+            ? 'No'
+            : 'Not found in the part of the archive that could be listed',
+      ],
     ]),
   );
   // Wheels run no code when installed, but three things in them run later: .pth
   // and .start files that Python reads at every start (see the notes above
   // pyStrip), and scripts under <name>.data/scripts that are installed onto the
-  // PATH. In a wheel the startup files sit at the root or under
-  // <name>.data/purelib or platlib, which install into the same folder.
-  const startupAll = zip.exactEntries.filter(
-    (e) =>
-      !e.isDirectory &&
-      /^(?:[^/]+\.data\/(?:purelib|platlib)\/)?[^./][^/]*\.(?:pth|start)$/.test(e.name),
-  );
-  const startupSeen = startupAll.slice(0, MAX_STARTUP_FILES);
-  const everyStart = new Set(
-    startupAll.filter((e) => e.name.endsWith('.start')).map((e) => startupKey(e.name)),
-  );
-  // What each .start file turned out to be, for the .pth files beside it.
-  const startState = new Map<string, StartState>();
-  const startRows = new Map<string, string>();
-  const bytesOf = new Map<string, Uint8Array | undefined>();
-  for (const entry of startupSeen) {
+  // PATH. site.py lists only the site folder itself (os.listdir), so a startup
+  // file counts only at the wheel root or directly under <name>.data/purelib or
+  // platlib, never in a subfolder. Every archive entry is kept, duplicates
+  // included, because entries that install to one path collide (see ambiguity).
+  const root = rootDir(wheel);
+  const startups: Startup[] = [];
+  for (const entry of zip.entries) {
+    const match = entry.exact && !entry.isDirectory ? STARTUP_NAME.exec(entry.name) : null;
+    if (match) {
+      startups.push({
+        entry,
+        dir: match[1] === undefined ? root : (match[1] as Dir),
+        base: match[2],
+        isStart: match[2].endsWith('.start'),
+        read: false,
+        registered: false,
+        points: [],
+        verdict: 'unknown',
+      });
+    }
+  }
+  const startupSeen = startups.slice(0, MAX_STARTUP_FILES);
+  const byName = new Map<string, Startup[]>();
+  for (const f of startups) {
+    const key = foldName(f.base);
+    const list = byName.get(key);
+    if (list) {
+      list.push(f);
+    } else {
+      byName.set(key, [f]);
+    }
+  }
+  for (const f of startupSeen) {
     let bytes: Uint8Array | undefined;
     try {
-      bytes = await zip.readEntry(entry, MAX_STARTUP_BYTES);
+      bytes = await zip.readEntry(f.entry, MAX_STARTUP_BYTES);
     } catch (error) {
       if (!(error instanceof PackageError)) {
         throw error;
       }
-      warnings.push(`${entry.name} could not be read.`);
+      warnings.push(`${f.entry.name} could not be read.`);
     }
-    bytesOf.set(entry.name, bytes);
-    if (!entry.name.endsWith('.start')) {
+    if (bytes === undefined) {
       continue;
     }
-    const key = startupKey(entry.name);
-    const text = bytes === undefined ? undefined : strictUtf8(bytes);
-    if (bytes === undefined) {
-      startState.set(key, { kind: 'unknown' });
-      startRows.set(
-        entry.name,
-        'May run entry points on Python 3.15 and later: the file was not inspected (it is too large or could not be read)',
-      );
-    } else if (text === undefined) {
-      // site.py drops a .start that is not UTF-8 before registering it.
-      startState.set(key, { kind: 'none' });
-      startRows.set(
-        entry.name,
-        'Not valid UTF-8, so Python 3.15 rejects the whole file: it runs nothing and does not affect a .pth of the same name',
-      );
-    } else {
-      startState.set(key, { kind: 'registered' });
-      const points = pyLines(text)
+    f.read = true;
+    f.text = strictUtf8(bytes);
+    if (f.text === undefined) {
+      // site.py drops a .start that is not UTF-8 before registering it. A .pth
+      // that is not UTF-8 is read in the system encoding, which is not known here.
+      f.verdict = f.isStart ? 'rejected' : 'unknown';
+    } else if (f.isStart) {
+      f.registered = true;
+      f.points = pyLines(f.text)
         .map(pyStrip)
         .filter((l) => l !== '' && l[0] !== '#');
-      startRows.set(
-        entry.name,
-        points.length === 0
-          ? 'No entry points. On Python 3.15 and later its presence still makes Python ignore the import lines of a .pth of the same name'
-          : `Runs on Python 3.15 and later, at every start (${points.length} entry point${points.length === 1 ? '' : 's'}): ${points
-              .slice(0, 3)
-              .map((l) => clip(l, 120))
-              .join(', ')}${points.length > 3 ? ', and more' : ''}`,
-      );
+      f.verdict = `registered\n${f.points.join('\n')}`;
+    } else {
+      f.facts = pthFacts(f.text);
+      f.verdict = `pth\n${f.facts.always ?? ''}\n${f.facts.later ?? ''}\n${f.facts.rejected}`;
     }
   }
+  // A copy of a file may sit in the part of the directory that could not be listed.
+  const unlistedCopy = zip.complete
+    ? ''
+    : '; the archive listing is incomplete, so another copy of this file may be unlisted';
+  const definite = (f: Startup, what: string, reason: string | undefined): string =>
+    reason === undefined && f.read && (f.isStart || f.text !== undefined)
+      ? what + unlistedCopy
+      : what;
   const startupRows: [string, string][] = [];
-  for (const entry of startupSeen) {
-    if (entry.name.endsWith('.start')) {
-      startupRows.push([entry.name, printable(startRows.get(entry.name) ?? '')]);
+  for (const f of startupSeen) {
+    const reason = ambiguity(f, byName.get(foldName(f.base)) ?? []);
+    let what: string;
+    if (f.isStart) {
+      if (reason !== undefined) {
+        what = `Whether it runs entry points on Python 3.15 and later is not established: ${reason}`;
+      } else if (!f.read) {
+        what =
+          'May run entry points on Python 3.15 and later: the file was not inspected (it is too large or could not be read)';
+      } else if (f.text === undefined) {
+        what =
+          'Not valid UTF-8, so Python 3.15 rejects the whole file: it runs nothing and does not affect a .pth of the same name';
+      } else if (f.points.length === 0) {
+        what =
+          'No entry points. On Python 3.15 and later its presence still makes Python ignore the import lines of a .pth of the same name in the same folder';
+      } else {
+        what = `Runs on Python 3.15 and later, at every start (${f.points.length} entry point${f.points.length === 1 ? '' : 's'}): ${f.points
+          .slice(0, 3)
+          .map((l) => clip(l, 120))
+          .join(', ')}${f.points.length > 3 ? ', and more' : ''}`;
+      }
+      startupRows.push([f.entry.name, printable(definite(f, what, reason))]);
       continue;
     }
-    const bytes = bytesOf.get(entry.name);
-    const key = startupKey(entry.name);
-    // Whether a .start of the same name takes this file's import lines away on 3.15 and later.
-    const beside: StartState =
-      startState.get(key) ?? (everyStart.has(key) ? { kind: 'unknown' } : { kind: 'none' });
-    const text = bytes === undefined ? undefined : strictUtf8(bytes);
-    let what: string;
-    const suppression = (): string =>
-      beside.kind === 'registered'
-        ? '; Python 3.15 and later skip it because a .start file of the same name is beside it'
-        : beside.kind === 'unknown'
-          ? '; whether a .start file of the same name makes Python 3.15 and later skip it was not established'
-          : '';
-    if (bytes === undefined) {
+    const skip = SUPPRESSION_TEXT[suppression(f, byName, zip.complete)];
+    if (reason !== undefined) {
+      what = `Whether it runs code at every Python start is not established: ${reason}`;
+    } else if (!f.read) {
       what =
         'May run code at every Python start: the file was not inspected (it is too large or could not be read)';
-    } else if (text === undefined) {
+    } else if (f.text === undefined) {
       what =
         'May run code at every Python start: the file is not valid UTF-8, so Python reads it in the system encoding and MarkCopy cannot tell what its lines say';
     } else {
-      const facts = pthFacts(text);
+      const facts = f.facts ?? { rejected: false };
       if (facts.always !== undefined) {
-        what = `Runs code at every Python start (an import line, deprecated since 3.15): ${clip(facts.always, 160)}${suppression()}`;
+        what = `Runs code at every Python start (an import line, deprecated since 3.15): ${clip(facts.always, 160)}${skip}`;
       } else if (facts.later !== undefined) {
-        what = `Runs on Python 3.15 and later (an import line after leading white space; earlier versions read it as a path): ${clip(facts.later, 160)}${suppression()}`;
+        what = `Runs on Python 3.15 and later (an import line after leading white space; earlier versions read it as a path): ${clip(facts.later, 160)}${skip}`;
       } else if (facts.rejected) {
         what =
           'An import line holds a NUL byte, which Python rejects, so it does not run; no other line runs code';
@@ -404,10 +584,10 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
         what = 'Path entries only: no line starts with import, so nothing here runs code';
       }
     }
-    startupRows.push([entry.name, printable(what)]);
+    startupRows.push([f.entry.name, printable(definite(f, what, reason))]);
   }
-  if (startupAll.length > startupSeen.length) {
-    const rest = startupAll.length - startupSeen.length;
+  if (startups.length > startupSeen.length) {
+    const rest = startups.length - startupSeen.length;
     startupRows.push([
       'Other startup files',
       `${formatNumber(rest)} more .pth or .start files were not inspected, so MarkCopy cannot say whether they run code`,
@@ -423,7 +603,9 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
         ...startupRows,
         [
           'Scripts installed to the PATH',
-          dataScripts.length > 0 ? `${dataScripts.length} files under *.data/scripts` : undefined,
+          dataScripts.length > 0
+            ? `${dataScripts.length}${zip.complete ? '' : ' or more'} files under *.data/scripts`
+            : undefined,
         ],
       ],
       'Only a .pth line that starts with "import" runs code (the other lines add folders to the module path); Python deprecated these lines in 3.15 and plans to ignore them from 3.18. A .start file runs its entry points on Python 3.15 and later, and earlier versions do not read it. Read these files before installing the wheel.',
