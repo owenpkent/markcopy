@@ -5,6 +5,7 @@ import { formatBytes } from '../../src/binary/html';
 import { readMsi, decodeStreamName } from '../../src/pkg/msi';
 import { PackageError, type PackageInfo, type InfoSection } from '../../src/pkg/model';
 import { renderPackageHtml } from '../../src/pkg/render';
+import { tlv } from '../pe/fixture';
 import { buildCfb } from './cfbFixture';
 import {
   buildMsi,
@@ -133,12 +134,12 @@ describe('readMsi: the package', () => {
     expect(f('Product code')).toBe('{11111111-2222-3333-4444-555555555555}');
     expect(f('Upgrade code')).toBe('{66666666-7777-8888-9999-000000000000}');
     expect(f('Package code')).toBe('{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}');
-    expect(f('Platform')).toBe('x64 (64-bit)');
+    expect(f('Platform (from the summary template)')).toBe('x64 (64-bit)');
     expect(f('Languages')).toBe('English (US) (1033), German (1031)');
-    expect(f('Install scope')).toBe('Per-machine (all users)');
+    expect(f('Install scope (from ALLUSERS)')).toBe('ALLUSERS=1 (per-machine)');
     expect(f('Minimum installer version')).toBe('5.0');
-    expect(f('Needs elevation')).toBe('Yes');
-    expect(f('Source files')).toBe('Compressed');
+    expect(f('Marked as not needing elevation')).toBe('No');
+    expect(f('Source files compressed (summary flag)')).toBe('Yes');
     expect(f('Created with')).toBe('WiX Toolset (4.0)');
     expect(f('Created')).toBe('2023-11-14 22:13:20 UTC');
     expect(f('Last saved')).toBe('2023-11-15 22:13:20 UTC');
@@ -158,16 +159,16 @@ describe('readMsi: the package', () => {
   it('counts rows from the table sizes and the column types', async () => {
     for (const wide of [false, true]) {
       const info = await read({ ...rich, wide });
-      const f = (label: string) => field(info, 'What it installs', label);
-      expect(f('Files installed')).toBe('12');
-      expect(f('Components')).toBe('7');
-      expect(f('Features')).toBe('2');
-      expect(f('Registry values written')).toBe('0');
-      expect(f('Services installed')).toBe('1');
-      expect(f('Custom actions (code run during install)')).toBe('4');
-      expect(f('Launch conditions')).toBe('1');
-      expect(f('Shortcuts')).toBeUndefined();
-      expect(f('Has binary resources')).toBe('Yes');
+      const f = (label: string) => field(info, 'What the tables define', label);
+      expect(f('File table rows')).toBe('12');
+      expect(f('Component table rows')).toBe('7');
+      expect(f('Feature table rows')).toBe('2');
+      expect(f('Registry table rows')).toBe('0');
+      expect(f('ServiceInstall table rows')).toBe('1');
+      expect(f('CustomAction table rows')).toBe('4');
+      expect(f('LaunchCondition table rows')).toBe('1');
+      expect(f('Shortcut table rows')).toBeUndefined();
+      expect(f('Binary table')).toBe('present');
     }
   });
 
@@ -176,7 +177,7 @@ describe('readMsi: the package', () => {
       ...rich,
       tables: [{ name: 'File', columns: ['s', 's', 'i4'], rows: 3, extra: 1 }],
     });
-    expect(field(info, 'What it installs', 'Files installed')).toBe('Yes');
+    expect(field(info, 'What the tables define', 'File table rows')).toBe('present');
   });
 
   it('works out the install scope', async () => {
@@ -184,19 +185,25 @@ describe('readMsi: the package', () => {
       field(
         await read({ properties: { ProductName: 'P', ...properties } }),
         'Package',
-        'Install scope',
+        'Install scope (from ALLUSERS)',
       );
-    expect(await scope({ ALLUSERS: '1' })).toBe('Per-machine (all users)');
-    expect(await scope({})).toBe('Per-user');
-    expect(await scope({ ALLUSERS: '2' })).toBe('Per-machine, or per-user when not elevated');
+    expect(await scope({ ALLUSERS: '1' })).toBe('ALLUSERS=1 (per-machine)');
+    expect(await scope({})).toBe('ALLUSERS not set (per-user by default)');
+    expect(await scope({ ALLUSERS: '2' })).toBe(
+      'ALLUSERS=2 (per-machine when elevated, otherwise per-user)',
+    );
     expect(await scope({ ALLUSERS: '2', MSIINSTALLPERUSER: '1' })).toBe(
-      'Per-user by default, per-machine when run elevated',
+      'ALLUSERS=2 with MSIINSTALLPERUSER=1 (per-user by default, per-machine when elevated)',
     );
   });
 
   it('names the platforms and the elevation and compression flags', async () => {
     const platform = async (template: string) =>
-      field(await read({ summary: { template } }), 'Package', 'Platform');
+      field(
+        await read({ summary: { template } }),
+        'Package',
+        'Platform (from the summary template)',
+      );
     expect(await platform('Intel;1033')).toBe('x86 (32-bit)');
     expect(await platform('x64;1033')).toBe('x64 (64-bit)');
     expect(await platform('Arm64;1033')).toBe('ARM64 (64-bit)');
@@ -205,13 +212,13 @@ describe('readMsi: the package', () => {
 
     const words = async (wordCount: number) => read({ summary: { wordCount, pageCount: 301 } });
     const a = await words(8 | 2);
-    expect(field(a, 'Package', 'Needs elevation')).toBe('No');
-    expect(field(a, 'Package', 'Source files')).toBe('Compressed');
+    expect(field(a, 'Package', 'Marked as not needing elevation')).toBe('Yes');
+    expect(field(a, 'Package', 'Source files compressed (summary flag)')).toBe('Yes');
     expect(field(a, 'Package', 'Minimum installer version')).toBe('3.1');
     const b = await words(1 | 4);
-    expect(field(b, 'Package', 'Needs elevation')).toBe('Yes');
-    expect(field(b, 'Package', 'Source files')).toBe('Uncompressed');
-    expect(field(b, 'Package', 'Administrative image')).toBe('Yes');
+    expect(field(b, 'Package', 'Marked as not needing elevation')).toBe('No');
+    expect(field(b, 'Package', 'Source files compressed (summary flag)')).toBe('No');
+    expect(field(b, 'Package', 'Administrative image (summary flag)')).toBe('Yes');
   });
 
   it('falls back to the summary for a package with no Property rows', async () => {
@@ -281,10 +288,41 @@ describe('readMsi: signature', () => {
     expect(s?.kind === 'properties' && s.note).toMatch(/does not check the signature/);
   });
 
-  it('still reports a signature it cannot parse', async () => {
-    const info = await read({ signature: new Uint8Array(20).fill(7) });
-    expect(field(info, 'Signature', 'Status')).toMatch(/present/);
-    expect(field(info, 'Signature', 'Signer')).toBeUndefined();
+  const oid = (...b: number[]) => tlv(0x06, Uint8Array.from(b));
+  const SIGNED_DATA_OID = oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02);
+  const DATA_OID = oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01);
+  const noSigners = tlv(
+    0x30,
+    SIGNED_DATA_OID,
+    tlv(0xa0, tlv(0x30, tlv(0x02, Uint8Array.of(1)), tlv(0x31), tlv(0x30, DATA_OID), tlv(0x31))),
+  );
+  const bareCertificate = tlv(
+    0x30,
+    tlv(0x30, tlv(0x02, Uint8Array.of(1))),
+    tlv(0x30, oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b), tlv(0x05)),
+    tlv(0x03, Uint8Array.of(0, 9, 9)),
+  );
+
+  it.each([
+    ['garbage', new Uint8Array(20).fill(7)],
+    ['a bare certificate', bareCertificate],
+    ['SignedData with no signers', noSigners],
+  ])('claims no signature for a DigitalSignature stream holding %s', async (_label, signature) => {
+    const info = await read({ signature, signatureEx: true });
+    expect(section(info, 'Signature')).toBeUndefined();
+    expect(info.warnings.join(' ')).toMatch(/not a recognised signature/);
+  });
+
+  it('claims nothing for MsiDigitalSignatureEx on its own', async () => {
+    const info = await read({ signatureEx: true });
+    expect(section(info, 'Signature')).toBeUndefined();
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('warns when the signature stream is over the read cap', async () => {
+    const info = await read({ signature: new Uint8Array(300 * 1024) });
+    expect(section(info, 'Signature')).toBeUndefined();
+    expect(info.warnings.join(' ')).toMatch(/could not be read/);
   });
 
   it('has no Signature section for an unsigned package', async () => {
@@ -301,9 +339,16 @@ describe('readMsi: what the file is', () => {
     expect(transform.format).toBe('Windows Installer transform');
   });
 
+  it('calls a package with a ModuleSignature table a merge module', async () => {
+    const info = await read({
+      tables: [{ name: 'ModuleSignature', columns: ['s', 'i2', 's'], rows: 1 }],
+    });
+    expect(info.format).toBe('Windows Installer merge module');
+  });
+
   it('recognises a package by its string pool when the CLSID is missing', async () => {
     const info = await read({ clsid: '{00000000-0000-0000-0000-000000000000}' });
-    expect(info.format).toBe('Windows Installer package');
+    expect(info.format).toBe('Windows Installer database');
   });
 
   it('says what an Office document or other compound file is not', async () => {
@@ -513,7 +558,7 @@ describe('readMsi: amplification bounds', () => {
       tables: [{ name: 'File', columns: ['s', 'i4'], rows: 3 }],
     });
     expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
-    expect(field(info, 'What it installs', 'Files installed')).toBe('Yes');
+    expect(field(info, 'What the tables define', 'File table rows')).toBe('present');
   });
 
   it('stops decoding once the budget of kept characters is spent', async () => {

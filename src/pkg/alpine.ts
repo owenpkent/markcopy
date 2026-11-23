@@ -37,13 +37,13 @@ const TABLE_LIMIT = 500;
 const NOT_ALPINE = 'it is a gzip archive, but not an Alpine package.';
 
 const SCRIPTS: Record<string, string> = {
-  '.pre-install': 'Runs as root before the files are installed',
-  '.post-install': 'Runs as root after the files are installed',
-  '.pre-upgrade': 'Runs as root before an upgrade',
-  '.post-upgrade': 'Runs as root after an upgrade',
-  '.pre-deinstall': 'Runs as root before the files are removed',
-  '.post-deinstall': 'Runs as root after the files are removed',
-  '.trigger': 'Runs as root when a watched directory changes',
+  '.pre-install': 'Runs before the files are installed',
+  '.post-install': 'Runs after the files are installed',
+  '.pre-upgrade': 'Runs before an upgrade',
+  '.post-upgrade': 'Runs after an upgrade',
+  '.pre-deinstall': 'Runs before the files are removed',
+  '.post-deinstall': 'Runs after the files are removed',
+  '.trigger': 'Runs when a watched directory changes',
 };
 
 /** `key = value` lines, with repeated keys kept in order. Comments start with `#`. */
@@ -246,16 +246,19 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
         ...scripts,
         ['Trigger paths', triggers ? printable(triggers.slice(0, MAX_VALUE)) : undefined],
       ],
-      'Installing a package runs these scripts as root. MarkCopy does not show or run them.',
+      'Installing a package runs these scripts, normally with root privileges. MarkCopy does not show or run them.',
     ),
   );
 
+  // apk only recognises these signature types (apk_sign_ctx_verify_tar in package.c); a
+  // `.SIGN.` entry of another kind is ignored by it, so it is not reported as a signature.
   const signed = tar.entries
     .slice(0, tar.entries.indexOf(entry))
-    .find((e) => e.name.startsWith('.SIGN.'));
+    .map((e) => /^\.SIGN\.(RSA512|RSA256|RSA|DSA)\.(.+)$/.exec(e.name))
+    .find((m) => m !== null);
   if (signed) {
-    const section = signatureSection('Alpine RSA');
-    section.rows.push(['Key name', printable(signed.name.replace(/^\.SIGN\.[A-Za-z0-9]+\./, ''))]);
+    const section = signatureSection(`Alpine ${signed[1]}`);
+    section.rows.push(['Key name', printable(signed[2])]);
     sections.push(section);
   }
 

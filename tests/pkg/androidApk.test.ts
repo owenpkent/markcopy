@@ -99,6 +99,11 @@ function manifest(overrides: Partial<{ package: string; extra: AxmlElement[] }> 
   };
 }
 
+const sf = (base: string): FixtureEntry => ({
+  name: `META-INF/${base}.SF`,
+  data: 'Signature-Version: 1.0\n',
+});
+
 const dex = (size: number): Uint8Array => new Uint8Array(size).fill(1);
 
 function apk(
@@ -201,7 +206,9 @@ describe('readZipPackage: Android signatures', () => {
   });
 
   it('names the signer of a v1 signature', async () => {
-    const info = await readZip(apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }]));
+    const info = await readZip(
+      apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }, sf('CERT')]),
+    );
     expect(value(info, 'Signature', 'Status')).toContain('Scheme v1 ');
     expect(value(info, 'Signature', 'Signer')).toBe('Android Debug');
     expect(value(info, 'Signature', 'Issued by')).toBe('Android Debug CA');
@@ -215,7 +222,9 @@ describe('readZipPackage: Android signatures', () => {
 
   it('combines v1 and v2 and keeps the v1 name', async () => {
     const info = await readZip(
-      apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }], { signingBlockIds: [0x7109871a] }),
+      apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }, sf('CERT')], {
+        signingBlockIds: [0x7109871a],
+      }),
     );
     expect(value(info, 'Signature', 'Status')).toContain('Scheme v1, v2 ');
     expect(value(info, 'Signature', 'Signer')).toBe('Android Debug');
@@ -244,9 +253,11 @@ describe('readZipPackage: Android signatures', () => {
   });
 
   it('reports a v1 block that is not PKCS #7 as unreadable, not as a signature', async () => {
-    const info = await readZip(apk(undefined, [{ name: 'META-INF/X.RSA', data: 'junk' }]));
+    const info = await readZip(apk(undefined, [{ name: 'META-INF/X.RSA', data: 'junk' }, sf('X')]));
     expect(value(info, 'Signature', 'Status')).toContain('could not be read');
-    expect(info.warnings).toContain('The META-INF signature block could not be read.');
+    expect(info.warnings).toContain(
+      '1 signature block in META-INF could not be read as a signature.',
+    );
   });
 
   it('combines versionCodeMajor and versionCode as Android does', async () => {
@@ -278,7 +289,9 @@ describe('readZipPackage: Android signatures', () => {
   });
 
   it('carries the caveat on a real signature section only', async () => {
-    const signed = await readZip(apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }]));
+    const signed = await readZip(
+      apk(undefined, [{ name: 'META-INF/CERT.RSA', data: der }, sf('CERT')]),
+    );
     expect((section(signed, 'Signature') as { note?: string }).note).toContain('does not check');
   });
 });
@@ -326,7 +339,7 @@ describe('readZipPackage: a hostile Android package', () => {
   it('survives truncation and corruption', async () => {
     const der = buildSignedData({ subject: { commonName: 'S' }, issuer: { commonName: 'I' } });
     await expectSafe(
-      apk(buildAxml(manifest()), [{ name: 'META-INF/C.RSA', data: der }], {
+      apk(buildAxml(manifest()), [{ name: 'META-INF/C.RSA', data: der }, sf('C')], {
         signingBlockIds: [0x7109871a],
       }),
       'x.apk',
@@ -378,5 +391,69 @@ describe('readZipPackage: entry identity', () => {
       buildZip([{ name: `AndroidManifest.xml${'x'.repeat(600)}`, data: real }]),
     );
     expect(info.format).toBe('Zip archive');
+  });
+});
+
+describe('readZipPackage: v1 signature pairing in an APK', () => {
+  const signedBy = (name: string): Uint8Array =>
+    buildSignedData({ subject: { commonName: name }, issuer: { commonName: 'CA' } });
+
+  it('still reports the release signer when an unpaired block comes first', async () => {
+    const info = await readZip(
+      apk(undefined, [
+        { name: 'META-INF/ORPHAN.RSA', data: signedBy('Orphan') },
+        sf('RELEASE'),
+        { name: 'META-INF/RELEASE.RSA', data: signedBy('Release') },
+      ]),
+    );
+    expect(value(info, 'Signature', 'Status')).toContain('Scheme v1 ');
+    expect(value(info, 'Signature', 'Signer')).toBe('Release');
+    expect(info.warnings.join(' ')).toContain('no matching .SF');
+  });
+
+  it('keeps a good signature when an unreadable block comes first, and warns', async () => {
+    const info = await readZip(
+      apk(undefined, [
+        sf('BAD'),
+        { name: 'META-INF/BAD.RSA', data: 'junk' },
+        sf('GOOD'),
+        { name: 'META-INF/GOOD.RSA', data: signedBy('Good') },
+      ]),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Good');
+    expect(info.warnings).toContain(
+      '1 signature block in META-INF could not be read as a signature.',
+    );
+  });
+
+  it('says how many signers there are and names the first few', async () => {
+    const entries: FixtureEntry[] = [];
+    for (const n of ['A', 'B', 'C', 'D']) {
+      entries.push(sf(n), { name: `META-INF/${n}.RSA`, data: signedBy(`Signer ${n}`) });
+    }
+    const info = await readZip(apk(undefined, entries));
+    expect(value(info, 'Signature', 'Signatures')).toBe(
+      '4 (Signer A, Signer B, Signer C, and more)',
+    );
+  });
+
+  it('does not count a .SF with no block as a signature', async () => {
+    const info = await readZip(apk(undefined, [sf('LONELY')]));
+    expect(value(info, 'Signature', 'Status')).toContain('Not signed');
+    expect(info.warnings.join(' ')).toContain('no signature block');
+  });
+
+  it('pairs names exactly, as apksig does: a base name differing in case is unpaired', async () => {
+    const info = await readZip(
+      apk(undefined, [{ name: 'META-INF/Release.RSA', data: signedBy('Release') }, sf('RELEASE')]),
+    );
+    expect(value(info, 'Signature', 'Status')).toContain('no matching .SF');
+    expect(info.warnings.join(' ')).toContain('no matching .SF');
+  });
+
+  it('does not report a block that is not SignedData with a signer as a signature', async () => {
+    const block = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x01]);
+    const info = await readZip(apk(undefined, [sf('C'), { name: 'META-INF/C.RSA', data: block }]));
+    expect(value(info, 'Signature', 'Status')).toContain('could not be read as a signature');
   });
 });

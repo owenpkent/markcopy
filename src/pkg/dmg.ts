@@ -16,7 +16,7 @@ import { parseXmlBounded } from '../binary/xml';
 import { child, type XNode } from '../ooxml/xnode';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
-import { readSigner, signatureSection } from './signature';
+import { isSignedData, readSigner, signatureSection, signerCount } from './signature';
 
 const KOLY_SIZE = 512;
 const SECTOR = 512;
@@ -213,26 +213,99 @@ async function readPartitions(
   return { partitions, licence };
 }
 
-/** The signer of the code signature's CMS blob, from its SuperBlob wrapper. */
-function readCodeSignature(blob: Uint8Array): { cms?: Uint8Array } {
+// Slots of an embedded-signature SuperBlob (xnu osfmk/kern/cs_blobs.h).
+const SLOT_NAMES: Record<number, string> = {
+  0: 'CodeDirectory',
+  1: 'Info.plist hash',
+  2: 'Requirements',
+  3: 'Resource directory',
+  5: 'Entitlements',
+  7: 'DER entitlements',
+  0x10000: 'CMS signature',
+  0x10001: 'Identification',
+  0x10002: 'Notarization ticket',
+};
+const MAGIC_SUPERBLOB = 0xfade0cc0;
+const MAGIC_CODEDIRECTORY = 0xfade0c02;
+const MAGIC_BLOBWRAPPER = 0xfade0b01;
+const SLOT_CODEDIRECTORY = 0;
+const SLOT_CMS = 0x10000;
+
+const UNRECOGNISED =
+  'The code-signature range holds data MarkCopy does not recognise, so no signature is claimed.';
+
+/**
+ * What the image's code-signature range establishes. It is a signature only
+ * when it is an embedded-signature SuperBlob with a CMS slot (0x10000) whose
+ * blob wraps PKCS #7 SignedData with at least one signer. A CodeDirectory
+ * alone is an ad-hoc signature, which names no signer; a SuperBlob with
+ * neither (Rectangle's holds only a notarization ticket) or any other bytes
+ * is reported for what it is, never as a signature.
+ */
+function codeSignatureSection(blob: Uint8Array): InfoSection {
+  const plain = (status: string, contents?: string): InfoSection => ({
+    kind: 'properties',
+    heading: 'Signature',
+    rows: contents
+      ? [
+          ['Status', status],
+          ['Contents', contents],
+        ]
+      : [['Status', status]],
+  });
   if (blob.length < 12) {
-    return {};
+    return plain(UNRECOGNISED);
   }
   const v = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
-  if (v.getUint32(0, false) !== 0xfade0cc0) {
-    return {};
+  const length = v.getUint32(4, false);
+  const count = v.getUint32(8, false);
+  if (
+    v.getUint32(0, false) !== MAGIC_SUPERBLOB ||
+    count > MAX_SIGNATURE_BLOBS ||
+    length > blob.length ||
+    length < 12 + count * 8
+  ) {
+    return plain(UNRECOGNISED);
   }
-  const count = Math.min(v.getUint32(8, false), MAX_SIGNATURE_BLOBS);
-  for (let i = 0; i < count && 12 + i * 8 + 8 <= blob.length; i++) {
+  const slots: string[] = [];
+  let hasCodeDirectory = false;
+  let cms: Uint8Array | undefined;
+  for (let i = 0; i < count; i++) {
+    const type = v.getUint32(12 + i * 8, false);
     const at = v.getUint32(12 + i * 8 + 4, false);
-    if (at + 8 <= blob.length && v.getUint32(at, false) === 0xfade0b01) {
-      const length = v.getUint32(at + 4, false);
-      if (length >= 8 && at + length <= blob.length) {
-        return { cms: blob.subarray(at + 8, at + length) };
-      }
+    if (at < 12 + count * 8 || at + 8 > length) {
+      return plain(UNRECOGNISED);
+    }
+    const magic = v.getUint32(at, false);
+    const size = v.getUint32(at + 4, false);
+    if (size < 8 || at + size > length) {
+      return plain(UNRECOGNISED);
+    }
+    slots.push(SLOT_NAMES[type] ?? `slot 0x${type.toString(16)}`);
+    if (type === SLOT_CODEDIRECTORY && magic === MAGIC_CODEDIRECTORY) {
+      hasCodeDirectory = true;
+    }
+    if (type === SLOT_CMS && magic === MAGIC_BLOBWRAPPER && size > 8 && !cms) {
+      cms = blob.subarray(at + 8, at + size);
     }
   }
-  return {};
+  const contents = slots.join(', ');
+  if (cms) {
+    if (isSignedData(cms) && signerCount(cms) > 0) {
+      return signatureSection('Apple code signing', readSigner(cms));
+    }
+    return plain(
+      'A CMS signature slot is present but does not hold a PKCS #7 signature with a signer, so no signature is claimed.',
+      contents,
+    );
+  }
+  if (hasCodeDirectory) {
+    return plain('Ad-hoc code signature (no signer), not verified by MarkCopy.', contents);
+  }
+  return plain(
+    'An embedded code-signing container with no CodeDirectory and no CMS signature, so the image is not shown as signed.',
+    contents || 'no slots',
+  );
 }
 
 export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
@@ -304,8 +377,7 @@ export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
       if (signatureLength > MAX_SIGNATURE_BYTES) {
         throw new PackageError('too large.');
       }
-      const { cms } = readCodeSignature(await reader.bytes(signatureOffset, signatureLength));
-      signature = [signatureSection('Apple code signing', cms ? readSigner(cms) : undefined)];
+      signature = [codeSignatureSection(await reader.bytes(signatureOffset, signatureLength))];
     } catch {
       warnings.push('The code signature could not be read.');
     }
@@ -337,8 +409,8 @@ export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
         ],
         ['Segment', segmentCount > 1 ? `${segmentNumber} of ${segmentCount}` : undefined],
         ['Encrypted', 'No'],
-        ['License agreement', licence ? 'Yes (shown before the image mounts)' : undefined],
-        ['Internet-enabled', flags & 4 ? 'Yes' : undefined],
+        ['License agreement', licence ? 'Yes (the image has a license resource)' : undefined],
+        ['Internet-enabled flag', flags & 4 ? 'Set' : undefined],
       ]),
       ...tableSection(
         'Partitions',

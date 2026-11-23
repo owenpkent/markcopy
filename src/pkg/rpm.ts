@@ -420,44 +420,52 @@ const ALGORITHMS: Record<number, string> = {
   22: 'EdDSA',
 };
 
-// Everything rpm runs as root, from lib/rpmscript.cc (rpm 6.0.0). A scriptlet exists
+// Everything rpm runs, from lib/rpmscript.cc (rpm 6.0.0). A scriptlet exists
 // when its body tag OR its program tag is present: `%post -p /sbin/ldconfig` has a
 // program and no body, and installing it still runs the program. All are stored on disk.
 const SCRIPTS: [body: number, program: number, label: string, runs: string][] = [
-  [1151, 1153, 'Pre-transaction (%pretrans)', 'Runs as root before the whole transaction'],
-  [1023, 1085, 'Pre-install (%pre)', 'Runs as root before the files are installed'],
-  [1024, 1086, 'Post-install (%post)', 'Runs as root after the files are installed'],
-  [1025, 1087, 'Pre-uninstall (%preun)', 'Runs as root before the files are removed'],
-  [1026, 1088, 'Post-uninstall (%postun)', 'Runs as root after the files are removed'],
-  [1152, 1154, 'Post-transaction (%posttrans)', 'Runs as root after the whole transaction'],
-  [
-    5103,
-    5105,
-    'Pre-uninstall transaction (%preuntrans)',
-    'Runs as root before a removal transaction',
-  ],
-  [
-    5104,
-    5106,
-    'Post-uninstall transaction (%postuntrans)',
-    'Runs as root after a removal transaction',
-  ],
-  [1079, 1091, 'Verify (%verify)', 'Runs as root when the package is verified'],
+  [1151, 1153, 'Pre-transaction (%pretrans)', 'Runs before the whole transaction'],
+  [1023, 1085, 'Pre-install (%pre)', 'Runs before the files are installed'],
+  [1024, 1086, 'Post-install (%post)', 'Runs after the files are installed'],
+  [1025, 1087, 'Pre-uninstall (%preun)', 'Runs before the files are removed'],
+  [1026, 1088, 'Post-uninstall (%postun)', 'Runs after the files are removed'],
+  [1152, 1154, 'Post-transaction (%posttrans)', 'Runs after the whole transaction'],
+  [5103, 5105, 'Pre-uninstall transaction (%preuntrans)', 'Runs before a removal transaction'],
+  [5104, 5106, 'Post-uninstall transaction (%postuntrans)', 'Runs after a removal transaction'],
+  [1079, 1091, 'Verify (%verify)', 'Runs when the package is verified'],
 ];
 
 // Script arrays: one entry per trigger, with a program array of the same length. They
 // run when other packages, or files, change.
-const TRIGGER_SCRIPTS: [body: number, program: number, label: string, when: string][] = [
+const TRIGGER_SCRIPTS: [
+  body: number,
+  program: number,
+  name: number,
+  index: number,
+  label: string,
+  when: string,
+][] = [
   [
     1065,
     1092,
+    1066,
+    1069,
     'Triggers (%triggerin, %triggerun, %triggerpostun)',
     'when other packages are installed, upgraded or removed',
   ],
-  [5066, 5067, 'File triggers (%filetriggerin ...)', 'when files under a watched path change'],
+  [
+    5066,
+    5067,
+    5069,
+    5070,
+    'File triggers (%filetriggerin ...)',
+    'when files under a watched path change',
+  ],
   [
     5076,
     5077,
+    5079,
+    5080,
     'Transaction file triggers (%transfiletriggerin ...)',
     'after a transaction that changed files under a watched path',
   ],
@@ -495,36 +503,55 @@ function scriptRows(main: Header): [string, string][] {
       prog ? `${runs}. ${hasBody ? 'Interpreter' : 'No script body, runs only'}: ${prog}` : runs,
     ]);
   }
-  for (const [bodyTag, programTag, label, when] of TRIGGER_SCRIPTS) {
-    const count = Math.max(
-      strings(main, bodyTag, MAX_RELATION_ENTRIES)?.count ?? 0,
-      strings(main, programTag, MAX_RELATION_ENTRIES)?.count ?? 0,
-    );
-    if (count === 0) {
+  for (const [bodyTag, programTag, nameTag, indexTag, label, when] of TRIGGER_SCRIPTS) {
+    // rpm builds a trigger script for index i only when the script and program arrays
+    // both reach it, and runs it only for trigger entries (name and index arrays)
+    // that point at i (rpmScriptFromTriggerTag in lib/rpmscript.cc).
+    const scripts = strings(main, bodyTag, MAX_RELATION_ENTRIES);
+    const programs = strings(main, programTag, MAX_RELATION_ENTRIES);
+    const names = strings(main, nameTag, MAX_RELATION_ENTRIES);
+    const indexes = numbers(main, indexTag, MAX_RELATION_ENTRIES);
+    if (!scripts || !programs || !names || !indexes) {
       continue;
     }
-    const programs = strings(main, programTag, MAX_PROGRAM_ARGS);
+    const reachable = Math.min(scripts.count, programs.count);
+    const used = new Set<number>();
+    for (let j = 0; j < Math.min(names.count, indexes.length); j++) {
+      if (indexes[j] < reachable) {
+        used.add(indexes[j]);
+      }
+    }
+    if (used.size === 0) {
+      continue;
+    }
     const distinct = new Set<string>();
-    for (let i = 0; i < (programs?.count ?? 0); i++) {
-      distinct.add(programs?.at(i, MAX_PROGRAM) ?? '');
+    for (const i of used) {
+      if (distinct.size >= MAX_PROGRAM_ARGS) {
+        break;
+      }
+      distinct.add(programs.at(i, MAX_PROGRAM) ?? '');
     }
     rows.push([
       label,
-      `${formatNumber(count)} script${count === 1 ? '' : 's'}, run as root ${when}` +
-        (distinct.size > 0 ? `. Interpreters: ${[...distinct].join(', ')}` : ''),
+      `${formatNumber(used.size)} script${used.size === 1 ? '' : 's'}, run ${when}. ` +
+        `Interpreters: ${[...distinct].join(', ')}`,
     ]);
   }
   return rows;
 }
 
 /**
- * Accounts the package creates. rpm stores them in the Provides: an entry named
- * user(..), group(..) or groupmember(..), with the equal flag, whose version is a
- * sysusers.d line in base64 (the line is NUL-padded so there is no `=` padding).
- * (users_and_groups.md and rpmdsIsSysuser in lib/rpmds.cc, rpm 6.0.0.) The
- * RPMTAG_SYSUSERS tag is computed from these on query and is never in the file.
+ * Accounts the package creates. rpm stores them in the Provides: an entry that
+ * rpmdsIsSysuser (lib/rpmds.cc, rpm 6.0.0) accepts is one named user(..), group(..) or
+ * groupmember(..) with the equal flag bit set (other bits do not matter) whose version
+ * Base64-decodes. Decoding follows rpmBase64Decode: characters of code 32 or less are
+ * skipped, the rest must be the standard alphabet or '=', and their count a multiple of 4.
+ * rpm accepts any decoded bytes there, but only acts on sysusers.d lines whose directive
+ * is u, u!, g or m (sysusers.sh; users_and_groups.md: "ignores others"), so those are
+ * what is counted. The user or group name is taken from the decoded line, as rpm does.
+ * The RPMTAG_SYSUSERS tag is computed from these on query and is never in the file.
  */
-function accountRows(main: Header): [string, string][] {
+function accountRows(main: Header, warnings: string[]): [string, string][] {
   const names = strings(main, 1047, MAX_RELATION_ENTRIES);
   const flags = numbers(main, 1112, MAX_RELATION_ENTRIES) ?? [];
   const versions = strings(main, 1113, MAX_RELATION_ENTRIES);
@@ -533,18 +560,31 @@ function accountRows(main: Header): [string, string][] {
   }
   const shown: string[] = [];
   let total = 0;
+  let tooLong = false;
   for (let i = 0; i < names.count; i++) {
     const head = names.at(i, 12) ?? '';
-    const isAccount =
+    const named =
       head.startsWith('user(') || head.startsWith('group(') || head.startsWith('groupmember(');
-    if (!isAccount || ((flags[i] ?? 0) & EQUAL) === 0) {
+    if (!named || ((flags[i] ?? 0) & EQUAL) === 0) {
       continue;
     }
-    total++;
-    if (shown.length < MAX_ACCOUNTS) {
-      const decoded = decodeBase64(versions.at(i, MAX_SYSUSERS_CHARS) ?? '');
-      shown.push(decoded ? describeSysusers(decoded) : (names.at(i, MAX_PATH_PART) ?? ''));
+    const raw = versions.at(i, MAX_SYSUSERS_CHARS + 1) ?? '';
+    if (raw.length > MAX_SYSUSERS_CHARS) {
+      tooLong = true; // not counted: it cannot be shown to be an account
+      continue;
     }
+    const decoded = decodeSysusers(raw);
+    if (decoded) {
+      total++;
+      if (shown.length < MAX_ACCOUNTS) {
+        shown.push(decoded);
+      }
+    }
+  }
+  if (tooLong) {
+    warnings.push(
+      "Some entries in the package's Provides were too long to inspect, so any accounts they create are not listed.",
+    );
   }
   if (total === 0) {
     return [];
@@ -552,7 +592,7 @@ function accountRows(main: Header): [string, string][] {
   return [
     [
       'System users and groups',
-      `Created as root: ${shown.join(', ')}${total > shown.length ? ` and ${formatNumber(total - shown.length)} more` : ''}`,
+      `Creates: ${shown.join(', ')}${total > shown.length ? ` and ${formatNumber(total - shown.length)} more` : ''}`,
     ],
   ];
 }
@@ -560,11 +600,24 @@ function accountRows(main: Header): [string, string][] {
 // A sysusers.d line, base64, is a few dozen characters.
 const MAX_SYSUSERS_CHARS = 1024;
 
-/** One sysusers.d line in words: "u name - "gecos" home" is a user named name. */
-function describeSysusers(bytes: Uint8Array): string {
-  const line = new TextDecoder().decode(bytes.subarray(0, MAX_SYSUSERS_CHARS)).replace(/\0+$/, '');
-  const [kind = '', name = '', id = ''] = line.trim().split(/\s+/, 3);
+/** The sysusers.d line in a Provides version, in words, or undefined when rpm would not act on it. */
+function decodeSysusers(version: string): string | undefined {
+  // rpmBase64Decode: control characters and spaces are skipped, the rest is the Base64
+  // alphabet (or '='), and the count must be a multiple of 4.
+  const compact = [...version].filter((c) => c.charCodeAt(0) > 32).join('');
+  if (compact.length === 0 || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+    return undefined;
+  }
+  const bytes = decodeBase64(compact);
+  if (!bytes) {
+    return undefined;
+  }
+  const line = new TextDecoder().decode(bytes).replace(/\0+$/, '');
+  const [kind = '', name = '', other = ''] = line.trim().split(/\s+/, 3);
   const clean = (value: string): string => printable(value).slice(0, 64);
+  if (!name) {
+    return undefined;
+  }
   switch (kind) {
     case 'u':
       return `user ${clean(name)}`;
@@ -573,9 +626,9 @@ function describeSysusers(bytes: Uint8Array): string {
     case 'g':
       return `group ${clean(name)}`;
     case 'm':
-      return `${clean(name)} added to group ${clean(id)}`;
+      return other ? `${clean(name)} added to group ${clean(other)}` : undefined;
     default:
-      return `${clean(kind)} ${clean(name)}`.trim();
+      return undefined;
   }
 }
 
@@ -682,12 +735,12 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
     ),
   );
 
-  const scripts = [...scriptRows(main), ...accountRows(main)];
+  const scripts = [...scriptRows(main), ...accountRows(main, warnings)];
   sections.push(
     ...propertySection(
       'Scripts',
       scripts,
-      'Installing a package runs these scripts as root. MarkCopy does not show or run them.',
+      'Installing a package runs these scripts, normally with root privileges. MarkCopy does not show or run them.',
     ),
   );
 
@@ -697,7 +750,7 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
       'Some tables in the package are larger than MarkCopy will read, so they are cut short.',
     );
   }
-  sections.push(...signatureOf(signature));
+  sections.push(...signatureOf(signature, warnings));
 
   return {
     format: isSource ? 'RPM source package' : 'RPM package',
@@ -801,38 +854,62 @@ function describe(packet: Uint8Array | undefined): Issuer {
   return { algorithm: issuer ? ALGORITHMS[issuer.algorithm] : undefined, keyId: issuer?.keyId };
 }
 
-function signatureOf(signature: Header): InfoSection[] {
+/** An OpenPGP packet starts with a byte whose top bit is set (RFC 4880 section 4.2). */
+const looksLikePacket = (bytes: Uint8Array | undefined): bytes is Uint8Array =>
+  bytes !== undefined && bytes.length > 0 && (bytes[0] & 0x80) !== 0;
+
+function signatureOf(signature: Header, warnings: string[]): InfoSection[] {
   // RPM v6 signatures (tag 278) win: rpm ignores the legacy tags when they are present.
+  // An entry counts as a signature only if it decodes to something that starts like an
+  // OpenPGP packet; one that does not is reported as a problem, not as a signature.
   const v6 = strings(signature, 278, MAX_SIGNATURES);
   if (v6 && v6.count > 0) {
     const issuers: Issuer[] = [];
+    let invalid = 0;
     for (let i = 0; i < v6.count; i++) {
-      issuers.push(describe(decodeBase64(v6.at(i, MAX_SIGNATURE_CHARS) ?? '')));
+      const bytes = decodeBase64(v6.at(i, MAX_SIGNATURE_CHARS) ?? '');
+      if (looksLikePacket(bytes)) {
+        issuers.push(describe(bytes));
+      } else {
+        invalid++;
+      }
     }
-    const algorithms = [...new Set(issuers.map((i) => i.algorithm).filter(Boolean))];
-    const section = signatureSection(
-      algorithms.length > 0 ? `OpenPGP v6 (${algorithms.join(', ')})` : 'OpenPGP v6',
-    );
-    issuers.forEach((issuer, i) => {
-      if (issuer.keyId) {
+    if (invalid > 0) {
+      warnings.push(
+        `${invalid === 1 ? 'A signature entry' : `${invalid} signature entries`} in the package could not be decoded as OpenPGP data.`,
+      );
+    }
+    if (issuers.length > 0) {
+      const algorithms = [...new Set(issuers.map((i) => i.algorithm).filter(Boolean))];
+      const section = signatureSection(
+        algorithms.length > 0 ? `OpenPGP v6 (${algorithms.join(', ')})` : 'OpenPGP v6',
+      );
+      issuers.forEach((issuer, i) => {
+        if (issuer.keyId) {
+          section.rows.push([
+            issuers.length === 1 ? 'Key ID' : `Key ID (signature ${i + 1})`,
+            issuer.keyId,
+          ]);
+        }
+      });
+      if (issuers.length > 1 || v6.truncated) {
         section.rows.push([
-          issuers.length === 1 ? 'Key ID' : `Key ID (signature ${i + 1})`,
-          issuer.keyId,
+          'Signatures',
+          v6.truncated ? `${issuers.length} shown, more are present` : String(issuers.length),
         ]);
       }
-    });
-    if (issuers.length > 1) {
-      section.rows.push([
-        'Signatures',
-        v6.truncated ? `${issuers.length} shown, more are present` : String(issuers.length),
-      ]);
+      return [section];
     }
-    return [section];
+    return []; // rpm would not fall back to the legacy tags here
   }
   // RSAHEADER and DSAHEADER sign the header alone; PGP and GPG cover the payload too.
   for (const tag of [268, 267, 1002, 1005]) {
     const packet = bin(signature, tag);
     if (!packet) {
+      continue;
+    }
+    if (!looksLikePacket(packet)) {
+      warnings.push('A signature tag in the package does not hold OpenPGP data.');
       continue;
     }
     const { algorithm, keyId } = describe(packet);

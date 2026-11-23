@@ -76,7 +76,7 @@ describe('readXar: product archive', () => {
     const pkg = rowsOf(info, 'Package');
     expect(pkg['Title']).toBe('Example Tool');
     expect(pkg['Version']).toBe('2.0');
-    expect(pkg['Installs as root']).toBe('Yes');
+    expect(pkg['Installs as root']).toBe('Yes (PackageInfo auth="root")');
     expect(pkg['Host architectures']).toBe('x86_64,arm64');
     expect(pkg['Minimum macOS']).toBe('10.13');
     expect(pkg['Installed size']).toContain('5.00 MB');
@@ -484,5 +484,94 @@ describe('readXar: compression wrappers', () => {
       }),
     );
     expect(tableOf(info, 'Components')[0][0]).toBe('com.gz');
+  });
+});
+
+describe('readXar: what counts as a signature', () => {
+  const cert = buildCertificate('Developer ID Installer: Example Inc', 'Developer ID CA');
+  const sigRows = async (spec: XarSpec) => rowsOf(await read(buildXar(spec)), 'Signature');
+  const notASignature = (rows: Record<string, string>): void => {
+    expect(rows['Status']).toContain('A signature element is present but');
+    expect(rows['Status']).not.toContain('signature present, not verified');
+    expect(rows['Signer']).toBeUndefined();
+    expect(rows['Issued by']).toBeUndefined();
+  };
+
+  it('accepts a complete RSA signature and names its kind', async () => {
+    const rows = await sigRows({ signature: { certificate: cert } });
+    expect(rows['Status']).toContain('signature present, not verified');
+    expect(rows['Kind']).toBe('RSA (signature)');
+    expect(rows['Signer']).toBe('Developer ID Installer: Example Inc');
+  });
+
+  it('accepts a CMS x-signature, and reports both kinds when both exist', async () => {
+    const cms = await sigRows({
+      signature: { element: 'x-signature', style: 'CMS', certificate: cert },
+    });
+    expect(cms['Kind']).toBe('CMS (x-signature)');
+    const toc =
+      '<xar><toc><signature style="RSA"><offset>20</offset><size>256</size><KeyInfo><X509Data><X509Certificate>QUJD</X509Certificate></X509Data></KeyInfo></signature>' +
+      '<x-signature style="CMS"><offset>276</offset><size>8</size><KeyInfo><X509Data><X509Certificate>QUJD</X509Certificate></X509Data></KeyInfo></x-signature></toc></xar>';
+    const bytes = buildXar({ rawToc: toc });
+    const padded = new Uint8Array(bytes.length + 512);
+    padded.set(bytes);
+    expect(rowsOf(await read(padded), 'Signature')['Kind']).toBe(
+      'RSA (signature), CMS (x-signature)',
+    );
+  });
+
+  it('refuses a signature element with a zero or missing size', async () => {
+    notASignature(await sigRows({ signature: { size: 0, certificate: cert } }));
+    notASignature(await sigRows({ signature: { size: null, certificate: cert } }));
+  });
+
+  it('refuses a signature element with no offset or no style', async () => {
+    notASignature(await sigRows({ signature: { offset: null, certificate: cert } }));
+    notASignature(await sigRows({ signature: { style: '', certificate: cert } }));
+  });
+
+  it('refuses a signature whose bytes are not inside the file', async () => {
+    notASignature(await sigRows({ signature: { offset: 10_000_000, certificate: cert } }));
+    notASignature(await sigRows({ signature: { noHeapBytes: true, certificate: cert } }));
+    notASignature(await sigRows({ signature: { size: 2 ** 40, certificate: cert } }));
+  });
+
+  it('refuses a signature element with no certificate', async () => {
+    notASignature(await sigRows({ signature: { certificate: null } }));
+  });
+
+  it('claims nothing for a certificate with no signature element', async () => {
+    const toc =
+      '<xar><toc><file><name>a</name><type>file</type></file><KeyInfo><X509Data><X509Certificate>QUJD</X509Certificate></X509Data></KeyInfo></toc></xar>';
+    const info = await read(buildXar({ rawToc: toc }));
+    expect(section(info, 'Signature')).toBeUndefined();
+  });
+});
+
+describe('readXar: claims about installing', () => {
+  const root = async (auth: string | null) =>
+    rowsOf(await read(buildProduct({ components: [{ dir: 'A.pkg', info: { auth } }] })), 'Package')[
+      'Installs as root'
+    ];
+
+  it('says root only for auth="root", says no for another stated value, and nothing when absent', async () => {
+    expect(await root('root')).toContain('Yes');
+    expect(await root('none')).toBe('No (PackageInfo auth="none")');
+    expect(await root(null)).toBeUndefined();
+  });
+
+  it('reports installation checks only when the element names a script', async () => {
+    const check = async (xml: string) =>
+      rowsOf(await read(buildXar({ files: [{ name: 'Distribution', data: xml }] })), 'Package')[
+        'Installation checks'
+      ];
+    expect(
+      await check(
+        '<installer-gui-script><installation-check script="f()"/></installer-gui-script>',
+      ),
+    ).toContain('JavaScript');
+    expect(
+      await check('<installer-gui-script><installation-check/></installer-gui-script>'),
+    ).toBeUndefined();
   });
 });

@@ -142,19 +142,42 @@ export function buildDmg(spec: DmgSpec = {}): Uint8Array {
   return out;
 }
 
-/** An Apple code-signing SuperBlob holding one CMS signature blob at index 0. */
-export function buildCodeSignature(cms: Uint8Array): Uint8Array {
-  const out = new Uint8Array(12 + 8 + 8 + cms.length);
+export interface SlotSpec {
+  /** Slot type: 0 CodeDirectory, 0x10000 CMS signature, 0x10002 notarization ticket. */
+  type: number;
+  /** Blob magic: 0xfade0c02 CodeDirectory, 0xfade0b01 generic wrapper (CMS). */
+  magic: number;
+  body: Uint8Array;
+}
+
+/**
+ * An Apple embedded-signature SuperBlob (xnu cs_blobs.h): magic 0xfade0cc0,
+ * total length, blob count, one (type, offset) index entry per blob, then the
+ * blobs, each a magic, a length that includes its 8-byte header, and a body.
+ */
+export function buildSuperBlob(slots: SlotSpec[]): Uint8Array {
+  const headerSize = 12 + slots.length * 8;
+  const total = headerSize + slots.reduce((n, s) => n + 8 + s.body.length, 0);
+  const out = new Uint8Array(total);
   const v = new DataView(out.buffer);
   v.setUint32(0, 0xfade0cc0, false);
-  v.setUint32(4, out.length, false);
-  v.setUint32(8, 1, false);
-  v.setUint32(12, 0x10000, false); // CSSLOT_SIGNATURESLOT
-  v.setUint32(16, 20, false);
-  v.setUint32(20, 0xfade0b01, false);
-  v.setUint32(24, 8 + cms.length, false);
-  out.set(cms, 28);
+  v.setUint32(4, total, false);
+  v.setUint32(8, slots.length, false);
+  let at = headerSize;
+  slots.forEach((slot, i) => {
+    v.setUint32(12 + i * 8, slot.type, false);
+    v.setUint32(12 + i * 8 + 4, at, false);
+    v.setUint32(at, slot.magic, false);
+    v.setUint32(at + 4, 8 + slot.body.length, false);
+    out.set(slot.body, at + 8);
+    at += 8 + slot.body.length;
+  });
   return out;
+}
+
+/** A SuperBlob holding one CMS signature blob in slot 0x10000. */
+export function buildCodeSignature(cms: Uint8Array): Uint8Array {
+  return buildSuperBlob([{ type: 0x10000, magic: 0xfade0b01, body: cms }]);
 }
 
 /** An encrypted image: the version 2 header, `encrcdsa`, followed by noise. */

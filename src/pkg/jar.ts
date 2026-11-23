@@ -6,11 +6,11 @@
 import { printable } from '../binary/text';
 import { formatNumber } from '../binary/html';
 import { propertySection, tableSection, type InfoSection } from './model';
-import { readSigner, signatureSection } from './signature';
 import {
-  readBytesEntry,
   readTextEntry,
-  unreadableSignature,
+  readV1Signatures,
+  signatureNotEstablished,
+  v1Section,
   type ZipArchive,
   type ZipEntry,
   type ZipFlavour,
@@ -21,7 +21,6 @@ const MANIFEST = 'META-INF/MANIFEST.MF';
 // bundle lists every package).
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_PROPERTIES_BYTES = 64 * 1024;
-const MAX_SIGNATURE_BYTES = 1024 * 1024;
 const MAX_MANIFEST_LINES = 20_000;
 const MAX_ATTRIBUTES = 500;
 const MAX_VALUE_CHARS = 4096;
@@ -223,21 +222,12 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   );
 
   const after: InfoSection[] = [];
-  const block = zip.exactEntries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
-  if (block) {
-    const der = await readBytesEntry(
-      zip,
-      block,
-      MAX_SIGNATURE_BYTES,
-      warnings,
-      'The signature block',
-    );
-    const signer = der ? readSigner(der) : undefined;
-    after.push(
-      signer
-        ? signatureSection('JAR signing', signer)
-        : unreadableSignature('A META-INF signature block'),
-    );
+  // The JDK pairs META-INF/X.SF with X.RSA/.DSA/.EC without regard to case.
+  const v1 = await readV1Signatures(zip, true, warnings);
+  if (v1.signed.length > 0) {
+    after.push(v1Section('JAR signing', v1));
+  } else if (v1.notEstablished) {
+    after.push(signatureNotEstablished(v1.notEstablished));
   }
 
   return {

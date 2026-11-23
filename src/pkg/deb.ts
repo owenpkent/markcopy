@@ -69,12 +69,12 @@ const PACKAGE_FIELDS = [
 ];
 
 const SCRIPTS: [string, string][] = [
-  ['preinst', 'Runs as root before the files are unpacked'],
-  ['postinst', 'Runs as root after the files are unpacked'],
-  ['prerm', 'Runs as root before the files are removed'],
-  ['postrm', 'Runs as root after the files are removed'],
-  ['config', 'Runs as root to ask configuration questions'],
-  ['triggers', 'Registers triggers: the postinst script runs as root when a watched path changes'],
+  ['preinst', 'Runs before the files are unpacked'],
+  ['postinst', 'Runs after the files are unpacked'],
+  ['prerm', 'Runs before the files are removed'],
+  ['postrm', 'Runs after the files are removed'],
+  ['config', 'Runs to ask configuration questions'],
+  ['triggers', 'Declares triggers: dpkg may run maintainer scripts when a watched path changes'],
 ];
 
 const COMPRESSION: Record<string, string> = {
@@ -346,7 +346,7 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
         ...propertySection(
           'Maintainer scripts',
           scripts,
-          'Installing a package runs these scripts as root. MarkCopy does not show or run them.',
+          'Installing a package runs these scripts, normally with root privileges. MarkCopy does not show or run them.',
         ),
       );
     }

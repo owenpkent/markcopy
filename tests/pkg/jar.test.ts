@@ -208,7 +208,15 @@ describe('readZipPackage: a Java archive', () => {
   });
 
   it('reports a signature block that is not PKCS #7 as unreadable', async () => {
-    const info = await readZip(jar([], [{ name: 'META-INF/X.EC', data: 'junk' }]));
+    const info = await readZip(
+      jar(
+        [],
+        [
+          { name: 'META-INF/X.EC', data: 'junk' },
+          { name: 'META-INF/X.SF', data: 'x' },
+        ],
+      ),
+    );
     expect(value(info, 'Signature', 'Status')).toContain('could not be read');
     expect(value(info, 'Signature', 'Signer')).toBeUndefined();
   });
@@ -330,5 +338,72 @@ describe('readZipPackage: Java entry identity', () => {
       buildZip([{ name: 'meta-inf/manifest.mf', data: manifest([['Main-Class', 'a.B']]) }]),
     );
     expect(value(info, 'Java', 'Main class')).toBe('a.B');
+  });
+});
+
+describe('readZipPackage: JAR signature pairing', () => {
+  const signedBy = (name: string): Uint8Array =>
+    buildSignedData({ subject: { commonName: name }, issuer: { commonName: 'CA' } });
+  const sf = (base: string): FixtureEntry => ({
+    name: `META-INF/${base}.SF`,
+    data: 'Signature-Version: 1.0\n',
+  });
+
+  it('still reports the release signer when an unpaired block comes first', async () => {
+    const info = await readZip(
+      jar(
+        [],
+        [
+          { name: 'META-INF/ORPHAN.RSA', data: signedBy('Orphan') },
+          sf('RELEASE'),
+          { name: 'META-INF/RELEASE.RSA', data: signedBy('Release') },
+        ],
+      ),
+    );
+    expect(value(info, 'Signature', 'Status')).toContain('JAR signing');
+    expect(value(info, 'Signature', 'Signer')).toBe('Release');
+    expect(info.warnings.join(' ')).toContain('no matching .SF');
+  });
+
+  it('keeps a good signature when an unreadable block comes first, and warns', async () => {
+    const info = await readZip(
+      jar(
+        [],
+        [
+          sf('BAD'),
+          { name: 'META-INF/BAD.DSA', data: 'junk' },
+          sf('GOOD'),
+          { name: 'META-INF/GOOD.RSA', data: signedBy('Good') },
+        ],
+      ),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Good');
+    expect(info.warnings).toContain(
+      '1 signature block in META-INF could not be read as a signature.',
+    );
+  });
+
+  it('says how many signers there are and names the first few', async () => {
+    const entries: FixtureEntry[] = [];
+    for (const n of ['A', 'B']) {
+      entries.push(sf(n), { name: `META-INF/${n}.RSA`, data: signedBy(`Signer ${n}`) });
+    }
+    const info = await readZip(jar([], entries));
+    expect(value(info, 'Signature', 'Signatures')).toBe('2 (Signer A, Signer B)');
+  });
+
+  it('does not count a .SF with no block, or a block with no .SF, as a signature', async () => {
+    const lone = await readZip(jar([], [sf('LONELY')]));
+    expect(hasSection(lone, 'Signature')).toBe(false);
+    expect(lone.warnings.join(' ')).toContain('no signature block');
+    const bare = await readZip(jar([], [{ name: 'META-INF/B.RSA', data: signedBy('B') }]));
+    expect(value(bare, 'Signature', 'Status')).toContain('no matching .SF');
+  });
+
+  it('pairs a base name that differs only in case, as the JDK does', async () => {
+    const info = await readZip(
+      jar([], [{ name: 'META-INF/Release.RSA', data: signedBy('Release') }, sf('RELEASE')]),
+    );
+    expect(value(info, 'Signature', 'Signer')).toBe('Release');
   });
 });

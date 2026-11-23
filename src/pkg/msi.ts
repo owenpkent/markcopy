@@ -14,12 +14,11 @@ import { ReadError, type RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
 import { openCfb, STREAM, type Cfb, type CfbEntry } from './cfb';
 import { propertySection, rows, tableSection, type InfoSection, type PackageInfo } from './model';
-import { readSigner, signatureSection } from './signature';
+import { isSignedData, readSigner, signatureSection, signerCount } from './signature';
 
 const CLSID_MSI = '{000C1084-0000-0000-C000-000000000046}';
 const CLSID_TRANSFORM = '{000C1082-0000-0000-C000-000000000046}';
 const CLSID_PATCH = '{000C1086-0000-0000-C000-000000000046}';
-const CLSID_MERGE_MODULE = '{000C1083-0000-0000-C000-000000000046}';
 
 // The string data of a large installer is a few megabytes. 16 MiB leaves room
 // for any real one and bounds what a hostile pool can make us hold.
@@ -386,14 +385,14 @@ function installerVersion(value: number | undefined): string | undefined {
 
 // Tables worth counting, and what a row of each is.
 const COUNTED: [table: string, label: string][] = [
-  ['File', 'Files installed'],
-  ['Component', 'Components'],
-  ['Feature', 'Features'],
-  ['Registry', 'Registry values written'],
-  ['Shortcut', 'Shortcuts'],
-  ['ServiceInstall', 'Services installed'],
-  ['CustomAction', 'Custom actions (code run during install)'],
-  ['LaunchCondition', 'Launch conditions'],
+  ['File', 'File table rows'],
+  ['Component', 'Component table rows'],
+  ['Feature', 'Feature table rows'],
+  ['Registry', 'Registry table rows'],
+  ['Shortcut', 'Shortcut table rows'],
+  ['ServiceInstall', 'ServiceInstall table rows'],
+  ['CustomAction', 'CustomAction table rows'],
+  ['LaunchCondition', 'LaunchCondition table rows'],
 ];
 
 async function tryRead(
@@ -426,6 +425,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     '_Columns',
     'Property',
     'Binary',
+    'ModuleSignature',
     ...COUNTED.map(([table]) => table),
   ]);
   const tables = new Map<string, CfbEntry>();
@@ -488,18 +488,23 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     }
   }
 
+  // The root CLSID names the kind of storage (Windows Installer's registered
+  // classes for a package, a patch and a transform). A merge module is a package
+  // database that carries a ModuleSignature table. A file with an unrecognised
+  // CLSID but a string pool is called a database, which is all that is known.
+  const patchOrTransform = cfb.rootClsid === CLSID_PATCH || cfb.rootClsid === CLSID_TRANSFORM;
   const kind =
-    cfb.rootClsid === CLSID_MSI
-      ? 'Windows Installer package'
-      : cfb.rootClsid === CLSID_PATCH
-        ? 'Windows Installer patch'
-        : cfb.rootClsid === CLSID_TRANSFORM
-          ? 'Windows Installer transform'
-          : cfb.rootClsid === CLSID_MERGE_MODULE
+    cfb.rootClsid === CLSID_PATCH
+      ? 'Windows Installer patch'
+      : cfb.rootClsid === CLSID_TRANSFORM
+        ? 'Windows Installer transform'
+        : cfb.rootClsid === CLSID_MSI
+          ? tables.has('ModuleSignature')
             ? 'Windows Installer merge module'
-            : tables.has('_StringPool')
-              ? 'Windows Installer package'
-              : undefined;
+            : 'Windows Installer package'
+          : tables.has('_StringPool')
+            ? 'Windows Installer database'
+            : undefined;
   if (!kind) {
     throw new ReadError('it is an OLE compound file, but not a Windows Installer package.');
   }
@@ -539,7 +544,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     } else {
       warnings.push('The string table could not be read, so the installer database is not shown.');
     }
-  } else if (kind === 'Windows Installer package') {
+  } else if (!patchOrTransform) {
     warnings.push('The package has no string table, so its database is not shown.');
   }
 
@@ -597,16 +602,21 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     : undefined;
   const words = num(15);
   const allUsers = properties.get('ALLUSERS');
+  // ALLUSERS is a property the package can also set or change while it runs
+  // (conditions, custom actions, the command line), so this reports the value
+  // the database stores, not what an install will do.
   const scope =
-    allUsers === '1'
-      ? 'Per-machine (all users)'
-      : allUsers === '2'
-        ? properties.get('MSIINSTALLPERUSER') === '1'
-          ? 'Per-user by default, per-machine when run elevated'
-          : 'Per-machine, or per-user when not elevated'
-        : properties.size > 0
-          ? 'Per-user'
-          : undefined;
+    properties.size === 0
+      ? undefined
+      : allUsers === undefined
+        ? 'ALLUSERS not set (per-user by default)'
+        : allUsers === '1'
+          ? 'ALLUSERS=1 (per-machine)'
+          : allUsers === '2'
+            ? properties.get('MSIINSTALLPERUSER') === '1'
+              ? 'ALLUSERS=2 with MSIINSTALLPERUSER=1 (per-user by default, per-machine when elevated)'
+              : 'ALLUSERS=2 (per-machine when elevated, otherwise per-user)'
+            : `ALLUSERS=${JSON.stringify(allUsers)}`;
   const productName = properties.get('ProductName') || text(3);
   const productVersion = properties.get('ProductVersion');
   const manufacturer = properties.get('Manufacturer') || text(4);
@@ -620,16 +630,22 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
       ['Product code', properties.get('ProductCode')],
       ['Upgrade code', properties.get('UpgradeCode')],
       ['Package code', text(9)],
-      ['Platform', platform],
+      ['Platform (from the summary template)', platform],
       ['Languages', languages(languageText) ?? languages(properties.get('ProductLanguage'))],
-      ['Install scope', scope],
+      ['Install scope (from ALLUSERS)', scope],
       ['Minimum installer version', installerVersion(num(14))],
-      ['Needs elevation', words === undefined ? undefined : (words & 8) !== 0 ? 'No' : 'Yes'],
       [
-        'Source files',
-        words === undefined ? undefined : (words & 2) !== 0 ? 'Compressed' : 'Uncompressed',
+        'Marked as not needing elevation',
+        words === undefined ? undefined : (words & 8) !== 0 ? 'Yes' : 'No',
       ],
-      ['Administrative image', words !== undefined && (words & 4) !== 0 ? 'Yes' : undefined],
+      [
+        'Source files compressed (summary flag)',
+        words === undefined ? undefined : (words & 2) !== 0 ? 'Yes' : 'No',
+      ],
+      [
+        'Administrative image (summary flag)',
+        words !== undefined && (words & 4) !== 0 ? 'Yes' : undefined,
+      ],
       ['Created with', text(18)],
       ['Created', text(12)],
       ['Last saved', text(13)],
@@ -657,13 +673,13 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     if (count !== undefined) {
       installs.push([label, formatNumber(count)]);
     } else if (tables.has(table)) {
-      installs.push([label, 'Yes']);
+      installs.push([label, 'present']);
     }
   }
   if (tables.has('Binary')) {
-    installs.push(['Has binary resources', 'Yes']);
+    installs.push(['Binary table', 'present']);
   }
-  sections.push(...propertySection('What it installs', installs));
+  sections.push(...propertySection('What the tables define', installs));
 
   // Embedded files: cabinets first, then the groups of small streams that
   // would otherwise bury them (one certificate and one hash per signed cabinet,
@@ -688,15 +704,25 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     }),
   );
 
-  // Signature, reported and never verified.
+  // Signature. A DigitalSignature stream counts only when it holds PKCS #7
+  // SignedData with at least one signer that carries a signature value;
+  // anything else is reported as an unrecognised stream, and a lone
+  // MsiDigitalSignatureEx (a hash the signature would cover) claims nothing.
   if (signatureEntry) {
     const bytes = await tryRead(cfb, signatureEntry, MAX_SIGNATURE_STREAM);
-    const signer = bytes ? readSigner(bytes) : undefined;
-    const section = signatureSection('Authenticode', signer);
-    if (signatureEx) {
-      section.rows.push(...rows(['Hash extension', 'MsiDigitalSignatureEx present']));
+    if (bytes && isSignedData(bytes) && signerCount(bytes) > 0) {
+      const section = signatureSection('Authenticode', readSigner(bytes));
+      if (signatureEx) {
+        section.rows.push(...rows(['Hash extension', 'MsiDigitalSignatureEx present']));
+      }
+      sections.push(section);
+    } else {
+      warnings.push(
+        bytes
+          ? 'The package has a DigitalSignature stream that is not a recognised signature, so no signature is reported.'
+          : 'The package has a DigitalSignature stream that could not be read, so no signature is reported.',
+      );
     }
-    sections.push(section);
   }
 
   const name = productName;

@@ -140,7 +140,7 @@ describe('readDeb: maintainer scripts and contents', () => {
     });
     const scripts = properties(info, 'Maintainer scripts');
     expect([...scripts.keys()]).toEqual(['postinst', 'prerm']);
-    expect(scripts.get('postinst')).toContain('as root');
+    expect(scripts.get('postinst')).toContain('Runs');
     expect(JSON.stringify(info)).not.toContain('exit 0');
     expect(properties(info, 'Package').get('Control files')).toBe(
       'control, conffiles, postinst, prerm',
@@ -148,7 +148,7 @@ describe('readDeb: maintainer scripts and contents', () => {
     const section = info.sections.find(
       (s) => s.heading === 'Maintainer scripts',
     ) as PropertySection;
-    expect(section.note).toContain('as root');
+    expect(section.note).toContain('normally with root privileges');
   });
 
   it('has no scripts section when the package has none', async () => {
@@ -390,7 +390,7 @@ describe('readDeb: triggers count as install-time code', () => {
     const info = await readSpec({ files: { triggers: 'interest /usr/share/foo\n' } });
     const scripts = properties(info, 'Maintainer scripts');
     expect([...scripts.keys()]).toEqual(['triggers']);
-    expect(scripts.get('triggers')).toContain('as root');
+    expect(scripts.get('triggers')).toContain('when a watched path changes');
     expect(JSON.stringify(info)).not.toContain('interest /usr/share/foo');
   });
 
