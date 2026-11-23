@@ -238,6 +238,10 @@ export function buildMsi(spec: MsiSpec = {}): Uint8Array {
   // The string pool: every distinct string, 1-based.
   const pool: string[] = [];
   const idOf = (text: string): number => {
+    // An empty value is a null reference, never a pool entry.
+    if (text === '') {
+      return 0;
+    }
     let at = pool.indexOf(text);
     if (at < 0) {
       pool.push(text);
