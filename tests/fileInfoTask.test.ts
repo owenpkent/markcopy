@@ -7,10 +7,45 @@
 // is marked `expected` (its message is shown as written; anything else is a
 // bug and gets a generic lead-in), and that its result survives the copy a
 // thread boundary makes.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, openSync, closeSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Every open the task makes, and a hook that runs just before the first read
+// through the handle it gets. Both exist for the replaced-file regression below.
+const spy = vi.hoisted(() => ({
+  opens: 0,
+  beforeFirstRead: undefined as (() => void) | undefined,
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      spy.opens++;
+      const handle = await actual.open(...args);
+      let first = true;
+      return {
+        stat: () => handle.stat(),
+        close: () => handle.close(),
+        read: (...readArgs: unknown[]) => {
+          if (first) {
+            first = false;
+            const hook = spy.beforeFirstRead;
+            spy.beforeFirstRead = undefined;
+            hook?.();
+          }
+          return (handle.read as (...a: unknown[]) => Promise<unknown>)(...readArgs);
+        },
+      };
+    },
+  };
+});
+
+import type * as FsPromises from 'node:fs/promises';
 import { runFileInfoTask, type FileInfoRequest } from '../src/fileInfoTask';
 import { buildPe, iconBitmap } from './pe/fixture';
 import { buildElf } from './pkg/elfFixture';
@@ -138,4 +173,103 @@ describe('what goes wrong', () => {
 
     expect(result).toEqual({ ok: false, expected: false, message: 'the request named no file.' });
   });
+});
+
+const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+describe('the digest of a result', () => {
+  it('is the size and SHA-256 of the file on disk', async () => {
+    const bytes = exeBytes();
+    const path = join(dir, 'digest.exe');
+    writeFileSync(path, bytes);
+
+    const result = await runFileInfoTask({ kind: 'exe', fileName: 'digest.exe', path });
+
+    expect(result.ok && result.digest).toEqual({ size: bytes.length, sha256: sha256(bytes) });
+  });
+
+  it('is of the given bytes, for a request that carries them', async () => {
+    const bytes = buildElf();
+
+    const result = await runFileInfoTask({ kind: 'package', fileName: 'a.so', bytes });
+
+    expect(result.ok && result.digest).toEqual({ size: bytes.length, sha256: sha256(bytes) });
+  });
+});
+
+// A rebuild or a finished download renames a new file over the old name. The
+// task opened the path in one place and the host in another, so a rename
+// between the two gave a page with one version's details beside the other's
+// hash. Now the task opens the path once, and reads the metadata and hashes
+// through that handle.
+describe('a file replaced while it is being read', () => {
+  const peWith = (description: string): Uint8Array =>
+    buildPe({ version: { strings: [['FileDescription', description]] } });
+  // Different in size as well as in text, so a mixed page cannot pass by luck.
+  const versionA = peWith('Version A');
+  const versionB = Uint8Array.from([
+    ...peWith('Version B, which is the newer one'),
+    ...new Array(500).fill(7),
+  ]);
+
+  beforeEach(() => {
+    spy.opens = 0;
+    spy.beforeFirstRead = undefined;
+  });
+
+  // Whether this platform lets a name be renamed over while it is open. POSIX
+  // does; Windows usually refuses (EPERM or EBUSY), and then the open-once
+  // form below is the proof, which holds on every platform.
+  const canRenameOverOpenFile = ((): boolean => {
+    const probe = join(dir, 'probe.bin');
+    const other = join(dir, 'probe-new.bin');
+    writeFileSync(probe, 'a');
+    writeFileSync(other, 'b');
+    const fd = openSync(probe, 'r');
+    try {
+      renameSync(other, probe);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      closeSync(fd);
+    }
+  })();
+
+  const expectVersionA = (result: Awaited<ReturnType<typeof runFileInfoTask>>): void => {
+    if (!result.ok || result.kind !== 'exe') {
+      throw new Error('not an executable result');
+    }
+    const strings = result.info.version?.strings ?? [];
+    expect(strings).toContainEqual(['FileDescription', 'Version A']);
+    expect(result.digest.size).toBe(versionA.length);
+    expect(result.digest.sha256).toBe(sha256(versionA));
+  };
+
+  it('opens the path exactly once, and reports one version throughout', async () => {
+    const path = join(dir, 'once.exe');
+    writeFileSync(path, versionA);
+
+    const result = await runFileInfoTask({ kind: 'exe', fileName: 'once.exe', path });
+
+    expect(spy.opens).toBe(1);
+    expectVersionA(result);
+  });
+
+  it.skipIf(!canRenameOverOpenFile)(
+    'keeps the details, size and hash of the version it opened when the path is replaced mid-read',
+    async () => {
+      const path = join(dir, 'replaced.exe');
+      const sibling = join(dir, 'replaced.exe.new');
+      writeFileSync(path, versionA);
+      writeFileSync(sibling, versionB);
+      spy.beforeFirstRead = () => renameSync(sibling, path);
+
+      const result = await runFileInfoTask({ kind: 'exe', fileName: 'replaced.exe', path });
+
+      expect(spy.beforeFirstRead).toBeUndefined();
+      expect(spy.opens).toBe(1);
+      expectVersionA(result);
+    },
+  );
 });

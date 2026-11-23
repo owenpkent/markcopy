@@ -523,14 +523,22 @@ describe.each(FLAVOURS)('file information page: $name', (flavour) => {
     });
   });
 
-  describe('when the file cannot be hashed', () => {
-    it('still shows the page, saying the hash could not be computed', async () => {
+  // The host does not open the file to hash it: the worker hashes it through
+  // the handle it reads the metadata from, so the two cannot describe different
+  // files when the path is replaced between them (see digestHandle). What the
+  // page shows is therefore exactly what the reader returned.
+  describe('where the hash and size come from', () => {
+    it('shows the reader digest, and opens nothing itself, for a path that does not exist', async () => {
       const provider = flavour.make();
-      // The reader is given bytes of its own, so only the host's hashing of
-      // the (absent) file on disk fails.
-      withSpy(provider, (request) =>
-        runFileInfoTask({ kind: request.kind, fileName: request.fileName, bytes: flavour.valid() }),
-      );
+      const sha256 = 'ab'.repeat(32);
+      const spy = withSpy(provider, async (request) => {
+        const result = await runFileInfoTask({
+          kind: request.kind,
+          fileName: request.fileName,
+          bytes: flavour.valid(),
+        });
+        return result.ok ? { ...result, digest: { size: 777, sha256 } } : result;
+      });
       const { panel, post, renders } = createPanel();
       await provider.resolveCustomEditor(documentAt(join(dir, 'gone', flavour.file)), panel);
       await post({ type: 'ready' });
@@ -538,9 +546,55 @@ describe.each(FLAVOURS)('file information page: $name', (flavour) => {
       await post({ type: 'readFile' });
 
       const html = renders().at(-1)!.html!;
+      expect(spy).toHaveBeenCalledTimes(1);
       expect(html).not.toContain('could not preview');
       expect(html).not.toContain('mc-info-waiting');
-      expect(html).toContain('Could not be computed');
+      expect(html).toContain(sha256);
+      if (flavour.kind === 'package') {
+        expect(html).toContain(formatBytes(777));
+      }
+    });
+
+    it('shows the reader note when it could not hash', async () => {
+      const provider = flavour.make();
+      withSpy(provider, async (request) => {
+        const result = await runFileInfoTask({
+          kind: request.kind,
+          fileName: request.fileName,
+          bytes: flavour.valid(),
+        });
+        return result.ok
+          ? { ...result, digest: { size: 5, hashNote: 'Could not be computed' } }
+          : result;
+      });
+      const { panel, post, renders } = createPanel();
+      await provider.resolveCustomEditor(documentAt(join(dir, 'gone', flavour.file)), panel);
+      await post({ type: 'ready' });
+      await post({ type: 'readFile' });
+
+      expect(renders().at(-1)!.html).toContain('Could not be computed');
+    });
+
+    it('gives the reader a time allowance that grows with the size of the file', async () => {
+      const allowanceFor = async (size: number): Promise<number | undefined> => {
+        vi.mocked(vs.workspace.fs.stat).mockResolvedValue({ size } as vscode.FileStat);
+        const provider = flavour.make();
+        const spy = withSpy(provider);
+        const { panel, post } = createPanel();
+        await provider.resolveCustomEditor(
+          documentAt(fileWith(flavour.file, flavour.valid())),
+          panel,
+        );
+        await post({ type: 'ready' });
+        await post({ type: 'readFile' });
+        return spy.mock.calls[0][1];
+      };
+
+      const small = await allowanceFor(0);
+      const large = await allowanceFor(64 * 1024 * 1024);
+
+      expect(small).toBeTypeOf('number');
+      expect(large).toBeGreaterThan(small!);
     });
   });
 });

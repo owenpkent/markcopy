@@ -4,9 +4,9 @@ import { formatBytes, pageHead } from './binary/html';
 import { printable } from './binary/text';
 import { ReadError } from './binary/reader';
 import { escapeAttr, escapeHtml } from './escape';
-import { digestFile, remoteBytes, type Digest } from './fileInspect';
+import { remoteBytes, type Digest } from './fileInspect';
 import type { FileInfoRequest, FileInfoResult } from './fileInfoTask';
-import { runInWorker } from './isolate';
+import { DEFAULT_ISOLATION, runInWorker } from './isolate';
 import {
   OoxmlEditorProvider,
   describeReadError,
@@ -41,7 +41,17 @@ export interface FileInfoOutcome {
 }
 
 /** Read a file somewhere safe. The default starts a worker; tests read in process. */
-export type FileInfoReader = (request: FileInfoRequest) => Promise<FileInfoResult>;
+export type FileInfoReader = (
+  request: FileInfoRequest,
+  /** How long the read may take, when it should differ from the default. */
+  timeoutMs?: number,
+) => Promise<FileInfoResult>;
+
+// The worker also hashes the file, through the handle it read it by, and that
+// is the one part of its work that grows with the file. It is allowed a second
+// for every this many bytes on top of the time parsing gets: a slow disk
+// hashes several times faster.
+const HASH_BYTES_PER_SECOND = 8 * 1024 * 1024;
 
 // The settings these pages are drawn from. `fileInfo.confirm` is here so that
 // turning it off reads a file whose page is waiting, without reopening it.
@@ -85,10 +95,11 @@ export abstract class FileInfoEditorProvider extends OoxmlEditorProvider {
    * How a file is read. A worker in the product; tests replace it with a call
    * in their own process, where there is no bundled worker script to start.
    */
-  public reader: FileInfoReader = (request) =>
+  public reader: FileInfoReader = (request, timeoutMs) =>
     runInWorker<FileInfoResult>(
       vscode.Uri.joinPath(this.extensionUri, 'dist', 'fileInfoWorker.js').fsPath,
       request,
+      timeoutMs === undefined ? {} : { timeoutMs },
     );
 
   private readonly extensionUri: vscode.Uri;
@@ -153,21 +164,28 @@ export abstract class FileInfoEditorProvider extends OoxmlEditorProvider {
     const request: FileInfoRequest = bytes
       ? { kind: this.infoKind, fileName, bytes }
       : { kind: this.infoKind, fileName, path: uri.fsPath };
-    // The hash is not parsing: it streams the file through a digest a megabyte
-    // at a time, in the host, while the worker reads. If it fails the page
-    // still has everything else.
-    const [result, digest] = await Promise.all([
-      this.reader(request),
-      digestFile(uri, bytes).catch((): Digest => ({
-        size: bytes?.length ?? 0,
-        hashNote: 'Could not be computed',
-      })),
-    ]);
+    // One read, in the worker: the metadata and the SHA-256 come back
+    // together, read through one open file handle, so the page cannot pair one
+    // version's details with another's hash when the path is replaced while
+    // it is being read. Hashing is the part that takes longer for a larger
+    // file, so the time allowed grows with the file's size.
+    let size = bytes?.length ?? 0;
+    if (!bytes) {
+      try {
+        size = (await vscode.workspace.fs.stat(uri)).size;
+      } catch {
+        // The worker reports a file it cannot open.
+      }
+    }
+    const result = await this.reader(
+      request,
+      DEFAULT_ISOLATION.timeoutMs + Math.ceil(size / HASH_BYTES_PER_SECOND) * 1000,
+    );
     if (!result.ok) {
       throw result.expected ? new ReadError(result.message) : new Error(result.message);
     }
     return {
-      page: this.renderInfo(result, fileName, digest),
+      page: this.renderInfo(result, fileName, result.digest),
       warnings: result.info.warnings.length,
     };
   }
