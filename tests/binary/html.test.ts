@@ -49,9 +49,11 @@ describe('table', () => {
 });
 
 describe('properties', () => {
-  it('is a Property and Value table', () => {
+  // The header is kept for the table copies and hidden by the stylesheet,
+  // which finds the table by this class.
+  it('is a Property and Value table, marked for the stylesheet', () => {
     expect(properties([['Name', 'curl']])).toBe(
-      '<table><thead><tr><th>Property</th><th>Value</th></tr></thead><tbody><tr><td>Name</td><td>curl</td></tr></tbody></table>',
+      '<table class="mc-info-props"><thead><tr><th>Property</th><th>Value</th></tr></thead><tbody><tr><td>Name</td><td>curl</td></tr></tbody></table>',
     );
   });
 

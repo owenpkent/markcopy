@@ -302,7 +302,7 @@ Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the read
 - Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
 - Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
 
-**None of the rows below has been checked in the editor yet**: opening a file in a dev host, the menu, the themes, copy and the exports are unverified.
+On 2026-11-23 a Debian package was opened in the Extension Development Host and its page drew, which is the only check made in the editor so far; that pass is what showed the page as a narrow table beside a wide empty panel. The layout that replaced it (two columns of sections, facts tables without a header row, long one and two column grids drawn several to a line, the size and hash second) was then checked by headless Chrome screenshots of the rendered markup with the real `media/preview.css`, not in the editor: a `.deb`, an `.rpm`, an `.msi`, an Android `.apk`, a macOS `.pkg`, `notepad.exe` and `kernel32.dll`, in the dark, light and green themes, at 1500, 1100 and 760 px wide. **The rows below are otherwise unchecked in the editor**: the menu, copy and the exports are unverified, and so is the icon, which the screenshots drew from an inline image where the editor sends it as a separate message.
 
 Every format:
 

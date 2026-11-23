@@ -356,7 +356,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     checksum: opt.getUint32(64, true),
     largeAddressAware: (characteristics & 0x20) !== 0,
     mitigations: [
-      ['Address space layout randomization (ASLR)', (dllFlags & 0x40) !== 0],
+      ['Address randomization (ASLR)', (dllFlags & 0x40) !== 0],
       ['High-entropy ASLR', (dllFlags & 0x20) !== 0],
       ['Data execution prevention (DEP)', (dllFlags & 0x100) !== 0],
       ['Control Flow Guard', (dllFlags & 0x4000) !== 0],

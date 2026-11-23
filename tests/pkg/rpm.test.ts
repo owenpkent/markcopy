@@ -132,8 +132,8 @@ describe('readRpm: dependencies', () => {
   it('lists what the package provides in its own table', async () => {
     const provides = table(await readSpec(), 'Provides');
     expect(provides.rows).toEqual([
-      ['Provides', 'curl', '= 8.5.0-2.fc40'],
-      ['Provides', 'curl(x86-64)', '= 8.5.0-2.fc40'],
+      ['curl', '= 8.5.0-2.fc40'],
+      ['curl(x86-64)', '= 8.5.0-2.fc40'],
     ]);
   });
 

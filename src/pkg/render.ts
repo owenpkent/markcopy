@@ -3,7 +3,15 @@
 // One renderer for every format: a reader returns facts (src/pkg/model.ts) and
 // never markup, so escaping lives in src/binary/html.ts alone.
 import { escapeHtml } from '../escape';
-import { formatBytes, properties, table, type Row } from '../binary/html';
+import {
+  block,
+  formatBytes,
+  grid,
+  LONG_GRID_ROWS,
+  pageHead,
+  properties,
+  type Row,
+} from '../binary/html';
 import { printable } from '../binary/text';
 import type { InfoSection, PackageInfo } from './model';
 
@@ -18,11 +26,10 @@ export interface RenderOptions {
 
 const note = (text: string): string => `<p class="mc-exe-note">${escapeHtml(text)}</p>`;
 
-// A grid this long, or with this many columns, is given the full width of the
-// page. Shorter and narrower ones sit in one of its two columns beside the
-// property tables (see .mc-exe in media/preview.css).
-const WIDE_ROWS = 12;
-const WIDE_COLUMNS = 3;
+// A grid with this many columns needs the page's full width however short it
+// is. Narrower ones sit in one of the two columns beside the property tables
+// (see .mc-exe in media/preview.css) unless they are long.
+const WIDE_COLUMNS = 4;
 
 function body(part: InfoSection): string {
   switch (part.kind) {
@@ -31,7 +38,7 @@ function body(part: InfoSection): string {
     case 'table':
       return (
         (part.lead ? `<p>${escapeHtml(part.lead)}</p>` : '') +
-        table(part.columns, part.rows) +
+        grid(part.columns, part.rows) +
         (part.note ? note(part.note) : '')
       );
     case 'text':
@@ -39,32 +46,24 @@ function body(part: InfoSection): string {
   }
 }
 
-function block(heading: string, html: string, wide = false): string {
-  return `<div class="mc-info-section${wide ? ' mc-info-wide' : ''}"><h2>${escapeHtml(heading)}</h2>${html}</div>`;
-}
+const isWide = (part: InfoSection): boolean =>
+  part.kind === 'table' &&
+  (part.rows.length > LONG_GRID_ROWS || part.columns.length >= WIDE_COLUMNS);
 
-function section(part: InfoSection): string {
-  const wide =
-    part.kind === 'table' &&
-    (part.rows.length > WIDE_ROWS || (part.columns.length >= WIDE_COLUMNS && part.rows.length > 1));
-  return block(part.heading, body(part), wide);
-}
+const section = (part: InfoSection): string => block(part.heading, body(part), isWide(part));
 
 export function renderPackageHtml(info: PackageInfo, options: RenderOptions): string {
-  const parts: string[] = [`<h1>${escapeHtml(printable(options.fileName))}</h1>`];
-  parts.push(
+  const lines = [
     info.title
       ? `<p><strong>${escapeHtml(info.title)}</strong><br>${escapeHtml(info.format)}</p>`
       : `<p>${escapeHtml(info.format)}</p>`,
-  );
+  ];
   if (info.summary) {
-    parts.push(`<p>${escapeHtml(info.summary)}</p>`);
+    lines.push(`<p>${escapeHtml(info.summary)}</p>`);
   }
+  const parts: string[] = [pageHead(printable(options.fileName), lines)];
   for (const warning of info.warnings) {
     parts.push(note(warning));
-  }
-  for (const part of info.sections) {
-    parts.push(section(part));
   }
   // What the host knows about the file whatever is inside it.
   const file: Row[] = [
@@ -76,7 +75,20 @@ export function renderPackageHtml(info: PackageInfo, options: RenderOptions): st
   } else if (options.hashNote) {
     file.push(['SHA-256', options.hashNote]);
   }
+  // The file's own facts go second, straight after the package's identity:
+  // the size and the hash are what a reader checking a download came for, and
+  // at the end they sat under two hundred rows of file list.
+  const [first, ...rest] = info.sections;
+  if (first) {
+    parts.push(section(first));
+  }
   parts.push(block('File', properties(file)));
+  // Then everything else that fits a column, and the full-width grids last.
+  // A full-width grid ends the two columns above it, so a short section left
+  // after one (a signature under a file list) would sit alone in half a page.
+  for (const part of [...rest.filter((p) => !isWide(p)), ...rest.filter(isWide)]) {
+    parts.push(section(part));
+  }
   // .mc-exe carries the layout the executable page already has: wrapping for
   // long values and the small print. .mc-pkg is there for anything this page
   // needs of its own.

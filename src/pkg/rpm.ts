@@ -432,11 +432,17 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   );
   const provides = relations(main, 'Provides', [1047, 1112, 1113], RELATION_LIMIT, false);
   sections.push(
-    ...tableSection('Provides', ['Relation', 'Package', 'Version'], provides.rows, {
-      limit: RELATION_LIMIT,
-      total: provides.total,
-      noun: 'entries',
-    }),
+    // The section is named for the relation, so the row need not repeat it.
+    ...tableSection(
+      'Provides',
+      ['Package', 'Version'],
+      provides.rows.map((row) => row.slice(1)),
+      {
+        limit: RELATION_LIMIT,
+        total: provides.total,
+        noun: 'entries',
+      },
+    ),
   );
 
   const scripts = SCRIPTS.filter(([tag]) => main.tags.has(tag)).map(

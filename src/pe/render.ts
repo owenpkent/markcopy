@@ -7,7 +7,16 @@
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
 import type { PeInfo, PeSection } from './read';
-import { formatBytes, formatNumber as number, properties, table, type Row } from '../binary/html';
+import {
+  block,
+  formatBytes,
+  formatNumber as number,
+  grid,
+  pageHead,
+  properties,
+  table,
+  type Row,
+} from '../binary/html';
 import { printable } from '../binary/text';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
@@ -265,13 +274,15 @@ function sectionsSection(info: PeInfo): string {
   );
 }
 
+// Two columns, each value complete in itself, so that a long import table can
+// be drawn as a list (see grid). A library is loaded when the program starts
+// unless it says otherwise, so only the exception is spelled out.
 function importsSection(info: PeInfo): string {
-  return table(
-    ['Library', 'Functions', 'Loaded'],
+  return grid(
+    ['Library', 'Functions'],
     info.imports.map((entry) => [
       entry.library,
-      number(entry.functions),
-      entry.delayLoaded ? 'On first use' : 'At start',
+      `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}${entry.delayLoaded ? ', loaded on first use' : ''}`,
     ]),
   );
 }
@@ -297,7 +308,7 @@ function exportsSection(info: PeInfo): string {
   }
   let html = `<p>${lead}</p>`;
   if (exported.names.length > 0) {
-    html += table(
+    html += grid(
       ['Exported name'],
       exported.names.map((name) => [name]),
     );
@@ -308,34 +319,27 @@ function exportsSection(info: PeInfo): string {
   return html;
 }
 
-/**
- * One headed part of the page. The page lays these out in two columns when it
- * is wide enough (see .mc-exe in media/preview.css), so a short table of
- * properties does not sit beside half a screen of nothing. `wide` is for a
- * grid that needs the whole width: many columns, or a long list.
- */
-function block(heading: string, body: string, wide = false): string {
-  return `<div class="mc-info-section${wide ? ' mc-info-wide' : ''}"><h2>${escapeHtml(heading)}</h2>${body}</div>`;
-}
-
 export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   const description = info.version?.strings.find(([key]) => key === 'FileDescription')?.[1];
   const summary = `${info.kind}, ${architecture(info)}`;
-  const parts: string[] = [];
+  let icon = '';
   if (info.icon) {
     const width = Math.min(ICON_SIDE, info.icon.width);
     const height = Math.max(1, Math.round((info.icon.height * width) / info.icon.width));
     // No src: the bytes follow in a media message and the webview fills it in.
-    parts.push(
-      `<p class="mc-exe-icon"><img ${MEDIA_ATTR}="${ICON_MEDIA_ID}" alt="File icon" width="${width}" height="${height}"></p>`,
-    );
+    icon = `<p class="mc-exe-icon"><img ${MEDIA_ATTR}="${ICON_MEDIA_ID}" alt="File icon" width="${width}" height="${height}"></p>`;
   }
-  parts.push(
-    `<h1>${escapeHtml(printable(options.fileName))}</h1>`,
-    description
-      ? `<p><strong>${escapeHtml(description)}</strong><br>${escapeHtml(summary)}</p>`
-      : `<p>${escapeHtml(summary)}</p>`,
-  );
+  const parts: string[] = [
+    pageHead(
+      printable(options.fileName),
+      [
+        description
+          ? `<p><strong>${escapeHtml(description)}</strong><br>${escapeHtml(summary)}</p>`
+          : `<p>${escapeHtml(summary)}</p>`,
+      ],
+      icon,
+    ),
+  ];
   for (const warning of info.warnings) {
     parts.push(`<p class="mc-exe-note">${escapeHtml(warning)}</p>`);
   }

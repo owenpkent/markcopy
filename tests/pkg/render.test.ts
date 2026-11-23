@@ -123,7 +123,7 @@ describe('renderPackageHtml: sections', () => {
     expect(html).toContain('<h2>Description</h2><p>First.</p><p>Second.</p><p>Third.</p>');
   });
 
-  it('keeps the sections in the order given, with File last', () => {
+  it('keeps the sections in the order given, with File second', () => {
     const html = renderPackageHtml(
       {
         ...base,
@@ -135,8 +135,9 @@ describe('renderPackageHtml: sections', () => {
       options,
     );
     const at = (h: string): number => html.indexOf(`<h2>${h}</h2>`);
-    expect(at('Package')).toBeLessThan(at('Description'));
-    expect(at('Description')).toBeLessThan(at('File'));
+    // The file's own facts come second, straight after the package's identity.
+    expect(at('Package')).toBeLessThan(at('File'));
+    expect(at('File')).toBeLessThan(at('Description'));
   });
 });
 
@@ -343,7 +344,9 @@ describe('renderPackageHtml: sections for the two-column layout', () => {
         grid(['Library'], 5),
         grid(['Library'], 13),
         grid(['Relation', 'Package', 'Version'], 4),
-        grid(['Relation', 'Package', 'Version'], 1),
+        grid(['Path', 'Size'], 13),
+        grid(['Identifier', 'Version', 'Location', 'Size'], 2),
+        { kind: 'properties', heading: 'Signature', rows: [['Status', 'present']] },
       ],
       warnings: [],
     },
@@ -354,12 +357,34 @@ describe('renderPackageHtml: sections for the two-column layout', () => {
     expect(html).toContain('<div class="mc-info-section"><h2>Package</h2>');
     expect(html).toContain('<div class="mc-info-section"><h2>Description</h2>');
     expect(html).toContain('<div class="mc-info-section"><h2>Grid 1x5</h2>');
-    expect(html).toContain('<div class="mc-info-section"><h2>Grid 3x1</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>Grid 3x4</h2>');
     expect(html).toContain('<div class="mc-info-section"><h2>File</h2>');
   });
 
-  it('gives a long grid, or one with several columns, the full width', () => {
+  it('gives a long grid, or one with four or more columns, the full width', () => {
     expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 1x13</h2>');
-    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 3x4</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 2x13</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Grid 4x2</h2>');
+  });
+
+  // A full-width grid ends the two columns above it, so a short section after
+  // one would sit alone in half a page.
+  it('puts every section that fits a column before the full-width grids', () => {
+    const at = (h: string): number => html.indexOf(`<h2>${h}</h2>`);
+    const firstWide = Math.min(at('Grid 1x13'), at('Grid 2x13'), at('Grid 4x2'));
+    for (const heading of ['Package', 'File', 'Description', 'Grid 1x5', 'Grid 3x4', 'Signature']) {
+      expect(at(heading)).toBeGreaterThan(-1);
+      expect(at(heading)).toBeLessThan(firstWide);
+    }
+    // Among themselves the full-width grids keep the order the reader gave.
+    expect(at('Grid 1x13')).toBeLessThan(at('Grid 2x13'));
+    expect(at('Grid 2x13')).toBeLessThan(at('Grid 4x2'));
+  });
+
+  it('marks a long grid of one or two columns as a list, and no other', () => {
+    expect(html).toContain('<h2>Grid 1x13</h2><table class="mc-info-list">');
+    expect(html).toContain('<h2>Grid 2x13</h2><table class="mc-info-list mc-info-pairs">');
+    expect(html).toContain('<h2>Grid 1x5</h2><table>');
+    expect(html).toContain('<h2>Grid 4x2</h2><table>');
   });
 });

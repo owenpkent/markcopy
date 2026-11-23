@@ -189,8 +189,9 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
     }),
     ...tableSection(
       'Provides',
-      ['Relation', 'Package', 'Version'],
-      rowsFor('Provides', info.get('provides')),
+      ['Package', 'Version'],
+      // The section is named for the relation, so the row need not repeat it.
+      rowsFor('Provides', info.get('provides')).map((row) => row.slice(1)),
       {
         limit: TABLE_LIMIT,
         total: info.get('provides')?.length,

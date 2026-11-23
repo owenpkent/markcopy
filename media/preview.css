@@ -2539,11 +2539,14 @@ body[data-mc-kind='package'] .markdown-body {
   width: 100%;
 }
 
-/* Labels in one column get the same share of every table in it, so the value
-   columns of neighbouring tables line up. */
-.mc-exe .mc-info-section:not(.mc-info-wide) th:first-child,
-.mc-exe .mc-info-section:not(.mc-info-wide) td:first-child {
-  width: 36%;
+/* The label column of a table of facts takes the same share of every such
+   table in a column, so their value columns line up, and a label is never
+   broken over two lines: a longer one widens its own column instead. Only
+   these tables: a grid's first column holds data, and squeezing it to a share
+   wrapped every permission name on an Android page. */
+.mc-exe table.mc-info-props td:first-child {
+  width: 40%;
+  white-space: nowrap;
 }
 
 .mc-exe table th {
@@ -2555,7 +2558,90 @@ body[data-mc-kind='package'] .markdown-body {
   overflow-wrap: anywhere;
 }
 
-/* The file's icon sits on its own line above the name, at its natural size. */
+/* The top of the page: the file's icon, when it has one, beside its name. */
+.mc-info-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.mc-info-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mc-info-title > h1 {
+  margin-top: 0;
+}
+
+.mc-info-head .mc-exe-icon {
+  flex: none;
+  margin: 0;
+}
+
+/* A table of facts. Its "Property | Value" header stays in the markup for the
+   table copies and is not drawn: over every table on the page it says nothing
+   the page does not. The label column is drawn as the header it is. */
+.mc-exe table.mc-info-props thead {
+  display: none;
+}
+
+.mc-exe table.mc-info-props td:first-child {
+  background: var(--mc-th-bg);
+  font-weight: 600;
+}
+
+/* A long list of one or two columns: file paths, exported names, a path
+   beside its size. As a full-width table it is one short string a line; here
+   its rows are laid out several to a line, read left to right. It is still a
+   table in the markup. */
+.mc-exe table.mc-info-list {
+  display: block;
+}
+
+.mc-exe table.mc-info-list thead {
+  display: none;
+}
+
+.mc-exe table.mc-info-list tbody {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  column-gap: 28px;
+}
+
+.mc-exe table.mc-info-list.mc-info-pairs tbody {
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+}
+
+.mc-exe table.mc-info-list tr {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--mc-border);
+  background: none;
+}
+
+.mc-exe table.mc-info-list td {
+  border: 0;
+  padding: 0;
+  width: auto;
+  font-size: 13px;
+}
+
+.mc-exe table.mc-info-list td:first-child {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.mc-exe table.mc-info-list td + td {
+  flex: none;
+  color: var(--mc-quote-fg);
+  white-space: nowrap;
+}
+
 .mc-exe-icon {
   margin-bottom: 4px;
 }

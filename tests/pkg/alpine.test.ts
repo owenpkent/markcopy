@@ -66,8 +66,8 @@ describe('readAlpineApk: package information', () => {
 
   it('lists what the package provides', async () => {
     expect(table(await readSpec(), 'Provides').rows).toEqual([
-      ['Provides', 'cmd:curl', '=8.5.0-r0'],
-      ['Provides', 'so:libcurl.so.4', '=4.8.0'],
+      ['cmd:curl', '=8.5.0-r0'],
+      ['so:libcurl.so.4', '=4.8.0'],
     ]);
   });
 
