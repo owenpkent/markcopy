@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMenu, revealLabel, type MenuEntry } from '../src/webview/menu';
+import { createMenu, fit, revealLabel, type MenuEntry } from '../src/webview/menu';
 
 function makeRoot(): HTMLDivElement {
   document.body.innerHTML = '<div id="mc-menu" class="mc-menu" role="menu" hidden></div>';
@@ -389,5 +389,167 @@ describe('revealLabel', () => {
     expect(revealLabel('MacIntel', '')).toBe('Reveal in Finder');
     expect(revealLabel('Win32', '')).toBe('Reveal in File Explorer');
     expect(revealLabel('Linux x86_64', 'X11; Linux')).toBe('Open Containing Folder');
+  });
+});
+
+describe('fit', () => {
+  // A 300px-tall menu in a 600px-tall window, opened at various pointer rows.
+  it('opens below the pointer when there is room', () => {
+    expect(fit(100, 300, 600, 100)).toBe(100);
+  });
+
+  it('flips above the pointer near the bottom edge', () => {
+    expect(fit(550, 300, 600, 550)).toBe(250);
+  });
+
+  it('pins to the bottom edge when neither side has room', () => {
+    // 200px above, 150px below: the whole menu stays on screen, 4px from the edge.
+    expect(fit(200, 300, 350, 200)).toBe(46);
+  });
+
+  it('never starts above the top edge, even when taller than the window', () => {
+    expect(fit(100, 900, 600, 100)).toBe(4);
+  });
+});
+
+// A fixed panel cannot be scrolled to, so one wider than a narrow split pane
+// hid its submenu arrows and the ends of its labels past the right edge with
+// no way to reach them. The window's width, less the edge gap, is handed to
+// the stylesheet on every panel, and it is the stylesheet that makes the
+// panel's minimum width give way to it.
+describe('menu width in a narrow window', () => {
+  const sized = (width: number, height: number): void => {
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      value: width,
+      configurable: true,
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      value: height,
+      configurable: true,
+    });
+  };
+  // jsdom lays nothing out, so widths are given by the test: a label "is cut"
+  // when its text is longer than the 12 characters said to fit.
+  const widths = (): (() => void) => {
+    const scroll = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollWidth');
+    const client = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return (this.textContent ?? '').length * 10;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this === document.documentElement ? 200 : 120;
+      },
+    });
+    return () => {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth;
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+      if (scroll) Object.defineProperty(Element.prototype, 'scrollWidth', scroll);
+      if (client) Object.defineProperty(Element.prototype, 'clientWidth', client);
+    };
+  };
+
+  afterEach(() => {
+    delete (document.documentElement as unknown as Record<string, unknown>).clientWidth;
+    delete (document.documentElement as unknown as Record<string, unknown>).clientHeight;
+  });
+
+  it('caps the root panel at the window width less the gap at both edges', () => {
+    sized(200, 300);
+    const root = makeRoot();
+    createMenu(root).show(150, 50, nested());
+    expect(root.style.getPropertyValue('--mc-menu-max')).toBe('192px');
+    expect(root.style.maxHeight).toBe('292px');
+  });
+
+  it('caps a submenu the same way', () => {
+    sized(200, 300);
+    const root = makeRoot();
+    createMenu(root).show(150, 50, nested());
+    hover(root.querySelector('.mc-menu-item--submenu') as Element);
+    expect(panels()).toHaveLength(2);
+    expect(panels()[1].style.getPropertyValue('--mc-menu-max')).toBe('192px');
+  });
+
+  it('follows the window: a wider one gets a wider cap, and a tiny one never a negative', () => {
+    const root = makeRoot();
+    const menu = createMenu(root);
+    sized(900, 600);
+    menu.show(10, 10, nested());
+    expect(root.style.getPropertyValue('--mc-menu-max')).toBe('892px');
+    menu.hide();
+    sized(5, 5);
+    menu.show(0, 0, nested());
+    expect(root.style.getPropertyValue('--mc-menu-max')).toBe('0px');
+  });
+
+  it('marks the label of a submenu row and of a checkbox row, apart from arrow and check', () => {
+    const root = makeRoot();
+    createMenu(root).show(10, 10, [
+      {
+        kind: 'submenu',
+        label: 'Copy as',
+        entries: [{ kind: 'item', label: 'CSV', run: () => {} }],
+      },
+      { kind: 'checkbox', label: 'Wrap code', checked: true, run: () => {} },
+    ]);
+    const submenu = root.querySelector('.mc-menu-item--submenu') as HTMLElement;
+    expect(submenu.querySelector('.mc-menu-label')?.textContent).toBe('Copy as');
+    expect(submenu.querySelector('.mc-menu-arrow')).not.toBeNull();
+    expect(submenu.querySelector('.mc-menu-arrow')?.classList.contains('mc-menu-label')).toBe(
+      false,
+    );
+    const check = root.querySelector('.mc-menu-item--check') as HTMLElement;
+    expect(check.querySelector('.mc-menu-label')?.textContent).toBe('Wrap code');
+    expect(check.querySelector('.mc-menu-check')?.classList.contains('mc-menu-label')).toBe(false);
+  });
+
+  it('gives a row whose label is cut a tooltip with all of it, and no other row one', () => {
+    const restore = widths();
+    try {
+      const root = makeRoot();
+      createMenu(root).show(10, 10, [
+        { kind: 'item', label: 'Copy', run: () => {} },
+        { kind: 'item', label: 'Search Google for "a long selection"', run: () => {} },
+        {
+          kind: 'submenu',
+          label: 'Copy as something with a long name',
+          entries: [{ kind: 'item', label: 'CSV', run: () => {} }],
+        },
+      ]);
+      const rows = Array.from(root.querySelectorAll<HTMLElement>('.mc-menu-item'));
+      expect(rows[0].hasAttribute('title')).toBe(false);
+      expect(rows[1].title).toBe('Search Google for "a long selection"');
+      // The tooltip is the label, without the arrow that shares the row.
+      expect(rows[2].title).toBe('Copy as something with a long name');
+    } finally {
+      restore();
+    }
+  });
+
+  it('places a panel as wide as the cap inside both edges', () => {
+    // A 192px panel in a 200px window, wherever the pointer was.
+    for (const x of [0, 4, 100, 150, 199]) {
+      const left = fit(x, 192, 200, x);
+      expect(left).toBeGreaterThanOrEqual(4);
+      expect(left + 192).toBeLessThanOrEqual(196);
+    }
+  });
+});
+
+describe('fit: a flipped panel keeps the gap at the far edge', () => {
+  // Opened with the pointer a pixel from the right edge, a panel that flips to
+  // the left of it used to end at the pointer, inside the gap the others keep.
+  it('ends at the gap, not at a pointer that is inside it', () => {
+    expect(fit(199, 150, 200, 199)).toBe(46);
+    expect(fit(199, 150, 200, 199) + 150).toBe(196);
+  });
+
+  it('still ends at the pointer when the pointer is clear of the gap', () => {
+    expect(fit(180, 150, 200, 180)).toBe(30);
   });
 });
