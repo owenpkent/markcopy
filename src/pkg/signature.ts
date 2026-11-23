@@ -8,7 +8,10 @@
 import type { Signer } from '../pe/signer';
 import { rows, type PropertySection } from './model';
 
-export { readCertificate, readSigner, type Signer } from '../pe/signer';
+// isSignedData and signerCount are how a reader decides a PKCS #7 blob is a
+// signature at all: SignedData, with at least one signer that carries a
+// signature value. A blob that fails them is certificate data, not a signature.
+export { isSignedData, readCertificate, readSigner, signerCount, type Signer } from '../pe/signer';
 
 const CAVEAT =
   'These names are what the file claims. MarkCopy does not check the signature, the ' +
