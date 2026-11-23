@@ -423,7 +423,12 @@ function installerVersion(value: number | undefined): string | undefined {
 //                8 elevated privileges not required
 //     transform  "should be Null"
 //     patch      the minimum installer version: 1 "the default value, which indicates that
-//                MSPATCH was used to create the patch", 2 is 1.2, 3 is 2.0, 4 is 3.0, 5 is 3.1
+//                MSPATCH was used to create the patch", 2 is 1.2, 3 is 2.0, 4 is 3.0, 5 is 3.1;
+//                6 is 4.0 from the Patchwiz.dll Properties table page, which the Word
+//                Count page does not list: MinimumRequiredMsiVersion "equal to 400,
+//                Patchwiz.dll sets the Word Count Summary property of the patch package
+//                to 6. This prevents the patch from being applied by Windows Installer
+//                earlier than version 4.0."
 //   Character Count (character-count-summary):
 //     transform  the upper 16-bit word holds the transform validation flags and the
 //                lower word the transform error condition flags
@@ -438,6 +443,7 @@ const PATCH_WORD_COUNT: Record<number, string> = {
   3: '2.0',
   4: '3.0',
   5: '3.1',
+  6: '4.0',
 };
 
 const MAX_LIST_ITEMS = 50;

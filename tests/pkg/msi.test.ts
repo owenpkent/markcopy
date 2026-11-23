@@ -434,6 +434,8 @@ describe('readMsi: what the file is', () => {
     [3, '2.0'],
     [4, '3.0'],
     [5, '3.1'],
+    // Not on the Word Count page; from the Patchwiz.dll Properties table page.
+    [6, '4.0'],
   ])('maps patch Word Count %i to Windows Installer %s', async (wordCount, version) => {
     const info = await patchRead({ wordCount });
     expect(pkg(info, 'Minimum installer version')).toBe(version);
@@ -447,7 +449,7 @@ describe('readMsi: what the file is', () => {
   });
 
   it('shows an undocumented patch Word Count as such, never as the package bit field', async () => {
-    for (const wordCount of [0, 6, 12]) {
+    for (const wordCount of [0, 7, 12]) {
       const info = await patchRead({ wordCount });
       expect(pkg(info, 'Minimum installer version')).toBe(
         `Word Count ${wordCount}: not a documented value`,
