@@ -219,6 +219,66 @@ describe('batchMedia', () => {
   });
 });
 
+// The hooks a session gets from the base: a way to draw again for its own
+// reasons (the file-information pages draw once the reader has said yes), and a
+// call when the tab closes (they forget the page then).
+describe('OoxmlEditorProvider session hooks', () => {
+  class HookProvider extends TestEditorProvider {
+    public redraw: (() => Promise<void>) | undefined;
+    public renders = 0;
+    public readonly disposed = vi.fn();
+    protected override createSession(
+      _document?: vscode.CustomDocument,
+      redraw?: () => Promise<void>,
+    ): OoxmlSession {
+      this.redraw = redraw;
+      return {
+        render: async () => ({ html: `render ${++this.renders}` }),
+        dispose: this.disposed,
+      };
+    }
+  }
+
+  async function open(): Promise<{
+    provider: HookProvider;
+    panel: vscode.WebviewPanel;
+    close: () => void;
+  }> {
+    const provider = new HookProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    const { panel } = createPanel();
+    let close = (): void => undefined;
+    (panel as unknown as { onDidDispose: (cb: () => void) => unknown }).onDidDispose = (cb) => {
+      close = cb;
+      return { dispose: () => undefined };
+    };
+    await provider.resolveCustomEditor(fakeDocument, panel);
+    return { provider, panel, close: () => close() };
+  }
+
+  it('hands the session a redraw that renders and posts again', async () => {
+    const { provider, panel } = await open();
+    expect(provider.redraw).toBeTypeOf('function');
+
+    await provider.redraw!();
+    await provider.redraw!();
+
+    const renders = vi
+      .mocked(panel.webview.postMessage)
+      .mock.calls.map(([msg]) => msg as { type: string; html?: string })
+      .filter((msg) => msg.type === 'render');
+    expect(renders.map((m) => m.html)).toEqual(['render 1', 'render 2']);
+  });
+
+  it('calls session.dispose exactly once, when the panel is disposed', async () => {
+    const { provider, close } = await open();
+    expect(provider.disposed).not.toHaveBeenCalled();
+
+    close();
+
+    expect(provider.disposed).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('OoxmlEditorProvider settings redraw', () => {
   it('lists markcopy.wrapCode for the Word, PowerPoint and Excel previews', () => {
     for (const Provider of [DocxEditorProvider, PptxEditorProvider, XlsxEditorProvider]) {

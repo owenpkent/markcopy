@@ -47,6 +47,7 @@ vi.mock('vscode', () => ({
 import { DocxEditorProvider } from '../src/docxEditor';
 import { ExeEditorProvider } from '../src/exeEditor';
 import { readRange } from '../src/fileInspect';
+import { runFileInfoTask } from '../src/fileInfoTask';
 import { readPe } from '../src/pe';
 import { buildPe, iconBitmap } from './pe/fixture';
 import type * as vscode from 'vscode';
@@ -131,6 +132,29 @@ describe('package.json: markcopy.exePreview', () => {
   });
 });
 
+// The two file-information previews (this one and the package preview) share a
+// command and a setting. They are pinned here, beside the view type, because
+// the command is useless if its enablement names the wrong editor.
+describe('package.json: file information read', () => {
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+
+  it('contributes markcopy.fileInfo.read, enabled only on the two file-information editors', () => {
+    const command = pkg.contributes.commands.find(
+      (c: { command: string }) => c.command === 'markcopy.fileInfo.read',
+    );
+    expect(command).toBeDefined();
+    expect(command.enablement).toContain('markcopy.exePreview');
+    expect(command.enablement).toContain('markcopy.packagePreview');
+    expect(command.enablement).toContain('activeCustomEditorId');
+  });
+
+  it('contributes markcopy.fileInfo.confirm as a boolean that defaults to asking', () => {
+    const setting = pkg.contributes.configuration.properties['markcopy.fileInfo.confirm'];
+    expect(setting.type).toBe('boolean');
+    expect(setting.default).toBe(true);
+  });
+});
+
 describe('Open in Default App', () => {
   it('is refused by the executable preview, so it can never launch the file', async () => {
     const provider = new ExeEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
@@ -169,11 +193,16 @@ describe('Open in Default App', () => {
 describe('ExeEditorProvider render', () => {
   async function renderOf(path: string) {
     const provider = new ExeEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    // Read in this process: there is no bundled worker script under test.
+    provider.reader = (request) => runFileInfoTask(request);
     const { panel, post, posted } = createPanel();
     await provider.resolveCustomEditor(documentAt(path), panel);
+    // The page opens waiting; the reader's click is what reads the file.
     await post({ type: 'ready' });
-    await vi.waitFor(() => expect(posted().some((m) => m.type === 'render')).toBe(true));
-    return posted().find((m) => m.type === 'render') as { kind: string; html: string };
+    await post({ type: 'readFile' });
+    const renders = posted().filter((m) => m.type === 'render');
+    expect(renders).toHaveLength(2);
+    return renders[1] as { kind: string; html: string };
   }
 
   it('posts the file details, with the SHA-256 of the bytes on disk', async () => {
@@ -224,10 +253,11 @@ describe('ExeEditorProvider icon', () => {
     const path = join(dir, name);
     writeFileSync(path, bytes);
     const provider = new ExeEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    provider.reader = (request) => runFileInfoTask(request);
     const { panel, post, posted } = createPanel();
     await provider.resolveCustomEditor(documentAt(path), panel);
     await post({ type: 'ready' });
-    await vi.waitFor(() => expect(posted().some((m) => m.type === 'render')).toBe(true));
+    await post({ type: 'readFile' });
     // Let any media message that follows the render be posted.
     await new Promise((resolve) => setTimeout(resolve, 20));
     return posted();
@@ -249,7 +279,7 @@ describe('ExeEditorProvider icon', () => {
   it('posts the icon as a PNG media message after the render', async () => {
     const messages = await messagesFor(buildPe({ icons: [icon] }), 'icon.exe');
     const types = messages.map((m) => m.type);
-    expect(types.indexOf('media')).toBeGreaterThan(types.indexOf('render'));
+    expect(types.indexOf('media')).toBeGreaterThan(types.lastIndexOf('render'));
     const media = messages.filter((m) => m.type === 'media');
     expect(media).toHaveLength(1);
     expect(media[0].items).toHaveLength(1);
@@ -258,14 +288,14 @@ describe('ExeEditorProvider icon', () => {
     expect(Array.from(Buffer.from(item.base64, 'base64').subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]);
-    const render = messages.find((m) => m.type === 'render');
+    const render = messages.filter((m) => m.type === 'render').at(-1);
     expect(render?.html).toContain('data-mc-media="m1"');
   });
 
   it('posts no media message for a file without an icon', async () => {
     const messages = await messagesFor(buildPe(), 'plain.exe');
     expect(messages.some((m) => m.type === 'media')).toBe(false);
-    expect(messages.find((m) => m.type === 'render')?.html).not.toContain('<img');
+    expect(messages.filter((m) => m.type === 'render').at(-1)?.html).not.toContain('<img');
   });
 });
 

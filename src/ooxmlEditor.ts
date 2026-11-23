@@ -42,9 +42,11 @@ export interface OoxmlSession {
    * matched; call `redraw` if the message changes what should be on screen.
    */
   handleMessage?(
-    msg: Extract<OoxmlMessage, { type: 'selectSheet' }>,
+    msg: Extract<OoxmlMessage, { type: 'selectSheet' | 'readFile' }>,
     redraw: () => Promise<void>,
   ): Promise<void> | void;
+  /** Called once, when the tab closes. */
+  dispose?(): void;
 }
 
 /**
@@ -144,8 +146,15 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
    */
   protected readonly opensInDefaultApp: boolean = true;
 
-  /** Build the per-panel render/message state for a newly opened document. */
-  protected abstract createSession(document: vscode.CustomDocument): OoxmlSession;
+  /**
+   * Build the per-panel render/message state for a newly opened document.
+   * `redraw` draws the page again, for a session that changes what it shows
+   * for a reason of its own rather than in answer to a message.
+   */
+  protected abstract createSession(
+    document: vscode.CustomDocument,
+    redraw: () => Promise<void>,
+  ): OoxmlSession;
 
   /** Turn a render failure into the notice the panel shows instead of it. */
   protected abstract errorHtml(err: unknown): string;
@@ -173,10 +182,12 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
     panel.onDidDispose(() => {
       disposed = true;
       clearTimeout(redrawTimer);
+      session.dispose?.();
       disposables.forEach((d) => d.dispose());
     });
 
-    const session = this.createSession(document);
+    // `draw` is defined further down; the session only calls this later.
+    const session = this.createSession(document, () => draw());
 
     // Each draw gets its own media set id, so the webview can tell the images
     // for this render from those of one it has already replaced.
@@ -331,6 +342,7 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
             break;
           }
           case 'selectSheet':
+          case 'readFile':
             await session.handleMessage?.(msg, draw);
             break;
         }

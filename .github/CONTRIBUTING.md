@@ -27,7 +27,7 @@ npm run watch       # rebuild the extension host and webviews on change
 `compile` runs three steps:
 
 1. `check-types` (`tsc --noEmit`) type-checks the whole tree without emitting.
-2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js`.
+2. `build:ext` (`esbuild.js`) bundles the Node extension to `dist/extension.js` and the file-information worker (`src/fileInfoWorker.ts`) to `dist/fileInfoWorker.js`.
 3. `build:web` (`esbuild.web.js`) bundles the webview to `media/webview.js`, plus `media/pdf.js` and `media/pdf.worker.js` for the PDF preview and `media/stl.js` (Three.js bundled in) for the STL preview, `media/video.js` for the video player, `media/gif.js` for the GIF viewer, and `media/image.js` for the image viewer.
 
 See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for why there are separate bundles.
@@ -132,7 +132,9 @@ To debug the webview itself, open **Developer: Open Webview Developer Tools** fr
 | `src/docxExport.ts`, `src/docx/`                                  | Host: Save as Word, the `.docx` writer.                                                                                                                        |
 | `src/exeEditor.ts`, `src/pe/`                                     | Host: read-only custom editor for `.exe`, `.dll` and related files, and the PE reader behind it.                                                               |
 | `src/packageEditor.ts`, `src/pkg/`                                | Host: read-only custom editor for packages and installers (`.deb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.so` and more), and one reader per format. |
-| `src/fileInspect.ts`, `src/binary/`                               | Host: ranged file access and SHA-256, and the page-cached reader, text cleaning and HTML helpers the executable and package previews share.                    |
+| `src/fileInfoEditor.ts`, `src/fileInfoTask.ts`                    | Host: the scaffold both file-information previews share (confirmation page, then a read), and the task that reads one file.                                    |
+| `src/isolate.ts`, `src/fileInfoWorker.ts`                         | Host: starts the worker thread (256 MB heap, 15 seconds) the files are read in, and the worker's entry, built to `dist/fileInfoWorker.js`.                     |
+| `src/fileInspect.ts`, `src/binary/`                               | Host: SHA-256 and fetching a remote file, and the page-cached reader, ranged file access, text cleaning and HTML helpers the previews share.                   |
 | `src/stlEditor.ts`                                                | Host: read-only custom editor for `.stl` files.                                                                                                                |
 | `src/webview/stl.ts`                                              | STL webview: the Three.js scene, orbit controls, and the toolbar.                                                                                              |
 | `src/webview/stlInfo.ts`                                          | STL sniffing and the pre-allocation guards (pure, unit-tested).                                                                                                |

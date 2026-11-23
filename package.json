@@ -165,6 +165,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "markcopy.fileInfo.read",
+        "title": "MarkCopy: Read This File",
+        "category": "MarkCopy",
+        "enablement": "activeCustomEditorId == markcopy.exePreview || activeCustomEditorId == markcopy.packagePreview"
+      },
+      {
         "command": "markcopy.openSettings",
         "title": "MarkCopy: Settings",
         "category": "MarkCopy",
@@ -897,6 +903,11 @@
           "default": 200,
           "minimum": 1,
           "description": "Maximum number of CSV/TSV columns to render. The preview says how many columns it is hiding. The grid also draws at most 500,000 cells in total, so a very wide file shows fewer rows."
+        },
+        "markcopy.fileInfo.confirm": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask before reading an executable or a package. When on, opening one shows its name and size and a Read this file button, and nothing in the file is read until you press it. When off, the file is read as soon as it is opened. Either way it is read in an isolated worker and never run."
         },
         "markcopy.xlsx.maxRows": {
           "type": "number",

@@ -21,7 +21,9 @@ export type OoxmlMessage =
   | { type: 'openSettings' }
   | ToastMessage
   | { type: 'openLink'; href: string }
-  | { type: 'selectSheet'; index: number };
+  | { type: 'selectSheet'; index: number }
+  // The "Read this file" button of a file-information page (src/fileInfoEditor.ts).
+  | { type: 'readFile' };
 
 export function parseOoxmlMessage(raw: unknown): OoxmlMessage | undefined {
   const msg = asMessage(raw);
@@ -33,6 +35,7 @@ export function parseOoxmlMessage(raw: unknown): OoxmlMessage | undefined {
     case 'revealInOS':
     case 'openExternal':
     case 'openSettings':
+    case 'readFile':
       return { type: msg.type };
     case 'pdfHtml':
     case 'docxXhtml':

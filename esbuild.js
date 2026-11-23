@@ -1,4 +1,6 @@
-// Bundles the Node-side extension host code -> dist/extension.js
+// Bundles the Node-side extension host code -> dist/extension.js, and the
+// worker the file-information previews read untrusted files in ->
+// dist/fileInfoWorker.js (started by src/isolate.ts; it has no editor API).
 const esbuild = require('esbuild');
 
 const production = process.argv.includes('--production');
@@ -6,7 +8,7 @@ const watch = process.argv.includes('--watch');
 
 async function main() {
   const ctx = await esbuild.context({
-    entryPoints: ['src/extension.ts'],
+    entryPoints: { extension: 'src/extension.ts', fileInfoWorker: 'src/fileInfoWorker.ts' },
     bundle: true,
     format: 'cjs',
     platform: 'node',
@@ -14,7 +16,7 @@ async function main() {
     minify: production,
     sourcemap: !production,
     sourcesContent: false,
-    outfile: 'dist/extension.js',
+    outdir: 'dist',
     external: ['vscode'], // provided by VS Code at runtime; never bundle
   });
   if (watch) {

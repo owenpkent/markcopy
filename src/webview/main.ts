@@ -661,6 +661,20 @@ document.addEventListener('click', (e) => {
 // Sheet tabs, in a workbook preview. The host re-renders with the chosen sheet;
 // the webview holds no workbook state of its own, exactly as it holds no Markdown
 // or CSV state.
+// The "Read this file" button of a file-information page. The page it is on
+// has read nothing of the file; this is the reader saying to. The button is
+// disabled at once so a second click cannot ask twice.
+content.addEventListener('click', (e) => {
+  const button = (e.target as Element | null)?.closest?.('[data-mc-action="read-file"]');
+  if (!(button instanceof HTMLButtonElement) || button.disabled) {
+    return;
+  }
+  e.preventDefault();
+  button.disabled = true;
+  button.textContent = 'Reading...';
+  vscode.postMessage({ type: 'readFile' });
+});
+
 content.addEventListener('click', (e) => {
   const tab = (e.target as HTMLElement).closest?.<HTMLElement>('[data-mc-sheet]');
   if (!tab) {

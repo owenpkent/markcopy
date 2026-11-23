@@ -2,9 +2,17 @@
 
 Look inside an executable or a package without running it. Both pages answer "what is this file?" from the file's own headers and tables, read as bytes, and neither can start the file.
 
+## Reading a file is a step you take
+
+Opening one of these files, which a single click in the Explorer does, shows only the file's name, its size and a **Read this file** button. Nothing inside the file is read until you press the button or run **MarkCopy: Read This File** from the Command Palette (it is enabled while one of these pages is in front). The question is asked again for each file you open: confirming one does not confirm the next. Once a page has been read, a change to the file on disk redraws it without asking again.
+
+The reading does not happen in the extension host, which other extensions share. It runs in a worker thread with a 256 MB heap limit and a 15 second time limit; a file that goes past either ends the worker and the page shows a notice, and VS Code carries on. This limits runaway memory and time. It is not a separate process or an operating-system sandbox, and it does not count memory allocated outside the JavaScript heap, which the readers' own caps on buffers and dictionaries bound instead.
+
+To skip the question, turn off `markcopy.fileInfo.confirm` (see [Commands and settings](settings.md)): the file is then read as soon as it is opened, still in the worker.
+
 ## Executable info preview
 
-MarkCopy registers as the editor for `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` and `.efi` files (either case), so opening one shows a page about the file instead of VS Code's "file is binary" notice. It is for answering "what is this file?" without running it.
+MarkCopy registers as the editor for `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` and `.efi` files (either case), so opening one shows a page about the file instead of VS Code's "file is binary" notice (after you press **Read this file**, as above). It is for answering "what is this file?" without running it.
 
 - **Icon.** The file's own icon, above its name: the largest image of the first icon in the file, drawn at up to 48 pixels. A file with no icon of its own (most DLLs) shows none.
 - **Version.** The version resource Explorer's Details tab reads: description, product, company, file and product versions, copyright, original file name and any other strings, plus the numeric versions, build flags and language.
@@ -15,13 +23,13 @@ MarkCopy registers as the editor for `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.c
 
 The file is **only read as bytes**. It is never run, loaded, or handed to the operating system, and there is no **Open in Default App** row in this preview's menu, because for an executable the default app is the file itself. A file on disk is read in bounded ranges, not loaded whole, with a budget of 16 MiB; the SHA-256 is computed for files up to 256 MB (a larger one shows "Not computed"), and a file on a virtual or remote file system is read whole and limited to 64 MB. A damaged or hostile file produces a notice or a warning on one table, not a crash.
 
-It is built on the same shared shell as the Word and Excel previews, so right-click **Copy as Rich Text** and **Copy as Markdown**, a table's **Copy Table** (with Markdown, CSV, TSV and PNG under **Copy as**), **Save as PDF / Word / PowerPoint**, Reveal in file manager, the themes and Search Google all work. It adds no settings.
+It is built on the same shared shell as the Word and Excel previews, so right-click **Copy as Rich Text** and **Copy as Markdown**, a table's **Copy Table** (with Markdown, CSV, TSV and PNG under **Copy as**), **Save as PDF / Word / PowerPoint**, Reveal in file manager, the themes and Search Google all work. Its one setting is `markcopy.fileInfo.confirm`, shared with the [package info page](#package-info-preview).
 
 Not shown: 16-bit and DOS executables (the page says so), Mach-O files (ELF files open in the [package info page](#package-info-preview)), the full list of imported function names, resources other than the icon, version block and manifest, signature verification, countersignature and timestamp details, and .NET metadata beyond the runtime version and flags.
 
 ## Package info preview
 
-MarkCopy registers as the editor for `.deb`, `.udeb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.war`, `.ear`, `.vsix`, `.whl`, `.nupkg`, `.snupkg`, `.so`, `.elf`, `.ko` and `.AppImage` files (either case) and `*.so.*` shared libraries, so opening one shows a page about the file instead of VS Code's "file is binary" notice. It is for answering "what is this, what version, who made it, and what does it need?" before you install it. The format is decided by what the file holds, not by its name, so a `.jar` that is an Android library or a `.apk` that is an Alpine package is read as what it is.
+MarkCopy registers as the editor for `.deb`, `.udeb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.war`, `.ear`, `.vsix`, `.whl`, `.nupkg`, `.snupkg`, `.so`, `.elf`, `.ko` and `.AppImage` files (either case) and `*.so.*` shared libraries, so opening one shows a page about the file instead of VS Code's "file is binary" notice (after you press **Read this file**, as above). It is for answering "what is this, what version, who made it, and what does it need?" before you install it. The format is decided by what the file holds, not by its name, so a `.jar` that is an Android library or a `.apk` that is an Alpine package is read as what it is.
 
 Every page starts with the file's name, format and a one-line summary, and ends with a **File** section: format, size and SHA-256. What is in between depends on the format.
 
@@ -45,7 +53,7 @@ The file is **only read as bytes**. It is never installed, run, mounted, or hand
 
 **Signatures are reported, never verified.** The page says who the file names as its signer and that nothing was checked. A file can carry a certificate with any name in it, so treat these as the file's claims. An Android package signed only with scheme v2 or later shows the scheme without a signer, and an RPM signature is OpenPGP, so it has a key ID and no certificate name.
 
-It is built on the same shared shell as the Word and executable previews, so right-click **Copy as Rich Text** and **Copy as Markdown**, a table's **Copy Table** (with Markdown, CSV, TSV and PNG under **Copy as**), **Save as PDF / Word / PowerPoint**, Reveal in file manager, the themes and Search Google all work. It adds no settings.
+It is built on the same shared shell as the Word and executable previews, so right-click **Copy as Rich Text** and **Copy as Markdown**, a table's **Copy Table** (with Markdown, CSV, TSV and PNG under **Copy as**), **Save as PDF / Word / PowerPoint**, Reveal in file manager, the themes and Search Google all work. Its one setting is `markcopy.fileInfo.confirm`, shared with the executable info page.
 
 Not shown: Mach-O binaries, the app inside a disk image, an Android app's label and icon, the contents of any script, and signature verification. A Debian package whose control archive is compressed with bzip2 or lzma shows a warning instead of its fields.
 

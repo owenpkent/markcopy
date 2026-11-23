@@ -1,81 +1,48 @@
 import * as vscode from 'vscode';
-import { createHash } from 'node:crypto';
-import { open, type FileHandle } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { digestBytes, digestHandle, fileSource, type Digest } from './binary/file';
 import { bytesSource, ReadError, type ByteSource } from './binary/reader';
 import { formatBytesShort } from './binary/html';
 
-// Opening a file for the previews that describe it without loading it: the
-// executable info page (src/exeEditor.ts) and the package info page
-// (src/packageEditor.ts). Both want the same two things from the host: random
-// access to the bytes, and the file's SHA-256.
+export { readRange, type Digest } from './binary/file';
 
-// Hashing reads every byte, which the metadata does not: past this size the
-// preview shows what it found at once rather than keep a disk busy for a number
-// most readers of a multi-gigabyte installer did not open the file to get.
-const HASH_LIMIT = 256 * 1024 * 1024;
+// The host's side of the file-information previews (src/fileInfoEditor.ts):
+// what it does to the file itself, as opposed to what the readers make of it.
+// That is the SHA-256, the size, and fetching a file that is not on a local
+// disk. None of it interprets the file's contents.
 
 // A file that is not on a local disk (a virtual or remote file system) can only
 // be read whole, so it has to fit in memory to be read at all.
 const WHOLE_FILE_LIMIT = 64 * 1024 * 1024;
 
-const HASH_CHUNK = 1024 * 1024;
-
-export interface Inspected<T> {
+export interface Inspected<T> extends Digest {
   result: T;
-  size: number;
-  /** Lowercase hex. Absent when the file was too large to hash. */
-  sha256?: string;
-  /** Why there is no hash, to show in its place. */
-  hashNote?: string;
 }
 
 /**
- * Read `length` bytes at `offset`, or as many as the file has.
- *
- * One read may return fewer bytes than were asked for without being at the end
- * of the file, on a network share for one. A ByteSource promises a short
- * answer only at the end, and the reader caches what it gets as the whole
- * page, so a short read passed straight through would make a complete file
- * look truncated. This keeps reading until the range is full or a read
- * returns nothing.
+ * The bytes of a file that is not on a local disk, which the worker cannot
+ * open by path. Refused, before any of it is fetched, when it is too large to
+ * hold in memory. Undefined for a file on disk.
  */
-export async function readRange(
-  handle: Pick<FileHandle, 'read'>,
-  offset: number,
-  length: number,
-): Promise<Uint8Array> {
-  const buffer = new Uint8Array(length);
-  let filled = 0;
-  while (filled < length) {
-    const { bytesRead } = await handle.read(buffer, filled, length - filled, offset + filled);
-    if (bytesRead === 0) {
-      break;
-    }
-    filled += bytesRead;
+export async function remoteBytes(uri: vscode.Uri): Promise<Uint8Array | undefined> {
+  if (uri.scheme === 'file') {
+    return undefined;
   }
-  return buffer.subarray(0, filled);
-}
-
-async function hashFile(handle: FileHandle, size: number): Promise<string> {
-  const hash = createHash('sha256');
-  const chunk = Buffer.allocUnsafe(Math.min(HASH_CHUNK, Math.max(size, 1)));
-  let position = 0;
-  for (;;) {
-    const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
-    if (bytesRead === 0) {
-      break;
-    }
-    hash.update(chunk.subarray(0, bytesRead));
-    position += bytesRead;
+  const { size } = await vscode.workspace.fs.stat(uri);
+  if (size > WHOLE_FILE_LIMIT) {
+    throw new ReadError(
+      `it is ${formatBytesShort(size)} and not on a local disk, where MarkCopy reads files of up to ${formatBytesShort(WHOLE_FILE_LIMIT)}.`,
+    );
   }
-  return hash.digest('hex');
+  return vscode.workspace.fs.readFile(uri);
 }
 
 /**
- * Run `read` over the file at `uri` and hash the file.
+ * Run `read` over the file at `uri`, in this process, and hash the file.
  *
- * A file on disk is read in ranges through a file handle, so the size of the
- * file never becomes the size of a buffer. Nothing here runs or loads it.
+ * The previews do not use this: they read in a worker (src/isolate.ts). It is
+ * the same access without the isolation, for callers that hold a reader they
+ * trust with the process, and for tests of the readers against a real file.
  */
 export async function inspectFile<T>(
   uri: vscode.Uri,
@@ -85,31 +52,12 @@ export async function inspectFile<T>(
     const handle = await open(uri.fsPath, 'r');
     try {
       const size = (await handle.stat()).size;
-      const result = await read({
-        size,
-        read: (offset, length) => readRange(handle, offset, length),
-      });
-      return size <= HASH_LIMIT
-        ? { result, size, sha256: await hashFile(handle, size) }
-        : {
-            result,
-            size,
-            hashNote: `Not computed for files over ${formatBytesShort(HASH_LIMIT)}`,
-          };
+      const result = await read(fileSource(handle, size));
+      return { result, ...(await digestHandle(handle, size)) };
     } finally {
       await handle.close();
     }
   }
-  const { size } = await vscode.workspace.fs.stat(uri);
-  if (size > WHOLE_FILE_LIMIT) {
-    throw new ReadError(
-      `it is ${formatBytesShort(size)} and not on a local disk, where MarkCopy reads files of up to ${formatBytesShort(WHOLE_FILE_LIMIT)}.`,
-    );
-  }
-  const bytes = await vscode.workspace.fs.readFile(uri);
-  return {
-    result: await read(bytesSource(bytes)),
-    size: bytes.length,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-  };
+  const bytes = (await remoteBytes(uri)) ?? new Uint8Array(0);
+  return { result: await read(bytesSource(bytes)), ...digestBytes(bytes) };
 }

@@ -2581,6 +2581,30 @@ body[data-mc-kind='package'] .markdown-body {
   overflow-wrap: anywhere;
 }
 
+/* The page a file opens on before it is read: its name, its size, and this. */
+.mc-info-read {
+  padding: 8px 18px;
+  border: 1px solid var(--mc-accent);
+  border-radius: 6px;
+  background: var(--mc-accent);
+  color: var(--mc-bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mc-info-read:hover:not(:disabled),
+.mc-info-read:focus-visible {
+  filter: brightness(1.12);
+  outline: 2px solid var(--mc-accent);
+  outline-offset: 2px;
+}
+
+.mc-info-read:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 /* The top of the page: the file's icon, when it has one, beside its name. */
 .mc-info-head {
   display: flex;
