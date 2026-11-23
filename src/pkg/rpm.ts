@@ -362,16 +362,22 @@ function parseIssuer(packet: Uint8Array): { algorithm: number; keyId?: string } 
       ? { algorithm: body[15], keyId: hex(body.subarray(7, 15)) }
       : undefined;
   }
-  if (body[0] !== 4 || body.length < 6) {
+  const version = body[0];
+  if ((version !== 4 && version !== 6) || body.length < 10) {
     return undefined;
   }
   const algorithm = body[2];
+  // Version 6 (RFC 9580) widens the subpacket area lengths to 4 bytes.
+  const width = version === 6 ? 4 : 2;
   // Hashed subpackets, then unhashed ones; the issuer is usually in either.
   let keyId: string | undefined;
   let pos = 4;
-  for (let area = 0; area < 2 && pos + 2 <= body.length; area++) {
-    const size = (body[pos] << 8) | body[pos + 1];
-    pos += 2;
+  for (let area = 0; area < 2 && pos + width <= body.length; area++) {
+    let size = 0;
+    for (let i = 0; i < width; i++) {
+      size = size * 256 + body[pos + i];
+    }
+    pos += width;
     const end = Math.min(pos + size, body.length);
     let sub = pos;
     // Each subpacket is at least 2 bytes, so this ends.
@@ -392,8 +398,13 @@ function parseIssuer(packet: Uint8Array): { algorithm: number; keyId?: string } 
       }
       if (type === 16 && len === 9) {
         keyId = hex(body.subarray(sub + 1, sub + 9));
-      } else if (type === 33 && len === 22 && body[sub + 1] === 4 && !keyId) {
-        keyId = hex(body.subarray(sub + 14, sub + 22));
+      } else if (type === 33 && !keyId) {
+        // Issuer fingerprint: the key ID is its last 8 bytes (version 4) or first 8 (version 6).
+        if (len === 22 && body[sub + 1] === 4) {
+          keyId = hex(body.subarray(sub + 14, sub + 22));
+        } else if (len === 34 && body[sub + 1] === 6) {
+          keyId = hex(body.subarray(sub + 2, sub + 10));
+        }
       }
       sub += len;
     }
@@ -409,6 +420,7 @@ const ALGORITHMS: Record<number, string> = {
   22: 'EdDSA',
 };
 
+// Every tag that holds code rpm runs as root, from rpmtag.h and rpm's tag reference.
 const SCRIPTS: [number, string, string][] = [
   [1151, 'Pre-transaction (%pretrans)', 'Runs as root before the whole transaction'],
   [1023, 'Pre-install (%pre)', 'Runs as root before the files are installed'],
@@ -416,6 +428,24 @@ const SCRIPTS: [number, string, string][] = [
   [1025, 'Pre-uninstall (%preun)', 'Runs as root before the files are removed'],
   [1026, 'Post-uninstall (%postun)', 'Runs as root after the files are removed'],
   [1152, 'Post-transaction (%posttrans)', 'Runs as root after the whole transaction'],
+  [5103, 'Pre-uninstall transaction (%preuntrans)', 'Runs as root before a removal transaction'],
+  [5104, 'Post-uninstall transaction (%postuntrans)', 'Runs as root after a removal transaction'],
+  [1079, 'Verify (%verify)', 'Runs as root when the package is verified'],
+];
+
+// Script arrays: one entry per trigger. They run when other packages, or files, change.
+const TRIGGER_SCRIPTS: [number, string, string][] = [
+  [
+    1065,
+    'Triggers (%triggerin, %triggerun, %triggerpostun)',
+    'when other packages are installed, upgraded or removed',
+  ],
+  [5066, 'File triggers (%filetriggerin ...)', 'when files under a watched path change'],
+  [
+    5076,
+    'Transaction file triggers (%transfiletriggerin ...)',
+    'after a transaction that changed files under a watched path',
+  ],
 ];
 
 export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
@@ -445,7 +475,9 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   const installed = number(main, 5009) ?? number(main, 1009);
   const payloadAt = main.end;
   const compressor = get(1125);
+  // Version 6 packages keep the same digest in tag 273; rpm 6 also adds a SHA3-256 in 279.
   const sha256 = text(signature, 273);
+  const sha3 = text(signature, 279);
 
   sections.push(
     ...propertySection('Package', [
@@ -474,6 +506,7 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
       ],
       ['Payload flags', get(1126)],
       ['Header SHA-256', sha256],
+      ['Header SHA3-256', sha3],
     ]),
   );
 
@@ -521,6 +554,21 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   const scripts = SCRIPTS.filter(([tag]) => main.tags.has(tag)).map(
     ([, label, runs]): [string, string] => [label, runs],
   );
+  for (const [tag, label, when] of TRIGGER_SCRIPTS) {
+    const count = strings(main, tag, MAX_RELATION_ENTRIES)?.count ?? 0;
+    if (count > 0) {
+      scripts.push([
+        label,
+        `${formatNumber(count)} script${count === 1 ? '' : 's'}, run as root ${when}`,
+      ]);
+    }
+  }
+  if (main.tags.has(5109)) {
+    scripts.push([
+      'System users (%sysusers)',
+      'Creates users and groups as root (declarative, not a script)',
+    ]);
+  }
   sections.push(
     ...propertySection(
       'Scripts',
@@ -610,18 +658,73 @@ function contents(main: Header, warnings: string[]): InfoSection[] {
   });
 }
 
+// RPM v6 keeps its OpenPGP signatures as base64 strings in tag 278 (RPMTAG_OPENPGP),
+// one or several. Signatures are read up to this many, each decoded from at most
+// this many characters (an RSA-4096 signature packet is about 700 bytes).
+const MAX_SIGNATURES = 16;
+const MAX_SIGNATURE_CHARS = 16 * 1024;
+
+function decodeBase64(text: string): Uint8Array | undefined {
+  try {
+    const binary = atob(text.replace(/\s+/g, ''));
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      out[i] = binary.charCodeAt(i);
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+interface Issuer {
+  algorithm?: string;
+  keyId?: string;
+}
+
+function describe(packet: Uint8Array | undefined): Issuer {
+  const issuer = packet && openPgpIssuer(packet);
+  return { algorithm: issuer ? ALGORITHMS[issuer.algorithm] : undefined, keyId: issuer?.keyId };
+}
+
 function signatureOf(signature: Header): InfoSection[] {
+  // RPM v6 signatures (tag 278) win: rpm ignores the legacy tags when they are present.
+  const v6 = strings(signature, 278, MAX_SIGNATURES);
+  if (v6 && v6.count > 0) {
+    const issuers: Issuer[] = [];
+    for (let i = 0; i < v6.count; i++) {
+      issuers.push(describe(decodeBase64(v6.at(i, MAX_SIGNATURE_CHARS) ?? '')));
+    }
+    const algorithms = [...new Set(issuers.map((i) => i.algorithm).filter(Boolean))];
+    const section = signatureSection(
+      algorithms.length > 0 ? `OpenPGP v6 (${algorithms.join(', ')})` : 'OpenPGP v6',
+    );
+    issuers.forEach((issuer, i) => {
+      if (issuer.keyId) {
+        section.rows.push([
+          issuers.length === 1 ? 'Key ID' : `Key ID (signature ${i + 1})`,
+          issuer.keyId,
+        ]);
+      }
+    });
+    if (issuers.length > 1) {
+      section.rows.push([
+        'Signatures',
+        v6.truncated ? `${issuers.length} shown, more are present` : String(issuers.length),
+      ]);
+    }
+    return [section];
+  }
   // RSAHEADER and DSAHEADER sign the header alone; PGP and GPG cover the payload too.
   for (const tag of [268, 267, 1002, 1005]) {
     const packet = bin(signature, tag);
     if (!packet) {
       continue;
     }
-    const issuer = openPgpIssuer(packet);
-    const algorithm = issuer ? ALGORITHMS[issuer.algorithm] : undefined;
+    const { algorithm, keyId } = describe(packet);
     const section = signatureSection(algorithm ? `OpenPGP (${algorithm})` : 'OpenPGP');
-    if (issuer?.keyId) {
-      section.rows.push(['Key ID', issuer.keyId]);
+    if (keyId) {
+      section.rows.push(['Key ID', keyId]);
     }
     return [section];
   }
