@@ -149,7 +149,7 @@ Opening a `.tex`, `.ltx`, or `.latex` file compiles it to a PDF and shows that P
 
 ### Open in Default App
 
-Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. The executable info preview is the exception: the default app for an executable is the executable, so it has no such row. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
+Every preview's menu has **Open in Default App** directly above the Reveal row. It copies nothing: it hands the file to the operating system's default application for its type, and the webview sends no path, so the host always opens its own document. This covers the Markdown, CSV, Excel, PowerPoint, Word, PDF, and LaTeX previews, in addition to the image, GIF, and video viewers. The executable and package info previews are the exceptions: the default app for an executable is the executable, and for a package it is an installer (or, for a `.jar` or an AppImage, the file itself), so they have no such row. A document that is not a file on disk (untitled, remote, virtual) shows a status bar note instead, as Reveal does. In the LaTeX preview the row reads **Open PDF in Default App** and opens the compiled PDF, not the `.tex` source; it is greyed out until the first compile succeeds.
 
 ### Always available
 
@@ -228,6 +228,19 @@ Differences worth stating:
 - **There is no Open in Default App row.** The default app for an executable is the file itself, so the row is removed from this preview's menu and the host ignores the message. **Reveal in file manager** is still there.
 - **Strings from the file are cleaned before they are shown**, so control and bidirectional-override characters are not in any copy.
 - There is no editing and no writeback: MarkCopy never writes to the file, and never runs it.
+
+## Package info (.deb, .rpm, .msi, .dmg, .pkg, .apk, .jar, ...)
+
+The page is ordinary semantic HTML in the shared shell, like the executable page: headings and tables, so a selection offers **Copy Selection** and **Copy as** > **Markdown**, any table on it (dependencies, files, partitions, components, requirements, permissions, sections, contents, and the File table) offers the full [table](#table) menu (**Copy Table** as rich text, **Copy as** > Markdown, CSV, TSV, PNG), and **Search Google** appears on a selection, as everywhere. It covers `.deb`, `.udeb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.war`, `.ear`, `.vsix`, `.whl`, `.nupkg`, `.snupkg`, `.so`, `.elf`, `.ko`, `*.so.*` and `.AppImage`. Which tables appear depends on the format.
+
+Differences worth stating:
+
+- **Copy Whole Document as Rich Text, Save as PDF, Save as Word, and Save as PowerPoint take the whole page.** What you copy is what rendered: a list the reader capped (a file list, say) is copied as shown, with its "first N of M" line.
+- **The SHA-256 and every other value are text.** Select a cell and **Copy Selection**, or copy the File table as CSV or TSV.
+- **There is no Open in Default App row.** The default app for a package is an installer, and for a `.jar` or an AppImage it is the file itself, so the row is removed from this preview's menu and the host ignores the message. **Reveal in file manager** is still there.
+- **Strings from the file are cleaned before they are shown**, so control and bidirectional-override characters are not in any copy.
+- **Scripts are not on the page, so they are not in a copy.** The page says only that they exist.
+- There is no editing and no writeback: MarkCopy never writes to the file, and never installs or runs it.
 
 ## 3D models (.stl, .3mf, .glb, .step, .stp, .obj, .gcode, .gco)
 

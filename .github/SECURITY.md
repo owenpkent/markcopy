@@ -66,7 +66,7 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, executable, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, executable, package or installer, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
 engine against the opened source and its included files. Video, GIF, and image previews hand
@@ -81,7 +81,7 @@ Messages in the other direction are checked too. Every webview's `message` liste
 
 Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
 
-The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL, Windows executable and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL, Windows executable, package and installer, and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
 
 ## Content Security Policy
 
@@ -251,6 +251,20 @@ An executable is the most hostile file MarkCopy opens, so the preview is built a
 - **Strings are cleaned and escaped.** Text from the file (version strings, names, paths, signer names) has control and bidirectional-override characters removed, so a name cannot be displayed as another, is HTML-escaped, and is sanitized again by the webview.
 - **The icon is re-encoded or size-checked.** A bitmap icon is decoded in the host under the format's own limit of 256 pixels a side and sent as a PNG the host wrote. An icon that is already a PNG is sent as is only when its header states at most 1024 pixels a side, and is then decoded by the webview like any image in a Word document.
 - **The signature is not verified.** The preview reports that an embedded Authenticode signature is present and the signer, organization, issuer and validity dates the file names. It does not verify the signature, the hash, the chain, revocation or expiry, and the page says so. These are claims the file makes about itself, not a verdict on whether to trust it.
+- **Read-only.** The preview never writes to the file.
+
+## Package info preview
+
+A package or installer is a file whose purpose is to run code on a machine, so the preview is built around not doing anything with it. `src/pkg/` reads a `.deb`, `.udeb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.war`, `.ear`, `.vsix`, `.whl`, `.nupkg`, `.snupkg`, `.so`, `.elf`, `.ko`, `*.so.*` or `.AppImage` in the extension host as bytes and nothing else: the file is never installed, run, mounted, unpacked to disk or handed to the OS. Beyond the DOMPurify pass and CSP in the webview:
+
+- **"Open in Default App" is removed.** The default app for a package is an installer, and for a `.jar` or an AppImage it is the file itself, so opening it that way would run it. The webview hides the row for this kind, and the host ignores the `openExternal` message for this preview (`opensInDefaultApp` in `src/ooxmlEditor.ts`), so a page that posts it anyway launches nothing.
+- **Reads are ranged and bounded.** A file on disk is read in ranges through a file handle by the shared `RangeReader` (`src/binary/reader.ts`): 64 KiB pages, a budget of 32 MiB of them per file (16 MiB for an executable), and a 16 MiB limit on any single read. Every offset the file supplies is checked against its real size, and every table and loop has a named cap, so a hostile or truncated file yields a notice or a warning, not a crash or an unbounded allocation. A file on a virtual or remote file system is read whole and refused above 64 MB. The SHA-256 is computed only up to 256 MB.
+- **The format comes from the bytes.** `readPackage` picks a reader from the file's leading bytes (and a disk image's trailer), not its extension, and a file that is none of them gets a notice.
+- **Decompression is bounded.** Only a Debian package's control archive (gzip, xz or zstd) and the front of an Alpine package are inflated, and a zip entry only up to the caller's cap. Every helper in `src/pkg/decompress.ts` is capped on both the compressed input and the output and stops as soon as the output reaches the cap, so a small file that expands to gigabytes ends in an error, not an out-of-memory. Data archives and payloads are never decompressed.
+- **Scripts are never shown or run.** The page says only that maintainer scripts, scriptlets, custom actions or build scripts exist, since that is what tells a reader an install will run code.
+- **Strings are cleaned and escaped.** Text from the file has control and bidirectional-override characters removed, so a name cannot be displayed as another, is HTML-escaped once in `src/binary/html.ts`, and is sanitized again by the webview. Entry names from an archive are only displayed, never used as a path.
+- **Signatures are not verified.** The page reports who the file names as its signer (a certificate name, or for an RPM an OpenPGP key ID) and that nothing was checked: not the signature, the hash, the chain, revocation or expiry. An Android package signed only with scheme v2 or later shows the scheme without a signer. These are claims the file makes about itself, not a verdict on whether to trust it.
+- **Two runtime dependencies were added.** `fzstd` (zstd decompression) and `xz-decompress` (xz decompression, with WebAssembly embedded in the package) are both MIT licensed and have no dependencies of their own. They are used only for a Debian package's control archive, and both run under the output cap above.
 - **Read-only.** The preview never writes to the file.
 
 ## CSV grid and cell editing

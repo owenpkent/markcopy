@@ -15,7 +15,7 @@ The manual layer is smaller than it was. What keeps a row in it is needing a rea
 
 ### Fuzzing
 
-Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), Windows executables (`pe`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
+Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), Windows executables (`pe`), packages and installers (`pkg`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
 
 ```bash
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
@@ -28,6 +28,8 @@ Three targets check a property rather than only looking for crashes. `links` thr
 The `3mf` target (`fuzz/targets/3mf.fuzz.ts`) runs `read3mf`, then the section maths on a model or the G-code reader on a sliced file; `gcode` (`fuzz/targets/gcode.fuzz.ts`) runs `parseGcode` and `readSliceInfo` and asserts the output arrays agree with the segment count. Both have dictionaries (`fuzz/dict/3mf.dict`, `fuzz/dict/gcode.dict`) and are in the nightly matrix. The `3mf` target found, within 20 seconds, a 1.2 KB file declaring a 184 MB part that made the zip reader allocate all of it; `src/ooxml/zip.ts` now refuses it. Local runs on 2026-11-20 after the fix: `3mf` 910,848 runs in 46 s and `gcode` 181,617 runs in 21 s, no findings.
 
 The `pe` target (`fuzz/targets/pe.fuzz.ts`) runs `readPe` and then `renderPeHtml`, and treats anything but a `PeError` as a finding. It has no seed corpus, because no executable is checked into the repo: the target writes a minimal PE32 header over any input that lacks one, so mutation reaches the directories and tables behind it. It is in the nightly matrix. Local run on 2026-11-22: 394,932 runs in 46 s, no findings.
+
+The `pkg` target (`fuzz/targets/pkg.fuzz.ts`) runs `readPackage` and then `renderPackageHtml`, and treats anything but a `PackageError` as a finding. Like `pe` it has no seed corpus, because no package is checked into the repo. `readPackage` picks a reader from the first bytes of the file, so the first input byte chooses one of thirteen shapes (ELF, RPM, Debian, Windows Installer, macOS installer, five zip-based names (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`), an empty zip, an Alpine gzip, and a disk image) and the target writes that format's magic over the start of the rest of the input (a disk image's trailer over its end) together with a file name that sends the dispatcher the same way, so mutation reaches the headers and tables behind it. It is in the nightly matrix. Local run on 2026-11-23: 507,592 runs in 61 s, no findings. The `pe` target was not rerun after the icon reader was added; its last local run (394,932 runs in 46 s, no findings) predates it.
 
 The `messages` target runs every webview message parser (Markdown and CSV, the Office previews, PDF, LaTeX, STL, video, GIF, image and audio) over generated messages and throws when one accepts a type or setting key its surface does not allow, a `navigate` step other than 1 or -1, or a review edit that lost the page's original object; the image and audio surfaces include `navigate`, the review messages and their `*.review` settings (`tests/messagesFuzzTarget.test.ts` is its regression test).
 
@@ -286,6 +288,63 @@ Measured so far, manually on Windows 11 on 2026-11-22 with a script over the par
 - [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, a table's **Copy Table** and its CSV and TSV work; **Search Google** works on a selection; **Save as PDF**, **Save as Word** and **Save as PowerPoint** export the whole page.
 - [ ] Light, dark, and green themes are all legible, including the tables, notes and the signature caveat.
 - [ ] A file on a virtual or remote file system opens if it is under 64 MB, and over that shows a notice.
+
+## Package info preview (.deb, .rpm, .msi, .dmg, .pkg, .apk, .jar, ...)
+
+Open real files in the Extension Development Host, one or two per family below. Never install, run, mount or open any of them outside the preview for this pass: the preview must not either. Get a Debian package from a distribution mirror, not from a build you trust less than the page's claims.
+
+Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the readers (not through the extension host):
+
+- Windows Installer: 7 real `.msi` files from 45 KB to 906 MB compared with Windows Installer's own database API (property count, product name, version, install scope, language and the row counts of eight tables). All matched, and each was read in under 25 ms.
+- Debian: a Debian `hello` package (xz control archive) and an Ubuntu one (zstd) compared with an independent extraction of the control file. RPM: a Fedora `hello` package compared with an independent header parse. Alpine: the `musl` package.
+- ELF: three real shared libraries (x86-64 and AArch64) and one statically linked Go executable compared with `file` and an independent header reader. No real kernel module or AppImage was checked.
+- macOS installer: two real signed packages (one product archive, one flat component package), file lists and signer names compared with an independent read of the table of contents.
+- Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
+- Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
+
+**None of the rows below has been checked in the editor yet**: opening a file in a dev host, the menu, the themes, copy and the exports are unverified.
+
+Every format:
+
+- [ ] Each file opens in the preview, not in VS Code's "file is binary" notice. An uppercase extension does too, and so does `libfoo.so.1`.
+- [ ] The page ends with a File section whose format and size are right and whose SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
+- [ ] No row, link or menu item installs, runs or opens the file. Right-click: there is **no Open in Default App**; **Reveal in file manager** works.
+- [ ] A text file renamed to each extension shows a notice in the panel, not a crash and not a blank page. So does a truncated copy of a real package.
+- [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, a table's **Copy Table** and its CSV and TSV work; **Search Google** works on a selection; **Save as PDF**, **Save as Word** and **Save as PowerPoint** export the whole page.
+- [ ] Light, dark, and green themes are all legible, including the tables and notes.
+- [ ] A file on a virtual or remote file system opens if it is under 64 MB, and over that shows a notice.
+- [ ] Any signature section names who the file claims signed it and says nothing was verified.
+
+Linux packages (`.deb`, `.rpm`, Alpine `.apk`):
+
+- [ ] The fields match `dpkg-deb --info`, `rpm -qip` or the `.PKGINFO` of the same file: name, version, architecture, maintainer, description, dependencies. A Debian package with an xz control archive and one with zstd both open; one with a bzip2 or lzma control archive shows a warning and still opens.
+- [ ] The page says which maintainer scripts or scriptlets exist and shows none of their text.
+- [ ] An RPM's file list has sizes, `rpmlib(...)` dependencies are hidden and counted, and a signed one shows the key ID.
+- [ ] An Alpine package is recognised as Alpine, not as Android.
+
+Windows Installer (`.msi`):
+
+- [ ] Product name, version, manufacturer, the product, upgrade and package codes, platform and install scope match the file's Properties or Orca. The table counts (files, components, features, registry values, shortcuts, services, custom actions) are plausible.
+- [ ] A patch, a transform and a merge module are labelled as such and do not show the product page.
+- [ ] A signed installer shows its signer; a large one opens at once.
+
+macOS (`.dmg`, `.pkg`):
+
+- [ ] A disk image shows its size, compression, checksum type and partitions, says whether it is encrypted and signed, and does not show the app's name or version, which it cannot read.
+- [ ] An installer package shows its title, identifiers, versions, install location, components, which components run scripts, the file list and the signing certificate names.
+
+Linux binaries (`.so`, `*.so.*`, `.elf`, `.ko`, `.AppImage`):
+
+- [ ] Type, architecture, SONAME, build ID, interpreter, stripped or not, protections and needed libraries match `readelf` or `file` for the same file.
+- [ ] A kernel module shows its module information; an AppImage shows its payload size and is not run.
+
+Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):
+
+- [ ] A Java archive shows its manifest, Maven coordinates when there are some, the class count and Java version; a signed one shows its signer.
+- [ ] A VS Code extension shows its identity, engine, activation events and contribution counts.
+- [ ] A wheel shows its metadata, requirements and entry points; a NuGet package its dependencies by framework and whether it carries build or install scripts.
+- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed only with scheme v2 or later shows the scheme without a signer. Its label and icon are not shown.
+- [ ] A `.zip` renamed to `.jar` with none of these inside shows its contents only.
 
 ## CSV / TSV grid
 
