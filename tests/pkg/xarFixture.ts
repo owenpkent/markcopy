@@ -7,7 +7,7 @@
 // Layout: a 28-byte big-endian header, the zlib-compressed XML table of
 // contents, then the heap. Heap offset 0 holds the table's own checksum, so
 // file data starts at 20 as it does in real archives.
-import { zlibSync } from 'fflate';
+import { gzipSync, zlibSync } from 'fflate';
 import { tlv } from '../pe/fixture';
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -23,7 +23,9 @@ export interface XarFile {
   children?: XarFile[];
   data?: Uint8Array | string;
   /** How the data is stored. `zlib` is what xar calls application/x-gzip. */
-  encoding?: 'zlib' | 'stored' | 'bzip2';
+  encoding?: 'zlib' | 'stored' | 'bzip2' | 'gzip';
+  /** For encoding 'gzip': length of the FNAME field in the member's header. */
+  gzipNameLength?: number;
   /** Replace the extracted size the table declares. */
   declaredSize?: number;
   /** Replace the stored length the table declares. */
@@ -39,12 +41,15 @@ export interface XarSpec {
   certificate?: Uint8Array;
   /** Raw XML to use as the table instead of building one. */
   rawToc?: string;
+  /** Compress the table of contents some other way than zlib. */
+  compressToc?: (xml: Uint8Array) => Uint8Array;
 }
 
 const ENCODING_STYLE = {
   zlib: 'application/x-gzip',
   stored: 'application/octet-stream',
   bzip2: 'application/x-bzip2',
+  gzip: 'application/x-gzip',
 };
 
 export function buildXar(spec: XarSpec = {}): Uint8Array {
@@ -62,7 +67,12 @@ export function buildXar(spec: XarSpec = {}): Uint8Array {
     }
     const raw = typeof file.data === 'string' ? utf8(file.data) : (file.data ?? new Uint8Array(0));
     const encoding = file.encoding ?? 'stored';
-    const stored = encoding === 'zlib' ? zlibSync(raw) : raw;
+    const stored =
+      encoding === 'zlib'
+        ? zlibSync(raw)
+        : encoding === 'gzip'
+          ? gzipSync(raw, { filename: 'n'.repeat(file.gzipNameLength ?? 1) })
+          : raw;
     const offset = heapLength;
     heap.push(stored);
     heapLength += stored.length;
@@ -87,7 +97,7 @@ export function buildXar(spec: XarSpec = {}): Uint8Array {
       `<creation-time>${spec.creationTime ?? '2024-03-05T10:20:30'}</creation-time>` +
       `<checksum style="sha1"><offset>0</offset><size>20</size></checksum>${signature}${filesXml}</toc></xar>`;
   const tocRaw = utf8(tocXml);
-  const toc = zlibSync(tocRaw);
+  const toc = spec.compressToc ? spec.compressToc(tocRaw) : zlibSync(tocRaw);
 
   const header = new DataView(new ArrayBuffer(28));
   header.setUint32(0, 0x78617221, false); // "xar!"

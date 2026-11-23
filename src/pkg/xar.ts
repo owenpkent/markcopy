@@ -7,13 +7,14 @@
 // package; a flat component package has `PackageInfo`, `Bom`, `Payload` and
 // `Scripts` at its root. Only the table and the two small XML files are read;
 // payloads and scripts are never opened.
-import { Decompress } from 'fflate';
+import { Unzlib } from 'fflate';
 import { formatBytes, formatNumber } from '../binary/html';
 import { printable } from '../binary/text';
 import type { RangeReader } from '../binary/reader';
 import { parseXmlBounded } from '../binary/xml';
 import { attr } from '../ooxml/xml';
 import { child, children, findAll, type XNode } from '../ooxml/xnode';
+import { gunzipBounded } from './decompress';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
 import { readCertificate, signatureSection } from './signature';
@@ -80,12 +81,30 @@ interface Component {
   bundles: { id: string; version?: string; path?: string }[];
 }
 
-/** Inflate zlib, gzip or raw deflate, stopping at `cap` bytes of output. */
-function inflateCapped(input: Uint8Array, cap: number): { data: Uint8Array; truncated: boolean } {
+/**
+ * Inflate a zlib stream (RFC 1950), stopping at `cap` bytes of output.
+ *
+ * xar specifies zlib for the table of contents and for entries marked
+ * `application/x-gzip` (Apple's xar writes them with zlib's deflate and the
+ * two-byte zlib header; xar/lib/zxar.c and xar/lib/archive.c). The header is
+ * checked here and Unzlib is used rather than the auto-detecting Decompress: a
+ * gzip wrapper carries variable-length header fields that fflate rescans on
+ * every push, which turns a slow feed into quadratic work before any output
+ * exists for the cap to count.
+ */
+function unzlibCapped(input: Uint8Array, cap: number): { data: Uint8Array; truncated: boolean } {
+  if (input.length < 2) {
+    throw new PackageError('its compressed data is not a zlib stream.');
+  }
+  const cmf = input[0];
+  const flg = input[1];
+  if ((cmf & 0x0f) !== 8 || cmf >> 4 > 7 || ((cmf << 8) | flg) % 31 !== 0 || (flg & 0x20) !== 0) {
+    throw new PackageError('its compressed data is not a zlib stream.');
+  }
   const chunks: Uint8Array[] = [];
   let total = 0;
   let truncated = false;
-  const stream = new Decompress((chunk) => {
+  const stream = new Unzlib((chunk) => {
     if (truncated) {
       return;
     }
@@ -231,11 +250,17 @@ async function readXmlEntry(
   if (style === '' || style === 'application/octet-stream') {
     bytes = stored;
   } else if (style === 'application/x-gzip' || style === 'application/x-deflate') {
-    const out = inflateCapped(stored, MAX_INFO);
-    if (out.truncated) {
-      return undefined;
+    // "gzip" in xar is zlib in practice. A true gzip member is the only other
+    // thing seen, and goes through the bounded gzip reader; anything else is refused.
+    if (stored[0] === 0x1f && stored[1] === 0x8b) {
+      bytes = gunzipBounded(stored, MAX_INFO);
+    } else {
+      const out = unzlibCapped(stored, MAX_INFO);
+      if (out.truncated) {
+        return undefined;
+      }
+      bytes = out.data;
     }
-    bytes = out.data;
   } else {
     // bzip2 and lzma are legal in xar but no installer is written with them.
     return undefined;
@@ -384,7 +409,7 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
 
   let toc: XNode;
   try {
-    const out = inflateCapped(await reader.bytes(headerSize, tocCompressed), MAX_TOC);
+    const out = unzlibCapped(await reader.bytes(headerSize, tocCompressed), MAX_TOC);
     if (out.truncated) {
       throw new PackageError('its table of contents is larger than MarkCopy will read.');
     }

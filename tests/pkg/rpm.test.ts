@@ -468,11 +468,151 @@ describe('readRpm: trigger scripts and the full script inventory', () => {
     expect(scripts.has('Verify (%verify)')).toBe(true);
   });
 
-  it('shows a verify-only package and a sysusers-only package', async () => {
+  it('shows a verify-only package', async () => {
     const verify = await readSpec({ without: noScripts, main: [str(1079, 'y')] });
     expect(properties(verify, 'Scripts').has('Verify (%verify)')).toBe(true);
-    const users = await readSpec({ without: noScripts, main: [strings(5109, ['u app - -'])] });
-    expect(properties(users, 'Scripts').has('System users (%sysusers)')).toBe(true);
+  });
+
+  it('shows a program-only post-install scriptlet and the program it runs', async () => {
+    // `%post -p /sbin/ldconfig`: the program tag is written, the body tag is not.
+    const info = await readSpec({ without: noScripts, main: [str(1086, '/sbin/ldconfig')] });
+    const scripts = properties(info, 'Scripts');
+    expect([...scripts.keys()]).toEqual(['Post-install (%post)']);
+    expect(scripts.get('Post-install (%post)')).toContain(
+      'No script body, runs only: /sbin/ldconfig',
+    );
+  });
+
+  it('shows each program-only variant, including transaction and verify ones', async () => {
+    const tags: [number, string][] = [
+      [1153, 'Pre-transaction (%pretrans)'],
+      [1085, 'Pre-install (%pre)'],
+      [1087, 'Pre-uninstall (%preun)'],
+      [1088, 'Post-uninstall (%postun)'],
+      [1154, 'Post-transaction (%posttrans)'],
+      [5105, 'Pre-uninstall transaction (%preuntrans)'],
+      [5106, 'Post-uninstall transaction (%postuntrans)'],
+      [1091, 'Verify (%verify)'],
+    ];
+    for (const [tag, label] of tags) {
+      const info = await readSpec({ without: noScripts, main: [str(tag, '/bin/true')] });
+      expect([...properties(info, 'Scripts').keys()]).toEqual([label]);
+    }
+  });
+
+  it('shows the interpreter of a scriptlet that has a body, as a string or an array', async () => {
+    const lua = await readSpec({
+      without: noScripts,
+      main: [str(1024, 'print(1)'), str(1086, '<lua>')],
+    });
+    expect(properties(lua, 'Scripts').get('Post-install (%post)')).toContain('Interpreter: <lua>');
+    const array = await readSpec({
+      without: noScripts,
+      main: [strings(1086, ['/usr/bin/env', 'python3', '-u'])],
+    });
+    expect(properties(array, 'Scripts').get('Post-install (%post)')).toContain(
+      '/usr/bin/env python3 -u',
+    );
+  });
+
+  it('cuts a very long program and a long argument array', async () => {
+    const info = await readSpec({
+      without: noScripts,
+      main: [
+        strings(
+          1086,
+          Array.from({ length: 50 }, () => 'x'.repeat(5000)),
+        ),
+      ],
+    });
+    expect(properties(info, 'Scripts').get('Post-install (%post)')!.length).toBeLessThan(600);
+  });
+
+  it('shows a trigger scriptlet that has only a program array', async () => {
+    const info = await readSpec({ without: noScripts, main: [strings(5067, ['/sbin/ldconfig'])] });
+    const row = properties(info, 'Scripts').get('File triggers (%filetriggerin ...)');
+    expect(row).toContain('1 script');
+    expect(row).toContain('/sbin/ldconfig');
+  });
+
+  describe('accounts created through serialized Provides', () => {
+    // From rpm's users_and_groups documentation: the sysusers.d line
+    //   u dnsmasq - "Dnsmasq DHCP and DNS server" /var/lib/dnsmasq
+    // is carried as the version of user(dnsmasq), with the equal flag.
+    const DNSMASQ =
+      'dSBkbnNtYXNxIC0gIkRuc21hc3EgREhDUCBhbmQgRE5TIHNlcnZlciIgL3Zhci9saWIvZG5zbWFzcQAA';
+    const EQUAL = 0x08;
+    const sysusers = (line: string): string => {
+      const padded = line + ' '.repeat((3 - (line.length % 3)) % 3);
+      return Buffer.from(padded).toString('base64');
+    };
+
+    it('names the user from the documentation example', async () => {
+      const info = await readSpec({
+        without: noScripts,
+        main: [
+          strings(1047, ['user(dnsmasq)', 'group(dnsmasq)']),
+          int32(1112, EQUAL, 0),
+          strings(1113, [DNSMASQ, '']),
+        ],
+      });
+      const row = properties(info, 'Scripts').get('System users and groups');
+      expect(row).toBe('Created as root: user dnsmasq');
+    });
+
+    it('names groups, memberships and locked users, and counts those past the cap', async () => {
+      const lines = ['g wheel2 515', 'm klangd klong', 'u! svc - "Service"'];
+      const info = await readSpec({
+        without: noScripts,
+        main: [
+          strings(1047, ['group(wheel2)', 'groupmember(klangd/klong)', 'user(svc)']),
+          int32(1112, EQUAL, EQUAL, EQUAL),
+          strings(1113, lines.map(sysusers)),
+        ],
+      });
+      expect(properties(info, 'Scripts').get('System users and groups')).toBe(
+        'Created as root: group wheel2, klangd added to group klong, user svc (locked)',
+      );
+      const count = 30;
+      const many = await readSpec({
+        without: noScripts,
+        main: [
+          strings(
+            1047,
+            Array.from({ length: count }, (_, i) => `user(u${i})`),
+          ),
+          int32(1112, ...new Array<number>(count).fill(EQUAL)),
+          strings(
+            1113,
+            Array.from({ length: count }, (_, i) => sysusers(`u u${i}`)),
+          ),
+        ],
+      });
+      expect(properties(many, 'Scripts').get('System users and groups')).toContain('and 10 more');
+    });
+
+    it('ignores an ordinary provide, a user() name without the equal flag, and a tag 5109', async () => {
+      const info = await readSpec({
+        without: noScripts,
+        main: [
+          strings(1047, ['user(x)', 'libfoo', 'group(y)']),
+          int32(1112, 0, EQUAL, 0),
+          strings(1113, [DNSMASQ, '1.0', '']),
+          strings(5109, ['u fabricated']),
+        ],
+      });
+      expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+    });
+
+    it('falls back to the capability name when the version is not base64', async () => {
+      const info = await readSpec({
+        without: noScripts,
+        main: [strings(1047, ['user(odd)']), int32(1112, EQUAL), strings(1113, ['!!not base64!!'])],
+      });
+      expect(properties(info, 'Scripts').get('System users and groups')).toBe(
+        'Created as root: user(odd)',
+      );
+    });
   });
 
   it('shows no Scripts section when no script-bearing tag is present', async () => {
