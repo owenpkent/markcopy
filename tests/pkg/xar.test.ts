@@ -356,3 +356,57 @@ describe('readXar: rendering', () => {
     expect(html).not.toContain(RLO);
   });
 });
+
+describe('readXar: Base64 names', () => {
+  // The first character of a Chinese word, built from its code point.
+  const ZHONG = String.fromCharCode(0x4e2d);
+  const paths = async (files: XarSpec['files']): Promise<string[]> =>
+    tableOf(await read(buildXar({ files })), 'Contents').map((r) => r[0]);
+
+  it('decodes a name marked enctype="base64" as UTF-8', async () => {
+    expect(await paths([{ name: `${ZHONG}.txt`, base64Name: true, data: 'a' }])).toEqual([
+      `${ZHONG}.txt`,
+    ]);
+  });
+
+  it('keeps a decoded directory name in every descendant path', async () => {
+    expect(
+      await paths([{ name: ZHONG, base64Name: true, children: [{ name: 'a.txt', data: 'a' }] }]),
+    ).toEqual([`${ZHONG}/a.txt`]);
+  });
+
+  it('finds PackageInfo by its decoded name', async () => {
+    const info = await read(
+      buildXar({
+        files: [
+          {
+            name: 'PackageInfo',
+            base64Name: true,
+            data: packageInfoXml({ identifier: 'com.b64' }),
+          },
+        ],
+      }),
+    );
+    expect(info.format).toBe('macOS installer package');
+    expect(tableOf(info, 'Components')[0][0]).toBe('com.b64');
+  });
+
+  it('does not let a decoded name carry a path separator', async () => {
+    const [path] = await paths([{ name: 'a/b', base64Name: true, data: 'x' }]);
+    expect(path).not.toContain('/');
+    expect(path).toHaveLength(3);
+  });
+
+  it('shows malformed Base64 as written', async () => {
+    const toc =
+      '<xar><toc><file><name enctype="base64">!!!=x</name><type>file</type></file></toc></xar>';
+    const info = await read(buildXar({ rawToc: toc }));
+    expect(tableOf(info, 'Contents')[0][0]).toBe('!!!=x');
+  });
+
+  it('cuts a huge Base64 name to the name cap without decoding it all', async () => {
+    const toc = `<xar><toc><file><name enctype="base64">${'QUJD'.repeat(250_000)}</name><type>file</type></file></toc></xar>`;
+    const info = await read(buildXar({ rawToc: toc }));
+    expect(tableOf(info, 'Contents')[0][0]).toHaveLength(255);
+  });
+});

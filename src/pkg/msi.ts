@@ -203,27 +203,41 @@ interface Strings {
 function readPool(pool: Uint8Array, data: Uint8Array): Strings {
   const view = new DataView(pool.buffer, pool.byteOffset, pool.byteLength);
   const entries = Math.min(Math.floor(pool.length / 4), MAX_POOL_ENTRIES);
-  const codePage = entries > 0 ? view.getUint16(0, true) : 0;
+  // The header's two words are the code page (low) and flags (high); the top
+  // flag bit is the 3-byte reference width, the rest extend the code page.
+  const codePage =
+    entries > 0 ? view.getUint16(0, true) | ((view.getUint16(2, true) & 0x7fff) << 16) : 0;
   const width = entries > 0 && (view.getUint16(2, true) & 0x8000) !== 0 ? 3 : 2;
   const decoder = decoderFor(codePage);
   // Strings are decoded on demand: a pool can hold hundreds of thousands.
+  // Logical string IDs are counted apart from the 4 byte records: a string over
+  // 64 KB takes two records but one ID (Wine's msi_load_string_table does the
+  // same), and an empty record (two zero words) still takes an ID.
   const start = new Float64Array(entries);
   const length = new Float64Array(entries);
   let offset = 0;
-  for (let i = 1; i < entries; i++) {
-    let size = view.getUint16(i * 4, true);
+  let count = 1;
+  for (let i = 1; i < entries; count++) {
+    const size = view.getUint16(i * 4, true);
     const refs = view.getUint16(i * 4 + 2, true);
-    let id = i;
-    if (size === 0 && refs !== 0 && i + 1 < entries) {
-      // A string over 64 KB: this entry holds the high word of its length,
-      // and the next entry the low word and the string's ID.
-      size = refs * 65536 + view.getUint16((i + 1) * 4, true);
+    let len = size;
+    if (size === 0 && refs === 0) {
       i++;
-      id = i;
+      continue;
     }
-    start[id] = offset;
-    length[id] = size;
-    offset += size;
+    if (size === 0) {
+      // A long string: [0, reference count] then [length low, length high].
+      if (i + 1 >= entries) {
+        break;
+      }
+      len = view.getUint16((i + 1) * 4, true) + view.getUint16((i + 1) * 4 + 2, true) * 65536;
+      i += 2;
+    } else {
+      i++;
+    }
+    start[count] = offset;
+    length[count] = len;
+    offset += len;
   }
   // One cache per cut length, so a table name (short) never poisons a value.
   const caches = new Map<number, Map<number, string>>();
@@ -232,7 +246,7 @@ function readPool(pool: Uint8Array, data: Uint8Array): Strings {
     width,
     exhausted: false,
     get(id, max = MAX_STRING_CHARS) {
-      if (id <= 0 || id >= entries || start[id] + length[id] > data.length) {
+      if (id <= 0 || id >= count || start[id] + length[id] > data.length) {
         return '';
       }
       let cache = caches.get(max);

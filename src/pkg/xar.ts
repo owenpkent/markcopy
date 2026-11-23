@@ -12,6 +12,7 @@ import { formatBytes, formatNumber } from '../binary/html';
 import { printable } from '../binary/text';
 import type { RangeReader } from '../binary/reader';
 import { parseXmlBounded } from '../binary/xml';
+import { attr } from '../ooxml/xml';
 import { child, children, findAll, type XNode } from '../ooxml/xnode';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
@@ -134,6 +135,51 @@ function utcDate(value: string | undefined): string | undefined {
     : `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
+// A name that is not Latin-1 is written by Apple's xar as <name enctype="base64">
+// holding the UTF-8 bytes in Base64 (xar/lib/filetree.c, xar_prop_serialize and
+// xar_prop_unserialize); its reader accepts exactly enctype="base64" on a
+// `name` element. 255 characters need at most 1,020 UTF-8 bytes, so only the
+// first 1,360 Base64 characters are ever decoded.
+const MAX_NAME_BASE64 = 1360;
+const DIVISION_SLASH = String.fromCharCode(0x2215);
+
+function decodeBase64Name(raw: string): string | undefined {
+  // Slice first, so whitespace padding in a hostile name cannot cost a scan of megabytes.
+  const chars = raw
+    .slice(0, 4096)
+    .replace(/[^A-Za-z0-9+/=]/g, '')
+    .slice(0, MAX_NAME_BASE64);
+  if (chars === '') {
+    return undefined;
+  }
+  try {
+    const binary = atob(chars);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    // Malformed Base64: show the text as written rather than nothing.
+    return undefined;
+  }
+}
+
+/**
+ * One entry's name as displayed. A slash inside a single name would read as a
+ * path separator and let an entry pose as another (an encoded name can decode
+ * to anything), so it is shown as a look-alike character.
+ */
+function entryName(node: XNode | undefined): string {
+  if (!node) {
+    return '';
+  }
+  const decoded =
+    attr(node.attrs, 'enctype') === 'base64' ? decodeBase64Name(node.text) : undefined;
+  const name = printable((decoded ?? node.text.slice(0, MAX_NAME)).slice(0, MAX_NAME).trim());
+  return name.split('/').join(DIVISION_SLASH);
+}
+
 /** Every file entry in the table, with the path built from the directories around it. */
 function walkEntries(toc: XNode): { entries: Entry[]; truncated: boolean } {
   const entries: Entry[] = [];
@@ -151,7 +197,7 @@ function walkEntries(toc: XNode): { entries: Entry[]; truncated: boolean } {
       return { entries, truncated: true };
     }
     const { node, prefix, depth } = stack.pop() as (typeof stack)[number];
-    const path = `${prefix}${text(child(node, 'name'), MAX_NAME)}`.slice(0, MAX_PATH);
+    const path = `${prefix}${entryName(child(node, 'name'))}`.slice(0, MAX_PATH);
     pathChars += path.length;
     const data = child(node, 'data');
     const type = text(child(node, 'type'));
