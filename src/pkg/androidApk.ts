@@ -89,7 +89,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   const packageName = attrs.package;
   const versionName = attrs.versionName;
 
-  const dex = zip.entries.filter((e) => /^classes\d*\.dex$/.test(e.name));
+  const dex = zip.exactEntries.filter((e) => /^classes\d*\.dex$/.test(e.name));
   const abis = new Set<string>();
   for (const e of zip.entries) {
     const match = /^lib\/([^/]+)\//.exec(e.name);
@@ -183,7 +183,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   // Signature: v1 is a JAR-style PKCS #7 block with names to read. v2 and
   // later live in the APK Signing Block, whose certificate MarkCopy does not parse.
   const after: InfoSection[] = [];
-  const block = zip.entries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
+  const block = zip.exactEntries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
   let signer: Signer | undefined;
   if (block) {
     const der = await readBytesEntry(zip, block, MAX_SIGNATURE_BYTES, warnings, 'The v1 signature');

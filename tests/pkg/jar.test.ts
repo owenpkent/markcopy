@@ -313,3 +313,22 @@ describe('parseJarManifest: long lines', () => {
     expect(parsed[0][1].length).toBeLessThanOrEqual(4096);
   });
 });
+
+describe('readZipPackage: Java entry identity', () => {
+  it('ignores a decoy manifest whose name cleans to META-INF/MANIFEST.MF', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: `META-INF/MANIFEST${RLO}.MF`, data: manifest([['Main-Class', 'decoy.Main']]) },
+        { name: 'META-INF/MANIFEST.MF', data: manifest([['Main-Class', 'real.Main']]) },
+      ]),
+    );
+    expect(value(info, 'Java', 'Main class')).toBe('real.Main');
+  });
+
+  it('finds the manifest without regard to case, as Java does', async () => {
+    const info = await readZip(
+      buildZip([{ name: 'meta-inf/manifest.mf', data: manifest([['Main-Class', 'a.B']]) }]),
+    );
+    expect(value(info, 'Java', 'Main class')).toBe('a.B');
+  });
+});

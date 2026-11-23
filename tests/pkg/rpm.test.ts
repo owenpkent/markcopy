@@ -21,6 +21,7 @@ import {
   lead,
   pgpSignatureV3,
   pgpSignatureV4,
+  pgpSignatureV6,
   str,
   strings,
   TYPE,
@@ -430,5 +431,124 @@ describe('readRpm: memory and work bounds', () => {
     const info = await read(bytes);
     expect(info.summary).toBe('aa');
     expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+  });
+});
+
+describe('readRpm: trigger scripts and the full script inventory', () => {
+  const noScripts = [1023, 1024, 1026, 1152];
+
+  it('shows a Scripts section for a package whose only scripts are file triggers', async () => {
+    const info = await readSpec({
+      without: noScripts,
+      main: [strings(5066, ['echo watched'])],
+    });
+    const scripts = properties(info, 'Scripts');
+    expect([...scripts.keys()]).toEqual(['File triggers (%filetriggerin ...)']);
+    expect(scripts.get('File triggers (%filetriggerin ...)')).toContain('1 script, run as root');
+    expect(JSON.stringify(info)).not.toContain('echo watched');
+  });
+
+  it('counts ordinary, file and transaction file triggers next to the install scripts', async () => {
+    const info = await readSpec({
+      main: [
+        strings(1065, ['a', 'b']),
+        strings(5066, ['c']),
+        strings(5076, ['d', 'e', 'f']),
+        str(5103, 'x'),
+        str(1079, 'y'),
+      ],
+    });
+    const scripts = properties(info, 'Scripts');
+    expect(scripts.get('Triggers (%triggerin, %triggerun, %triggerpostun)')).toContain('2 scripts');
+    expect(scripts.get('Transaction file triggers (%transfiletriggerin ...)')).toContain(
+      '3 scripts',
+    );
+    expect(scripts.has('Pre-install (%pre)')).toBe(true);
+    expect(scripts.has('Pre-uninstall transaction (%preuntrans)')).toBe(true);
+    expect(scripts.has('Verify (%verify)')).toBe(true);
+  });
+
+  it('shows a verify-only package and a sysusers-only package', async () => {
+    const verify = await readSpec({ without: noScripts, main: [str(1079, 'y')] });
+    expect(properties(verify, 'Scripts').has('Verify (%verify)')).toBe(true);
+    const users = await readSpec({ without: noScripts, main: [strings(5109, ['u app - -'])] });
+    expect(properties(users, 'Scripts').has('System users (%sysusers)')).toBe(true);
+  });
+
+  it('shows no Scripts section when no script-bearing tag is present', async () => {
+    const info = await readSpec({ without: noScripts });
+    expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+  });
+});
+
+describe('readRpm: version 6 signatures', () => {
+  const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+  const OTHER = [1, 2, 3, 4, 5, 6, 7, 8];
+  const OTHER_HEX = '0102030405060708';
+
+  it('reports a v6-only signature (tag 278) with its key ID and no legacy tag', async () => {
+    const info = await readSpec({
+      without: [268],
+      signature: [strings(278, [b64(pgpSignatureV4(22))])],
+    });
+    const section = properties(info, 'Signature');
+    expect(section.get('Status')).toContain('OpenPGP v6 (EdDSA) signature present, not verified');
+    expect(section.get('Key ID')).toBe(KEY_ID_HEX);
+  });
+
+  it('prefers the v6 signature over a legacy one with a different key ID', async () => {
+    const info = await readSpec({
+      signature: [bin(268, pgpSignatureV4(1, OTHER)), strings(278, [b64(pgpSignatureV4(22))])],
+    });
+    const section = properties(info, 'Signature');
+    expect(section.get('Key ID')).toBe(KEY_ID_HEX);
+    expect(JSON.stringify(info)).not.toContain(OTHER_HEX);
+  });
+
+  it('falls back to the legacy tags only when there is no v6 signature', async () => {
+    const info = await readSpec({ signature: [bin(268, pgpSignatureV4(1, OTHER))] });
+    expect(properties(info, 'Signature').get('Key ID')).toBe(OTHER_HEX);
+  });
+
+  it('lists every key ID when a package carries several v6 signatures', async () => {
+    const info = await readSpec({
+      without: [268],
+      signature: [strings(278, [b64(pgpSignatureV4(1)), b64(pgpSignatureV6(22, OTHER))])],
+    });
+    const section = properties(info, 'Signature');
+    expect(section.get('Status')).toContain('OpenPGP v6 (RSA, EdDSA)');
+    expect(section.get('Key ID (signature 1)')).toBe(KEY_ID_HEX);
+    expect(section.get('Key ID (signature 2)')).toBe(OTHER_HEX);
+    expect(section.get('Signatures')).toBe('2');
+  });
+
+  it('still reports a v6 signature that cannot be decoded, without a key ID', async () => {
+    const info = await readSpec({
+      without: [268],
+      signature: [strings(278, ['!!! not base64 !!!'])],
+    });
+    const section = properties(info, 'Signature');
+    expect(section.get('Status')).toContain('OpenPGP v6 signature present');
+    expect(section.has('Key ID')).toBe(false);
+  });
+
+  it('reads at most 16 signatures and each from a bounded string', async () => {
+    const many = Array.from({ length: 40 }, () => b64(pgpSignatureV4(1)));
+    const info = await readSpec({
+      without: [268],
+      signature: [strings(278, [...many.slice(0, 20), 'A'.repeat(200_000)])],
+    });
+    const section = properties(info, 'Signature');
+    expect([...section.keys()].filter((k) => k.startsWith('Key ID'))).toHaveLength(16);
+    expect(section.get('Signatures')).toBe('16 shown, more are present');
+  });
+
+  it('shows the SHA3-256 header digest of a v6 package', async () => {
+    const info = await readSpec({ signature: [str(279, 'b'.repeat(64))] });
+    expect(properties(info, 'Package').get('Header SHA3-256')).toBe('b'.repeat(64));
+  });
+
+  it('parses a version 6 packet directly', () => {
+    expect(openPgpIssuer(pgpSignatureV6(22, KEY_ID))).toEqual({ algorithm: 22, keyId: KEY_ID_HEX });
   });
 });

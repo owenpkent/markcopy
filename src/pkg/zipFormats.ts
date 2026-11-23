@@ -40,15 +40,20 @@ async function flavour(zip: ZipArchive, fileName: string): Promise<ZipFlavour> {
   if (zip.find('extension.vsixmanifest')) {
     return readVsix(zip);
   }
-  const distInfo = zip.entries.find((e) => /^[^/]+\.dist-info\/METADATA$/.test(e.name));
+  // Identity files are found among exact names only, so an entry whose name was
+  // cleaned or cut for display cannot stand in for one.
+  const distInfo = zip.exactEntries.find((e) => /^[^/]+\.dist-info\/METADATA$/.test(e.name));
   if (distInfo) {
     return readWheel(zip, distInfo);
   }
-  const nuspec = zip.entries.find((e) => /^[^/]+\.nuspec$/.test(e.name));
+  // NuGet's own reader matches the extension without regard to case.
+  const nuspec = zip.exactEntries.find((e) => /^[^/]+\.nuspec$/i.test(e.name));
   if (nuspec) {
     return readNupkg(zip, nuspec, fileName);
   }
-  if (zip.entries.some((e) => e.name.toUpperCase() === 'META-INF/MANIFEST.MF')) {
+  // Java looks the manifest up without regard to case. The pattern has no `u`
+  // flag, so a non-ASCII letter never folds to an ASCII one.
+  if (zip.exactEntries.some((e) => /^META-INF\/MANIFEST\.MF$/i.test(e.name))) {
     return readJar(zip);
   }
   return {
@@ -64,6 +69,11 @@ export async function readZipPackage(reader: RangeReader, fileName: string): Pro
   const zip = await openZip(reader);
   const kind = await flavour(zip, fileName);
   const warnings = [...kind.warnings];
+  if (zip.duplicateNames > 0) {
+    warnings.push(
+      'The archive lists some names more than once. MarkCopy read the last copy of each, and other tools may read a different one.',
+    );
+  }
   if (!zip.complete) {
     warnings.push('The archive directory is damaged or very large, so the file list is partial.');
   }

@@ -290,3 +290,30 @@ describe('renderPeHtml: caps the import rows it draws', () => {
     expect(long).not.toContain('n'.repeat(257));
   });
 });
+
+// NX_COMPAT is a header flag. Whether DEP is in force is not the flag's to
+// say: 64-bit Windows enforces it for every native 64-bit program regardless,
+// so "DEP: No" on such a file misdescribed it.
+describe('renderPeHtml: the DEP row says what the flag is, not what Windows does', () => {
+  const dep = (html: string): string =>
+    /<td>DEP compatible \(NX_COMPAT\)<\/td><td>([^<]*)<\/td>/.exec(html)?.[1] ?? 'missing';
+
+  it('never says a native 64-bit program has no DEP', async () => {
+    // ASLR set, NX_COMPAT clear.
+    const html = await render({ plus: true, dllCharacteristics: 0x40 });
+    expect(dep(html)).toBe('Flag not set (64-bit Windows enforces DEP regardless)');
+    expect(html).not.toContain('Data execution prevention');
+    expect(dep(await render({ plus: true, machine: 0xaa64, dllCharacteristics: 0x40 }))).toContain(
+      'enforces DEP regardless',
+    );
+  });
+
+  it('says Yes when the flag is set, on either width', async () => {
+    expect(dep(await render({ plus: true, dllCharacteristics: 0x140 }))).toBe('Yes');
+    expect(dep(await render({ dllCharacteristics: 0x140 }))).toBe('Yes');
+  });
+
+  it('says No for a 32-bit program without the flag, where the flag does decide', async () => {
+    expect(dep(await render({ dllCharacteristics: 0x40 }))).toBe('No');
+  });
+});

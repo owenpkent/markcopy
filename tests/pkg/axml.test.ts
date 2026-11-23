@@ -257,6 +257,51 @@ describe('parseAxml: string pool bombs', () => {
   });
 });
 
+describe('parseAxml: the text budget belongs to the whole document', () => {
+  const retained = (node: { attrs: Record<string, string> }): number => {
+    const distinct = new Set<string>();
+    for (const [key, value] of Object.entries(node.attrs)) {
+      distinct.add(key);
+      distinct.add(value);
+    }
+    return [...distinct].reduce((n, text) => n + text.length, 0);
+  };
+
+  it('refuses a second string pool instead of giving it a fresh allowance', () => {
+    // Three pools of 400 distinct 4,096-character strings, as in the review: each
+    // alone is under the pool budget, together they are 4.9 million characters.
+    const bytes = buildPoolBomb({ count: 450, chars: 4096, distinct: true, attrs: 400, pools: 3 });
+    const before = process.memoryUsage().heapUsed;
+    expect(() => parseAxml(bytes)).toThrow(PackageError);
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(64 * 1024 * 1024);
+  });
+
+  it('refuses a string pool or resource map after the elements', () => {
+    expect(() =>
+      parseAxml(buildPoolBomb({ count: 4, chars: 8, attrs: 1, trailingPool: true })),
+    ).toThrow(PackageError);
+  });
+
+  it('retains no more text than the budget, counting distinct strings', () => {
+    const bytes = buildPoolBomb({
+      count: 700,
+      chars: 4096,
+      distinct: true,
+      attrs: 600,
+      keysFromPool: true,
+    });
+    const warnings: string[] = [];
+    const root = parseAxml(bytes, warnings);
+    expect(warnings.length).toBe(1);
+    expect(retained(root)).toBeLessThanOrEqual(1024 * 1024 + 1024);
+  });
+
+  it('still reads a single pool exactly as before', () => {
+    const root = parseAxml(buildAxml(tree));
+    expect(root.attrs.versionName).toBe('1.2.3');
+  });
+});
+
 describe('parseManifest: bounded text XML', () => {
   it('rejects a text manifest nested past the XML depth bound as invalid XML', () => {
     const xml = `${'<a>'.repeat(300)}${'</a>'.repeat(300)}`;

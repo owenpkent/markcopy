@@ -345,19 +345,54 @@ describe('readMsi: hostile files', () => {
     expect(info.format).toBe('Windows Installer package');
   });
 
-  it('reads a long string and cuts it to a displayable length', async () => {
-    // Slot 1: "ProductName". Slots 2 and 3: a string of 65536 + 7 bytes (the
-    // high word is the first slot's count, the low word the second's length).
-    const pool = Uint8Array.from([0xe4, 0x04, 0, 0, 11, 0, 1, 0, 0, 0, 1, 0, 7, 0, 1, 0]);
-    const name = new TextEncoder().encode('ProductName');
-    const data = new Uint8Array(11 + 65543).fill(0x78);
-    data.set(name, 0);
+  /** A pool from 4 byte records given as [word, word] pairs after the code page header. */
+  const poolOf = (...records: [number, number][]): Uint8Array => {
+    const out = new Uint8Array(4 + records.length * 4);
+    const view = new DataView(out.buffer);
+    view.setUint16(0, 1252, true);
+    records.forEach(([a, b], i) => {
+      view.setUint16(4 + i * 4, a, true);
+      view.setUint16(6 + i * 4, b, true);
+    });
+    return out;
+  };
+  const ascii = (text: string): number[] => [...new TextEncoder().encode(text)];
+
+  it('gives a string over 64 KB one ID, with its length in the second record', async () => {
+    // IDs: 1 = "ProductName", 2 = 70,000 bytes (0x11170: low word 0x1170, high word 1),
+    // 3 = "Acme". The long string is [0, reference count 5] then [low, high]; the
+    // reference count differs from the high word so the two cannot be confused.
+    const data = Uint8Array.from([
+      ...ascii('ProductName'),
+      ...new Array<number>(70000).fill(0x78),
+      ...ascii('Acme'),
+    ]);
     const info = await read({
-      poolBytes: pool,
+      poolBytes: poolOf([11, 1], [0, 5], [0x1170, 1], [4, 1]),
       dataBytes: data,
       propertyBytes: Uint8Array.from([1, 0, 3, 0]),
     });
+    expect(field(info, 'Package', 'Product name')).toBe('Acme');
+  });
+
+  it('cuts a long string to a displayable length', async () => {
+    const data = Uint8Array.from([...ascii('ProductName'), ...new Array<number>(70000).fill(0x78)]);
+    const info = await read({
+      poolBytes: poolOf([11, 1], [0, 2], [0x1170, 1]),
+      dataBytes: data,
+      propertyBytes: Uint8Array.from([1, 0, 2, 0]),
+    });
     expect(field(info, 'Package', 'Product name')).toBe('x'.repeat(2048));
+  });
+
+  it('gives an empty pool record an ID of its own', async () => {
+    // Record 1 is empty (two zero words) and is still string 1; "ProductName" is 2, "Zed" is 3.
+    const info = await read({
+      poolBytes: poolOf([0, 0], [11, 1], [3, 1]),
+      dataBytes: Uint8Array.from([...ascii('ProductName'), ...ascii('Zed')]),
+      propertyBytes: Uint8Array.from([2, 0, 3, 0]),
+    });
+    expect(field(info, 'Package', 'Product name')).toBe('Zed');
   });
 
   it('survives a summary whose offsets point outside the stream', async () => {

@@ -17,6 +17,8 @@ export const xmlEscape = (text: string): string =>
 
 export interface XarFile {
   name: string;
+  /** Write the name as Apple's xar does for a name that is not Latin-1: enctype="base64" over the UTF-8 bytes. */
+  base64Name?: boolean;
   /** Directories hold `children`; files hold `data`. */
   children?: XarFile[];
   data?: Uint8Array | string;
@@ -52,7 +54,9 @@ export function buildXar(spec: XarSpec = {}): Uint8Array {
 
   const fileXml = (file: XarFile): string => {
     id++;
-    const name = `<name>${xmlEscape(file.name)}</name>`;
+    const name = file.base64Name
+      ? `<name enctype="base64">${btoa(String.fromCharCode(...utf8(file.name)))}</name>`
+      : `<name>${xmlEscape(file.name)}</name>`;
     if (file.children) {
       return `<file id="${id}">${name}<type>directory</type>${file.children.map(fileXml).join('')}</file>`;
     }

@@ -384,3 +384,18 @@ describe('readDeb: memory and work bounds', () => {
     expect(info.warnings.join(' ')).toContain('more compressed streams');
   });
 });
+
+describe('readDeb: triggers count as install-time code', () => {
+  it('shows the scripts section for a package whose only such file is triggers', async () => {
+    const info = await readSpec({ files: { triggers: 'interest /usr/share/foo\n' } });
+    const scripts = properties(info, 'Maintainer scripts');
+    expect([...scripts.keys()]).toEqual(['triggers']);
+    expect(scripts.get('triggers')).toContain('as root');
+    expect(JSON.stringify(info)).not.toContain('interest /usr/share/foo');
+  });
+
+  it('lists config next to the other maintainer scripts', async () => {
+    const info = await readSpec({ scripts: ['config', 'postinst'] });
+    expect([...properties(info, 'Maintainer scripts').keys()]).toEqual(['postinst', 'config']);
+  });
+});

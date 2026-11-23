@@ -262,3 +262,22 @@ describe('readZipPackage: bounded XML in a NuGet package', () => {
     expect(table.note).toBe('Showing the first 200 of 2,000 dependencies.');
   });
 });
+
+describe('readZipPackage: NuGet entry identity', () => {
+  it('uses the real nuspec, not an earlier entry that cleans to the same name', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: `a${RLO}.nuspec`, data: nuspec('<id>decoy</id><version>9</version>') },
+        { name: 'a.nuspec', data: nuspec('<id>real</id><version>1</version>') },
+      ]),
+    );
+    expect(info.title).toBe('real 1');
+  });
+
+  it('accepts an upper-case extension, as NuGet does', async () => {
+    const info = await readZip(
+      buildZip([{ name: 'A.NUSPEC', data: nuspec('<id>x</id><version>2</version>') }]),
+    );
+    expect(info.title).toBe('x 2');
+  });
+});

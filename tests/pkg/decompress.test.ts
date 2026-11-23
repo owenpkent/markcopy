@@ -214,3 +214,59 @@ describe('gzip with many members', () => {
     expect(text(gunzipBounded(data, MIB))).toBe('abc');
   });
 });
+
+describe('gzip optional headers are bounded before the decoder sees them', () => {
+  /** A gzip member whose header carries the given FNAME and FEXTRA, around one real deflate stream. */
+  function member(content: string, name = '', extra = 0): Uint8Array {
+    const deflated = gzipSync(utf8(content)).subarray(10); // raw deflate data and trailer
+    const flags = (name ? 8 : 0) | (extra ? 4 : 0);
+    const header = [0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3];
+    const parts: Uint8Array[] = [new Uint8Array(header)];
+    if (extra) {
+      parts.push(new Uint8Array([extra & 255, extra >> 8]), new Uint8Array(extra));
+    }
+    if (name) {
+      parts.push(utf8(name), new Uint8Array([0]));
+    }
+    return concat(...parts, deflated);
+  }
+
+  it('reads a short file name and extra field', () => {
+    expect(text(gunzipBounded(member('hello', 'control.tar', 20), MIB))).toBe('hello');
+  });
+
+  it('refuses a 1 MiB file name in the first member', () => {
+    expect(() => gunzipBounded(member('x', 'a'.repeat(MIB)), MIB)).toThrow(PackageError);
+  });
+
+  it('refuses an oversized extra field in the first member', () => {
+    expect(() => gunzipBounded(member('x', '', 60000), MIB)).toThrow(PackageError);
+  });
+
+  it('refuses an oversized header in a later concatenated member', () => {
+    const data = concat(member('one '), member('two', 'b'.repeat(MIB)));
+    expect(() => gunzipBounded(data, MIB)).toThrow(PackageError);
+  });
+
+  it('reads members with short names one after another', () => {
+    const data = concat(member('one ', 'a'), member('two', 'b'));
+    expect(text(gunzipBounded(data, MIB))).toBe('one two');
+  });
+
+  it('refuses a header whose name never ends', () => {
+    const header = new Uint8Array([0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 3]);
+    expect(() => gunzipBounded(concat(header, utf8('a'.repeat(100000))), MIB)).toThrow(
+      PackageError,
+    );
+  });
+
+  it('refuses reserved flag bits and a method other than deflate', () => {
+    const good = gzipSync(utf8('x'));
+    const reserved = Uint8Array.from(good);
+    reserved[3] = 0x20;
+    const method = Uint8Array.from(good);
+    method[2] = 7;
+    expect(() => gunzipBounded(reserved, MIB)).toThrow(PackageError);
+    expect(() => gunzipBounded(method, MIB)).toThrow(PackageError);
+  });
+});

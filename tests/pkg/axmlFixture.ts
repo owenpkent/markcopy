@@ -219,6 +219,12 @@ export function buildPoolBomb(options: {
   chars: number;
   distinct?: boolean;
   attrs?: number;
+  /** Name each attribute by pool string i as well as value i, so keys are long too. */
+  keysFromPool?: boolean;
+  /** String pool chunks in a row before the element (default 1). */
+  pools?: number;
+  /** A further string pool after the element. */
+  trailingPool?: boolean;
 }): Uint8Array {
   const { count, chars, distinct = false, attrs = 0 } = options;
   const record = (text: string): number[] => {
@@ -267,7 +273,14 @@ export function buildPoolBomb(options: {
   );
   const rows = new Out();
   for (let i = 1; i <= attrs; i++) {
-    rows.u32(0xffffffff).u32(0).u32(0xffffffff).u16(8).u8(0).u8(0x03).u32(i);
+    rows
+      .u32(0xffffffff)
+      .u32(options.keysFromPool ? i : 0)
+      .u32(0xffffffff)
+      .u16(8)
+      .u8(0)
+      .u8(0x03)
+      .u32(i);
   }
   const start = new Out()
     .u32(1)
@@ -287,5 +300,17 @@ export function buildPoolBomb(options: {
     [1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],
     new Out().u32(0xffffffff).u32(0).parts,
   );
-  return Uint8Array.from(chunk(0x0003, 8, [], [...poolChunk, ...element, ...end]));
+  return Uint8Array.from(
+    chunk(
+      0x0003,
+      8,
+      [],
+      [
+        ...Array.from({ length: options.pools ?? 1 }, () => poolChunk).flat(),
+        ...element,
+        ...end,
+        ...(options.trailingPool ? poolChunk : []),
+      ],
+    ),
+  );
 }

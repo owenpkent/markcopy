@@ -131,7 +131,7 @@ async function classVersion(
 export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   const warnings: string[] = [];
   const manifestEntry =
-    zip.find(MANIFEST) ?? zip.entries.find((e) => e.name.toUpperCase() === MANIFEST);
+    zip.find(MANIFEST) ?? zip.exactEntries.find((e) => /^META-INF\/MANIFEST\.MF$/i.test(e.name));
   const text = manifestEntry
     ? await readTextEntry(zip, manifestEntry, MAX_MANIFEST_BYTES, warnings, 'The manifest')
     : undefined;
@@ -142,7 +142,7 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
     return manifest.find(([n]) => n.toLowerCase() === name.toLowerCase())?.[1];
   };
 
-  const mavenEntry = zip.entries.find((e) =>
+  const mavenEntry = zip.exactEntries.find((e) =>
     /^META-INF\/maven\/[^/]+\/[^/]+\/pom\.properties$/.test(e.name),
   );
   let maven: Map<string, string> | undefined;
@@ -222,7 +222,7 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
   );
 
   const after: InfoSection[] = [];
-  const block = zip.entries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
+  const block = zip.exactEntries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
   if (block) {
     const der = await readBytesEntry(
       zip,

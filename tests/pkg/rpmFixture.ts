@@ -176,6 +176,32 @@ export function pgpSignatureV4(algorithm = 1, keyId = KEY_ID): Uint8Array {
   return Uint8Array.from([0xc2, body.length, ...body]);
 }
 
+/** A new-format version 6 signature packet (RFC 9580) naming its issuer by fingerprint. */
+export function pgpSignatureV6(algorithm = 22, keyId = KEY_ID): Uint8Array {
+  const fingerprint = [...keyId, ...new Array<number>(24).fill(0x11)]; // v6: key ID is the first 8 bytes
+  const unhashed = [34, 33, 6, ...fingerprint];
+  const body = [
+    6,
+    0,
+    algorithm,
+    8,
+    0,
+    0,
+    0,
+    0, // hashed subpacket area: empty
+    0,
+    0,
+    0,
+    unhashed.length,
+    ...unhashed,
+    0xab,
+    0xcd,
+    0,
+    0, // left 16 bits of the hash, salt length 0
+  ];
+  return Uint8Array.from([0xc2, body.length, ...body]);
+}
+
 /** An old-format version 3 signature packet. */
 export function pgpSignatureV3(algorithm = 17, keyId = KEY_ID): Uint8Array {
   const body = [3, 5, 0, 0, 0, 0, 1, ...keyId, algorithm, 2, 0xab, 0xcd, 0, 8, 0xff];

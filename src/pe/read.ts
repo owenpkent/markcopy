@@ -197,6 +197,9 @@ const DIR_CLR = 14;
 
 const RT_VERSION = 16;
 const RT_MANIFEST = 24;
+// CREATEPROCESS_MANIFEST_RESOURCE_ID and ISOLATIONAWARE_MANIFEST_RESOURCE_ID.
+const PROCESS_MANIFEST_ID = 1;
+const ISOLATION_MANIFEST_ID = 2;
 const RT_ICON = 3;
 const RT_GROUP_ICON = 14;
 
@@ -221,6 +224,9 @@ function kindOf(isDll: boolean, subsystem: number): string {
   }
   return subsystem === 3 ? 'Console application' : 'Application';
 }
+
+/** The label of the NX_COMPAT row in `PeInfo.mitigations`, which the page words specially. */
+export const NX_COMPAT_LABEL = 'DEP compatible (NX_COMPAT)';
 
 export async function readPe(source: ByteSource): Promise<PeInfo> {
   const reader = new Reader(source);
@@ -364,7 +370,10 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     mitigations: [
       ['Address randomization (ASLR)', (dllFlags & 0x40) !== 0],
       ['High-entropy ASLR', (dllFlags & 0x20) !== 0],
-      ['Data execution prevention (DEP)', (dllFlags & 0x100) !== 0],
+      // The header flag, under its own name. Whether DEP is in force is not
+      // this bit's to say: 64-bit Windows enforces it for every native 64-bit
+      // program whatever the flag holds. The page words the row accordingly.
+      [NX_COMPAT_LABEL, (dllFlags & 0x100) !== 0],
       ['Control Flow Guard', (dllFlags & 0x4000) !== 0],
       ['Forced integrity checks', (dllFlags & 0x80) !== 0],
       ['AppContainer only', (dllFlags & 0x1000) !== 0],
@@ -414,7 +423,22 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       }
     });
     await attempt('manifest', async () => {
-      const data = await findResource(reader, toOffset, need(resources.address), RT_MANIFEST);
+      // The manifest Windows applies to the process is resource ID 1 in an
+      // executable and ID 2 in a library, which is where the linker puts
+      // them. A file may carry others, and named ones sort first in the
+      // directory: taking the first found showed a secondary activation
+      // context's "asInvoker" for a program whose own manifest asks for
+      // administrator rights. Only the process manifest is read, and a file
+      // with none at its ID is shown as having none.
+      const root = need(resources.address);
+      const ids = isDll ? [ISOLATION_MANIFEST_ID, PROCESS_MANIFEST_ID] : [PROCESS_MANIFEST_ID];
+      let data: { offset: number; size: number } | undefined;
+      for (const id of ids) {
+        data = await findResource(reader, toOffset, root, RT_MANIFEST, id);
+        if (data) {
+          break;
+        }
+      }
       if (data) {
         info.manifest = readManifest(
           await reader.upTo(data.offset, Math.min(data.size, MAX_MANIFEST_BYTES)),

@@ -74,6 +74,7 @@ const SCRIPTS: [string, string][] = [
   ['prerm', 'Runs as root before the files are removed'],
   ['postrm', 'Runs as root after the files are removed'],
   ['config', 'Runs as root to ask configuration questions'],
+  ['triggers', 'Registers triggers: the postinst script runs as root when a watched path changes'],
 ];
 
 const COMPRESSION: Record<string, string> = {

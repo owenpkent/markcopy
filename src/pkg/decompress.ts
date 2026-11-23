@@ -7,7 +7,7 @@
 // therefore end in a PackageError and never in an out-of-memory.
 //
 // No `vscode` import: the helpers are pure and unit-tested.
-import { Gunzip } from 'fflate';
+import { Inflate } from 'fflate';
 import { Decompress as ZstdDecompress } from 'fzstd';
 import { XzReadableStream } from 'xz-decompress';
 import type { RangeReader } from '../binary/reader';
@@ -106,34 +106,98 @@ function contain(error: unknown): never {
   throw new PackageError(DAMAGED);
 }
 
+// Optional gzip header fields (extra data, file name, comment) are read by this
+// module, not by fflate's Gunzip, which concatenates and rescans the pending header
+// on every push: a header of N bytes fed in slices costs N squared. A real control
+// archive has no such fields or a short file name; this is far more than that.
+const GZIP_MAX_HEADER = 4 * 1024;
+
+/** Where a member's deflate data starts, after checking its header against GZIP_MAX_HEADER. */
+function gzipHeaderEnd(data: Uint8Array, start: number): number {
+  if (start + 10 > data.length || data[start] !== 31 || data[start + 1] !== 139) {
+    throw new PackageError(DAMAGED);
+  }
+  const flags = data[start + 3];
+  // Method 8 is deflate, and the top three flag bits are reserved.
+  if (data[start + 2] !== 8 || (flags & 0xe0) !== 0) {
+    throw new PackageError(DAMAGED);
+  }
+  const limit = Math.min(data.length, start + GZIP_MAX_HEADER);
+  let at = start + 10;
+  if (flags & 4) {
+    if (at + 2 > limit) {
+      throw new PackageError(DAMAGED);
+    }
+    at += 2 + (data[at] | (data[at + 1] << 8));
+  }
+  // FNAME (bit 3) and FCOMMENT (bit 4) are NUL-terminated.
+  for (let strings = ((flags >> 3) & 1) + ((flags >> 4) & 1); strings > 0; strings--) {
+    while (at < limit && data[at] !== 0) {
+      at++;
+    }
+    at++;
+  }
+  if (flags & 2) {
+    at += 2;
+  }
+  if (at > limit) {
+    throw new PackageError(DAMAGED);
+  }
+  return at;
+}
+
+// fflate's Inflate keeps these as private fields; Gunzip itself reads them to find the
+// end of a member. The tests pin the behaviour against the installed version.
+interface InflateState {
+  p: Uint8Array;
+  s: { p: number; f?: number; l?: unknown };
+}
+
 /**
  * Inflate gzip (all members, concatenated) and hand each piece to `onChunk`,
  * stopping when it returns true. Throws when more than `max` bytes come out.
+ *
+ * Each member's header is parsed here and only its raw deflate data goes to
+ * fflate's Inflate, so no header is ever accumulated or rescanned by the decoder.
  */
 export function gunzipUntil(data: Uint8Array, max: number, onChunk: ChunkHandler): void {
   if (data.length === 0) {
     throw new PackageError(DAMAGED);
   }
   let total = 0;
-  const gunzip = new Gunzip((chunk) => {
-    total += chunk.length;
-    if (total > max) {
-      throw new PackageError(TOO_BIG);
-    }
-    if (onChunk(chunk) === true) {
-      throw new Stop();
-    }
-  });
-  let members = 1;
-  gunzip.onmember = () => {
-    if (++members > GZIP_MAX_MEMBERS) {
-      throw new PackageError(TOO_MANY);
-    }
-  };
   try {
-    for (let i = 0; i < data.length; i += GZIP_SLICE) {
-      const end = Math.min(i + GZIP_SLICE, data.length);
-      gunzip.push(data.subarray(i, end), end === data.length);
+    let pos = 0;
+    for (let members = 1; pos < data.length; members++) {
+      if (members > GZIP_MAX_MEMBERS) {
+        throw new PackageError(TOO_MANY);
+      }
+      let fed = gzipHeaderEnd(data, pos);
+      const inflate = new Inflate((chunk) => {
+        total += chunk.length;
+        if (total > max) {
+          throw new PackageError(TOO_BIG);
+        }
+        if (onChunk(chunk) === true) {
+          throw new Stop();
+        }
+      });
+      const state = inflate as unknown as InflateState;
+      let end = -1;
+      while (end < 0 && fed < data.length) {
+        const next = Math.min(fed + GZIP_SLICE, data.length);
+        inflate.push(data.subarray(fed, next), false);
+        fed = next;
+        if (state.s.f && !state.s.l) {
+          // The deflate stream is complete; what is left unread is the trailer and the rest.
+          end = fed - (state.p.length - ((state.s.p + 7) >> 3));
+        }
+      }
+      if (end < 0) {
+        inflate.push(new Uint8Array(0), true); // cut short: this raises the error
+        return;
+      }
+      // Skip the 8-byte trailer (CRC and length). It is not checked: the bytes are only displayed.
+      pos = end + 8;
     }
   } catch (error) {
     if (error instanceof Stop) {
