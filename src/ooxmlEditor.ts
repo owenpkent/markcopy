@@ -124,6 +124,16 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
    */
   protected abstract readonly redrawSettings: readonly string[];
 
+  /**
+   * Whether "Open in Default App" may hand this file to the OS.
+   *
+   * True for a document, whose default app is a viewer. A format whose default
+   * app is the file itself (an executable) turns it off: the webview hides the
+   * row for that kind, and this is the host-side half of the same rule, so a
+   * message the row would have sent is refused whatever the webview does.
+   */
+  protected readonly opensInDefaultApp: boolean = true;
+
   /** Build the per-panel render/message state for a newly opened document. */
   protected abstract createSession(document: vscode.CustomDocument): OoxmlSession;
 
@@ -217,7 +227,9 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
             await draw();
             break;
           case 'openExternal':
-            await openInDefaultApp(document.uri);
+            if (this.opensInDefaultApp) {
+              await openInDefaultApp(document.uri);
+            }
             break;
           case 'revealInOS':
             revealInOs(document.uri);

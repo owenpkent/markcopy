@@ -66,7 +66,7 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
-MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
+MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, executable, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
 engine against the opened source and its included files. Video, GIF, and image previews hand
@@ -81,7 +81,7 @@ Messages in the other direction are checked too. Every webview's `message` liste
 
 Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
 
-The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
+The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL, Windows executable and video probe parsers, link handling and sanitized Markdown output, and opens a `Fuzz crash:` issue when an input makes one fail. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached.
 
 ## Content Security Policy
 
@@ -241,6 +241,17 @@ A `.docx` is the same hostile-input surface as a workbook or deck, and `src/docx
 - **Bounded work.** Style `basedOn` chains are cycle-safe and capped, table nesting is capped, and the walk stops at a paragraph budget. Generated output has its own document-wide budget (16 MiB): every chart table is charged against it per reference, not once per unique part, so a document that repeats one chart cannot multiply the preview's size; once it is spent, the extras become placeholders and the preview says so. An image reference is a short attribute, so repeating a picture costs nothing beyond its one copy. Equation text is capped at 100,000 characters before conversion, and an oversized equation is dropped. A crafted document therefore costs a bounded amount of time and memory.
 - **Parts read.** Beyond the body, styles, numbering, and notes, the reader opens the header and footer parts a section names, `comments.xml` and `commentsExtended.xml`, and the chart parts the body references, always through the guarded unpacker. Header, footer, and comment content goes through the same escaping as the body, and a chart is drawn only from its cached values (no embedded workbook is opened). Each is bounded by the paragraph budget, a text box nesting limit, and chart row and series caps, and a malformed part is skipped rather than failing the preview.
 - **Read-only.** The preview never writes to the document, and macros in a `.docm` are not read, let alone run.
+
+## Executable info preview
+
+An executable is the most hostile file MarkCopy opens, so the preview is built around not doing anything with it. `src/pe/` reads a `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` or `.efi` in the extension host as bytes and nothing else: the file is never run, loaded, mapped or handed to the OS. Beyond the DOMPurify pass and CSP in the webview:
+
+- **"Open in Default App" is removed.** For an executable the default app is the file itself, so opening it that way would run it. The webview hides the row for this kind, and the host ignores the `openExternal` message for this preview (`opensInDefaultApp` in `src/ooxmlEditor.ts`), so a page that posts it anyway launches nothing.
+- **Reads are ranged and bounded.** A file on disk is read in ranges through a file handle, so its size never becomes the size of a buffer. Every offset the file supplies is checked against its real size, every table has a cap, and the reader will touch at most 16 MiB of any one file, so a hostile or truncated file yields a notice or a per-table warning, not a crash or an unbounded allocation. A file on a virtual or remote file system is read whole and refused above 64 MB. The SHA-256 is computed only up to 256 MB.
+- **Strings are cleaned and escaped.** Text from the file (version strings, names, paths, signer names) has control and bidirectional-override characters removed, so a name cannot be displayed as another, is HTML-escaped, and is sanitized again by the webview.
+- **The icon is re-encoded or size-checked.** A bitmap icon is decoded in the host under the format's own limit of 256 pixels a side and sent as a PNG the host wrote. An icon that is already a PNG is sent as is only when its header states at most 1024 pixels a side, and is then decoded by the webview like any image in a Word document.
+- **The signature is not verified.** The preview reports that an embedded Authenticode signature is present and the signer, organization, issuer and validity dates the file names. It does not verify the signature, the hash, the chain, revocation or expiry, and the page says so. These are claims the file makes about itself, not a verdict on whether to trust it.
+- **Read-only.** The preview never writes to the file.
 
 ## CSV grid and cell editing
 

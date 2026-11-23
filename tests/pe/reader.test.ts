@@ -1,0 +1,761 @@
+import { describe, expect, it } from 'vitest';
+import { bytesSource, PeError, readPe, type ByteSource } from '../../src/pe';
+import { readSigner } from '../../src/pe/signer';
+import { readVersionResource } from '../../src/pe/version';
+import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
+
+const read = (spec: PeSpec = {}) => readPe(bytesSource(buildPe(spec)));
+
+const RLO = String.fromCharCode(0x202e);
+
+describe('readPe: headers', () => {
+  it('reads a 32-bit GUI application', async () => {
+    const info = await read({ timestamp: 1700000000, checksum: 0xabcdef });
+    expect(info.format).toBe('PE32');
+    expect(info.machine).toBe(0x014c);
+    expect(info.machineName).toBe('x86 (32-bit)');
+    expect(info.kind).toBe('Application');
+    expect(info.subsystem).toBe(2);
+    expect(info.subsystemName).toBe('Windows GUI');
+    expect(info.imageBase).toBe('0x00400000');
+    expect(info.timestamp).toBe(1700000000);
+    expect(info.checksum).toBe(0xabcdef);
+    expect(info.entryPoint).toBe(0x1000);
+    expect(info.linkerVersion).toBe('14.36');
+    expect(info.osVersion).toBe('6.0');
+    expect(info.subsystemVersion).toBe('6.0');
+    expect(info.fileSize).toBe(buildPe().length);
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('reads a 64-bit image with its wider image base', async () => {
+    const info = await read({ plus: true });
+    expect(info.format).toBe('PE32+');
+    expect(info.machineName).toBe('x64 (64-bit)');
+    expect(info.imageBase).toBe('0x0000000140000000');
+  });
+
+  it('names other machines, and shows an unknown one as a number', async () => {
+    expect((await read({ plus: true, machine: 0xaa64 })).machineName).toBe('ARM64 (64-bit)');
+    expect((await read({ machine: 0x01c4 })).machineName).toBe('ARM Thumb-2 (32-bit)');
+    expect((await read({ machine: 0x1234 })).machineName).toBe('Unknown (0x1234)');
+  });
+
+  it('tells a console program, a DLL, a driver and EFI images apart', async () => {
+    expect((await read({ subsystem: 3 })).kind).toBe('Console application');
+    expect((await read({ dll: true })).kind).toBe('Dynamic-link library');
+    expect((await read({ subsystem: 1 })).kind).toBe('Driver or native image');
+    expect((await read({ subsystem: 1, dll: true })).kind).toBe('Native library');
+    expect((await read({ plus: true, subsystem: 10 })).kind).toBe('EFI application');
+    expect((await read({ plus: true, subsystem: 11 })).kind).toBe('EFI boot service driver');
+    expect((await read({ plus: true, subsystem: 12 })).subsystemName).toBe('EFI runtime driver');
+    expect((await read({ subsystem: 99 })).subsystemName).toBe('Unknown (99)');
+  });
+
+  it('reads the loader mitigations from DllCharacteristics', async () => {
+    // ASLR 0x40, high-entropy 0x20, DEP 0x100, CFG 0x4000, force integrity 0x80, AppContainer 0x1000.
+    const info = await read({ plus: true, dllCharacteristics: 0x40 | 0x20 | 0x100 | 0x4000 });
+    expect(Object.fromEntries(info.mitigations)).toEqual({
+      'Address space layout randomization (ASLR)': true,
+      'High-entropy ASLR': true,
+      'Data execution prevention (DEP)': true,
+      'Control Flow Guard': true,
+      'Forced integrity checks': false,
+      'AppContainer only': false,
+    });
+    const other = await read({ dllCharacteristics: 0x80 | 0x1000 });
+    const flags = Object.fromEntries(other.mitigations);
+    expect(flags['Forced integrity checks']).toBe(true);
+    expect(flags['AppContainer only']).toBe(true);
+    expect(flags['Control Flow Guard']).toBe(false);
+  });
+
+  it('reads the large-address-aware flag', async () => {
+    expect((await read({ largeAddressAware: true })).largeAddressAware).toBe(true);
+    expect((await read()).largeAddressAware).toBe(false);
+  });
+
+  it('lists the sections with their access and contents', async () => {
+    const info = await read({ version: { fileVersion: [1, 0, 0, 0] } });
+    expect(info.sections.map((s) => s.name)).toEqual(['.text', '.rdata', '.rsrc']);
+    expect(info.sections[0]).toMatchObject({
+      read: true,
+      write: false,
+      execute: true,
+      contents: ['code'],
+    });
+    expect(info.sections[1]).toMatchObject({
+      read: true,
+      execute: false,
+      contents: ['data'],
+    });
+  });
+});
+
+describe('readPe: version resource', () => {
+  const strings: [string, string][] = [
+    ['CompanyName', 'Contoso'],
+    ['FileDescription', 'Contoso Tool'],
+    ['FileVersion', '1.2.3.4'],
+    ['ProductName', 'X'],
+    ['LegalCopyright', 'Copyright (C) Contoso \u00a9 2024'],
+  ];
+
+  it('reads the strings in file order, the numeric versions and the language', async () => {
+    const info = await read({
+      version: {
+        fileVersion: [1, 2, 3, 4],
+        productVersion: [5, 6, 7, 8],
+        strings,
+        language: '040904B0',
+      },
+    });
+    expect(info.version).toEqual({
+      fileVersion: '1.2.3.4',
+      productVersion: '5.6.7.8',
+      flags: [],
+      language: '0409 / 04B0',
+      strings,
+    });
+  });
+
+  it('reads a version resource in a 64-bit image and a non-English language', async () => {
+    const info = await read({
+      plus: true,
+      version: { fileVersion: [10, 0, 19041, 1], strings, language: '040704E4' },
+    });
+    expect(info.version?.fileVersion).toBe('10.0.19041.1');
+    expect(info.version?.language).toBe('0407 / 04E4');
+  });
+
+  it('keeps odd-length keys and values apart despite the 4-byte padding between nodes', async () => {
+    const odd: [string, string][] = [
+      ['A', 'b'],
+      ['CD', 'efg'],
+      ['EFG', 'h'],
+      ['LongerKeyName', 'x'],
+    ];
+    const info = await read({ version: { fileVersion: [1, 0, 0, 0], strings: odd } });
+    expect(info.version?.strings).toEqual(odd);
+  });
+
+  it('reports only the flags the mask says are meaningful', async () => {
+    const both = await read({
+      version: { fileVersion: [1, 0, 0, 0], fileFlags: 0x03, fileFlagsMask: 0x3f },
+    });
+    expect(both.version?.flags).toEqual(['Debug build', 'Prerelease']);
+    const masked = await read({
+      version: { fileVersion: [1, 0, 0, 0], fileFlags: 0x0b, fileFlagsMask: 0x01 },
+    });
+    expect(masked.version?.flags).toEqual(['Debug build']);
+    const special = await read({
+      version: { fileVersion: [1, 0, 0, 0], fileFlags: 0x2c },
+    });
+    expect(special.version?.flags).toEqual(['Patched', 'Private build', 'Special build']);
+  });
+
+  it('has no version when the image carries none', async () => {
+    expect((await read()).version).toBeUndefined();
+    expect((await read({ manifest: '<assembly/>' })).version).toBeUndefined();
+  });
+
+  it('finds the version resource when a manifest sits beside it', async () => {
+    const info = await read({
+      version: { fileVersion: [1, 2, 3, 4], strings },
+      manifest: '<assembly><assemblyIdentity name="A.B" version="1.0.0.0"/></assembly>',
+    });
+    expect(info.version?.strings).toEqual(strings);
+    expect(info.manifest?.identity).toBe('A.B 1.0.0.0');
+  });
+
+  it('rejects a block that is not VS_VERSION_INFO', () => {
+    expect(readVersionResource(new Uint8Array(4))).toBeUndefined();
+    expect(readVersionResource(new Uint8Array(0))).toBeUndefined();
+  });
+});
+
+const square = (side: number, bitCount: 32 | 24 = 32) => ({
+  id: 0,
+  width: side,
+  height: side,
+  bitCount,
+  data: iconBitmap({
+    width: side,
+    height: side,
+    bitCount,
+    rgba: Array.from({ length: side * side }, () => [200, 100, 50, 255]),
+  }),
+});
+
+describe('readPe: icon', () => {
+  it('uses the image the group names, not the first icon resource', async () => {
+    // RT_ICON resources are stored by ascending id, so the 16 px image (id 5)
+    // is first in the file; the group's best entry is the 32 px one (id 9).
+    const info = await read({
+      icons: [
+        { ...square(16), id: 5 },
+        { ...square(32), id: 9 },
+        { ...square(8), id: 12 },
+      ],
+    });
+    expect(info.icon).toMatchObject({ width: 32, height: 32 });
+    expect(info.warnings).toEqual([]);
+    expect(Array.from(info.icon!.png.subarray(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  it('works alongside a version resource and a manifest, in a 64-bit image', async () => {
+    const info = await read({
+      plus: true,
+      version: { fileVersion: [1, 2, 3, 4], strings: [['A', 'b']] },
+      manifest: '<assembly><assemblyIdentity name="N"/></assembly>',
+      icons: [{ ...square(24, 24), id: 2 }],
+    });
+    expect(info.icon).toMatchObject({ width: 24, height: 24 });
+    expect(info.version?.fileVersion).toBe('1.2.3.4');
+    expect(info.manifest?.identity).toBe('N');
+  });
+
+  it('passes a 256 pixel PNG image through', async () => {
+    const png = pngStub(256, 256);
+    const info = await read({
+      icons: [{ id: 1, width: 256, height: 256, bitCount: 32, data: png }],
+    });
+    expect(info.icon).toMatchObject({ width: 256, height: 256 });
+    expect(Array.from(info.icon!.png.subarray(0, 24))).toEqual(Array.from(png.subarray(0, 24)));
+  });
+
+  it('has no icon, and no warning, when the file has no icon resource', async () => {
+    const info = await read({ version: { fileVersion: [1, 0, 0, 0] } });
+    expect(info.icon).toBeUndefined();
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('has no icon when the group names an id with no resource', async () => {
+    const info = await read({
+      icons: [{ id: 77, width: 32, height: 32, bitCount: 32 }],
+      version: { fileVersion: [1, 0, 0, 0] },
+    });
+    expect(info.icon).toBeUndefined();
+    expect(info.version?.fileVersion).toBe('1.0.0.0');
+  });
+
+  it('has no icon for a cursor group', async () => {
+    const info = await read({ icons: [{ ...square(32), id: 1 }], iconGroupType: 2 });
+    expect(info.icon).toBeUndefined();
+  });
+
+  it('has no icon when the best image is not a bitmap or PNG', async () => {
+    const info = await read({
+      icons: [{ id: 1, width: 32, height: 32, bitCount: 32, data: new Uint8Array(200) }],
+    });
+    expect(info.icon).toBeUndefined();
+  });
+});
+
+describe('readPe: manifest', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="2.1.0.0" name="Contoso.Tool" type="win32"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security><requestedPrivileges>
+      <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+    </requestedPrivileges></security>
+  </trustInfo>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3"><windowsSettings>
+    <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+  </windowsSettings></application>
+</assembly>`;
+
+  it('reads the execution level, UI access, DPI awareness and identity', async () => {
+    expect((await read({ manifest: xml })).manifest).toEqual({
+      executionLevel: 'requireAdministrator',
+      uiAccess: 'false',
+      dpiAware: 'true/pm',
+      identity: 'Contoso.Tool 2.1.0.0',
+    });
+  });
+
+  it('prefers dpiAwareness, and accepts prefixed elements and single quotes', async () => {
+    const prefixed = `<asmv1:assembly xmlns:asmv1="urn:schemas-microsoft-com:asm.v1">
+  <asmv1:assemblyIdentity name='Only.Name'/>
+  <asmv3:requestedExecutionLevel xmlns:asmv3="urn:schemas-microsoft-com:asm.v3" level='asInvoker'/>
+  <dpiAware>true</dpiAware><dpiAwareness>PerMonitorV2</dpiAwareness>
+</asmv1:assembly>`;
+    expect((await read({ manifest: prefixed })).manifest).toEqual({
+      executionLevel: 'asInvoker',
+      uiAccess: undefined,
+      dpiAware: 'PerMonitorV2',
+      identity: 'Only.Name',
+    });
+  });
+
+  it('has no manifest when none of the four facts is present', async () => {
+    expect((await read({ manifest: '<assembly></assembly>' })).manifest).toBeUndefined();
+    expect((await read()).manifest).toBeUndefined();
+  });
+});
+
+describe('readPe: imports', () => {
+  const imports = [
+    { library: 'KERNEL32.dll', functions: 5 },
+    { library: 'USER32.dll', functions: 1 },
+  ];
+
+  for (const plus of [false, true]) {
+    it(`counts the functions of each library in a ${plus ? 'PE32+' : 'PE32'} image`, async () => {
+      const info = await read({ plus, imports });
+      expect(info.imports).toEqual([
+        { library: 'KERNEL32.dll', functions: 5, delayLoaded: false },
+        { library: 'USER32.dll', functions: 1, delayLoaded: false },
+      ]);
+    });
+
+    it(`lists delay-load imports after the ordinary ones in a ${plus ? 'PE32+' : 'PE32'} image`, async () => {
+      const info = await read({
+        plus,
+        imports: [{ library: 'KERNEL32.dll', functions: 2 }],
+        delayImports: [{ library: 'ole32.dll', functions: 3 }],
+      });
+      expect(info.imports).toEqual([
+        { library: 'KERNEL32.dll', functions: 2, delayLoaded: false },
+        { library: 'ole32.dll', functions: 3, delayLoaded: true },
+      ]);
+    });
+  }
+
+  it('reads delay-load imports on their own', async () => {
+    const info = await read({ delayImports: [{ library: 'dbghelp.dll', functions: 4 }] });
+    expect(info.imports).toEqual([{ library: 'dbghelp.dll', functions: 4, delayLoaded: true }]);
+  });
+
+  it('has no imports for an image without the table', async () => {
+    expect((await read()).imports).toEqual([]);
+  });
+});
+
+describe('readPe: exports', () => {
+  it('reads the export name, counts and names', async () => {
+    const info = await read({
+      dll: true,
+      exports: { dllName: 'tool.dll', names: ['Alpha', 'Beta'] },
+    });
+    expect(info.exports).toEqual({
+      name: 'tool.dll',
+      functions: 2,
+      named: 2,
+      names: ['Alpha', 'Beta'],
+    });
+  });
+
+  it('counts functions that are exported by ordinal only', async () => {
+    const info = await read({ exports: { dllName: 'x.dll', names: ['One'], functions: 5 } });
+    expect(info.exports).toMatchObject({ functions: 5, named: 1, names: ['One'] });
+  });
+
+  it('lists at most 100 names but reports how many there are', async () => {
+    const names = Array.from({ length: 150 }, (_, i) => `Export${String(i).padStart(3, '0')}`);
+    const info = await read({ plus: true, exports: { dllName: 'big.dll', names } });
+    expect(info.exports?.named).toBe(150);
+    expect(info.exports?.functions).toBe(150);
+    expect(info.exports?.names).toHaveLength(100);
+    expect(info.exports?.names[0]).toBe('Export000');
+    expect(info.exports?.names[99]).toBe('Export099');
+  });
+
+  it('has no exports for an image without the table', async () => {
+    expect((await read()).exports).toBeUndefined();
+  });
+});
+
+describe('readPe: debug directory', () => {
+  const debug = {
+    guid: '11223344-5566-7788-99AA-BBCCDDEEFF00',
+    age: 3,
+    pdbPath: 'C:\\build\\tool.pdb',
+  };
+
+  it('reads the CodeView record with its GUID in canonical byte order', async () => {
+    const info = await read({ debug });
+    expect(info.debug).toEqual({
+      guid: '11223344-5566-7788-99AA-BBCCDDEEFF00',
+      age: 3,
+      pdbPath: 'C:\\build\\tool.pdb',
+    });
+    expect(info.reproducible).toBe(false);
+  });
+
+  it('marks a build with a REPRO entry as reproducible', async () => {
+    const info = await read({ debug, repro: true });
+    expect(info.reproducible).toBe(true);
+    expect(info.debug?.pdbPath).toBe('C:\\build\\tool.pdb');
+  });
+
+  it('marks a reproducible build that has no CodeView record', async () => {
+    const info = await read({ repro: true });
+    expect(info.reproducible).toBe(true);
+    expect(info.debug).toBeUndefined();
+  });
+
+  it('has no debug record when the directory is absent', async () => {
+    const info = await read();
+    expect(info.debug).toBeUndefined();
+    expect(info.reproducible).toBe(false);
+  });
+});
+
+describe('readPe: .NET header', () => {
+  it('reads the runtime and an IL-only assembly', async () => {
+    expect((await read({ clr: { runtime: 'v4.0.30319', flags: 0x1 } })).dotnet).toEqual({
+      runtime: 'v4.0.30319',
+      ilOnly: true,
+      requires32Bit: false,
+      prefers32Bit: false,
+      strongNamed: false,
+    });
+  });
+
+  it('reads the 32-bit, preferred-32-bit and strong-name flags', async () => {
+    const required = await read({ clr: { runtime: 'v2.0.50727', flags: 0x1 | 0x2 } });
+    expect(required.dotnet).toMatchObject({ requires32Bit: true, prefers32Bit: false });
+    const preferred = await read({ clr: { runtime: 'v4.0.30319', flags: 0x1 | 0x2 | 0x20000 } });
+    expect(preferred.dotnet).toMatchObject({ requires32Bit: false, prefers32Bit: true });
+    const strong = await read({ clr: { runtime: 'v4.0.30319', flags: 0x1 | 0x8 } });
+    expect(strong.dotnet?.strongNamed).toBe(true);
+    const mixed = await read({ clr: { runtime: 'v4.0.30319', flags: 0 } });
+    expect(mixed.dotnet?.ilOnly).toBe(false);
+  });
+
+  it('has no .NET header for a native image', async () => {
+    expect((await read()).dotnet).toBeUndefined();
+  });
+});
+
+describe('readPe: signature', () => {
+  const signer = {
+    subject: { commonName: 'Contoso Software', organization: 'Contoso Ltd' },
+    issuer: { commonName: 'Contoso Code Signing CA' },
+    notBefore: '230615000000Z',
+    notAfter: '260615235959Z',
+  };
+
+  it('names the signer the SignerInfo cites, not the first certificate', async () => {
+    const info = await read({ certificate: buildSignedData(signer) });
+    expect(info.signature?.signer).toEqual({
+      subject: 'Contoso Software',
+      organization: 'Contoso Ltd',
+      issuer: 'Contoso Code Signing CA',
+      notBefore: '2023-06-15',
+      notAfter: '2026-06-15',
+    });
+  });
+
+  it('reports the size of the certificate table, padding included', async () => {
+    const der = buildSignedData(signer);
+    const info = await read({ certificate: der });
+    expect(info.signature?.size).toBe(Math.ceil((8 + der.length) / 8) * 8);
+  });
+
+  it('reads PrintableString names and two-digit years before and after 2050', async () => {
+    const info = await read({
+      certificate: buildSignedData({
+        ...signer,
+        stringTag: 0x13,
+        notBefore: '991231235959Z',
+        notAfter: '490101000000Z',
+      }),
+    });
+    expect(info.signature?.signer).toMatchObject({
+      subject: 'Contoso Software',
+      notBefore: '1999-12-31',
+      notAfter: '2049-01-01',
+    });
+  });
+
+  it('still reports a signature when the certificate blob cannot be parsed', async () => {
+    const info = await read({ certificate: new Uint8Array(40).fill(0x41) });
+    expect(info.signature).toBeDefined();
+    expect(info.signature?.size).toBe(48);
+    expect(info.signature?.signer).toBeUndefined();
+  });
+
+  it('still reports a signature for an entry that is not PKCS #7', async () => {
+    const info = await read({ certificate: buildSignedData(signer), certificateType: 1 });
+    expect(info.signature).toBeDefined();
+    expect(info.signature?.signer).toBeUndefined();
+  });
+
+  it('has no signature when the directory is empty', async () => {
+    expect((await read()).signature).toBeUndefined();
+  });
+
+  it('strips direction and control characters from the signer name', async () => {
+    const info = await read({
+      certificate: buildSignedData({
+        ...signer,
+        subject: { commonName: `Evil${RLO}fdp\u0007.exe` },
+      }),
+    });
+    expect(info.signature?.signer?.subject).toBe('Evilfdp.exe');
+  });
+
+  it('returns nothing from a truncated or empty SignedData', () => {
+    const der = buildSignedData(signer);
+    expect(readSigner(new Uint8Array(0))).toBeUndefined();
+    for (let n = 0; n < der.length; n += 7) {
+      expect(() => readSigner(der.subarray(0, n))).not.toThrow();
+    }
+  });
+});
+
+describe('readPe: overlay', () => {
+  it('reports bytes after the last section', async () => {
+    const bytes = buildPe({ overlay: 1000 });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.overlay).toEqual({ offset: bytes.length - 1000, size: 1000 });
+  });
+
+  it('stops the overlay where the certificate table starts', async () => {
+    const der = buildSignedData({
+      subject: { commonName: 'S' },
+      issuer: { commonName: 'I' },
+    });
+    const bytes = buildPe({ overlay: 1000, certificate: der });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.signature?.signer?.subject).toBe('S');
+    // The overlay is padded to the table's 8-byte boundary.
+    expect(info.overlay?.offset).toBe(bytes.length - Math.ceil((8 + der.length) / 8) * 8 - 1000);
+    expect(info.overlay?.size).toBe(1000);
+  });
+
+  it('has no overlay for an image that ends with its last section', async () => {
+    expect((await read()).overlay).toBeUndefined();
+  });
+
+  it('has no overlay when only a certificate table follows the sections', async () => {
+    const info = await read({
+      certificate: buildSignedData({ subject: { commonName: 'S' }, issuer: { commonName: 'I' } }),
+    });
+    expect(info.overlay).toBeUndefined();
+  });
+});
+
+describe('readPe: rejection', () => {
+  const rejects = async (bytes: Uint8Array, message?: RegExp) => {
+    const failure = await readPe(bytesSource(bytes)).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(failure).toBeInstanceOf(PeError);
+    if (message) {
+      expect((failure as PeError).message).toMatch(message);
+    }
+  };
+
+  it('rejects an empty file', async () => {
+    await rejects(new Uint8Array(0), /too small/);
+  });
+
+  it('rejects a file too short for a DOS header', async () => {
+    await rejects(Uint8Array.from([0x4d, 0x5a, 0, 0]), /too small/);
+  });
+
+  it('rejects bytes that do not start with MZ', async () => {
+    await rejects(new Uint8Array(200).fill(0x41), /MZ/);
+  });
+
+  it('rejects an MZ file with no PE signature, as a DOS program is', async () => {
+    const dos = new Uint8Array(256);
+    dos.set([0x4d, 0x5a]);
+    new DataView(dos.buffer).setUint32(0x3c, 0x80, true); // points at zeros
+    await rejects(dos, /DOS or 16-bit/);
+  });
+
+  it('rejects an MZ file whose PE offset is past the end', async () => {
+    const dos = new Uint8Array(128);
+    dos.set([0x4d, 0x5a]);
+    new DataView(dos.buffer).setUint32(0x3c, 0xfffffff0, true);
+    await rejects(dos, /DOS or 16-bit/);
+  });
+
+  it('rejects an absurd section count', async () => {
+    await rejects(buildPe({ declaredSections: 97 }), /sections/);
+    await rejects(buildPe({ declaredSections: 0xffff }), /sections/);
+  });
+
+  it('rejects an optional header too small to describe an image', async () => {
+    const bytes = buildPe();
+    new DataView(bytes.buffer).setUint16(0x80 + 4 + 16, 40, true); // SizeOfOptionalHeader
+    await rejects(bytes, /optional header/);
+  });
+
+  it('rejects an unknown optional header magic', async () => {
+    const bytes = buildPe();
+    new DataView(bytes.buffer).setUint16(0x80 + 24, 0x107, true);
+    await rejects(bytes, /unknown format/);
+  });
+});
+
+describe('readPe: damaged images', () => {
+  it('warns instead of throwing when a directory points outside the file', async () => {
+    const info = await read({
+      version: { fileVersion: [1, 0, 0, 0] },
+      directories: {
+        1: { address: 0x7fff0000, size: 40 },
+        6: { address: 0x7fff0000, size: 56 },
+        0: { address: 0x7fff0000, size: 40 },
+        14: { address: 0x7fff0000, size: 72 },
+      },
+    });
+    expect(info.imports).toEqual([]);
+    expect(info.exports).toBeUndefined();
+    expect(info.dotnet).toBeUndefined();
+    expect(info.warnings).toEqual(
+      expect.arrayContaining([
+        'The import table could not be read.',
+        'The export table could not be read.',
+        'The debug directory could not be read.',
+        'The .NET header could not be read.',
+      ]),
+    );
+    // The part that is intact is still shown.
+    expect(info.version?.fileVersion).toBe('1.0.0.0');
+  });
+
+  it('warns when the certificate table lies beyond the end of the file', async () => {
+    const info = await read({ directories: { 4: { address: 0x7ffffff0, size: 64 } } });
+    expect(info.signature).toBeUndefined();
+    expect(info.warnings).toContain('The signature could not be read.');
+  });
+
+  it('warns when the resource directory points outside the file', async () => {
+    const info = await read({
+      version: { fileVersion: [1, 0, 0, 0] },
+      directories: { 2: { address: 0x7fff0000, size: 64 } },
+    });
+    expect(info.version).toBeUndefined();
+    expect(info.warnings).toContain('The version resource could not be read.');
+    expect(info.warnings).toContain('The manifest could not be read.');
+  });
+
+  it('resolves or rejects with PeError at every truncation of a rich image', async () => {
+    const bytes = buildPe({
+      plus: true,
+      dll: true,
+      version: {
+        fileVersion: [1, 2, 3, 4],
+        strings: [
+          ['CompanyName', 'Contoso'],
+          ['FileDescription', 'Contoso Tool'],
+        ],
+      },
+      manifest: '<assembly><assemblyIdentity name="A" version="1.0.0.0"/></assembly>',
+      imports: [{ library: 'KERNEL32.dll', functions: 8 }],
+      delayImports: [{ library: 'ole32.dll', functions: 2 }],
+      exports: { dllName: 'rich.dll', names: ['Alpha', 'Beta', 'Gamma'] },
+      debug: { guid: '11223344-5566-7788-99AA-BBCCDDEEFF00', age: 1, pdbPath: 'rich.pdb' },
+      repro: true,
+      clr: { runtime: 'v4.0.30319', flags: 1 },
+      icons: [
+        { ...square(16), id: 3 },
+        { ...square(32), id: 4 },
+      ],
+      overlay: 300,
+      certificate: buildSignedData({
+        subject: { commonName: 'S', organization: 'O' },
+        issuer: { commonName: 'I' },
+      }),
+    });
+    const lengths: number[] = [];
+    for (let n = 0; n <= Math.min(1024, bytes.length); n++) {
+      lengths.push(n);
+    }
+    for (let n = 1024 + 61; n < bytes.length; n += 61) {
+      lengths.push(n);
+    }
+    let resolved = 0;
+    for (const n of lengths) {
+      try {
+        await readPe(bytesSource(bytes.subarray(0, n)));
+        resolved++;
+      } catch (err) {
+        expect(err, `truncated to ${n} bytes`).toBeInstanceOf(PeError);
+      }
+    }
+    // Truncation past the headers still yields a preview of what survived.
+    expect(resolved).toBeGreaterThan(0);
+  }, 30000);
+
+  it('reads a flipped byte anywhere in the headers without a non-PeError exception', async () => {
+    const bytes = buildPe({
+      version: { fileVersion: [1, 0, 0, 0], strings: [['A', 'b']] },
+      imports: [{ library: 'K.dll', functions: 2 }],
+      exports: { dllName: 'x.dll', names: ['n'] },
+    });
+    for (let at = 0; at < 0x200; at++) {
+      const copy = bytes.slice();
+      copy[at] ^= 0xff;
+      try {
+        await readPe(bytesSource(copy));
+      } catch (err) {
+        expect(err, `byte ${at} flipped`).toBeInstanceOf(PeError);
+      }
+    }
+  }, 30000);
+});
+
+describe('readPe: reading is ranged and budgeted', () => {
+  function counting(bytes: Uint8Array): ByteSource & { total: () => number } {
+    let total = 0;
+    return {
+      size: bytes.length,
+      read: (offset, length) => {
+        const out = bytes.subarray(offset, offset + length);
+        total += out.length;
+        return Promise.resolve(out);
+      },
+      total: () => total,
+    };
+  }
+
+  it('does not read a 40 MB overlay', async () => {
+    const bytes = buildPe({
+      version: { fileVersion: [1, 0, 0, 0], strings: [['A', 'b']] },
+      imports: [{ library: 'KERNEL32.dll', functions: 3 }],
+      overlay: 40 * 1024 * 1024,
+    });
+    const source = counting(bytes);
+    const info = await readPe(source);
+    expect(info.overlay?.size).toBe(40 * 1024 * 1024);
+    expect(info.imports[0].functions).toBe(3);
+    expect(source.total()).toBeLessThan(2 * 1024 * 1024);
+  }, 30000);
+
+  it('never asks a source for bytes past its reported size', async () => {
+    const bytes = buildPe({ imports: [{ library: 'A.dll', functions: 1 }] });
+    const requests: [number, number][] = [];
+    await readPe({
+      size: bytes.length,
+      read: (offset, length) => {
+        requests.push([offset, length]);
+        return Promise.resolve(bytes.subarray(offset, offset + length));
+      },
+    });
+    for (const [offset, length] of requests) {
+      expect(offset).toBeGreaterThanOrEqual(0);
+      expect(offset + length).toBeLessThanOrEqual(bytes.length);
+    }
+  });
+
+  it('rejects a source that returns less than its size promised', async () => {
+    const bytes = buildPe();
+    const failure = await readPe({
+      size: bytes.length,
+      read: (offset, length) =>
+        Promise.resolve(bytes.subarray(offset, offset + Math.min(length, 10))),
+    }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(failure === undefined || failure instanceof PeError).toBe(true);
+  });
+});

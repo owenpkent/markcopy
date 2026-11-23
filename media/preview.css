@@ -2489,6 +2489,35 @@ ol.mc-pptx-body {
   color: var(--mc-quote-fg);
 }
 
+/* ---------------------------------------------------------------------------
+   Executable info (.exe, .dll and the other PE images)
+   ---------------------------------------------------------------------------
+   The page is ordinary headings and tables in the .markdown-body flow. Only
+   two things are added: the small print under a table, and wrapping for the
+   values that have no spaces to break at (a SHA-256, a symbol path, a
+   decorated export name), which would otherwise push the table off the page. */
+
+.mc-exe table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+/* The file's icon sits on its own line above the name, at its natural size. */
+.mc-exe-icon {
+  margin-bottom: 4px;
+}
+
+.mc-exe-icon img {
+  display: block;
+  background: none;
+}
+
+.mc-exe-note {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--mc-quote-fg);
+}
+
 /* Markdown edit mode: the read/edit pill and the in-place block editor. */
 .mc-modepill {
   position: fixed;
