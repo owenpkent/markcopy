@@ -7,7 +7,8 @@
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
 import type { PeInfo, PeSection } from './read';
-import { printable } from './text';
+import { formatBytes, formatNumber as number, properties, table, type Row } from '../binary/html';
+import { printable } from '../binary/text';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -24,36 +25,7 @@ export interface RenderOptions {
   hashNote?: string;
 }
 
-type Row = [label: string, value: string];
-
-const number = (value: number): string => value.toLocaleString('en-US');
-
-export function formatBytes(bytes: number): string {
-  const exact = `${number(bytes)} ${bytes === 1 ? 'byte' : 'bytes'}`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let unit = '';
-  for (const next of units) {
-    if (value < 1024) {
-      break;
-    }
-    value /= 1024;
-    unit = next;
-  }
-  return unit ? `${value.toFixed(value < 10 ? 2 : 1)} ${unit} (${exact})` : exact;
-}
-
 const hex = (value: number): string => `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
-
-function table(headers: string[], rows: string[][]): string {
-  const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
-  const body = rows
-    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
-    .join('');
-  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-}
-
-const properties = (rows: Row[]): string => table(['Property', 'Value'], rows);
 
 // The names Explorer's Details tab uses, in the order it shows them. A string
 // the file defines under any other key is listed after these, under its own key.

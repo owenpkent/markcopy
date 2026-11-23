@@ -10,7 +10,7 @@
 // beside these fields; this module's output is a claim the file makes, and
 // must never be presented as a verdict.
 
-import { printable } from './text';
+import { printable } from '../binary/text';
 
 export interface Signer {
   subject?: string;
@@ -195,4 +195,35 @@ export function readSigner(der: Uint8Array): Signer | undefined {
     return Object.values(signer).some((value) => value !== undefined) ? signer : undefined;
   }
   return undefined;
+}
+
+/**
+ * The names and dates on one X.509 certificate, for the formats that carry a
+ * bare certificate rather than a PKCS #7 blob (a macOS installer package's
+ * table of contents). The same caveat applies: this reads a claim and
+ * verifies nothing.
+ */
+export function readCertificate(der: Uint8Array): Signer | undefined {
+  const certificate = tlvAt(der, 0, der.length);
+  const tbs = certificate?.tag === 0x30 ? children(der, certificate, 1)[0] : undefined;
+  if (!tbs) {
+    return undefined;
+  }
+  const fields = children(der, tbs, 8);
+  const base = fields[0]?.tag === 0xa0 ? 1 : 0;
+  const issuer = fields[base + 2];
+  const validity = fields[base + 3];
+  const subject = fields[base + 4];
+  if (!issuer || !validity || !subject) {
+    return undefined;
+  }
+  const [notBefore, notAfter] = children(der, validity, 2);
+  const signer: Signer = {
+    subject: nameField(der, subject, COMMON_NAME),
+    organization: nameField(der, subject, ORGANIZATION),
+    issuer: nameField(der, issuer, COMMON_NAME) ?? nameField(der, issuer, ORGANIZATION),
+    notBefore: date(der, notBefore),
+    notAfter: date(der, notAfter),
+  };
+  return Object.values(signer).some((value) => value !== undefined) ? signer : undefined;
 }

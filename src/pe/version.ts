@@ -5,7 +5,7 @@
 // and product versions); under it, StringFileInfo holds one table of named
 // strings per language, and VarFileInfo lists those languages.
 
-import { printable } from './text';
+import { printable } from '../binary/text';
 
 export interface VersionInfo {
   /** The numeric versions from the fixed record, as "a.b.c.d". */

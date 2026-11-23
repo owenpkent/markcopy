@@ -14,25 +14,19 @@
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
 import { iconToPng, pickIcon, type PeIcon } from './icon';
 import { readSigner, type Signer } from './signer';
-import { printable } from './text';
+import {
+  RangeReader as Reader,
+  ReadError as PeError,
+  TRUNCATED,
+  type ByteSource,
+} from '../binary/reader';
+import { printable } from '../binary/text';
 import { readVersionResource, type VersionInfo } from './version';
 
-/** An error whose message is written to be shown to the reader as is. */
-export class PeError extends Error {}
-
-/** Random access to the file. `read` may return fewer bytes only at the end of the file. */
-export interface ByteSource {
-  readonly size: number;
-  read(offset: number, length: number): Promise<Uint8Array>;
-}
-
-/** A ByteSource over bytes already in memory. */
-export function bytesSource(bytes: Uint8Array): ByteSource {
-  return {
-    size: bytes.length,
-    read: (offset, length) => Promise.resolve(bytes.subarray(offset, offset + length)),
-  };
-}
+// The shared reader's error under this feature's name, so a file the ranged
+// reader gives up on and one whose PE headers make no sense are the same thing
+// to the preview: a message to show.
+export { ReadError as PeError, bytesSource, type ByteSource } from '../binary/reader';
 
 export interface PeSection {
   name: string;
@@ -132,12 +126,6 @@ export interface PeInfo {
   warnings: string[];
 }
 
-const PAGE = 0x10000;
-// 16 MiB of distinct pages. A real image needs well under one: the headers,
-// the directories and a version resource. A file built to send the reader all
-// over itself runs out of budget instead of out of memory.
-const MAX_PAGES = 256;
-const MAX_READ = 4 * 1024 * 1024;
 const MAX_SECTIONS = 96;
 const MAX_IMPORTS = 1024;
 const MAX_THUNKS = 16384;
@@ -148,80 +136,6 @@ const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_SIGNATURE_BYTES = 1024 * 1024;
 // A 256 pixel, 32-bit bitmap with its mask is about 270 KB; a PNG is smaller.
 const MAX_ICON_BYTES = 1024 * 1024;
-
-const TRUNCATED = 'the file ends before the data its headers point to.';
-
-class Reader {
-  private readonly pages = new Map<number, Uint8Array>();
-
-  constructor(private readonly source: ByteSource) {}
-
-  get size(): number {
-    return this.source.size;
-  }
-
-  private async page(index: number): Promise<Uint8Array> {
-    let page = this.pages.get(index);
-    if (!page) {
-      if (this.pages.size >= MAX_PAGES) {
-        throw new PeError('its tables point to more of the file than MarkCopy will read.');
-      }
-      const start = index * PAGE;
-      page = await this.source.read(start, Math.min(PAGE, this.size - start));
-      this.pages.set(index, page);
-    }
-    return page;
-  }
-
-  async bytes(offset: number, length: number): Promise<Uint8Array> {
-    if (
-      !Number.isSafeInteger(offset) ||
-      !Number.isSafeInteger(length) ||
-      offset < 0 ||
-      length < 0 ||
-      length > MAX_READ ||
-      offset + length > this.size
-    ) {
-      throw new PeError(TRUNCATED);
-    }
-    const out = new Uint8Array(length);
-    let done = 0;
-    while (done < length) {
-      const pos = offset + done;
-      const index = Math.floor(pos / PAGE);
-      const page = await this.page(index);
-      const within = pos - index * PAGE;
-      const take = Math.min(length - done, page.length - within);
-      if (take <= 0) {
-        // The source returned less than the size it reported.
-        throw new PeError(TRUNCATED);
-      }
-      out.set(page.subarray(within, within + take), done);
-      done += take;
-    }
-    return out;
-  }
-
-  async view(offset: number, length: number): Promise<DataView> {
-    const bytes = await this.bytes(offset, length);
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  }
-
-  /** As much as exists of `length` bytes at `offset`: for data whose end the file may cut short. */
-  async upTo(offset: number, length: number): Promise<Uint8Array> {
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= this.size) {
-      throw new PeError(TRUNCATED);
-    }
-    return this.bytes(offset, Math.max(0, Math.min(length, this.size - offset)));
-  }
-
-  /** A NUL-terminated string, decoded as UTF-8 (a superset of the ASCII the format specifies). */
-  async cstr(offset: number, max = 512): Promise<string> {
-    const bytes = await this.upTo(offset, max);
-    const end = bytes.indexOf(0);
-    return printable(new TextDecoder().decode(end < 0 ? bytes : bytes.subarray(0, end)));
-  }
-}
 
 const MACHINES: Record<number, string> = {
   0x014c: 'x86 (32-bit)',

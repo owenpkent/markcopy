@@ -457,6 +457,9 @@ function syncSuppressed(): boolean {
 // What actually scrolls. A Markdown preview scrolls the page; a grid preview (CSV
 // or a spreadsheet sheet) is viewport-tall and scrolls inside its own wrapper (see
 // preview.css), and the page itself never moves.
+// Previews of files that do something when opened: see buildMenu's Open in Default App row.
+const NO_LAUNCH_KINDS = new Set(['exe', 'package']);
+
 function isGridKind(): boolean {
   const kind = document.body.dataset.mcKind;
   return kind === 'csv' || kind === 'xlsx';
@@ -1048,10 +1051,11 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
   entries.push({ kind: 'divider' });
-  // The default app for an executable is the executable: this row would run
-  // the file the reader opened a preview to avoid running. The host refuses the
-  // message for that kind too (opensInDefaultApp in src/ooxmlEditor.ts).
-  if (document.body.dataset.mcKind !== 'exe') {
+  // The default app for an executable is the executable, and for a package it
+  // is an installer: this row would run or install the file the reader opened a
+  // preview to avoid running. The host refuses the message for those kinds too
+  // (opensInDefaultApp in src/ooxmlEditor.ts).
+  if (!NO_LAUNCH_KINDS.has(document.body.dataset.mcKind ?? '')) {
     entries.push({
       kind: 'item',
       label: 'Open in Default App',
