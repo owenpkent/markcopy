@@ -516,3 +516,21 @@ export async function readBytesEntry(
     throw error;
   }
 }
+
+/**
+ * The Signature section for a signature file that is there but is not a
+ * PKCS #7 block MarkCopy can read. A file with a signature's name proves
+ * nothing, so the page says what was found and no more.
+ */
+export function unreadableSignature(what: string): InfoSection {
+  return {
+    kind: 'properties',
+    heading: 'Signature',
+    rows: [
+      [
+        'Status',
+        `${what} is present but could not be read as a signature, so nothing is known about it`,
+      ],
+    ],
+  };
+}

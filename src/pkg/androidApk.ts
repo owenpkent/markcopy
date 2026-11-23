@@ -8,7 +8,7 @@ import { formatBytesShort, formatNumber } from '../binary/html';
 import { parseManifest, type ManifestNode } from './axml';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import { readSigner, signatureSection, type Signer } from './signature';
-import { readBytesEntry, type ZipArchive, type ZipFlavour } from './zipRange';
+import { readBytesEntry, unreadableSignature, type ZipArchive, type ZipFlavour } from './zipRange';
 
 // A large app's manifest, with thousands of components, is still well under this.
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
@@ -17,11 +17,34 @@ const MAX_PERMISSIONS = 2000;
 const MAX_FEATURES = 500;
 const MAX_ABIS = 32;
 
+// Block IDs from apksig (ApkSigningBlockUtils, V2/V3SchemeConstants,
+// SourceStampConstants). The container holds ID/value pairs and Android ignores
+// IDs it does not know, so only these count as a signature scheme.
 const SIGNING_SCHEMES: Record<number, string> = {
   0x7109871a: 'v2',
   0xf05368c0: 'v3',
   0x1b93ad61: 'v3.1',
 };
+// Padding that keeps the directory aligned, and the source stamp (who built the
+// app, not a signature over it). Neither is a signature scheme.
+const VERITY_PADDING_ID = 0x42726577;
+const SOURCE_STAMP_IDS = new Set([0x2b09189e, 0x6dff800d]);
+
+/** versionCodeMajor and versionCode as Android combines them: major in the high word, both unsigned. */
+function versionCode(code: string | undefined, major: string | undefined): string | undefined {
+  const parse = (text: string | undefined): bigint | undefined => {
+    if (text === undefined || !/^(-?[0-9]{1,12}|0x[0-9a-f]{1,8})$/i.test(text)) {
+      return undefined;
+    }
+    return BigInt.asUintN(32, BigInt(text));
+  };
+  const high = parse(major);
+  const low = parse(code);
+  if (high === undefined || high === 0n || low === undefined) {
+    return code;
+  }
+  return `${(high << 32n) | low} (major ${high}, code ${low})`;
+}
 
 const named = (node: ManifestNode, name: string): ManifestNode[] =>
   node.children.filter((c) => c.name === name);
@@ -119,7 +142,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
     ...propertySection('Package', [
       ['Package name', packageName],
       ['Version', versionName],
-      ['Version code', attrs.versionCode],
+      ['Version code', versionCode(attrs.versionCode, attrs.versionCodeMajor)],
       ['App label', shown(application?.attrs.label)],
       ['Minimum Android API', sdk?.minSdkVersion],
       ['Target Android API', sdk?.targetSdkVersion],
@@ -198,16 +221,14 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
     }
     warnings.push('The APK Signing Block could not be read.');
   }
+  // Only schemes whose IDs are present are named. A block with none of them
+  // (empty, padding only, unknown IDs) is reported as a container, not as a signature.
   const schemes = [
-    ...(block ? ['v1'] : []),
-    ...(ids === undefined
-      ? []
-      : ids.length === 0
-        ? ['v2 or later']
-        : [...new Set(ids.map((id) => SIGNING_SCHEMES[id]).filter(Boolean))]),
+    ...(signer ? ['v1'] : []),
+    ...new Set((ids ?? []).map((id) => SIGNING_SCHEMES[id]).filter(Boolean)),
   ];
-  if (ids !== undefined && ids.length > 0 && !ids.some((id) => SIGNING_SCHEMES[id])) {
-    schemes.push('v2 or later');
+  if (block && !signer) {
+    warnings.push('The META-INF signature block could not be read.');
   }
   if (schemes.length > 0) {
     const section = signatureSection(`APK Signature Scheme ${schemes.join(', ')}`, signer);
@@ -218,6 +239,22 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
       ]);
     }
     after.push(section);
+  } else if (ids !== undefined) {
+    const others = ids.filter((id) => id !== VERITY_PADDING_ID && !SOURCE_STAMP_IDS.has(id));
+    after.push(
+      ...propertySection('Signature', [
+        [
+          'Status',
+          'An APK Signing Block is present but holds no signature scheme MarkCopy recognises, so no signature is reported',
+        ],
+        [
+          'Block contents',
+          `${formatNumber(ids.length)} entries${others.length === 0 && ids.length > 0 ? ' (padding or source stamp only)' : ''}`,
+        ],
+      ]),
+    );
+  } else if (block) {
+    after.push(unreadableSignature('A META-INF signature block'));
   } else {
     after.push(
       ...propertySection('Signature', [

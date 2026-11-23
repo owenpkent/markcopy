@@ -207,9 +207,9 @@ describe('readZipPackage: a Java archive', () => {
     expect((section(info, 'Signature') as { note?: string }).note).toContain('does not check');
   });
 
-  it('still reports a signature block that is not PKCS #7, without a name', async () => {
+  it('reports a signature block that is not PKCS #7 as unreadable', async () => {
     const info = await readZip(jar([], [{ name: 'META-INF/X.EC', data: 'junk' }]));
-    expect(value(info, 'Signature', 'Status')).toContain('present');
+    expect(value(info, 'Signature', 'Status')).toContain('could not be read');
     expect(value(info, 'Signature', 'Signer')).toBeUndefined();
   });
 

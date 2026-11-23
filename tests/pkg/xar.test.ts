@@ -1,6 +1,7 @@
-import { zlibSync } from 'fflate';
+import { gzipSync, zlibSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { bytesSource, RangeReader } from '../../src/binary/reader';
+import { readPackage } from '../../src/pkg';
 import { PackageError } from '../../src/pkg/model';
 import { renderPackageHtml } from '../../src/pkg/render';
 import { readXar } from '../../src/pkg/xar';
@@ -408,5 +409,80 @@ describe('readXar: Base64 names', () => {
     const toc = `<xar><toc><file><name enctype="base64">${'QUJD'.repeat(250_000)}</name><type>file</type></file></toc></xar>`;
     const info = await read(buildXar({ rawToc: toc }));
     expect(tableOf(info, 'Contents')[0][0]).toHaveLength(255);
+  });
+});
+
+describe('readXar: compression wrappers', () => {
+  const viaPackage = (bytes: Uint8Array) => readPackage(bytesSource(bytes), 'a.pkg');
+  const gzipToc = (xml: Uint8Array): Uint8Array =>
+    gzipSync(xml, { filename: 'n'.repeat(256 * 1024) });
+  const withHeader = (edit: (z: Uint8Array) => void) => (xml: Uint8Array) => {
+    const z = zlibSync(xml);
+    edit(z);
+    return z;
+  };
+
+  it('reads a normal zlib table of contents, directly and through readPackage', async () => {
+    const bytes = buildXar({ files: [{ name: 'a.txt', data: 'x' }] });
+    expect(tableOf(await read(bytes), 'Contents')).toEqual([['a.txt', '1 byte']]);
+    expect((await viaPackage(bytes)).format).toBe('xar archive');
+  });
+
+  it('refuses a gzip-wrapped table of contents with a huge file name, quickly', async () => {
+    const bytes = buildXar({ files: [{ name: 'a' }], compressToc: gzipToc });
+    for (const run of [read, viaPackage]) {
+      const start = performance.now();
+      await expect(run(bytes)).rejects.toThrow(PackageError);
+      expect(performance.now() - start).toBeLessThan(500);
+    }
+  });
+
+  it('refuses a zlib header with FDICT set or a bad check value', async () => {
+    const fdict = buildXar({
+      compressToc: withHeader((z) => {
+        z[1] = (z[1] & 0xc0) | 0x20;
+        z[1] |= 31 - (((z[0] << 8) | z[1]) % 31);
+      }),
+    });
+    const badCheck = buildXar({ compressToc: withHeader((z) => (z[1] ^= 1)) });
+    for (const bytes of [fdict, badCheck]) {
+      await expect(read(bytes)).rejects.toThrow(PackageError);
+      await expect(viaPackage(bytes)).rejects.toThrow(PackageError);
+    }
+  });
+
+  it('warns about a gzip-wrapped PackageInfo with a huge file name, quickly', async () => {
+    const bytes = buildXar({
+      files: [
+        {
+          name: 'PackageInfo',
+          data: packageInfoXml(),
+          encoding: 'gzip',
+          gzipNameLength: 256 * 1024,
+        },
+      ],
+    });
+    for (const run of [read, viaPackage]) {
+      const start = performance.now();
+      const info = await run(bytes);
+      expect(performance.now() - start).toBeLessThan(500);
+      expect(info.warnings.join(' ')).toContain('PackageInfo');
+      expect(tableOf(info, 'Components')).toEqual([]);
+    }
+  });
+
+  it('still reads a short true-gzip PackageInfo through the bounded gzip reader', async () => {
+    const info = await read(
+      buildXar({
+        files: [
+          {
+            name: 'PackageInfo',
+            data: packageInfoXml({ identifier: 'com.gz' }),
+            encoding: 'gzip',
+          },
+        ],
+      }),
+    );
+    expect(tableOf(info, 'Components')[0][0]).toBe('com.gz');
   });
 });

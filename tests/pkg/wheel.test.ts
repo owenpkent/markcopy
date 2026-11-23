@@ -235,3 +235,17 @@ describe('readZipPackage: wheel entry identity', () => {
     expect(info.title).toBe('real 1');
   });
 });
+
+describe('readZipPackage: what a wheel runs', () => {
+  it('calls out .pth files and scripts installed to the PATH', async () => {
+    const info = await readZip(
+      wheel(METADATA, [
+        { name: 'evil.pth', data: 'import os' },
+        { name: 'demo_pkg-1.4.0.data/scripts/run.sh', data: 'x' },
+      ]),
+    );
+    expect(value(info, 'Code that runs', '.pth files')).toBe('evil.pth');
+    expect(value(info, 'Code that runs', 'Scripts installed to the PATH')).toContain('1 files');
+    expect(hasSection(await readZip(wheel()), 'Code that runs')).toBe(false);
+  });
+});

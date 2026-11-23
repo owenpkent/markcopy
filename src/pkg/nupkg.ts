@@ -13,6 +13,7 @@ import { readSigner, signatureSection } from './signature';
 import {
   readBytesEntry,
   readTextEntry,
+  unreadableSignature,
   type ZipArchive,
   type ZipEntry,
   type ZipFlavour,
@@ -32,11 +33,17 @@ const text = (node: XNode | undefined, max = 500): string | undefined => {
   return value || undefined;
 };
 
+// NuGet's package folders (lib, build, tools...) are matched without regard to
+// case, so "Build/" is the build folder. No `u` flag: a non-ASCII letter never
+// folds to an ASCII one.
+const folderPattern = (folder: string): RegExp => new RegExp(`^${folder}/`, 'i');
+
 /** The first segment under a folder: "lib/net6.0/a.dll" under "lib" gives "net6.0". */
 function subfolders(zip: ZipArchive, folder: string): string[] {
   const found = new Set<string>();
+  const inside = folderPattern(folder);
   for (const entry of zip.entries) {
-    const rest = entry.name.startsWith(`${folder}/`) ? entry.name.slice(folder.length + 1) : '';
+    const rest = inside.test(entry.name) ? entry.name.slice(folder.length + 1) : '';
     const slash = rest.indexOf('/');
     if (slash > 0 && found.size < MAX_FOLDER_NAMES) {
       found.add(rest.slice(0, slash));
@@ -46,7 +53,8 @@ function subfolders(zip: ZipArchive, folder: string): string[] {
 }
 
 function underFolder(zip: ZipArchive, folder: string): ZipEntry[] {
-  return zip.entries.filter((e) => !e.isDirectory && e.name.startsWith(`${folder}/`));
+  const inside = folderPattern(folder);
+  return zip.entries.filter((e) => !e.isDirectory && inside.test(e.name));
 }
 
 export async function readNupkg(
@@ -99,14 +107,23 @@ export async function readNupkg(
         repository ? printable((repository.attrs.type ?? '').slice(0, 40)) : undefined,
       ],
       ['Commit', repository ? printable((repository.attrs.commit ?? '').slice(0, 80)) : undefined],
+      ['Branch', repository ? printable((repository.attrs.branch ?? '').slice(0, 80)) : undefined],
       ['Tags', field('tags')],
       ['Development dependency', field('developmentDependency')],
-      ['Minimum NuGet client', field('minClientVersion')],
+      // minClientVersion is an attribute of <metadata>, not a child element.
+      [
+        'Minimum NuGet client',
+        metadata ? printable((metadata.attrs.minClientVersion ?? '').slice(0, 40)) : undefined,
+      ],
       [
         'Package types',
         typeNodes
           .slice(0, 10)
-          .map((n) => printable((n.attrs.name ?? '').slice(0, 100)))
+          .map((n) =>
+            printable(
+              `${(n.attrs.name ?? '').slice(0, 100)}${n.attrs.version ? ` ${n.attrs.version.slice(0, 40)}` : ''}`,
+            ),
+          )
           .filter(Boolean)
           .join(', '),
       ],
@@ -175,11 +192,23 @@ export async function readNupkg(
   const list = (items: string[]): string | undefined =>
     items.length > 0 ? items.map((s) => printable(s)).join(', ') : undefined;
   const runtimes = subfolders(zip, 'runtimes');
-  const buildFiles = [...underFolder(zip, 'build'), ...underFolder(zip, 'buildTransitive')].filter(
-    (e) => /\.(targets|props)$/i.test(e.name),
-  );
+  // Every folder NuGet imports build logic from: build for every framework,
+  // buildTransitive for assets that flow to consumers, buildMultiTargeting for the
+  // outer build of multi-targeting projects. Only .props and .targets are imported.
+  const buildFiles = [
+    ...underFolder(zip, 'build'),
+    ...underFolder(zip, 'buildTransitive'),
+    ...underFolder(zip, 'buildMultiTargeting'),
+  ].filter((e) => /\.(targets|props)$/i.test(e.name));
   const toolsFiles = underFolder(zip, 'tools');
   const scripts = toolsFiles.filter((e) => /(^|\/)(install|uninstall|init)\.ps1$/i.test(e.name));
+  // Analyzers and source generators are loaded into the compiler on every build.
+  const analyzerFiles = underFolder(zip, 'analyzers').filter((e) => /\.dll$/i.test(e.name));
+  // contentFiles and the older content folder put files into the consuming project,
+  // where source files are compiled and other build actions apply.
+  const contentFiles = [...underFolder(zip, 'contentFiles'), ...underFolder(zip, 'content')];
+  const toolPackage = typeNodes.some((n) => /^dotnettool$/i.test(n.attrs.name ?? ''));
+  const sdkPackage = typeNodes.some((n) => /^msbuildsdk$/i.test(n.attrs.name ?? ''));
   const names = (entries: ZipEntry[]): string =>
     entries
       .slice(0, MAX_LISTED_FILES)
@@ -193,7 +222,6 @@ export async function readNupkg(
       ['Libraries for', list(subfolders(zip, 'lib'))],
       ['Reference assemblies for', list(subfolders(zip, 'ref'))],
       ['Runtimes', list(runtimes)],
-      ['Analyzers', underFolder(zip, 'analyzers').length > 0 ? 'Yes' : undefined],
     ]),
     ...propertySection(
       'Code that runs',
@@ -201,11 +229,21 @@ export async function readNupkg(
         ['Build integration', buildFiles.length > 0 ? names(buildFiles) : undefined],
         ['Install scripts', scripts.length > 0 ? names(scripts) : undefined],
         [
+          'Compiler analyzers',
+          analyzerFiles.length > 0 ? `${formatNumber(analyzerFiles.length)} DLLs` : undefined,
+        ],
+        [
+          'Files added to projects',
+          contentFiles.length > 0 ? `${formatNumber(contentFiles.length)} files` : undefined,
+        ],
+        ['.NET tool', toolPackage ? 'Yes: installed as a command' : undefined],
+        ['MSBuild SDK', sdkPackage ? 'Yes: its Sdk files run on every build' : undefined],
+        [
           'Tools folder',
           toolsFiles.length > 0 ? `${formatNumber(toolsFiles.length)} files` : undefined,
         ],
       ],
-      'Build files run during the build of any project that uses the package, and PowerShell scripts under tools/ are run by older NuGet clients on install. Read them before trusting the package.',
+      'Build files run during the build of any project that uses the package, analyzers run inside the compiler, and PowerShell scripts under tools/ are run by older NuGet clients on install. Read them before trusting the package.',
     ),
   );
 
@@ -219,7 +257,12 @@ export async function readNupkg(
       warnings,
       'The signature',
     );
-    after.push(signatureSection('NuGet package', der ? readSigner(der) : undefined));
+    const signer = der ? readSigner(der) : undefined;
+    after.push(
+      signer
+        ? signatureSection('NuGet package', signer)
+        : unreadableSignature('The package signature file'),
+    );
   }
 
   const symbols =

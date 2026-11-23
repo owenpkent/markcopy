@@ -68,6 +68,49 @@ const HOVER_CLOSE_MS = 150;
 // same id.
 let panelSeq = 0;
 
+// Gap kept between a panel and the edge of the window, so its border and
+// shadow stay in view.
+const EDGE = 4;
+
+/**
+ * The visible area of the webview. clientWidth/clientHeight of the root element
+ * leave out a scrollbar along the edge, which window.innerWidth/innerHeight
+ * count, so a menu opened near the bottom of a scrolling page no longer tucks
+ * its last rows under the horizontal scrollbar.
+ */
+function viewport(): { width: number; height: number } {
+  const doc = document.documentElement;
+  return {
+    width: doc.clientWidth || window.innerWidth,
+    height: doc.clientHeight || window.innerHeight,
+  };
+}
+
+/**
+ * Cap a panel at the window's height (it scrolls past that) and read its size
+ * from the top-left corner, where nothing narrows it.
+ */
+function measure(
+  panel: HTMLDivElement,
+  view: { height: number },
+): { width: number; height: number } {
+  panel.style.maxHeight = `${Math.max(0, view.height - 2 * EDGE)}px`;
+  panel.style.left = '0px';
+  panel.style.top = '0px';
+  return { width: panel.offsetWidth, height: panel.offsetHeight };
+}
+
+/**
+ * Where a panel of `size` starts along one axis of length `limit`: at `start`
+ * when it fits there, ending at `flipTo` when it fits on that side instead, and
+ * otherwise as far from the start as the window allows.
+ */
+export function fit(start: number, size: number, limit: number, flipTo: number): number {
+  if (start + size <= limit - EDGE) return Math.max(EDGE, start);
+  if (flipTo - size >= EDGE) return flipTo - size;
+  return Math.max(EDGE, limit - size - EDGE);
+}
+
 export function createMenu(root: HTMLDivElement): MenuController {
   // Every panel currently on screen, shallowest first. panels[0] is `root`
   // while the menu is open, and the array is empty while it is closed, so a
@@ -233,16 +276,12 @@ export function createMenu(root: HTMLDivElement): MenuController {
     // riding up from the bottom edge when the viewport runs out.
     const row = anchor.getBoundingClientRect();
     const box = parent.getBoundingClientRect();
-    let left = box.right - 4;
-    if (left + panel.offsetWidth > window.innerWidth) {
-      left = Math.max(0, box.left - panel.offsetWidth + 4);
-    }
-    let top = row.top - 4;
-    if (top + panel.offsetHeight > window.innerHeight) {
-      top = Math.max(0, window.innerHeight - panel.offsetHeight);
-    }
-    panel.style.left = `${left + window.scrollX}px`;
-    panel.style.top = `${top + window.scrollY}px`;
+    const view = viewport();
+    const size = measure(panel, view);
+    const left = fit(box.right - 4, size.width, view.width, box.left + 4);
+    const top = Math.max(EDGE, Math.min(row.top - 4, view.height - size.height - EDGE));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
   }
 
   function rowFor(entry: MenuEntry, depth: number): HTMLElement {
@@ -385,17 +424,17 @@ export function createMenu(root: HTMLDivElement): MenuController {
       invoker = opener instanceof HTMLElement && opener !== document.body ? opener : undefined;
       panels.push(root);
       render(root, entries, 0);
-      root.style.left = `${pageX}px`;
-      root.style.top = `${pageY}px`;
       root.hidden = false;
-      // Keep the menu inside the viewport.
-      const rect = root.getBoundingClientRect();
-      if (rect.right > window.innerWidth) {
-        root.style.left = `${Math.max(0, pageX - rect.width)}px`;
-      }
-      if (rect.bottom > window.innerHeight) {
-        root.style.top = `${Math.max(0, pageY - rect.height)}px`;
-      }
+      // Panels are position: fixed, so they place in viewport coordinates and
+      // no scrolled or overflow-clipped ancestor can hide part of one. Open
+      // below and to the right of the pointer, flip to the other side where
+      // that runs off the window, and pin to the edge where neither side fits.
+      const view = viewport();
+      const size = measure(root, view);
+      const x = pageX - window.scrollX;
+      const y = pageY - window.scrollY;
+      root.style.left = `${fit(x, size.width, view.width, x)}px`;
+      root.style.top = `${fit(y, size.height, view.height, y)}px`;
       // The arrow keys only drive the menu once something inside it holds
       // focus, and most actions now sit one level down, so hand the keyboard
       // the first row instead of making the user Tab in blind. Focusing a

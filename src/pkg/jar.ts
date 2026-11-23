@@ -10,6 +10,7 @@ import { readSigner, signatureSection } from './signature';
 import {
   readBytesEntry,
   readTextEntry,
+  unreadableSignature,
   type ZipArchive,
   type ZipEntry,
   type ZipFlavour,
@@ -231,7 +232,12 @@ export async function readJar(zip: ZipArchive): Promise<ZipFlavour> {
       warnings,
       'The signature block',
     );
-    after.push(signatureSection('JAR signing', der ? readSigner(der) : undefined));
+    const signer = der ? readSigner(der) : undefined;
+    after.push(
+      signer
+        ? signatureSection('JAR signing', signer)
+        : unreadableSignature('A META-INF signature block'),
+    );
   }
 
   return {

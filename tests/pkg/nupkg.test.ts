@@ -14,13 +14,14 @@ import {
 
 const RLO = String.fromCharCode(0x202e);
 
-const nuspec = (inner: string): string =>
+const nuspec = (inner: string, attributes = ''): string =>
   `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
-  <metadata>${inner}</metadata>
+  <metadata${attributes}>${inner}</metadata>
 </package>`;
 
-const FULL = nuspec(`
+const FULL = nuspec(
+  `
     <id>Contoso.Widgets</id>
     <version>3.1.0-beta.2</version>
     <title>Widgets</title>
@@ -40,7 +41,6 @@ Second paragraph.</description>
 Later paragraph.</releaseNotes>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <developmentDependency>true</developmentDependency>
-    <minClientVersion>4.3.0</minClientVersion>
     <packageTypes><packageType name="Dependency" /><packageType name="DotnetTool" /></packageTypes>
     <dependencies>
       <group targetFramework="net6.0">
@@ -51,7 +51,9 @@ Later paragraph.</releaseNotes>
       <group>
         <dependency id="Any.Dep" version="1.0.0" />
       </group>
-    </dependencies>`);
+    </dependencies>`,
+  ' minClientVersion="4.3.0"',
+);
 
 const pkg = (spec = FULL, extra: FixtureEntry[] = []): Uint8Array =>
   buildZip([
@@ -128,7 +130,7 @@ describe('readZipPackage: a NuGet package', () => {
     expect(value(info, 'Targets', 'Libraries for')).toBe('net6.0, netstandard2.0');
     expect(value(info, 'Targets', 'Reference assemblies for')).toBe('net6.0');
     expect(value(info, 'Targets', 'Runtimes')).toBe('win-x64, linux-x64');
-    expect(value(info, 'Targets', 'Analyzers')).toBe('Yes');
+    expect(value(info, 'Code that runs', 'Compiler analyzers')).toBe('1 DLLs');
   });
 
   it('calls out build files and install scripts, which run code', async () => {
@@ -153,7 +155,8 @@ describe('readZipPackage: a NuGet package', () => {
   });
 
   it('has no code-that-runs section for a plain library', async () => {
-    expect(hasSection(await readZip(pkg()), 'Code that runs')).toBe(false);
+    const plain = pkg(nuspec('<id>a</id><version>1</version>'));
+    expect(hasSection(await readZip(plain), 'Code that runs')).toBe(false);
   });
 
   it('reports a package signature and the signer it names', async () => {
@@ -209,9 +212,9 @@ describe('readZipPackage: a hostile NuGet package', () => {
     expect(value(info, 'Targets', 'Libraries for')!.split(', ').length).toBe(64);
   });
 
-  it('warns about an unreadable signature but still reports it', async () => {
+  it('reports an unreadable signature file as unreadable', async () => {
     const info = await readZip(pkg(FULL, [{ name: '.signature.p7s', data: 'junk' }]));
-    expect(value(info, 'Signature', 'Status')).toContain('present');
+    expect(value(info, 'Signature', 'Status')).toContain('could not be read');
     expect(value(info, 'Signature', 'Signer')).toBeUndefined();
   });
 
@@ -279,5 +282,83 @@ describe('readZipPackage: NuGet entry identity', () => {
       buildZip([{ name: 'A.NUSPEC', data: nuspec('<id>x</id><version>2</version>') }]),
     );
     expect(info.title).toBe('x 2');
+  });
+});
+
+describe('readZipPackage: what a NuGet package runs', () => {
+  const spec = nuspec('<id>a</id><version>1</version>');
+  const only = (entry: FixtureEntry): Uint8Array =>
+    buildZip([{ name: 'a.nuspec', data: spec }, entry]);
+
+  it('lists a package whose only build asset is in buildMultiTargeting', async () => {
+    const info = await readZip(
+      only({ name: 'buildMultiTargeting/Acme.props', data: '<Project/>' }),
+    );
+    expect(value(info, 'Code that runs', 'Build integration')).toBe(
+      'buildMultiTargeting/Acme.props',
+    );
+  });
+
+  it('lists build, buildTransitive and buildMultiTargeting files together', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: 'a.nuspec', data: spec },
+        { name: 'build/a.targets', data: 'x' },
+        { name: 'buildTransitive/a.props', data: 'x' },
+        { name: 'buildMultiTargeting/a.targets', data: 'x' },
+      ]),
+    );
+    expect(value(info, 'Code that runs', 'Build integration')).toBe(
+      'build/a.targets, buildTransitive/a.props, buildMultiTargeting/a.targets',
+    );
+  });
+
+  it('matches folder names without regard to case', async () => {
+    const info = await readZip(only({ name: 'Build/Acme.TARGETS', data: 'x' }));
+    expect(value(info, 'Code that runs', 'Build integration')).toBe('Build/Acme.TARGETS');
+  });
+
+  it('lists a package whose only code is an analyzer, a content file or a tools script', async () => {
+    const analyzer = await readZip(only({ name: 'analyzers/dotnet/cs/G.dll', data: 'MZ' }));
+    expect(value(analyzer, 'Code that runs', 'Compiler analyzers')).toBe('1 DLLs');
+    const content = await readZip(only({ name: 'contentFiles/cs/any/x.cs', data: 'class X {}' }));
+    expect(value(content, 'Code that runs', 'Files added to projects')).toBe('1 files');
+    const script = await readZip(only({ name: 'tools/init.ps1', data: 'x' }));
+    expect(value(script, 'Code that runs', 'Install scripts')).toBe('tools/init.ps1');
+  });
+
+  it('calls out a .NET tool package and an MSBuild SDK package', async () => {
+    const tool = nuspec(
+      '<id>a</id><version>1</version><packageTypes><packageType name="DotnetTool"/></packageTypes>',
+    );
+    const toolInfo = await readZip(buildZip([{ name: 'a.nuspec', data: tool }]));
+    expect(value(toolInfo, 'Code that runs', '.NET tool')).toContain('Yes');
+    const sdk = nuspec(
+      '<id>a</id><version>1</version><packageTypes><packageType name="MSBuildSdk"/></packageTypes>',
+    );
+    const sdkInfo = await readZip(buildZip([{ name: 'a.nuspec', data: sdk }]));
+    expect(value(sdkInfo, 'Code that runs', 'MSBuild SDK')).toContain('Yes');
+  });
+});
+
+describe('readZipPackage: nuspec attributes and elements', () => {
+  it('reads minClientVersion from the metadata attribute and ignores a child of that name', async () => {
+    const attr = nuspec('<id>a</id><version>1</version>', ' minClientVersion="3.5.0"');
+    const read = await readZip(buildZip([{ name: 'a.nuspec', data: attr }]));
+    expect(value(read, 'Package', 'Minimum NuGet client')).toBe('3.5.0');
+    const child = nuspec(
+      '<id>a</id><version>1</version><minClientVersion>9.9.9</minClientVersion>',
+    );
+    const info = await readZip(buildZip([{ name: 'a.nuspec', data: child }]));
+    expect(value(info, 'Package', 'Minimum NuGet client')).toBeUndefined();
+  });
+
+  it('reads the repository branch and a package type version', async () => {
+    const withBranch = nuspec(
+      '<id>a</id><version>1</version><repository type="git" url="u" branch="main"/><packageTypes><packageType name="Template" version="1.0"/></packageTypes>',
+    );
+    const info = await readZip(buildZip([{ name: 'a.nuspec', data: withBranch }]));
+    expect(value(info, 'Package', 'Branch')).toBe('main');
+    expect(value(info, 'Package', 'Package types')).toBe('Template 1.0');
   });
 });

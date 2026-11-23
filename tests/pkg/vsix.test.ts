@@ -148,13 +148,31 @@ describe('readZipPackage: a VS Code extension', () => {
     expect(tableRows(info, 'Activation events').length).toBe(30);
   });
 
-  it('notes a marketplace signature by its presence only', async () => {
-    const signed = await readZip(vsix([{ name: '.signature.p7s', data: 'x' }]));
-    expect(value(signed, 'Signature', 'Status')).toContain('Marketplace');
-    expect(value(signed, 'Signature', 'Signer')).toBeUndefined();
-    const sigzip = await readZip(vsix([{ name: 'extension.sigzip', data: 'x' }]));
-    expect(hasSection(sigzip, 'Signature')).toBe(true);
-    expect(hasSection(await readZip(vsix()), 'Signature')).toBe(false);
+  it('does not let an ordinary member manufacture a signature status', async () => {
+    const plain = await readZip(vsix());
+    for (const name of ['.signature.p7s', '.signature.sig', 'extension.sigzip']) {
+      const info = await readZip(vsix([{ name, data: 'x' }]));
+      // The page says the same with or without a member of that name.
+      expect(section(info, 'Signature')).toEqual(section(plain, 'Signature'));
+    }
+    const status = value(plain, 'Signature', 'Status')!;
+    expect(status).toContain('separate file');
+    expect(status).not.toContain('present');
+    expect((section(plain, 'Signature') as { note?: string }).note).toBeUndefined();
+  });
+
+  it('shows that the extension executes code, from the manifest property', async () => {
+    const manifest = vsixManifest().replace(
+      '</Properties>',
+      '<Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true" /></Properties>',
+    );
+    const info = await readZip(
+      buildZip([
+        { name: 'extension.vsixmanifest', data: manifest },
+        { name: 'extension/package.json', data: JSON.stringify(packageJson) },
+      ]),
+    );
+    expect(value(info, 'Extension', 'Executes code')).toBe('true');
   });
 
   it('reads a deflated vsix', async () => {

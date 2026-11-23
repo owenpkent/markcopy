@@ -585,7 +585,14 @@ export interface PeSpec {
    * number of names) and `unused` lists the slots in it left empty, as the
    * gaps between a library's ordinals are.
    */
-  exports?: { dllName: string; names: string[]; functions?: number; unused?: number[] };
+  exports?: {
+    dllName: string;
+    names: string[];
+    functions?: number;
+    unused?: number[];
+    /** The ordinal of the first slot. 1 unless given. */
+    base?: number;
+  };
   /** A CodeView "RSDS" debug record. `guid` is the usual 8-4-4-4-12 text form. */
   debug?: { guid: string; age: number; pdbPath: string };
   /** Adds an IMAGE_DEBUG_TYPE_REPRO (16) entry, which marks a deterministic build. */
@@ -718,7 +725,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       .u16(0)
       .u16(0) // version
       .u32(dllName)
-      .u32(1) // Base
+      .u32(spec.exports.base ?? 1) // Base
       .u32(functions)
       .u32(names.length)
       .u32(functionTable)

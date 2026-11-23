@@ -9,7 +9,6 @@ import { formatNumber } from '../binary/html';
 import { parseXmlBounded } from '../binary/xml';
 import { child, findAll, type XNode } from '../ooxml/xnode';
 import { propertySection, tableSection, type InfoSection } from './model';
-import { signatureSection } from './signature';
 import { readTextEntry, type ZipArchive, type ZipFlavour } from './zipRange';
 
 const MAX_MANIFEST_BYTES = 512 * 1024;
@@ -224,6 +223,8 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
       ['Entry point (Node)', str(pkg?.main)],
       ['Entry point (web)', str(pkg?.browser)],
       ['Extension kind', property('Microsoft.VisualStudio.Code.ExtensionKind')],
+      ['Executes code', property('Microsoft.VisualStudio.Code.ExecutesCode')],
+      ['API proposals enabled', property('Microsoft.VisualStudio.Code.EnabledApiProposals')],
       ['Activation events', activationCount > 0 ? formatNumber(activationCount) : undefined],
       ['Untrusted workspaces', trust('untrustedWorkspaces')],
       ['Virtual workspaces', trust('virtualWorkspaces')],
@@ -275,12 +276,16 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
     }),
   );
 
-  const after: InfoSection[] = [];
-  if (['.signature.p7s', '.signature.sig', 'extension.sigzip'].some((n) => zip.find(n))) {
-    // The signature here is the marketplace's, in its own container; only
-    // its presence is reported.
-    after.push(signatureSection('Marketplace'));
-  }
+  // A Marketplace signature is a separate archive that VS Code downloads next to
+  // the VSIX and checks against it. A member of the VSIX with a signature-like
+  // name is just a member, so the page says what it cannot know and no file
+  // name can make it claim a signature.
+  const after: InfoSection[] = propertySection('Signature', [
+    [
+      'Status',
+      'Not shown: the Marketplace signature of an extension is a separate file, so it cannot be seen from the VSIX alone',
+    ],
+  ]);
 
   const label = displayName ?? id;
   return {
