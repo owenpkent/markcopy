@@ -47,6 +47,16 @@ export interface OoxmlSession {
   ): Promise<void> | void;
 }
 
+/**
+ * How long a preview waits after the file changes before reading it again.
+ *
+ * A file being written fires a change event per write, and reading it between
+ * two of them reads half a file. Waiting for the events to stop reads it once,
+ * whole. Long enough to outlast a burst, short enough that a save feels
+ * immediate.
+ */
+export const REDRAW_DELAY_MS = 250;
+
 /** Group media items into messages of about `maxBytes` of base64 text each; an oversized item travels alone. */
 export function batchMedia(items: MediaItem[], maxBytes = 4 * 1024 * 1024): MediaItem[][] {
   const batches: MediaItem[][] = [];
@@ -155,19 +165,31 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
     };
 
     const disposables: vscode.Disposable[] = [];
-    panel.onDidDispose(() => disposables.forEach((d) => d.dispose()));
+    // Set when the tab closes. A draw may be reading the file at that moment,
+    // and a timer may be waiting to start one: neither may touch the webview
+    // afterwards, and nothing new may start.
+    let disposed = false;
+    let redrawTimer: ReturnType<typeof setTimeout> | undefined;
+    panel.onDidDispose(() => {
+      disposed = true;
+      clearTimeout(redrawTimer);
+      disposables.forEach((d) => d.dispose());
+    });
 
     const session = this.createSession(document);
 
     // Each draw gets its own media set id, so the webview can tell the images
     // for this render from those of one it has already replaced.
     let mediaSets = 0;
-    const draw = async (): Promise<void> => {
+    const drawOnce = async (): Promise<void> => {
       let result: RenderResult;
       try {
         result = await session.render();
       } catch (err) {
         result = { html: this.errorHtml(err) };
+      }
+      if (disposed) {
+        return;
       }
       const mediaSet = `${document.uri.toString()}#${++mediaSets}`;
       const cfg = vscode.workspace.getConfiguration('markcopy', document.uri);
@@ -212,6 +234,52 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
           items,
         });
       }
+    };
+
+    // One draw at a time, and at most one waiting.
+    //
+    // Every change event used to start a draw of its own. A draw reads the
+    // file, and for the file-information previews hashes all of it, so a file
+    // rewritten in a loop (an executable being rebuilt with its info page
+    // open, a package still downloading) stacked up as many simultaneous reads
+    // as there were events: three hundred events were three hundred and one
+    // reads in flight, each with its own buffers. Asking for a draw while one
+    // is running now only notes that another is wanted. When the running one
+    // ends, one more starts, and it reads the file as it is then, so the page
+    // still ends on the newest state however many requests were folded in.
+    let running: Promise<void> | undefined;
+    let again = false;
+    const draw = (): Promise<void> => {
+      if (running) {
+        again = true;
+        return running;
+      }
+      running = (async () => {
+        try {
+          do {
+            again = false;
+            try {
+              await drawOnce();
+            } catch {
+              // drawOnce turns a failed read into a notice itself. Whatever
+              // else goes wrong (a webview disposed mid-post) must not leave
+              // `running` set, or the preview would never draw again.
+            }
+          } while (again && !disposed);
+        } finally {
+          running = undefined;
+        }
+      })();
+      return running;
+    };
+
+    // For changes on disk: wait for the events to stop, then draw once.
+    const drawSoon = (): void => {
+      if (disposed) {
+        return;
+      }
+      clearTimeout(redrawTimer);
+      redrawTimer = setTimeout(() => void draw(), REDRAW_DELAY_MS);
     };
 
     // Registered before the HTML is assigned, so the webview's `ready` cannot
@@ -290,11 +358,7 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
         escapeGlobName(basename(document.uri.path)),
       ),
     );
-    disposables.push(
-      watcher,
-      watcher.onDidChange(() => void draw()),
-      watcher.onDidCreate(() => void draw()),
-    );
+    disposables.push(watcher, watcher.onDidChange(drawSoon), watcher.onDidCreate(drawSoon));
 
     // Follow markcopy.* changes the way the Markdown preview does, so settings
     // like the theme take effect without reopening the file.
