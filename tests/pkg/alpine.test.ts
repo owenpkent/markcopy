@@ -11,7 +11,7 @@ import {
   type TableSection,
 } from '../../src/pkg/model';
 import { renderPackageHtml } from '../../src/pkg/render';
-import { concat, tar } from './debFixture';
+import { concat, tar, tarHeader } from './debFixture';
 import { buildApk, DATAHASH, KEY_NAME, type ApkSpec } from './alpineFixture';
 
 const RLO = String.fromCharCode(0x202e);
@@ -221,5 +221,29 @@ describe('readAlpineApk: rendering', () => {
     }
     expect(JSON.stringify(info)).not.toContain(RLO);
     expect(html).not.toContain(RLO);
+  });
+});
+
+describe('readAlpineApk: work bounds', () => {
+  it('does not re-walk the tar on every chunk: a long run of long-name headers is rejected', async () => {
+    const header = tarHeader('x', 0, 'L');
+    const raw = new Uint8Array(header.length * 6000);
+    for (let i = 0; i < 6000; i++) {
+      raw.set(header, i * header.length);
+    }
+    const started = Date.now();
+    await expect(read(gzipSync(raw, { level: 0 }))).rejects.toThrow(NOT_ALPINE);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('survives a megabyte of spaces after a key without backtracking', async () => {
+    const pkginfo = `pkgname = p\ndesc =${' '.repeat(1_000_000)}x\n`;
+    const info = await readSpec({ pkginfo });
+    expect(info.title).toBe('p');
+  });
+
+  it('cuts every line before looking at it', () => {
+    const parsed = parsePkgInfo(`key = ${'v'.repeat(100_000)}\n`);
+    expect(parsed.get('key')?.[0].length).toBeLessThanOrEqual(2000);
   });
 });

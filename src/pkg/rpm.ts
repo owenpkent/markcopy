@@ -49,6 +49,12 @@ interface Header {
   store: Uint8Array;
   /** The offset just past the header's store. */
   end: number;
+  /** Store bytes walked so far while finding string boundaries, shared by every tag. */
+  scanned: number;
+  /** True once a table was cut short by a cap, so the page can say so. */
+  limited: boolean;
+  /** String tables already located, by region, so tags that alias one region share the work. */
+  tables: Map<string, Strings>;
 }
 
 const SIZES: Record<number, number> = {
@@ -90,10 +96,53 @@ async function readHeader(reader: RangeReader, at: number): Promise<Header> {
       tags.set(tag, { type, offset, count: n });
     }
   }
-  return { tags, store, end: storeAt + size };
+  return { tags, store, end: storeAt + size, scanned: 0, limited: false, tables: new Map() };
 }
 
-function strings(header: Header, tag: number): string[] | undefined {
+// A single value (name, summary, URL) is cut to this many characters.
+const MAX_FIELD = 4096;
+// One path component. Directory and base name are each cut to this before they are joined.
+const MAX_PATH_PART = 1024;
+// Entries considered of the file list. A real package with 200,000 files has a header of
+// roughly 20 MB, about the most MarkCopy reads.
+const MAX_FILES = 200_000;
+// Entries considered of one relationship list (requires, provides ...).
+const MAX_RELATION_ENTRIES = 20_000;
+// Store bytes that may be walked, across every tag of one header, to find string
+// boundaries. Tags can point at the same region, and each walk would otherwise repeat.
+const SCAN_BUDGET = 128 * 1024 * 1024;
+
+/**
+ * Where the strings of one array start, found without building any of them. A
+ * string is decoded only when asked for, cut to the length asked.
+ */
+class Strings {
+  constructor(
+    private readonly store: Uint8Array,
+    private readonly starts: number[],
+    /** True when the entry declared more strings than were located. */
+    readonly truncated: boolean,
+  ) {}
+
+  get count(): number {
+    return this.starts.length;
+  }
+
+  /** The string at `index`, at most `max` characters, cleaned; undefined past the end. */
+  at(index: number, max: number, keepLineBreaks = false): string | undefined {
+    const start = this.starts[index];
+    if (start === undefined) {
+      return undefined;
+    }
+    // A character is at most 4 bytes, so looking further for the terminator is wasted work.
+    const window = this.store.subarray(start, Math.min(this.store.length, start + max * 4));
+    const end = window.indexOf(0);
+    const decoded = new TextDecoder().decode(end < 0 ? window : window.subarray(0, end));
+    return printable(decoded.slice(0, max), keepLineBreaks);
+  }
+}
+
+function strings(header: Header, tag: number, max: number): Strings | undefined {
   const entry = header.tags.get(tag);
   if (
     !entry ||
@@ -101,36 +150,53 @@ function strings(header: Header, tag: number): string[] | undefined {
   ) {
     return undefined;
   }
+  const key = `${entry.offset}:${entry.count}:${max}`;
+  const known = header.tables.get(key);
+  if (known) {
+    return known;
+  }
   const { store } = header;
   // Every string takes at least its terminator, so a larger count is a lie.
-  const wanted = Math.min(entry.count, store.length - entry.offset);
-  const out: string[] = [];
-  const decoder = new TextDecoder();
+  const declared = Math.min(entry.count, store.length - entry.offset);
+  const starts: number[] = [];
+  const wanted = Math.min(declared, max);
   let at = entry.offset;
-  for (let i = 0; i < wanted && at < store.length; i++) {
+  while (starts.length < wanted && at < store.length) {
+    if (header.scanned > SCAN_BUDGET) {
+      header.limited = true;
+      break;
+    }
+    starts.push(at);
+    if (starts.length >= wanted) {
+      break; // the last wanted string needs no end: `at()` finds it
+    }
     let end = store.indexOf(0, at);
     if (end < 0) {
       end = store.length;
     }
-    out.push(decoder.decode(store.subarray(at, end)));
+    header.scanned += end - at + 1;
     at = end + 1;
   }
-  return out;
+  const table = new Strings(store, starts, declared > starts.length);
+  header.tables.set(key, table);
+  return table;
 }
 
-const text = (header: Header, tag: number): string | undefined => {
-  const value = strings(header, tag)?.[0];
-  return value === undefined ? undefined : printable(value.slice(0, MAX_TEXT));
-};
+const text = (
+  header: Header,
+  tag: number,
+  max = MAX_FIELD,
+  keepLineBreaks = false,
+): string | undefined => strings(header, tag, 1)?.at(0, max, keepLineBreaks);
 
-function numbers(header: Header, tag: number): number[] | undefined {
+function numbers(header: Header, tag: number, max = 1): number[] | undefined {
   const entry = header.tags.get(tag);
   const width = entry && [INT8, INT16, INT32, INT64].includes(entry.type) ? SIZES[entry.type] : 0;
   if (!entry || !width) {
     return undefined;
   }
   const available = Math.floor((header.store.length - entry.offset) / width);
-  const n = Math.min(entry.count, available);
+  const n = Math.min(entry.count, available, max);
   const view = new DataView(header.store.buffer, header.store.byteOffset, header.store.length);
   const out = new Array<number>(n);
   for (let i = 0; i < n; i++) {
@@ -199,23 +265,30 @@ function relations(
   limit: number,
   hideRpmlib: boolean,
 ): Relations {
-  const names = strings(header, nameTag) ?? [];
-  const flags = numbers(header, flagTag) ?? [];
-  const versions = strings(header, versionTag) ?? [];
+  const names = strings(header, nameTag, MAX_RELATION_ENTRIES);
+  const flags = numbers(header, flagTag, MAX_RELATION_ENTRIES) ?? [];
+  const versions = strings(header, versionTag, MAX_RELATION_ENTRIES);
+  if (names?.truncated) {
+    header.limited = true;
+  }
   const rows: string[][] = [];
   let total = 0;
   let hidden = 0;
-  for (let i = 0; i < names.length; i++) {
+  for (let i = 0; i < (names?.count ?? 0); i++) {
     // rpmlib(...) entries describe the rpm tool needed to install, not the system.
-    if (hideRpmlib && ((flags[i] ?? 0) & RPMLIB || names[i].startsWith('rpmlib('))) {
+    if (hideRpmlib && ((flags[i] ?? 0) & RPMLIB || names?.at(i, 8)?.startsWith('rpmlib('))) {
       hidden++;
       continue;
     }
     total++;
     if (rows.length < limit) {
       const op = comparison(flags[i] ?? 0);
-      const version = printable(versions[i] ?? '');
-      rows.push([label, printable(names[i]), version ? `${op} ${version}`.trim() : '']);
+      const version = versions?.at(i, MAX_PATH_PART) ?? '';
+      rows.push([
+        label,
+        names?.at(i, MAX_PATH_PART) ?? '',
+        version ? `${op} ${version}`.trim() : '',
+      ]);
     }
   }
   return { rows, total, hidden };
@@ -405,7 +478,7 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   );
 
   const summary = get(1004);
-  const description = paragraphs(strings(main, 1005)?.[0]);
+  const description = paragraphs(text(main, 1005, MAX_TEXT, true));
   if (description.length > 0) {
     sections.push({ kind: 'text', heading: 'Description', paragraphs: description });
   }
@@ -457,6 +530,11 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   );
 
   sections.push(...contents(main, warnings));
+  if (main.limited) {
+    warnings.push(
+      'Some tables in the package are larger than MarkCopy will read, so they are cut short.',
+    );
+  }
   sections.push(...signatureOf(signature));
 
   return {
@@ -469,15 +547,20 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
 }
 
 function contents(main: Header, warnings: string[]): InfoSection[] {
-  const base = strings(main, 1117);
-  if (!base || base.length === 0) {
+  const base = strings(main, 1117, MAX_FILES);
+  if (!base || base.count === 0) {
     return [];
   }
-  const dirs = strings(main, 1118) ?? [];
-  const indexes = numbers(main, 1116) ?? [];
-  const sizes = numbers(main, 5008) ?? numbers(main, 1028) ?? [];
-  const modes = numbers(main, 1030);
-  if (indexes.length !== base.length) {
+  const dirs = strings(main, 1118, MAX_FILES);
+  const indexes = numbers(main, 1116, MAX_FILES) ?? [];
+  const sizes = numbers(main, 5008, MAX_FILES) ?? numbers(main, 1028, MAX_FILES) ?? [];
+  const modes = numbers(main, 1030, MAX_FILES);
+  if (base.truncated) {
+    warnings.push(
+      `The file list is longer than MarkCopy will read, so only its first ${formatNumber(base.count)} entries are counted.`,
+    );
+  }
+  if (indexes.length !== base.count) {
     warnings.push('The file list could not be read.');
     return [];
   }
@@ -485,7 +568,20 @@ function contents(main: Header, warnings: string[]): InfoSection[] {
   let files = 0;
   let directories = 0;
   let bytes = 0;
-  for (let i = 0; i < base.length; i++) {
+  // Directory names are shared by many files: decode each once, cut short.
+  const dirNames = new Map<number, string>();
+  const dirName = (index: number | undefined): string => {
+    if (index === undefined) {
+      return '';
+    }
+    let name = dirNames.get(index);
+    if (name === undefined) {
+      name = dirs?.at(index, MAX_PATH_PART) ?? '';
+      dirNames.set(index, name);
+    }
+    return name;
+  };
+  for (let i = 0; i < base.count; i++) {
     // The file mode's type bits (S_IFMT) mark directories, which are listed but are not files.
     if (modes && ((modes[i] ?? 0) & 0xf000) === 0x4000) {
       directories++;
@@ -495,7 +591,7 @@ function contents(main: Header, warnings: string[]): InfoSection[] {
     bytes += sizes[i] ?? 0;
     if (rows.length < TABLE_LIMIT) {
       rows.push([
-        printable(`${dirs[indexes[i]] ?? ''}${base[i]}`),
+        `${dirName(indexes[i])}${base.at(i, MAX_PATH_PART) ?? ''}`,
         sizes[i] === undefined ? '' : formatBytes(sizes[i]),
       ]);
     }

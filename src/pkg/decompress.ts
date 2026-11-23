@@ -15,6 +15,7 @@ import { PackageError } from './model';
 
 export const TOO_BIG = 'it expands to more data than MarkCopy will unpack.';
 export const DAMAGED = 'its compressed data is damaged.';
+export const TOO_MANY = 'it holds more compressed streams than MarkCopy will read.';
 
 // Input is fed in small slices so one slice cannot expand into more than a few
 // megabytes (deflate cannot beat about 1000:1) before the cap is checked again.
@@ -24,9 +25,19 @@ const GZIP_SLICE = 4 * 1024;
 const ZSTD_SLICE = 16 * 1024;
 const XZ_SLICE = 16 * 1024;
 
-// The largest back-reference window we will allocate for a Zstandard frame. A
-// frame header may ask for gigabytes; real packages use 1 to 8 MiB (dpkg's default).
-const ZSTD_MAX_WINDOW = 32 * 1024 * 1024;
+// fzstd allocates the frame's window (or, for a single-segment frame, its declared
+// content size) plus 12 bytes, and then moves the whole window on every block. A
+// frame header may ask for gigabytes. Control archives are tiny and the encoder
+// sizes the window to the content, so 16 MiB matches the largest control archive MarkCopy unpacks.
+const ZSTD_MAX_WINDOW = 16 * 1024 * 1024;
+// Frames a control archive may hold: one, in practice.
+const ZSTD_MAX_FRAMES = 16;
+// Blocks times window is the bytes fzstd shifts in total; this keeps that under 4 GiB.
+const ZSTD_MAX_SHIFT = 4 * 1024 * 1024 * 1024;
+const ZSTD_MAX_BLOCK = 128 * 1024;
+// A deflate member is 20 bytes at the least, so a few hundred thousand empty ones fit
+// in a few megabytes and cost time for no output. Real files have one to three.
+const GZIP_MAX_MEMBERS = 64;
 
 // After the xz input is used up, a healthy stream finishes within a pull or two.
 // A truncated one makes the decoder return empty output forever, so a run of
@@ -113,6 +124,12 @@ export function gunzipUntil(data: Uint8Array, max: number, onChunk: ChunkHandler
       throw new Stop();
     }
   });
+  let members = 1;
+  gunzip.onmember = () => {
+    if (++members > GZIP_MAX_MEMBERS) {
+      throw new PackageError(TOO_MANY);
+    }
+  };
   try {
     for (let i = 0; i < data.length; i += GZIP_SLICE) {
       const end = Math.min(i + GZIP_SLICE, data.length);
@@ -134,75 +151,133 @@ export function gunzipBounded(data: Uint8Array, max: number): Uint8Array {
   return sink.bytes();
 }
 
-/** Refuse a Zstandard frame whose header declares more than we would unpack or allocate. */
-function checkZstdHeader(data: Uint8Array, max: number): void {
+interface ZstdFrame {
+  start: number;
+  end: number;
+}
+
+/**
+ * Walk every frame of the input, reading only headers, and return the data
+ * frames. A check on the first frame is not a check: fzstd sizes its window from
+ * each frame's own header, so each one is validated here before any reaches it.
+ * Skippable frames are dropped. Throws when a frame asks for more than allowed.
+ */
+function zstdFrames(data: Uint8Array, max: number): ZstdFrame[] {
+  const view = new DataView(data.buffer, data.byteOffset, data.length);
+  const frames: ZstdFrame[] = [];
   let pos = 0;
-  // Skippable frames (magic 0x184D2A50 to 0x184D2A5F) may come first.
-  for (let skipped = 0; skipped < 8 && pos + 8 <= data.length; skipped++) {
-    const magic = new DataView(data.buffer, data.byteOffset + pos, 8).getUint32(0, true);
-    if ((magic & 0xfffffff0) !== 0x184d2a50) {
-      break;
+  let declared = 0;
+  let shifted = 0;
+  let seen = 0;
+  while (pos < data.length) {
+    if (++seen > ZSTD_MAX_FRAMES || pos + 4 > data.length) {
+      throw new PackageError(seen > ZSTD_MAX_FRAMES ? TOO_MANY : DAMAGED);
     }
-    pos += 8 + new DataView(data.buffer, data.byteOffset + pos, 8).getUint32(4, true);
-  }
-  if (pos + 6 > data.length) {
-    return; // too short to say; the decoder will report it
-  }
-  const view = new DataView(data.buffer, data.byteOffset + pos, data.length - pos);
-  if (view.getUint32(0, true) !== 0xfd2fb528) {
-    return;
-  }
-  const descriptor = view.getUint8(4);
-  const single = (descriptor & 0x20) !== 0;
-  const sizeFlag = descriptor >> 6;
-  const dictBytes = [0, 1, 2, 4][descriptor & 3];
-  let at = 5;
-  let window = 0;
-  if (!single) {
-    const byte = view.getUint8(at++);
-    const base = 2 ** (10 + (byte >> 3));
-    window = base + (base / 8) * (byte & 7);
-  }
-  at += dictBytes;
-  const contentBytes = sizeFlag === 0 ? (single ? 1 : 0) : [0, 2, 4, 8][sizeFlag];
-  if (contentBytes > 0 && at + contentBytes <= view.byteLength) {
-    let content = 0;
-    for (let i = contentBytes - 1; i >= 0; i--) {
-      content = content * 256 + view.getUint8(at + i);
+    const magic = view.getUint32(pos, true);
+    if ((magic & 0xfffffff0) === 0x184d2a50) {
+      if (pos + 8 > data.length) {
+        throw new PackageError(DAMAGED);
+      }
+      pos += 8 + view.getUint32(pos + 4, true);
+      continue;
     }
-    if (sizeFlag === 1) {
-      content += 256;
+    if (magic !== 0xfd2fb528 || pos + 6 > data.length) {
+      throw new PackageError(DAMAGED);
     }
-    if (content > max) {
-      throw new PackageError(TOO_BIG);
+    const start = pos;
+    const descriptor = data[pos + 4];
+    const single = (descriptor & 0x20) !== 0;
+    const checksum = (descriptor & 0x04) !== 0;
+    const sizeFlag = descriptor >> 6;
+    // Bit 3 is reserved and a dictionary needs one we do not have.
+    if ((descriptor & 0x08) !== 0 || (descriptor & 3) !== 0) {
+      throw new PackageError(DAMAGED);
     }
-    if (single) {
-      window = content;
+    let at = pos + 5;
+    let window = 0;
+    if (!single) {
+      const byte = data[at++];
+      const base = 2 ** (10 + (byte >> 3));
+      window = base + (base / 8) * (byte & 7);
     }
+    const contentBytes = sizeFlag === 0 ? (single ? 1 : 0) : [0, 2, 4, 8][sizeFlag];
+    if (at + contentBytes > data.length) {
+      throw new PackageError(DAMAGED);
+    }
+    let content: number | undefined;
+    if (contentBytes > 0) {
+      content = 0;
+      for (let i = contentBytes - 1; i >= 0; i--) {
+        content = content * 256 + data[at + i];
+      }
+      if (sizeFlag === 1) {
+        content += 256;
+      }
+      declared += content;
+      if (content > max || declared > max) {
+        throw new PackageError(TOO_BIG);
+      }
+      if (single) {
+        window = content;
+      }
+    }
+    at += contentBytes;
+    if (window > ZSTD_MAX_WINDOW) {
+      throw new PackageError('it uses a larger Zstandard window than MarkCopy will allocate.');
+    }
+    // Blocks: a 3-byte header (last flag, type, size), then the block's bytes.
+    for (let last = false; !last;) {
+      if (at + 3 > data.length) {
+        // The frame is cut short; the decoder will say so. Nothing after it is read.
+        at = data.length;
+        break;
+      }
+      const header = data[at] | (data[at + 1] << 8) | (data[at + 2] << 16);
+      last = (header & 1) !== 0;
+      const type = (header >> 1) & 3;
+      const size = header >> 3;
+      if (type === 3 || size > ZSTD_MAX_BLOCK) {
+        throw new PackageError(DAMAGED);
+      }
+      shifted += Math.max(window, 1);
+      if (shifted > ZSTD_MAX_SHIFT) {
+        throw new PackageError(TOO_BIG);
+      }
+      at += 3 + (type === 1 ? 1 : size);
+    }
+    if (checksum) {
+      at += 4;
+    }
+    pos = Math.min(at, data.length);
+    frames.push({ start, end: pos });
   }
-  if (window > ZSTD_MAX_WINDOW) {
-    throw new PackageError('it uses a larger Zstandard window than MarkCopy will allocate.');
-  }
+  return frames;
 }
 
 export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
   if (data.length === 0) {
     throw new PackageError(DAMAGED);
   }
+  const frames = zstdFrames(data, max);
+  if (frames.length === 0) {
+    throw new PackageError(DAMAGED);
+  }
   const sink = new ByteSink();
-  checkZstdHeader(data, max);
   let total = 0;
   try {
-    const decoder = new ZstdDecompress((chunk) => {
-      total += chunk.length;
-      if (total > max) {
-        throw new PackageError(TOO_BIG);
+    // One decoder per validated frame, so its window is the one that was checked.
+    for (const frame of frames) {
+      const decoder = new ZstdDecompress((chunk) => {
+        total += chunk.length;
+        if (total > max) {
+          throw new PackageError(TOO_BIG);
+        }
+        sink.append(chunk);
+      });
+      for (let i = frame.start; i < frame.end; i += ZSTD_SLICE) {
+        const end = Math.min(i + ZSTD_SLICE, frame.end);
+        decoder.push(data.subarray(i, end), end === frame.end);
       }
-      sink.append(chunk);
-    });
-    for (let i = 0; i < data.length; i += ZSTD_SLICE) {
-      const end = Math.min(i + ZSTD_SLICE, data.length);
-      decoder.push(data.subarray(i, end), end === data.length);
     }
   } catch (error) {
     contain(error);

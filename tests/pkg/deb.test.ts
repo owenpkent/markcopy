@@ -337,3 +337,50 @@ describe('readDeb: rendering', () => {
     expect(html).not.toContain(RLO);
   });
 });
+
+describe('readDeb: memory and work bounds', () => {
+  it('reads a long list of empty lines without building a string per line', async () => {
+    const bytes = buildDeb({ files: { md5sums: 'aa\n'.repeat(4_000_000) }, compression: 'gz' });
+    const before = process.memoryUsage().heapUsed;
+    const info = await read(bytes);
+    expect(info.title).toBe('curl 8.5.0-2');
+    expect(info.sections.some((s) => s.heading === 'Contents')).toBe(false);
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(64 * 1024 * 1024);
+  });
+
+  it('cuts a checksum list longer than it will read and says so', async () => {
+    const line = 'd41d8cd98f00b204e9800998ecf8427e  usr/share/some/path/file\n';
+    const bytes = buildDeb({ files: { md5sums: line.repeat(200_000) } });
+    const info = await read(bytes);
+    expect(info.warnings.join(' ')).toContain('file list is longer than MarkCopy will read');
+    expect(table(info, 'Contents').rows).toHaveLength(200);
+  });
+
+  it('refuses a control archive that is a zstd frame hiding a huge window after skippable frames', async () => {
+    const skippable = new Uint8Array([0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0]);
+    const frame = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0xa7, 0x03, 0x00, 0x04, 0x00]);
+    const hostile = new Uint8Array(9 * 8 + frame.length);
+    for (let i = 0; i < 9; i++) {
+      hostile.set(skippable, i * 8);
+    }
+    hostile.set(frame, 72);
+    const info = await readSpec({ compression: 'zst', controlBytes: hostile });
+    expect(info.warnings.join(' ')).toContain('larger Zstandard window');
+  });
+
+  it('stops at the member cap of a control archive made of empty gzip members', async () => {
+    const empty = gzipSync(new Uint8Array(0));
+    const many = new Uint8Array(empty.length * 5000);
+    for (let i = 0; i < 5000; i++) {
+      many.set(empty, i * empty.length);
+    }
+    const info = await read(
+      ar([
+        { name: 'debian-binary', data: '2.0\n' },
+        { name: 'control.tar.gz', data: many },
+        { name: 'data.tar.xz', data: new Uint8Array(10) },
+      ]),
+    );
+    expect(info.warnings.join(' ')).toContain('more compressed streams');
+  });
+});

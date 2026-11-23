@@ -23,6 +23,7 @@ import {
   pgpSignatureV4,
   str,
   strings,
+  TYPE,
   type RpmSpec,
 } from './rpmFixture';
 
@@ -368,3 +369,66 @@ describe('readRpm: rendering', () => {
 function i18nSummary(value: string): ReturnType<typeof str> {
   return { tag: 1004, type: 9, value };
 }
+
+describe('readRpm: memory and work bounds', () => {
+  const heap = (): number => process.memoryUsage().heapUsed;
+
+  it('cuts a megabyte directory name that 200 files share', async () => {
+    const files = Array.from({ length: 200 }, (_, i) => ({
+      dir: 'd'.repeat(1 << 20),
+      name: `f${i}`,
+      size: 1,
+    }));
+    const bytes = buildRpm({ files });
+    const before = heap();
+    const info = await read(bytes);
+    const contents = table(info, 'Contents');
+    expect(contents.rows).toHaveLength(200);
+    for (const row of contents.rows) {
+      expect(row[0].length).toBeLessThanOrEqual(2048);
+    }
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+  });
+
+  it('counts only the first 200,000 files of a longer list and says so', async () => {
+    const count = 250_000;
+    const names = Array.from({ length: count }, (_, i) => `f${i}`);
+    const info = await readSpec({
+      files: [],
+      main: [
+        strings(1117, names),
+        { tag: 1116, type: TYPE.INT32, value: new Array<number>(count).fill(0) },
+        strings(1118, ['/d/']),
+      ],
+    });
+    expect(table(info, 'Contents').lead).toContain('200,000 files');
+    expect(info.warnings.join(' ')).toContain('only its first 200,000 entries');
+  });
+
+  it('reads a long relationship list up to a cap and warns', async () => {
+    const count = 30_000;
+    const names = Array.from({ length: count }, (_, i) => `lib${i}`);
+    const info = await readSpec({
+      main: [
+        strings(1049, names),
+        { tag: 1048, type: TYPE.INT32, value: new Array<number>(count).fill(0) },
+        strings(
+          1050,
+          names.map(() => ''),
+        ),
+      ],
+    });
+    const dependencies = table(info, 'Dependencies');
+    expect(dependencies.rows.length).toBeLessThanOrEqual(500);
+    expect(info.warnings.join(' ')).toContain('larger than MarkCopy will read');
+  });
+
+  it('takes one value from a text tag without building its whole array', async () => {
+    const huge = Array.from({ length: 100_000 }, () => 'aa');
+    const bytes = buildRpm({ main: [strings(1004, huge)] });
+    const before = heap();
+    const info = await read(bytes);
+    expect(info.summary).toBe('aa');
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+  });
+});

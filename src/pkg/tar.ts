@@ -14,6 +14,10 @@ export const TAR_MAX_ENTRIES = 2000;
 
 // A long-name or pax record bigger than this is not a path.
 const MAX_META = 64 * 1024;
+// Names are cut to this many characters as they are read: entries are kept, up to
+// TAR_MAX_ENTRIES of them, and a cap on their number bounds nothing if each name
+// may be 64 KiB.
+const MAX_NAME = 1024;
 
 export interface TarEntry {
   /** The path as stored, with any leading "./" removed. */
@@ -38,6 +42,11 @@ export interface TarResult {
 function text(bytes: Uint8Array): string {
   const end = bytes.indexOf(0);
   return new TextDecoder().decode(end < 0 ? bytes : bytes.subarray(0, end));
+}
+
+/** A name from a long-name or pax record: decode only as much as can be kept. */
+function nameText(bytes: Uint8Array): string {
+  return text(bytes.subarray(0, MAX_NAME * 4)).slice(0, MAX_NAME);
 }
 
 /** An octal field, or a GNU base-256 number for sizes past 8 GiB. NaN when it is neither. */
@@ -77,9 +86,10 @@ function paxPath(data: Uint8Array): string | undefined {
     if (!Number.isInteger(length) || length < space - at + 2 || at + length > data.length) {
       return undefined;
     }
-    const record = new TextDecoder().decode(data.subarray(space + 1, at + length - 1));
-    if (record.startsWith('path=')) {
-      return record.slice(5);
+    // Look at the key before decoding the value, so a megabyte-long other record costs nothing.
+    const key = data.subarray(space + 1, Math.min(space + 6, at + length - 1));
+    if (new TextDecoder().decode(key) === 'path=') {
+      return nameText(data.subarray(space + 6, at + length - 1));
     }
     at += length;
   }
@@ -99,12 +109,14 @@ export function readTar(buffer: Uint8Array, start = 0): TarResult {
   const entries: TarEntry[] = [];
   let at = start;
   let longName: string | undefined;
+  // Where the record that set the pending name began: a resume has to restart there.
+  let recordStart: number | undefined;
   for (;;) {
     if (entries.length >= TAR_MAX_ENTRIES) {
       return { entries, next: at, stop: 'cap' };
     }
     if (at + BLOCK > buffer.length) {
-      return { entries, next: at, stop: 'more' };
+      return { entries, next: recordStart ?? at, stop: 'more' };
     }
     const header = buffer.subarray(at, at + BLOCK);
     if (header.every((byte) => byte === 0)) {
@@ -123,13 +135,15 @@ export function readTar(buffer: Uint8Array, start = 0): TarResult {
         return { entries, next: at, stop: 'invalid' };
       }
       if (dataAt + size > buffer.length) {
-        return { entries, next: at, stop: 'more' };
+        return { entries, next: recordStart ?? at, stop: 'more' };
       }
       const data = buffer.subarray(dataAt, dataAt + size);
-      if (type === 'L') {
-        longName = text(data);
-      } else if (type === 'x') {
-        longName = paxPath(data) ?? longName;
+      // The latest name record wins, so a resume only has to restart at the one that
+      // set the pending name; restarting at the first of a long run would repeat the run.
+      const named = type === 'L' ? nameText(data) : type === 'x' ? paxPath(data) : undefined;
+      if (named) {
+        longName = named;
+        recordStart = at;
       }
       at = after;
       continue;
@@ -137,6 +151,7 @@ export function readTar(buffer: Uint8Array, start = 0): TarResult {
 
     let name = longName;
     longName = undefined;
+    recordStart = undefined;
     if (name === undefined) {
       name = text(header.subarray(0, 100));
       // ustar splits a long path into a 155-byte prefix and the name.

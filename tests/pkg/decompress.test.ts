@@ -158,3 +158,59 @@ describe('ByteSink', () => {
     expect(sink.bytes().every((b) => b === 3)).toBe(true);
   });
 });
+
+describe('Zstandard frames are all checked before any is decoded', () => {
+  const skippable = new Uint8Array([0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0]);
+  const repeat = (part: Uint8Array, times: number): Uint8Array =>
+    concat(...Array.from({ length: times }, () => part));
+  // Descriptor 0 (no content size), window byte 0xA7 (about 1.875 GiB), then one RLE block.
+  const hugeWindow = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0xa7, 0x03, 0x00, 0x04, 0x00]);
+
+  it('refuses a huge window that follows more than eight skippable frames', () => {
+    const input = concat(repeat(skippable, 9), hugeWindow);
+    expect(() => unzstdBounded(input, 64 * MIB)).toThrow('larger Zstandard window');
+  });
+
+  it('refuses a huge window in a second data frame after a good one', () => {
+    const input = concat(b64(VECTOR_ZST), hugeWindow);
+    expect(() => unzstdBounded(input, 64 * MIB)).toThrow('larger Zstandard window');
+  });
+
+  it('refuses a stream of more frames than it will read', () => {
+    expect(() => unzstdBounded(repeat(skippable, 40), MIB)).toThrow('more compressed streams');
+  });
+
+  it('refuses a frame whose blocks would shift the window too many times', () => {
+    // Window byte 0x80 is 2^26 (64 MiB); use 0x68 (2^23 = 8 MiB) with 600 RLE blocks.
+    const block = new Uint8Array([0x02, 0x00, 0x04, 0x00]);
+    const frame = concat(new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x68]), repeat(block, 600));
+    expect(() => unzstdBounded(frame, 64 * MIB)).toThrow(PackageError);
+  });
+
+  it('decodes two good frames in a row', () => {
+    const out = unzstdBounded(concat(b64(VECTOR_ZST), b64(VECTOR_ZST)), MIB);
+    expect(out.length).toBe(2 * 10240);
+  });
+
+  it('refuses a frame that names a dictionary or sets the reserved bit', () => {
+    expect(() =>
+      unzstdBounded(new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x01, 0x00, 0, 0, 0, 0, 0, 0]), MIB),
+    ).toThrow(PackageError);
+    expect(() =>
+      unzstdBounded(new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x08, 0x00, 0, 0, 0, 0, 0, 0]), MIB),
+    ).toThrow(PackageError);
+  });
+});
+
+describe('gzip with many members', () => {
+  it('stops at the member cap instead of walking hundreds of thousands of empty members', () => {
+    const empty = gzipSync(new Uint8Array(0));
+    const data = concat(...Array.from({ length: 5000 }, () => empty));
+    expect(() => gunzipBounded(data, MIB)).toThrow('more compressed streams');
+  });
+
+  it('still reads a few members', () => {
+    const data = concat(gzipSync(utf8('a')), gzipSync(utf8('b')), gzipSync(utf8('c')));
+    expect(text(gunzipBounded(data, MIB))).toBe('abc');
+  });
+});

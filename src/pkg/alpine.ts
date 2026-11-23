@@ -9,7 +9,7 @@
 import { formatBytes } from '../binary/html';
 import type { RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
-import { ByteSink, DAMAGED, gunzipUntil, readCompressed, TOO_BIG } from './decompress';
+import { ByteSink, DAMAGED, gunzipUntil, readCompressed, TOO_BIG, TOO_MANY } from './decompress';
 import {
   PackageError,
   propertySection,
@@ -18,7 +18,7 @@ import {
   type PackageInfo,
 } from './model';
 import { signatureSection } from './signature';
-import { readTar, tarData, type TarResult } from './tar';
+import { readTar, tarData, TAR_MAX_ENTRIES, type TarResult } from './tar';
 
 // The signature and control streams are a few kilobytes to a few hundred, and
 // they come first. Four MiB of the file is more than enough to hold both.
@@ -28,6 +28,8 @@ const UNPACKED_MAX = 4 * 1024 * 1024;
 // `.PKGINFO` itself: a few KB, and a package with a thousand dependencies still fits.
 const PKGINFO_MAX = 1024 * 1024;
 const MAX_LINES = 20_000;
+// A line is cut here before it is looked at; values are kept to MAX_VALUE.
+const MAX_LINE = 4096;
 const MAX_VALUE = 2000;
 const MAX_RELATIONS = 5000;
 const TABLE_LIMIT = 500;
@@ -47,14 +49,32 @@ const SCRIPTS: Record<string, string> = {
 /** `key = value` lines, with repeated keys kept in order. Comments start with `#`. */
 export function parsePkgInfo(text: string): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length && i < MAX_LINES; i++) {
-    const match = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*$/.exec(lines[i]);
-    if (match && !lines[i].trimStart().startsWith('#')) {
-      const list = out.get(match[1]) ?? [];
-      list.push(match[2].slice(0, MAX_VALUE));
-      out.set(match[1], list);
+  // Lines are walked in place. A line is cut before it is examined, and no pattern
+  // runs over it that could backtrack on a megabyte of spaces.
+  let at = 0;
+  for (let n = 0; at < text.length && n < MAX_LINES; n++) {
+    let end = text.indexOf('\n', at);
+    if (end < 0) {
+      end = text.length;
     }
+    const line = text.slice(at, Math.min(end, at + MAX_LINE)).trimStart();
+    at = end + 1;
+    const equals = line.indexOf('=');
+    if (equals <= 0 || line.startsWith('#')) {
+      continue;
+    }
+    const key = line.slice(0, equals).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+      continue;
+    }
+    const list = out.get(key) ?? [];
+    list.push(
+      line
+        .slice(equals + 1)
+        .trim()
+        .slice(0, MAX_VALUE),
+    );
+    out.set(key, list);
   }
   return out;
 }
@@ -104,12 +124,23 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
 
   const sink = new ByteSink();
   // What the control archive holds, kept from the last look at the tar so far.
-  let tar: TarResult = { entries: [], next: 0, stop: 'more' };
+  const tar: TarResult = { entries: [], next: 0, stop: 'more' };
   const look = (): boolean => {
-    tar = readTar(sink.bytes());
+    const buffer = sink.bytes();
+    // Walk on from where the last look stopped. Starting over on every chunk makes
+    // a long run of tiny headers quadratic.
+    if (tar.stop === 'more') {
+      const more = readTar(buffer, tar.next);
+      tar.entries.push(...more.entries);
+      tar.next = more.next;
+      tar.stop = tar.entries.length >= TAR_MAX_ENTRIES ? 'cap' : more.stop;
+    }
+    for (const entry of tar.entries) {
+      entry.complete = entry.offset + entry.size <= buffer.length;
+    }
     const info = tar.entries.findIndex((e) => e.name === '.PKGINFO');
     if (info < 0 || !tar.entries[info].complete) {
-      return false;
+      return tar.stop !== 'more';
     }
     // Control scripts follow `.PKGINFO`; the first plain path is the data archive.
     return tar.stop !== 'more' || tar.entries.slice(info).some((e) => !e.name.startsWith('.'));
@@ -122,7 +153,7 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
   } catch (error) {
     if (
       !(error instanceof PackageError) ||
-      (error.message !== TOO_BIG && error.message !== DAMAGED)
+      (error.message !== TOO_BIG && error.message !== DAMAGED && error.message !== TOO_MANY)
     ) {
       throw error;
     }

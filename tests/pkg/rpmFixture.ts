@@ -52,6 +52,13 @@ export const int64 = (tag: number, ...value: bigint[]): Tag => ({
 });
 export const bin = (tag: number, value: Uint8Array): Tag => ({ tag, type: TYPE.BIN, value });
 
+/** Append without spreading: a spread of a megabyte exceeds the argument limit. */
+function put(into: number[], items: ArrayLike<number>): void {
+  for (let i = 0; i < items.length; i++) {
+    into.push(items[i]);
+  }
+}
+
 function u32(value: number): number[] {
   return [(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255];
 }
@@ -84,15 +91,17 @@ export function header(tags: Tag[], options: HeaderOptions = {}): Uint8Array {
     }
     const offset = store.length;
     if (type === TYPE.STRING || type === TYPE.I18N) {
-      store.push(...ascii(value as string), 0);
+      put(store, ascii(value as string));
+      store.push(0);
     } else if (type === TYPE.STRING_ARRAY) {
       count = (value as string[]).length;
       for (const item of value as string[]) {
-        store.push(...ascii(item), 0);
+        put(store, ascii(item));
+        store.push(0);
       }
     } else if (type === TYPE.BIN) {
       count = (value as Uint8Array).length;
-      store.push(...(value as Uint8Array));
+      put(store, value as Uint8Array);
     } else if (type === TYPE.INT16) {
       count = (value as number[]).length;
       for (const item of value as number[]) {

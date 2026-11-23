@@ -26,7 +26,10 @@ const CONTROL_FILE_MAX = 1024 * 1024;
 // Fields, and lines in the md5sums list, are counted up to these. The unpacked
 // cap already bounds the work; these keep the loops' limits named.
 const MAX_FIELDS = 500;
-const MAX_FILE_LINES = 2_000_000;
+const MAX_FILE_LINES = 1_000_000;
+// The checksum list is read up to this many bytes (about 200,000 files).
+const MD5SUMS_MAX = 8 * 1024 * 1024;
+const MAX_CONTROL_LINES = 50_000;
 // One field value is shown at most this long (a Depends line can be long, a
 // Description is capped separately).
 const MAX_VALUE = 8 * 1024;
@@ -91,7 +94,16 @@ interface Field {
 /** RFC 822-style fields of the first paragraph. Continuation lines start with a space or tab. */
 export function parseControl(text: string): Field[] {
   const fields: Field[] = [];
-  for (const line of text.split('\n')) {
+  // Lines are walked in place with a cap: a megabyte of newlines would otherwise
+  // make half a million empty strings.
+  let at = 0;
+  for (let n = 0; at < text.length && n < MAX_CONTROL_LINES; n++) {
+    let end = text.indexOf('\n', at);
+    if (end < 0) {
+      end = text.length;
+    }
+    const line = text.slice(at, end);
+    at = end + 1;
     if (line.trim() === '' && fields.length > 0) {
       break; // a blank line ends the paragraph
     }
@@ -343,12 +355,22 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
     if (sumBytes) {
       const paths: string[][] = [];
       let count = 0;
-      for (const line of decode(sumBytes).split('\n')) {
-        if (count >= MAX_FILE_LINES) {
-          break;
+      // Walk the lines in place: splitting the whole list builds a string per line,
+      // and a file of empty lines would build millions.
+      const listing = decode(sumBytes.subarray(0, MD5SUMS_MAX));
+      if (sumBytes.length > MD5SUMS_MAX) {
+        warnings.push('The file list is longer than MarkCopy will read, so it is cut short.');
+      }
+      let at = 0;
+      for (let examined = 0; at < listing.length && examined < MAX_FILE_LINES; examined++) {
+        let end = listing.indexOf('\n', at);
+        if (end < 0) {
+          end = listing.length;
         }
-        // "<32 hex digits>  <path>"
-        const path = /^[0-9a-fA-F]{32}\s+(.+)$/.exec(line)?.[1];
+        // "<32 hex digits>  <path>"; a line is looked at only as far as a path can be shown.
+        const line = listing.slice(at, Math.min(end, at + 40 + MAX_PATH));
+        at = end + 1;
+        const path = /^[0-9a-fA-F]{32}[ \t]+(\S.*)$/.exec(line)?.[1];
         if (path) {
           count++;
           if (paths.length < CONTENTS_LIMIT) {
