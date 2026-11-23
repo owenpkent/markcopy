@@ -477,7 +477,10 @@ describe('readMsi: what the file is', () => {
     });
     expect(pkg(info, 'Applies to product codes (from the summary template)')).toBe(`${a}, ${b}`);
     expect(pkg(info, 'Patch code')).toBe(c);
-    expect(pkg(info, 'Obsoletes patches')).toBe(d);
+    expect(pkg(info, 'Obsoletes patches')).toBeUndefined();
+    expect(pkg(info, 'Obsolete patches (legacy list in the summary)')).toBe(
+      `${d} (used when the patch has no MsiPatchSequence sequencing information, and this patch has none)`,
+    );
     expect(pkg(info, 'Package code')).toBeUndefined();
     expect(pkg(info, 'Patch sources (from Keywords)')).toBe(
       'https://example.test/one, \\\\server\\share',
@@ -486,6 +489,35 @@ describe('readMsi: what the file is', () => {
     expect(pkg(info, 'Patch description (from Subject)')).toBe('Hotfix for Example');
     expect(pkg(info, 'Product name')).toBeUndefined();
     expect(info.title).toBe('Hotfix for Example');
+  });
+
+  it('says Windows Installer 3.0 ignores the legacy obsolete list when MsiPatchSequence has rows', async () => {
+    // The reviewer's fixture: minimum installer 3.0, the patch code and an older
+    // patch code, and an MsiPatchSequence row with Attributes 0.
+    const c = '{AAAAAAAA-1111-2222-3333-444444444444}';
+    const d = '{12345678-1234-1234-1234-123456789ABC}';
+    const sequence = (rows: number) =>
+      read({
+        clsid: CLSID_PATCH,
+        summary: { wordCount: 4, revision: `${c}${d}` },
+        tables: [{ name: 'MsiPatchSequence', columns: ['s', 's', 's', 'i4'], rows }],
+      });
+    const label = 'Obsolete patches (legacy list in the summary)';
+    const withRows = await sequence(1);
+    expect(pkg(withRows, 'Patch code')).toBe(c);
+    expect(pkg(withRows, label)).toBe(
+      `${d} (Windows Installer 3.0 and later ignore this list, because this patch has sequencing information in an MsiPatchSequence table)`,
+    );
+    expect(pkg(withRows, 'Obsoletes patches')).toBeUndefined();
+    const empty = await sequence(0);
+    expect(pkg(empty, label)).toContain('this patch has none');
+    const unmeasured = await read({
+      clsid: CLSID_PATCH,
+      summary: { wordCount: 4, revision: `${c}${d}` },
+      tables: [{ name: 'MsiPatchSequence', columns: ['s', 's', 's', 'i4'], rows: 1, extra: 3 }],
+    });
+    expect(pkg(unmeasured, label)).toContain('could not be read');
+    expect(pkg(unmeasured, label)).not.toContain('this patch has none');
   });
 
   it('shows a patch Revision Number that is not a run of GUIDs as it is', async () => {

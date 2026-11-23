@@ -272,7 +272,9 @@ function ambiguity(f: Startup, group: Startup[]): string | undefined {
   }
   if (scheme.length > 0 && differs(scheme)) {
     const root = f.dir === 'unknown' || scheme.some((g) => g.dir === 'unknown');
-    return `a differing copy sits in the other of purelib and platlib, which are one directory on some systems and two on others, so the outcome depends on the installation scheme${root ? ROOT_NOTE : ''}`;
+    return root
+      ? `a differing copy may install into the same directory as this one or into another${ROOT_NOTE}, so the outcome depends on where the wheel root goes, on the installation scheme and on which copy the installer leaves in place`
+      : 'a differing copy sits in the other of purelib and platlib, which are one directory on some systems and two on others, so the outcome depends on the installation scheme';
   }
   return undefined;
 }
@@ -323,8 +325,12 @@ function suppression(pth: Startup, byName: Map<string, Startup[]>, complete: boo
       state = rootUnknown ? 'mixed-root' : 'mixed';
     }
   }
-  // Without a complete listing a .start that would suppress may be unlisted.
-  return state === 'none' && !complete ? 'unlisted' : state;
+  // Without a complete listing an unlisted copy of the .start may decide the
+  // outcome: one that would suppress where none is listed, or one that is
+  // rejected (or installs elsewhere) where a registering one is listed. Only the
+  // states that already say the outcome is open, or why it is not known, stay.
+  const open: Suppression[] = ['unknown', 'case', 'collision', 'mixed', 'mixed-root'];
+  return !complete && !open.includes(state) ? 'unlisted' : state;
 }
 
 const SUPPRESSION_TEXT: Record<Suppression, string> = {
@@ -333,16 +339,16 @@ const SUPPRESSION_TEXT: Record<Suppression, string> = {
   unknown:
     '; whether a .start file of the same name makes Python 3.15 and later skip it was not established',
   unlisted:
-    '; the archive listing is incomplete, so a .start file of the same name that would make Python 3.15 and later skip it may be unlisted',
+    '; whether a .start file of the same name makes Python 3.15 and later skip it is not established, because the archive listing is incomplete and a copy of that .start may be unlisted',
   case: '; whether a .start file of the same name makes Python 3.15 and later skip it is not established, because names that differ only by letter case are one file on a case-insensitive file system',
   collision:
     '; whether a .start file of the same name makes Python 3.15 and later skip it depends on which copy of that .start the installer leaves in place (pip writes the .data copy last)',
   scheme:
     '; whether Python 3.15 and later skip it depends on the installation scheme: a .start of the same name sits in the other of purelib and platlib, so it is skipped where they are one directory and runs where they differ',
-  'scheme-root': `; whether Python 3.15 and later skip it depends on the installation scheme: a .start of the same name may sit in the same folder or the other of purelib and platlib, so it is skipped where they are one directory and runs where they differ${ROOT_NOTE}`,
+  'scheme-root': `; whether Python 3.15 and later skip it is not established: a .start of the same name is in the archive, but whether it installs into the same directory as this file is not${ROOT_NOTE}; it is skipped where the two share a directory and runs where they do not`,
   mixed:
     '; whether Python 3.15 and later skip it depends on the installation scheme and on which copy the installer leaves in place: the archive holds differing .start files of the same name, at least one of them in the other of purelib and platlib',
-  'mixed-root': `; whether Python 3.15 and later skip it depends on the installation scheme and on which copy the installer leaves in place: the archive holds differing .start files of the same name, at least one of them in the other of purelib and platlib${ROOT_NOTE}`,
+  'mixed-root': `; whether Python 3.15 and later skip it is not established: the archive holds differing .start files of the same name, and which of them install into the same directory as this file is not${ROOT_NOTE}, so it depends on that, on the installation scheme and on which copy the installer leaves in place`,
 };
 
 export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<ZipFlavour> {
@@ -532,7 +538,7 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
   // A copy of a file may sit in the part of the directory that could not be listed.
   const unlistedCopy = zip.complete
     ? ''
-    : '; the archive listing is incomplete, so another copy of this file may be unlisted';
+    : '; the archive listing is incomplete, so another copy of this file that would change this may be unlisted';
   const definite = (f: Startup, what: string, reason: string | undefined): string =>
     reason === undefined && f.read && (f.isStart || f.text !== undefined)
       ? what + unlistedCopy
