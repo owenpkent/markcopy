@@ -282,7 +282,20 @@ function exportsSection(info: PeInfo): string {
     return '';
   }
   const as = exported.name ? ` as ${escapeHtml(exported.name)}` : '';
-  let html = `<p>${number(exported.functions)} ${exported.functions === 1 ? 'function' : 'functions'}${as}, ${number(exported.named)} by name.</p>`;
+  const byName = `${number(exported.named)} by name`;
+  let lead: string;
+  if (exported.functions === undefined) {
+    // The table could not be read, so only its length is known, and a length
+    // is not a count of functions: unused ordinals take a slot each.
+    lead = `${number(exported.slots)} export table ${exported.slots === 1 ? 'slot' : 'slots'}${as}, ${byName}. The table could not be read, so how many of the slots hold a function is not known.`;
+  } else {
+    lead = `${number(exported.functions)} ${exported.functions === 1 ? 'function' : 'functions'}${as}, ${byName}.`;
+    const unused = exported.slots - exported.functions;
+    if (unused > 0) {
+      lead += ` Its ordinals run to ${number(exported.slots)}, with ${number(unused)} unused.`;
+    }
+  }
+  let html = `<p>${lead}</p>`;
   if (exported.names.length > 0) {
     html += table(
       ['Exported name'],

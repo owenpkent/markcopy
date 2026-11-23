@@ -534,7 +534,12 @@ export interface PeSpec {
   imports?: { library: string; functions: number }[];
   /** Delay-load imports: attributes bit 0 set, so every field is an RVA. */
   delayImports?: { library: string; functions: number }[];
-  exports?: { dllName: string; names: string[]; functions?: number };
+  /**
+   * `functions` is the length of the export address table (it defaults to the
+   * number of names) and `unused` lists the slots in it left empty, as the
+   * gaps between a library's ordinals are.
+   */
+  exports?: { dllName: string; names: string[]; functions?: number; unused?: number[] };
   /** A CodeView "RSDS" debug record. `guid` is the usual 8-4-4-4-12 text form. */
   debug?: { guid: string; age: number; pdbPath: string };
   /** Adds an IMAGE_DEBUG_TYPE_REPRO (16) entry, which marks a deterministic build. */
@@ -649,7 +654,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     rdata.pad(4);
     const functionTable = here();
     for (let i = 0; i < functions; i++) {
-      rdata.u32(TEXT_RVA);
+      rdata.u32(spec.exports.unused?.includes(i) ? 0 : TEXT_RVA);
     }
     const nameTable = here();
     for (const r of nameRvas) {

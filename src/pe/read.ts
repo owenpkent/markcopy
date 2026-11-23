@@ -12,6 +12,7 @@
 // hostile.
 //
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
+import { child, findAll, parseXml } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
 import { readSigner, type Signer } from './signer';
 import {
@@ -51,7 +52,16 @@ export interface PeImport {
 export interface PeExports {
   /** The name the image exports under, which survives a rename of the file. */
   name: string;
-  functions: number;
+  /**
+   * Entries of the export address table that hold an address: what the image
+   * really exports. Absent when the table could not be read to count them.
+   */
+  functions?: number;
+  /**
+   * How long the export address table is. Ordinals index it, so a library
+   * whose ordinals have gaps has more slots than functions.
+   */
+  slots: number;
   named: number;
   /** The first names, in table order. `named` says how many there are in all. */
   names: string[];
@@ -130,6 +140,9 @@ const MAX_SECTIONS = 96;
 const MAX_IMPORTS = 1024;
 const MAX_THUNKS = 16384;
 const MAX_EXPORT_NAMES = 100;
+// An export is addressed by a 16-bit ordinal, so a table has no use for more
+// slots than that, and a header that claims more is not counted.
+const MAX_EXPORT_SLOTS = 0x10000;
 const MAX_RESOURCE_ENTRIES = 4096;
 const MAX_VERSION_BYTES = 512 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
@@ -650,8 +663,27 @@ async function readExports(
 ): Promise<PeExports> {
   const head = await reader.view(offset, 40);
   const nameRva = head.getUint32(12, true);
+  const slots = head.getUint32(20, true);
   const named = head.getUint32(24, true);
   const namesRva = head.getUint32(32, true);
+  // The header gives the length of the address table, not how many of its
+  // entries are in use: shell32.dll has 2,001 slots and 843 exports. The
+  // unused ordinals are zero, so the functions are the entries that are not.
+  let functions: number | undefined;
+  if (slots <= MAX_EXPORT_SLOTS) {
+    try {
+      const table = await reader.view(need(head.getUint32(28, true)), slots * 4);
+      functions = 0;
+      for (let i = 0; i < slots; i++) {
+        if (table.getUint32(i * 4, true) !== 0) {
+          functions++;
+        }
+      }
+    } catch {
+      // The names below may still be readable; the page says the slots were not counted.
+      functions = undefined;
+    }
+  }
   const shown = Math.min(named, MAX_EXPORT_NAMES);
   const names: string[] = [];
   if (shown > 0) {
@@ -662,34 +694,46 @@ async function readExports(
   }
   return {
     name: nameRva === 0 ? '' : await reader.cstr(need(nameRva), 260),
-    functions: head.getUint32(20, true),
+    functions,
+    slots,
     named,
     names,
   };
 }
 
-// An application manifest is a small XML document. Four facts in it are worth
-// a row each, and attribute lookups find them without an XML parser in the
-// host bundle; nothing here is used as markup, only shown as text.
+// An application manifest is a small XML document, and it is parsed as one.
+// Matching its text instead reads the wrong thing in two ordinary cases: the
+// stock Visual Studio manifest keeps a commented-out example of every
+// execution level above the live element, so the first textual match for
+// requestedExecutionLevel is the comment's asInvoker whatever the program
+// really asks for; and the first assemblyIdentity in the text of many
+// manifests is a dependency's (the common controls library), not the
+// program's own.
 function readManifest(bytes: Uint8Array): PeManifest | undefined {
-  const xml = new TextDecoder().decode(bytes);
-  const attribute = (element: string, name: string): string | undefined => {
-    const tag = new RegExp(`<(?:\\w+:)?${element}\\b[^>]{0,2000}>`, 'i').exec(xml)?.[0];
-    const value = tag && new RegExp(`\\b${name}\\s*=\\s*(["'])(.{0,200}?)\\1`, 'i').exec(tag)?.[2];
-    return value ? printable(value) : undefined;
+  // A manifest is UTF-8 unless a byte order mark says UTF-16.
+  const encoding =
+    bytes[0] === 0xff && bytes[1] === 0xfe
+      ? 'utf-16le'
+      : bytes[0] === 0xfe && bytes[1] === 0xff
+        ? 'utf-16be'
+        : 'utf-8';
+  const root = parseXml(new TextDecoder(encoding).decode(bytes));
+  const clean = (value: string | undefined): string | undefined => {
+    const text = value === undefined ? '' : printable(value).trim().slice(0, 200);
+    return text || undefined;
   };
-  const text = (element: string): string | undefined => {
-    const value = new RegExp(`<(?:\\w+:)?${element}\\b[^>]{0,500}>([^<]{0,200})</`, 'i').exec(
-      xml,
-    )?.[1];
-    return value?.trim() ? printable(value.trim()) : undefined;
-  };
-  const name = attribute('assemblyIdentity', 'name');
-  const version = attribute('assemblyIdentity', 'version');
+  const first = (name: string) => findAll(root, name)[0];
+  // The program's own identity is the one directly under <assembly>. Those
+  // nested in <dependency> name what it depends on.
+  const assembly = child(root, 'assembly');
+  const own = assembly && child(assembly, 'assemblyIdentity');
+  const name = clean(own?.attrs.name);
+  const version = clean(own?.attrs.version);
+  const level = first('requestedExecutionLevel');
   const manifest: PeManifest = {
-    executionLevel: attribute('requestedExecutionLevel', 'level'),
-    uiAccess: attribute('requestedExecutionLevel', 'uiAccess'),
-    dpiAware: text('dpiAwareness') ?? text('dpiAware'),
+    executionLevel: clean(level?.attrs.level),
+    uiAccess: clean(level?.attrs.uiAccess),
+    dpiAware: clean(first('dpiAwareness')?.text) ?? clean(first('dpiAware')?.text),
     identity: name ? (version ? `${name} ${version}` : name) : undefined,
   };
   return Object.values(manifest).some((value) => value !== undefined) ? manifest : undefined;
