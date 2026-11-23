@@ -234,3 +234,27 @@ describe('renderPeHtml: icon', () => {
     expect(html).not.toContain('mc-exe-icon');
   });
 });
+
+// The page lays its sections out in two columns (media/preview.css), which
+// needs each one wrapped, and the grids that need the full width marked.
+describe('renderPeHtml: sections for the two-column layout', () => {
+  it('wraps each section, and marks the wide grids', async () => {
+    const info = await readPe(
+      bytesSource(
+        buildPe({
+          dll: true,
+          imports: [{ library: 'KERNEL32.dll', functions: 2 }],
+          exports: { dllName: 'x.dll', names: ['A'] },
+        }),
+      ),
+    );
+    const html = renderPeHtml(info, { fileName: 'x.dll' });
+    expect(html).toContain('<div class="mc-info-section"><h2>Version</h2>');
+    expect(html).toContain('<div class="mc-info-section"><h2>File</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Sections</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Imports</h2>');
+    expect(html).toContain('<div class="mc-info-section mc-info-wide"><h2>Exports</h2>');
+    // Every heading sits inside a section: none is left loose between them.
+    expect(html.match(/<h2>/g)).toHaveLength(html.match(/class="mc-info-section/g)?.length ?? 0);
+  });
+});
