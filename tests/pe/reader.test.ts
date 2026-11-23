@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../../src/pe';
-import { readSigner } from '../../src/pe/signer';
+import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
 
@@ -670,6 +670,62 @@ describe('readPe: signature', () => {
       subject: 'Contoso Software',
       notBefore: '1999-12-31',
       notAfter: '2049-01-01',
+    });
+  });
+
+  it('counts the signers of SignedData, and finds none in a bundle of certificates', () => {
+    expect(signerCount(buildSignedData(signer))).toBe(1);
+    // ContentInfo naming SignedData, holding an empty SEQUENCE.
+    const bare = Uint8Array.from([
+      0x30, 0x0f, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02, 0xa0, 0x02,
+      0x30, 0x00,
+    ]);
+    expect(isSignedData(bare)).toBe(true);
+    expect(signerCount(bare)).toBe(0);
+    expect(signerCount(new Uint8Array(40).fill(0x41))).toBe(0);
+    expect(signerCount(new Uint8Array(0))).toBe(0);
+  });
+
+  // A corrupt entry length must not carry the walk out of the certificate
+  // table. A length near the top of the range once became a step backwards,
+  // because the padding was done with a 32-bit mask.
+  describe('an entry whose length lies', () => {
+    it('is not followed when it runs past the table', async () => {
+      const info = await read({ certificate: buildSignedData(signer), certificateLength: 0x10000 });
+      expect(info.signature).toMatchObject({ signedData: false, entries: [] });
+      expect(info.warnings).toEqual([]);
+    });
+
+    it('is not followed backwards when it is near the top of the range', async () => {
+      for (const length of [0xfffffff8, 0xfffffff9, 0xffffffff, 0x80000000, 0x7ffffff9]) {
+        const info = await read({
+          certificate: buildSignedData(signer),
+          certificateLength: length,
+        });
+        expect(info.signature).toMatchObject({ signedData: false, entries: [] });
+      }
+    });
+
+    it('does not read bytes before the table as an entry', async () => {
+      // Sixteen bytes placed straight before the table that read as the header
+      // of a PKCS #7 entry. Stepping back eight bytes from the table would land
+      // on them.
+      const lure = new Uint8Array(16);
+      new DataView(lure.buffer).setUint32(8, 16, true);
+      new DataView(lure.buffer).setUint16(14, 2, true);
+      const info = await read({
+        overlay: lure,
+        certificate: buildSignedData(signer),
+        certificateLength: 0xfffffff8,
+      });
+      expect(info.signature?.entries).toEqual([]);
+      expect(info.signature?.signedData).toBe(false);
+    });
+
+    it('still reads a second entry that follows a well-formed first', async () => {
+      const first = buildSignedData(signer);
+      const info = await read({ certificate: first });
+      expect(info.signature).toMatchObject({ signedData: true, entries: ['PKCS #7 SignedData'] });
     });
   });
 

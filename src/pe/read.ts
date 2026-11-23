@@ -14,7 +14,7 @@
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
 import { child, findAll, parseXml } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
-import { isSignedData, readSigner, type Signer } from './signer';
+import { isSignedData, readSigner, signerCount, type Signer } from './signer';
 import { printable } from './text';
 import { readVersionResource, type VersionInfo } from './version';
 
@@ -101,9 +101,10 @@ export interface PeSignature {
   /** Bytes of the certificate table. */
   size: number;
   /**
-   * Whether the table holds a PKCS #7 SignedData entry, the form an
-   * Authenticode signature takes. A table can exist without one: a bare X.509
-   * certificate signs nothing, and must not be reported as a signature.
+   * Whether the table holds a PKCS #7 SignedData entry with at least one
+   * signer, the form an Authenticode signature takes. A table can exist
+   * without one: a bare X.509 certificate signs nothing, and neither does
+   * SignedData that only carries certificates.
    */
   signedData: boolean;
   /** What each entry of the table says it is, in table order. */
@@ -637,7 +638,11 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         const head = await reader.view(at, 8);
         const length = head.getUint32(0, true);
         const type = head.getUint16(6, true);
-        if (length < 8) {
+        // An entry is its 8-byte header and its content, and it lies inside
+        // the table. A length that says otherwise is damage, and is not
+        // followed: stepping by it would carry the walk out of the table and
+        // read whatever lies there as certificate entries.
+        if (length < 8 || length > end - at) {
           break;
         }
         signature.entries.push(CERTIFICATE_TYPES[type] ?? `Type ${type}`);
@@ -646,12 +651,17 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
             at + 8,
             Math.min(length - 8, MAX_SIGNATURE_BYTES, end - at - 8),
           );
-          if (isSignedData(der)) {
+          // SignedData with no signer is a bundle of certificates, not a
+          // signature: something has to have signed.
+          if (isSignedData(der) && signerCount(der) > 0) {
             signature.signedData = true;
             signature.signer = readSigner(der);
           }
         }
-        at += (length + 7) & ~7;
+        // Entries are padded to eight bytes. Arithmetic, not a bit mask: a
+        // mask works on 32-bit signed values, and turned a length near the
+        // top of the range into a step backwards.
+        at += Math.ceil(length / 8) * 8;
       }
     });
   }

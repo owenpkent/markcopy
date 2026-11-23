@@ -155,6 +155,34 @@ export function isSignedData(der: Uint8Array): boolean {
   );
 }
 
+/**
+ * How many signers a PKCS #7 SignedData carries, at most `max`.
+ *
+ * SignedData with none is a legitimate thing and not a signature: it is how a
+ * bundle of certificates is shipped ("certs-only"). Something has to have
+ * signed for there to be a signature, so the reader asks this before it says
+ * a file carries one.
+ */
+export function signerCount(der: Uint8Array, max = 16): number {
+  const outer = tlvAt(der, 0, der.length);
+  if (outer?.tag !== 0x30) {
+    return 0;
+  }
+  const wrapped = children(der, outer, 2)[1];
+  const signed = wrapped?.tag === 0xa0 ? tlvAt(der, wrapped.start, wrapped.end) : undefined;
+  if (signed?.tag !== 0x30) {
+    return 0;
+  }
+  // version, digestAlgorithms, contentInfo, then optional certificates and
+  // CRLs, then signerInfos: the last element, and a SET like the second.
+  const parts = children(der, signed, 8);
+  const signers = parts.length > 3 ? parts[parts.length - 1] : undefined;
+  if (signers?.tag !== 0x31) {
+    return 0;
+  }
+  return children(der, signers, max).filter((info) => info.tag === 0x30).length;
+}
+
 export function readSigner(der: Uint8Array): Signer | undefined {
   // ContentInfo ::= SEQUENCE { contentType OID, [0] EXPLICIT SignedData }
   const outer = tlvAt(der, 0, der.length);

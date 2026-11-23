@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { bytesSource, formatBytes, ICON_MEDIA_ID, readPe, renderPeHtml } from '../../src/pe';
-import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
+import { buildPe, buildSignedData, iconBitmap, pngStub, tlv, type PeSpec } from './fixture';
+
+// A PKCS #7 SignedData with the given signerInfos and no certificates, built
+// here because the fixture's own always has exactly one signer and its
+// certificate.
+const SIGNED_DATA_OID = tlv(
+  0x06,
+  Uint8Array.from([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02]),
+);
+const signerInfo = (): Uint8Array =>
+  tlv(
+    0x30,
+    tlv(0x02, Uint8Array.of(1)), // version
+    tlv(0x30, tlv(0x30), tlv(0x02, Uint8Array.of(5))), // issuer and serial number
+  );
+const signedDataWith = (signers: Uint8Array[]): Uint8Array =>
+  tlv(
+    0x30,
+    SIGNED_DATA_OID,
+    tlv(
+      0xa0,
+      tlv(
+        0x30,
+        tlv(0x02, Uint8Array.of(1)), // version
+        tlv(0x31), // digestAlgorithms
+        tlv(0x30), // contentInfo
+        tlv(0x31, ...signers), // signerInfos
+      ),
+    ),
+  );
 
 const RLO = String.fromCharCode(0x202e);
 const BEL = String.fromCharCode(7);
@@ -114,15 +143,25 @@ describe('renderPeHtml: content', () => {
   });
 
   it('says the signature is not verified even when the signer cannot be read', async () => {
-    // A ContentInfo that says it is SignedData and holds an empty one: a
-    // signature entry by its own account, with no signer to walk to.
-    const emptySignedData = Uint8Array.from([
+    // SignedData with one signer and no certificate for it: something signed,
+    // and there is no certificate to take a name from.
+    const html = await render({ certificate: signedDataWith([signerInfo()]) });
+    expect(html).toContain('Embedded signature present, not verified by MarkCopy');
+    expect(html).not.toContain('Signer</td>');
+  });
+
+  // SignedData with no signer is how a bundle of certificates is shipped. It
+  // signs nothing, and was once reported as a signature because the entry was
+  // SignedData at all.
+  it('does not claim a signature for SignedData that has no signer', async () => {
+    const html = await render({ certificate: signedDataWith([]) });
+    expect(html).toContain('Certificate data present, with no Authenticode signature recognized');
+    expect(html).not.toContain('Embedded signature present');
+    const bare = Uint8Array.from([
       0x30, 0x0f, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02, 0xa0, 0x02,
       0x30, 0x00,
     ]);
-    const html = await render({ certificate: emptySignedData });
-    expect(html).toContain('Embedded signature present, not verified by MarkCopy');
-    expect(html).not.toContain('Signer</td>');
+    expect(await render({ certificate: bare })).not.toContain('Embedded signature present');
   });
 
   // A certificate table is not a signature. Bytes filed as PKCS #7 that are
