@@ -8,6 +8,7 @@ import { formatBytesShort, formatNumber } from '../binary/html';
 import { parseManifest, type ManifestNode } from './axml';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import {
+  MAX_SIGNING_PAIRS,
   readBytesEntry,
   readV1Signatures,
   signatureNotEstablished,
@@ -176,21 +177,32 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
 
   const permissions: string[][] = [];
   const features: string[][] = [];
+  let unlisted = 0;
   for (const node of manifest?.children ?? []) {
-    if (
-      /^uses-permission(-sdk-23|-sdk-m)?$/.test(node.name) &&
-      permissions.length < MAX_PERMISSIONS
-    ) {
-      permissions.push([
-        node.attrs.name ?? '(unnamed)',
-        node.attrs.maxSdkVersion ? `API ${node.attrs.maxSdkVersion}` : '',
-      ]);
-    } else if (node.name === 'uses-feature' && features.length < MAX_FEATURES) {
-      const label =
-        node.attrs.name ??
-        (node.attrs.glEsVersion ? glVersion(node.attrs.glEsVersion) : '(unnamed)');
-      features.push([label, node.attrs.required === 'false' ? 'No' : 'Yes']);
+    if (/^uses-permission(-sdk-23|-sdk-m)?$/.test(node.name)) {
+      if (permissions.length < MAX_PERMISSIONS) {
+        permissions.push([
+          node.attrs.name ?? '(unnamed)',
+          node.attrs.maxSdkVersion ? `API ${node.attrs.maxSdkVersion}` : '',
+        ]);
+      } else {
+        unlisted++;
+      }
+    } else if (node.name === 'uses-feature') {
+      if (features.length < MAX_FEATURES) {
+        const label =
+          node.attrs.name ??
+          (node.attrs.glEsVersion ? glVersion(node.attrs.glEsVersion) : '(unnamed)');
+        features.push([label, node.attrs.required === 'false' ? 'No' : 'Yes']);
+      } else {
+        unlisted++;
+      }
     }
+  }
+  if (unlisted > 0) {
+    warnings.push(
+      `The manifest lists ${formatNumber(unlisted)} more permissions or features than MarkCopy reads, so the tables below are incomplete.`,
+    );
   }
   before.push(
     ...tableSection('Permissions', ['Permission', 'Up to API'], permissions, {
@@ -212,7 +224,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   // later live in the APK Signing Block, whose certificate MarkCopy does not parse.
   const after: InfoSection[] = [];
   // apksig matches the block and .SF names exactly.
-  const v1 = await readV1Signatures(zip, false, warnings);
+  const v1 = await readV1Signatures(zip, 'apksig', warnings);
   const signer = v1.signed[0]?.signer;
   let ids: number[] | undefined;
   try {
@@ -246,7 +258,9 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
       ...propertySection('Signature', [
         [
           'Status',
-          'An APK Signing Block is present but holds no signature scheme MarkCopy recognises, so no signature is reported',
+          ids.length >= MAX_SIGNING_PAIRS
+            ? `The first ${MAX_SIGNING_PAIRS} entries of the APK Signing Block hold no signature scheme MarkCopy recognises; later entries were not examined`
+            : 'An APK Signing Block is present but holds no signature scheme MarkCopy recognises, so no signature is reported',
         ],
         [
           'Block contents',
@@ -259,7 +273,12 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   } else {
     after.push(
       ...propertySection('Signature', [
-        ['Status', 'Not signed: no v1 signature or APK Signing Block was found'],
+        [
+          'Status',
+          zip.complete
+            ? 'Not signed: no v1 signature or APK Signing Block was found'
+            : 'No v1 signature or APK Signing Block was found in the part of the archive that could be listed',
+        ],
       ]),
     );
   }

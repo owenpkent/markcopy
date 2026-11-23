@@ -51,7 +51,7 @@ const HEAD_COMPRESSED_CAP = 4 * 1024 * 1024;
 const MAX_SIZE = 2 ** 50;
 // A signing block is a few kilobytes to a few megabytes; the IDs are listed
 // from its start, and a handful of pairs is all a real one has.
-const MAX_SIGNING_PAIRS = 64;
+export const MAX_SIGNING_PAIRS = 64;
 const MAX_SIGNING_BLOCK = 64 * 1024 * 1024;
 
 export interface ZipEntry {
@@ -538,64 +538,189 @@ const MAX_V1_BLOCK_BYTES = 1024 * 1024;
 const MAX_V1_NAMES = 3;
 
 export interface V1Signatures {
-  /** Blocks paired with their .SF that read as a signature, in directory order, paired ones first. */
+  /** Blocks that form a signature, paired ones first. */
   signed: { name: string; signer?: Signer }[];
-  /** Why no signature is established, when blocks exist but none is. */
+  /** Why no signature is established, when signature blocks exist but none is. */
   notEstablished?: string;
 }
 
-const foldAscii = (text: string): string => text.replace(/[a-z]/g, (c) => c.toUpperCase());
+/** Whether a bounded read of a DER item is possible: its tag, content range and whether its length is indefinite. */
+function derAt(
+  b: Uint8Array,
+  at: number,
+  limit: number,
+): { tag: number; start: number; end: number; indefinite: boolean } | undefined {
+  if (at + 2 > limit) {
+    return undefined;
+  }
+  const tag = b[at];
+  let length = b[at + 1];
+  let p = at + 2;
+  if (length === 0x80) {
+    return { tag, start: p, end: limit, indefinite: true };
+  }
+  if (length & 0x80) {
+    const count = length & 0x7f;
+    if (count < 1 || count > 4 || p + count > limit) {
+      return undefined;
+    }
+    length = 0;
+    for (let i = 0; i < count; i++) {
+      length = length * 256 + b[p++];
+    }
+  }
+  return p + length > limit ? undefined : { tag, start: p, end: p + length, indefinite: false };
+}
 
 /**
- * The v1 (JAR) signatures of an archive. A signature is a block
- * `META-INF/X.RSA|.DSA|.EC` together with `META-INF/X.SF`; a block with no
- * .SF is ignored with a warning and a .SF with no block signs nothing, which
- * is how apksig's V1SchemeVerifier treats them (it matches names exactly).
- * The JDK's verifier folds case in the base name, so JAR files are paired
- * with `caseInsensitive`; APKs are not.
+ * Whether a PKCS #7 SignedData carries its own signature-file bytes: a
+ * non-empty OCTET STRING in its encapsulated ContentInfo (what jarsigner
+ * -internalsf writes). OpenJDK reads `block.getContentInfo().getData()` and
+ * asks for an external .SF only when that is null.
  *
- * Every candidate is considered, paired ones first, within a count and a
- * byte budget, so an orphan or an unreadable block ahead of the real one
- * costs a warning and not the signature.
+ * ContentInfo { OID, [0] { SignedData { version, digestAlgorithms,
+ *   ContentInfo { OID, [0] { OCTET STRING }? }, ... } } }
+ */
+export function hasEmbeddedSignatureFile(der: Uint8Array): boolean {
+  const outer = derAt(der, 0, der.length);
+  if (outer?.tag !== 0x30) {
+    return false;
+  }
+  const oid = derAt(der, outer.start, outer.end);
+  const wrapped = oid && !oid.indefinite ? derAt(der, oid.end, outer.end) : undefined;
+  const signed = wrapped?.tag === 0xa0 ? derAt(der, wrapped.start, wrapped.end) : undefined;
+  if (signed?.tag !== 0x30) {
+    return false;
+  }
+  // version, digestAlgorithms, then the encapsulated ContentInfo.
+  let at = signed.start;
+  for (let i = 0; i < 2; i++) {
+    const item = derAt(der, at, signed.end);
+    if (!item || item.indefinite) {
+      return false;
+    }
+    at = item.end;
+  }
+  const content = derAt(der, at, signed.end);
+  if (content?.tag !== 0x30) {
+    return false;
+  }
+  const type = derAt(der, content.start, content.end);
+  const holder = type && !type.indefinite ? derAt(der, type.end, content.end) : undefined;
+  if (holder?.tag !== 0xa0) {
+    return false;
+  }
+  const octets = derAt(der, holder.start, holder.end);
+  if (!octets || (octets.tag !== 0x04 && octets.tag !== 0x24)) {
+    return false;
+  }
+  // An indefinite length ends with 00 00; anything before that is content.
+  return octets.indefinite
+    ? der[octets.start] !== 0 || der[octets.start + 1] !== 0
+    : octets.end > octets.start;
+}
+
+type V1Rules = 'jdk' | 'apksig';
+
+interface V1Name {
+  kind: 'block' | 'sf';
+  /** What a block and its .SF share. */
+  key: string;
+}
+
+/**
+ * Which entry names are signature files, per implementation.
+ *
+ * OpenJDK (sun.security.util.SignatureFileVerifier, jdk-21+35):
+ *   isInMetaInf: name starts with "META-INF/" ignoring case and has no
+ *     further "/", so only direct children count;
+ *   isBlockOrSF, on the upper-cased name: ends with .SF, .DSA, .RSA or .EC;
+ *   a block and its .SF share the upper-cased name without the extension.
+ *
+ * apksig (V1SchemeVerifier): any name starting "META-INF/" (case-sensitive,
+ *   nested paths included) that ends with .SF, or .RSA, .DSA or .EC (all
+ *   case-sensitive); a block pairs with the .SF named like it with the
+ *   extension replaced by ".SF".
+ */
+function v1Name(name: string, rules: V1Rules): V1Name | undefined {
+  if (rules === 'jdk') {
+    const upper = name.toUpperCase();
+    if (!upper.startsWith('META-INF/') || name.lastIndexOf('/') >= 'META-INF/'.length) {
+      return undefined;
+    }
+    if (upper.endsWith('.SF')) {
+      return { kind: 'sf', key: upper.slice(0, -3) };
+    }
+    if (/\.(DSA|RSA|EC)$/.test(upper)) {
+      return { kind: 'block', key: upper.slice(0, upper.lastIndexOf('.')) };
+    }
+    return undefined;
+  }
+  if (!name.startsWith('META-INF/')) {
+    return undefined;
+  }
+  if (name.endsWith('.SF')) {
+    return { kind: 'sf', key: name.slice(0, -3) };
+  }
+  if (/\.(RSA|DSA|EC)$/.test(name)) {
+    return { kind: 'block', key: name.slice(0, name.lastIndexOf('.')) };
+  }
+  return undefined;
+}
+
+/**
+ * The v1 (JAR) signatures of an archive, following each implementation.
+ *
+ * jdk (JarVerifier + SignatureFileVerifier): a block is a signature when it
+ * carries its own signature-file bytes, or when a .SF with the same base name
+ * is present; a block with neither is left pending and never verified, which
+ * is "treated as unsigned". apksig: a block needs its external .SF (it warns
+ * and skips one without), and the JAR needs META-INF/MANIFEST.MF.
+ *
+ * Every candidate is considered within a count and a byte budget, paired ones
+ * first, so an orphan or an unreadable block ahead of the real one costs a
+ * warning and not the signature. Nothing is said about a block that was not
+ * examined.
  */
 export async function readV1Signatures(
   zip: ZipArchive,
-  caseInsensitive: boolean,
+  rules: V1Rules,
   warnings: string[],
 ): Promise<V1Signatures> {
-  const flags = caseInsensitive ? 'i' : '';
-  const blockPattern = new RegExp(String.raw`^META-INF/(.+)\.(RSA|DSA|EC)$`, flags);
-  const filePattern = new RegExp(String.raw`^META-INF/(.+)\.SF$`, flags);
-  const key = (base: string): string => (caseInsensitive ? foldAscii(base) : base);
   const files = new Set<string>();
-  const blocks: { entry: ZipEntry; paired: boolean }[] = [];
+  const blocks: { entry: ZipEntry; key: string; paired: boolean }[] = [];
+  let manifest = false;
   for (const entry of zip.exactEntries) {
-    const file = filePattern.exec(entry.name);
-    if (file) {
-      files.add(key(file[1]));
+    if (entry.isDirectory) {
+      continue;
+    }
+    if (entry.name === 'META-INF/MANIFEST.MF') {
+      manifest = true;
+    }
+    const parsed = v1Name(entry.name, rules);
+    if (parsed?.kind === 'sf') {
+      files.add(parsed.key);
     }
   }
-  const used = new Set<string>();
   for (const entry of zip.exactEntries) {
-    const block = blockPattern.exec(entry.name);
-    if (block) {
-      const paired = files.has(key(block[1]));
-      blocks.push({ entry, paired });
-      if (paired) {
-        used.add(key(block[1]));
-      }
+    const parsed = entry.isDirectory ? undefined : v1Name(entry.name, rules);
+    if (parsed?.kind === 'block') {
+      blocks.push({ entry, key: parsed.key, paired: files.has(parsed.key) });
     }
   }
+  const used = new Set(blocks.filter((b) => b.paired).map((b) => b.key));
   const orphanFiles = [...files].filter((f) => !used.has(f)).length;
-  const unpaired = blocks.filter((b) => !b.paired).length;
   const ordered = [...blocks.filter((b) => b.paired), ...blocks.filter((b) => !b.paired)];
 
   const signed: V1Signatures['signed'] = [];
   let unreadable = 0;
-  let budget = MAX_V1_TOTAL_BYTES;
+  let unpaired = 0;
   let skipped = 0;
+  let budget = MAX_V1_TOTAL_BYTES;
   for (const [index, { entry, paired }] of ordered.entries()) {
-    if (!paired) {
+    // apksig never looks at a block without its .SF, so reading one is pointless.
+    if (!paired && rules === 'apksig') {
+      unpaired++;
       continue;
     }
     if (index >= MAX_V1_CANDIDATES || budget <= 0) {
@@ -605,10 +730,12 @@ export async function readV1Signatures(
     try {
       const der = await zip.readEntry(entry, Math.min(MAX_V1_BLOCK_BYTES, budget));
       budget -= der.length;
-      if (isSignature(der)) {
+      if (!isSignature(der)) {
+        unreadable++;
+      } else if (paired || hasEmbeddedSignatureFile(der)) {
         signed.push({ name: entry.name, signer: readSigner(der) });
       } else {
-        unreadable++;
+        unpaired++;
       }
     } catch (error) {
       if (!(error instanceof PackageError)) {
@@ -617,30 +744,44 @@ export async function readV1Signatures(
       unreadable++;
     }
   }
+  const noManifest = rules === 'apksig' && !manifest && signed.length > 0;
+  if (noManifest) {
+    // apksig reports JAR_SIG_NO_MANIFEST and stops: nothing is a v1 signature.
+    signed.length = 0;
+  }
+  const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
   if (unpaired > 0) {
     warnings.push(
-      `${unpaired} signature block${unpaired === 1 ? ' has' : 's have'} no matching .SF file in META-INF and ${unpaired === 1 ? 'was' : 'were'} ignored.`,
+      `${unpaired} signature block${plural(unpaired, ' has', 's have')} no matching .SF file in META-INF${rules === 'jdk' ? ' and no signature file inside it' : ''}, so ${plural(unpaired, 'it was', 'they were')} ignored.`,
     );
   }
   if (unreadable > 0) {
     warnings.push(
-      `${unreadable} signature block${unreadable === 1 ? '' : 's'} in META-INF could not be read as ${unreadable === 1 ? 'a signature' : 'signatures'}.`,
+      `${unreadable} signature block${plural(unreadable, '', 's')} in META-INF could not be read as ${plural(unreadable, 'a signature', 'signatures')}.`,
     );
   }
   if (orphanFiles > 0) {
     warnings.push(
-      `${orphanFiles} .SF file${orphanFiles === 1 ? ' has' : 's have'} no signature block in META-INF.`,
+      `${orphanFiles} .SF file${plural(orphanFiles, ' has', 's have')} no signature block in META-INF.`,
     );
   }
   if (skipped > 0) {
     warnings.push('More signature blocks than MarkCopy reads were skipped.');
   }
+  if (noManifest) {
+    warnings.push(
+      'The archive has no META-INF/MANIFEST.MF, so Android does not accept a v1 signature.',
+    );
+  }
   let notEstablished: string | undefined;
-  if (signed.length === 0 && blocks.length > 0) {
-    notEstablished =
-      unreadable > 0
-        ? 'A META-INF signature block is present but could not be read as a signature, so nothing is known about it'
-        : 'A META-INF signature block has no matching .SF file, so it does not form a signature';
+  if (signed.length === 0 && (blocks.length > 0 || noManifest)) {
+    notEstablished = noManifest
+      ? 'A META-INF signature block is present, but the archive has no META-INF/MANIFEST.MF, so it is not a v1 signature'
+      : skipped > 0
+        ? 'META-INF signature blocks are present, but more than MarkCopy reads, so whether any is a signature is not known'
+        : unreadable > 0
+          ? 'A META-INF signature block is present but could not be read as a signature, so nothing is known about it'
+          : 'A META-INF signature block has no signature file, so it does not form a signature';
   }
   return { signed, notEstablished };
 }

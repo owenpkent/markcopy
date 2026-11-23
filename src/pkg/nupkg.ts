@@ -156,6 +156,7 @@ export async function readNupkg(
   }
 
   const dependencies: string[][] = [];
+  let droppedDependencies = 0;
   const depsNode = metadata ? child(metadata, 'dependencies') : undefined;
   const addDependencies = (parent: XNode, framework: string): void => {
     const list = children(parent, 'dependency');
@@ -163,7 +164,9 @@ export async function readNupkg(
       dependencies.push([framework, '(none)', '']);
     }
     for (const dep of list) {
-      if (dependencies.length < MAX_DEPENDENCY_ROWS) {
+      if (dependencies.length >= MAX_DEPENDENCY_ROWS) {
+        droppedDependencies++;
+      } else {
         dependencies.push([
           framework,
           printable((dep.attrs.id ?? '').slice(0, 200)),
@@ -176,6 +179,7 @@ export async function readNupkg(
     addDependencies(depsNode, '(any)');
     for (const group of children(depsNode, 'group')) {
       if (dependencies.length >= MAX_DEPENDENCY_ROWS) {
+        droppedDependencies++;
         break;
       }
       addDependencies(
@@ -183,6 +187,11 @@ export async function readNupkg(
         printable((group.attrs.targetFramework ?? '').slice(0, 100)) || '(any)',
       );
     }
+  }
+  if (droppedDependencies > 0) {
+    warnings.push(
+      'The nuspec lists more dependencies than MarkCopy reads, so the table is incomplete.',
+    );
   }
   before.push(
     ...tableSection('Dependencies', ['Framework', 'Package', 'Version'], dependencies, {

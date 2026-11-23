@@ -58,7 +58,9 @@ async function flavour(zip: ZipArchive, fileName: string): Promise<ZipFlavour> {
   }
   return {
     format: 'Zip archive',
-    summary: 'A zip archive that is not a recognised package type.',
+    summary: zip.complete
+      ? 'A zip archive that is not a recognised package type.'
+      : 'A zip archive in which no package type was recognised in the part that could be listed.',
     before: [],
     after: [],
     warnings: [],
