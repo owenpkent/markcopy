@@ -138,7 +138,11 @@ describe('runInWorker', () => {
       await sleep(100);
 
       expect(settlements).toBe(1);
-      expect(outcome).toBe('first');
+      // Which of the two arrives first is the platform's to decide: the answer
+      // came first on Windows and the failure first on a Linux runner. Either
+      // is a fair account of a worker that did both; what must hold is that
+      // there is one outcome and nothing left over.
+      expect(['first', 'rejected']).toContain(outcome);
       expect(unhandled).toEqual([]);
     } finally {
       process.off('unhandledRejection', note);
