@@ -5,6 +5,12 @@
 // Every cell is escaped here. The strings come out of files that may be
 // hostile, and the webview sanitizes the result again on arrival.
 import { escapeHtml } from '../escape';
+import { clip } from './text';
+
+// The longest value a cell will draw. The readers cap what they keep, and this
+// is the backstop behind every one of them: whatever a reader lets through,
+// one cell cannot be megabytes of markup.
+export const MAX_CELL_CHARS = 4096;
 
 export type Row = [label: string, value: string];
 
@@ -33,7 +39,10 @@ export function formatBytesShort(bytes: number): string {
 export function table(headers: string[], rows: string[][], className?: string): string {
   const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
   const body = rows
-    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+    .map(
+      (row) =>
+        `<tr>${row.map((cell) => `<td>${escapeHtml(clip(cell, MAX_CELL_CHARS))}</td>`).join('')}</tr>`,
+    )
     .join('');
   return `<table${className ? ` class="${className}"` : ''}><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
