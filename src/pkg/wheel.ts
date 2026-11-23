@@ -172,6 +172,36 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
       ['File list (RECORD)', hasRecord ? 'Yes' : 'No'],
     ]),
   );
+  // Wheels run no code when installed, but two things in them run later: a .pth
+  // file is read at every Python start and executes any line beginning "import",
+  // and scripts under <name>.data/scripts are installed onto the PATH.
+  const pth = zip.exactEntries.filter((e) =>
+    /^([^/]+\.data\/(purelib|platlib)\/)?[^/]+\.pth$/i.test(e.name),
+  );
+  const dataScripts = zip.exactEntries.filter(
+    (e) => !e.isDirectory && /^[^/]+\.data\/scripts\//i.test(e.name),
+  );
+  before.push(
+    ...propertySection(
+      'Code that runs',
+      [
+        [
+          '.pth files',
+          pth.length > 0
+            ? pth
+                .slice(0, 10)
+                .map((e) => e.name)
+                .join(', ')
+            : undefined,
+        ],
+        [
+          'Scripts installed to the PATH',
+          dataScripts.length > 0 ? `${dataScripts.length} files under *.data/scripts` : undefined,
+        ],
+      ],
+      'A .pth file is read each time Python starts, and a line in it that begins with "import" is executed. Read these files before installing the wheel.',
+    ),
+  );
   const scriptsText = await read('entry_points.txt', MAX_SMALL_BYTES, 'entry_points.txt');
   if (scriptsText) {
     before.push(

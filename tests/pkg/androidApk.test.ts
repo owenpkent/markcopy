@@ -224,8 +224,52 @@ describe('readZipPackage: Android signatures', () => {
   it('names a newer scheme and an unknown one', async () => {
     const info = await readZip(apk(undefined, [], { signingBlockIds: [0x1b93ad61] }));
     expect(value(info, 'Signature', 'Status')).toContain('v3.1');
-    const unknown = await readZip(apk(undefined, [], { signingBlockIds: [0x12345678] }));
-    expect(value(unknown, 'Signature', 'Status')).toContain('v2 or later');
+  });
+
+  it('does not call an unknown-only, padding-only or empty block a signature', async () => {
+    for (const ids of [[0x12345678], [0x42726577], [0x42726577, 0x12345678], [0x6dff800d], []]) {
+      const info = await readZip(apk(undefined, [], { signingBlockIds: ids }));
+      const status = value(info, 'Signature', 'Status')!;
+      expect(status).toContain('no signature is reported');
+      expect(status).not.toContain('Scheme');
+      expect((section(info, 'Signature') as { note?: string }).note).toBeUndefined();
+    }
+  });
+
+  it('names only the recognised schemes in a mixed block', async () => {
+    const info = await readZip(
+      apk(undefined, [], { signingBlockIds: [0x42726577, 0x7109871a, 0x12345678] }),
+    );
+    expect(value(info, 'Signature', 'Status')).toContain('Scheme v2 ');
+  });
+
+  it('reports a v1 block that is not PKCS #7 as unreadable, not as a signature', async () => {
+    const info = await readZip(apk(undefined, [{ name: 'META-INF/X.RSA', data: 'junk' }]));
+    expect(value(info, 'Signature', 'Status')).toContain('could not be read');
+    expect(info.warnings).toContain('The META-INF signature block could not be read.');
+  });
+
+  it('combines versionCodeMajor and versionCode as Android does', async () => {
+    const tree = manifest();
+    tree.attrs!.push(int('versionCodeMajor', 0x01010576, 1));
+    tree.attrs![1] = int('versionCode', 0x0101021b, 2);
+    const info = await readZip(apk(buildAxml(tree)));
+    expect(value(info, 'Package', 'Version code')).toBe('4294967298 (major 1, code 2)');
+  });
+
+  it('treats a negative typed versionCode as unsigned when combining', async () => {
+    const tree = manifest();
+    tree.attrs!.push(int('versionCodeMajor', 0x01010576, 1));
+    tree.attrs![1] = int('versionCode', 0x0101021b, -1);
+    const info = await readZip(apk(buildAxml(tree)));
+    expect(value(info, 'Package', 'Version code')).toBe('8589934591 (major 1, code 4294967295)');
+  });
+
+  it('keeps showing versionCode alone when there is no major word, or it is zero', async () => {
+    expect(value(await readZip(apk()), 'Package', 'Version code')).toBe('24');
+    const tree = manifest();
+    tree.attrs!.push(int('versionCodeMajor', 0x01010576, 0));
+    expect(value(await readZip(apk(buildAxml(tree))), 'Package', 'Version code')).toBe('24');
   });
 
   it('says so when the file is unsigned', async () => {
