@@ -1,0 +1,66 @@
+import { describe, expect, it } from 'vitest';
+import { fuzz, shaped, SHAPES } from '../fuzz/targets/pkg.fuzz';
+import { buildElf } from './pkg/elfFixture';
+import { buildMsi } from './pkg/msiFixture';
+
+// The first input byte that picks shape `index`.
+const pick = (index: number, rest: Buffer): Buffer => Buffer.concat([Buffer.of(index), rest]);
+
+describe('pkg fuzz target', () => {
+  it('accepts real files, junk, and an empty input without throwing', async () => {
+    await fuzz(Buffer.from(buildElf()));
+    await fuzz(Buffer.from(buildMsi()));
+    await fuzz(Buffer.alloc(0));
+    await fuzz(Buffer.alloc(4096, 0x41));
+    await fuzz(Buffer.alloc(4096, 0xff));
+  });
+
+  it('accepts every shape over zeros and over 0xff', async () => {
+    for (let i = 0; i < SHAPES.length; i++) {
+      await fuzz(pick(i, Buffer.alloc(2048, 0)));
+      await fuzz(pick(i, Buffer.alloc(2048, 0xff)));
+      await fuzz(pick(i, Buffer.alloc(3)));
+    }
+  });
+
+  it('writes the chosen magic over the start of the file and names it to match', () => {
+    const rest = Buffer.alloc(100, 0x41);
+    const elf = shaped(pick(0, rest));
+    expect([...elf.bytes.subarray(0, 4)]).toEqual([0x7f, 0x45, 0x4c, 0x46]);
+    expect(elf.bytes).toHaveLength(100);
+    expect(elf.name).toMatch(/\.so$/);
+
+    const gzip = shaped(pick(11, rest));
+    expect([...gzip.bytes.subarray(0, 3)]).toEqual([0x1f, 0x8b, 0x08]);
+    expect(gzip.name).toMatch(/\.apk$/);
+  });
+
+  it('pads an input shorter than the magic, rather than dropping the magic', () => {
+    const deb = shaped(pick(2, Buffer.alloc(2)));
+    expect(deb.bytes.subarray(0, 8).toString('latin1')).toBe('!<arch>\n');
+  });
+
+  it('wraps the index around the shapes', () => {
+    const wrapped = shaped(pick(SHAPES.length + 1, Buffer.alloc(64)));
+    expect(wrapped.name).toBe(SHAPES[1].name);
+  });
+
+  it('writes the disk image trailer over the last 512 bytes', () => {
+    const dmg = shaped(pick(SHAPES.length - 1, Buffer.alloc(2000, 0x41)));
+    expect(dmg.name).toMatch(/\.dmg$/);
+    expect(dmg.bytes.subarray(dmg.bytes.length - 512, dmg.bytes.length - 508).toString()).toBe(
+      'koly',
+    );
+    expect(dmg.bytes.subarray(0, 4).toString()).toBe('AAAA');
+  });
+
+  it('grows a short input to hold a disk image trailer', () => {
+    const dmg = shaped(pick(SHAPES.length - 1, Buffer.alloc(10)));
+    expect(dmg.bytes).toHaveLength(512);
+    expect(dmg.bytes.subarray(0, 4).toString()).toBe('koly');
+  });
+
+  it('leaves an empty input alone', () => {
+    expect(shaped(Buffer.alloc(0)).bytes).toHaveLength(0);
+  });
+});
