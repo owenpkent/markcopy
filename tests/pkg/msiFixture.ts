@@ -120,6 +120,7 @@ export interface MsiSpec {
   poolBytes?: Uint8Array;
   dataBytes?: Uint8Array;
   summaryBytes?: Uint8Array;
+  columnsBytes?: Uint8Array;
   /** Extra raw streams by stored name. */
   rawStreams?: CfbStream[];
 }
@@ -296,7 +297,7 @@ export function buildMsi(spec: MsiSpec = {}): Uint8Array {
   if (!spec.noPool) {
     streams.push({ name: packName('_StringPool', true), data: spec.poolBytes ?? poolOut.done() });
     streams.push({ name: packName('_StringData', true), data: spec.dataBytes ?? data.done() });
-    streams.push({ name: packName('_Columns', true), data: columns.done() });
+    streams.push({ name: packName('_Columns', true), data: spec.columnsBytes ?? columns.done() });
   }
   streams.push({
     name: packName('Property', true),

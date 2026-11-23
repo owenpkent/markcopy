@@ -11,18 +11,24 @@ import { Decompress } from 'fflate';
 import { formatBytes, formatNumber } from '../binary/html';
 import { printable } from '../binary/text';
 import type { RangeReader } from '../binary/reader';
-import { child, children, findAll, parseXml, type XNode } from '../ooxml/xnode';
+import { parseXmlBounded } from '../binary/xml';
+import { child, children, findAll, type XNode } from '../ooxml/xnode';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
 import { readCertificate, signatureSection } from './signature';
 
 const HEADER_SIZE = 28;
-// Real tables are a few KB per thousand files. A product archive of 100,000
-// files is about 20 MB of XML, so 16 MiB (and 4 MiB compressed, which is the
-// reader's largest single read) covers every installer seen while keeping the
-// XML tree small enough to build.
+// Compressed, the table may be as large as the reader's largest single read.
 const MAX_TOC_COMPRESSED = 4 * 1024 * 1024;
-const MAX_TOC = 16 * 1024 * 1024;
+// The tables of contents seen (a few KB for a product archive, tens of KB for a
+// flat package) are far below this; 8 MiB inflated leaves room for an archive
+// that lists tens of thousands of files and stops a bomb early.
+const MAX_TOC = 8 * 1024 * 1024;
+// A tree costs about 100 times its text, so the element count, not the text,
+// is what bounds memory: 200,000 elements is roughly 20,000 files.
+const MAX_TOC_NODES = 100_000;
+// Distribution and PackageInfo are small documents; 20,000 elements is far past a real one.
+const MAX_INFO_NODES = 20_000;
 // Distribution and PackageInfo are tens of KB; localised Distribution files reach a few hundred.
 const MAX_INFO_COMPRESSED = 1024 * 1024;
 const MAX_INFO = 2 * 1024 * 1024;
@@ -30,7 +36,18 @@ const MAX_INFO = 2 * 1024 * 1024;
 // the work done after the output cap is crossed to a few megabytes.
 const INFLATE_SLICE = 4096;
 // Entries walked in the table, and how deep directories may nest.
-const MAX_ENTRIES = 200_000;
+const MAX_ENTRIES = 50_000;
+// A file name is at most 255 characters on every file system this archive could
+// come from; a path is cut at 1,024. Without these a long directory name is
+// copied into every child's path.
+const MAX_NAME = 255;
+const MAX_PATH = 1024;
+// Characters of path kept across all entries, so entries times path length
+// cannot add up to more than this.
+const MAX_PATH_CHARS = 4 * 1024 * 1024;
+// Strings from attributes and elements (identifiers, versions, titles).
+const MAX_TEXT = 512;
+const MAX_REFS = 200;
 const MAX_DEPTH = 32;
 const MAX_ROWS = 200;
 const MAX_COMPONENTS = 64;
@@ -92,9 +109,11 @@ function inflateCapped(input: Uint8Array, cap: number): { data: Uint8Array; trun
   return { data, truncated };
 }
 
-const text = (node: XNode | undefined): string => printable(node?.text.trim() ?? '');
+// Cut before trimming and cleaning: the text of an element may be megabytes.
+const text = (node: XNode | undefined, max = MAX_TEXT): string =>
+  printable((node?.text ?? '').slice(0, max).trim());
 const int = (value: string | undefined): number | undefined => {
-  if (value === undefined || !/^\d+$/.test(value.trim())) {
+  if (value === undefined || !/^\d+$/.test(value.slice(0, 32).trim())) {
     return undefined;
   }
   const n = Number.parseInt(value, 10);
@@ -102,7 +121,7 @@ const int = (value: string | undefined): number | undefined => {
 };
 const attrText = (node: XNode | undefined, name: string): string | undefined => {
   const v = node?.attrs[name];
-  return v === undefined ? undefined : printable(v.trim()) || undefined;
+  return v === undefined ? undefined : printable(v.slice(0, MAX_TEXT).trim()) || undefined;
 };
 
 function utcDate(value: string | undefined): string | undefined {
@@ -118,6 +137,7 @@ function utcDate(value: string | undefined): string | undefined {
 /** Every file entry in the table, with the path built from the directories around it. */
 function walkEntries(toc: XNode): { entries: Entry[]; truncated: boolean } {
   const entries: Entry[] = [];
+  let pathChars = 0;
   const stack: { node: XNode; prefix: string; depth: number }[] = [];
   const push = (parent: XNode, prefix: string, depth: number): void => {
     const kids = children(parent, 'file');
@@ -127,11 +147,12 @@ function walkEntries(toc: XNode): { entries: Entry[]; truncated: boolean } {
   };
   push(toc, '', 0);
   while (stack.length > 0) {
-    if (entries.length >= MAX_ENTRIES) {
+    if (entries.length >= MAX_ENTRIES || pathChars >= MAX_PATH_CHARS) {
       return { entries, truncated: true };
     }
     const { node, prefix, depth } = stack.pop() as (typeof stack)[number];
-    const path = `${prefix}${text(child(node, 'name'))}`;
+    const path = `${prefix}${text(child(node, 'name'), MAX_NAME)}`.slice(0, MAX_PATH);
+    pathChars += path.length;
     const data = child(node, 'data');
     const type = text(child(node, 'type'));
     entries.push({
@@ -143,7 +164,7 @@ function walkEntries(toc: XNode): { entries: Entry[]; truncated: boolean } {
       encoding: data ? (attrText(child(data, 'encoding'), 'style') ?? '') : '',
     });
     if (depth < MAX_DEPTH) {
-      push(node, `${path}/`, depth + 1);
+      push(node, path.length < MAX_PATH ? `${path}/` : path, depth + 1);
     }
   }
   return { entries, truncated: false };
@@ -173,7 +194,10 @@ async function readXmlEntry(
     // bzip2 and lzma are legal in xar but no installer is written with them.
     return undefined;
   }
-  return parseXml(new TextDecoder().decode(bytes));
+  return parseXmlBounded(new TextDecoder().decode(bytes), {
+    maxNodes: MAX_INFO_NODES,
+    maxChars: MAX_INFO,
+  });
 }
 
 function readComponent(root: XNode, dir: string, entries: Map<string, Entry>): Component {
@@ -232,6 +256,9 @@ function readDistribution(root: XNode): Distribution {
   const options = findAll(root, 'options')[0];
   const refs = new Map<string, { id: string; version?: string; installKBytes?: number }>();
   for (const ref of findAll(root, 'pkg-ref')) {
+    if (refs.size >= MAX_REFS) {
+      break;
+    }
     const id = attrText(ref, 'id');
     if (!id) {
       continue;
@@ -272,8 +299,11 @@ function signatureFrom(toc: XNode): InfoSection[] {
   let signer;
   if (cert) {
     try {
-      const base64 = cert.text.replace(/[^A-Za-z0-9+/=]/g, '');
-      if (base64.length <= Math.ceil((MAX_CERTIFICATE_BYTES * 4) / 3)) {
+      const base64 = (cert.text.length > MAX_CERTIFICATE_BYTES * 2 ? '' : cert.text).replace(
+        /[^A-Za-z0-9+/=]/g,
+        '',
+      );
+      if (base64.length > 0 && base64.length <= Math.ceil((MAX_CERTIFICATE_BYTES * 4) / 3)) {
         const raw = atob(base64);
         signer = readCertificate(Uint8Array.from(raw, (c) => c.charCodeAt(0)));
       }
@@ -312,7 +342,10 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
     if (out.truncated) {
       throw new PackageError('its table of contents is larger than MarkCopy will read.');
     }
-    const root = parseXml(new TextDecoder().decode(out.data));
+    const root = parseXmlBounded(new TextDecoder().decode(out.data), {
+      maxNodes: MAX_TOC_NODES,
+      maxChars: MAX_TOC,
+    });
     const found = child(child(root, 'xar') ?? root, 'toc');
     if (!found) {
       throw new PackageError('it has no table of contents.');
@@ -328,7 +361,9 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
   const warnings: string[] = [];
   const { entries, truncated } = walkEntries(toc);
   if (truncated) {
-    warnings.push(`Only the first ${formatNumber(MAX_ENTRIES)} entries were read.`);
+    warnings.push(
+      'The archive lists more entries than MarkCopy will read, so the file list is partial.',
+    );
   }
   const byPath = new Map<string, Entry>();
   for (const e of entries) {

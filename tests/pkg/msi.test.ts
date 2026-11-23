@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { bytesSource, RangeReader, ReadError } from '../../src/binary/reader';
 import { formatBytes } from '../../src/binary/html';
@@ -421,5 +422,92 @@ describe('readMsi: rendering', () => {
     expect(html).not.toContain('<img src=x');
     expect(html).not.toContain(RLO);
     expect(html).toContain('Windows Installer package');
+  });
+});
+
+describe('readMsi: amplification bounds', () => {
+  /** A pool whose first string is 8 KB and whose other strings are five-digit names. */
+  function bigPool(names: number): { pool: Uint8Array; data: Uint8Array } {
+    const pool = new Uint8Array(4 * (names + 2));
+    const view = new DataView(pool.buffer);
+    view.setUint16(0, 1252, true);
+    view.setUint16(4, 8192, true);
+    view.setUint16(6, 1, true);
+    for (let i = 0; i < names; i++) {
+      view.setUint16(8 + i * 4, 5, true);
+      view.setUint16(10 + i * 4, 1, true);
+    }
+    const data = new Uint8Array(8192 + names * 5).fill(0x61);
+    return { pool, data };
+  }
+
+  const heap = () => {
+    globalThis.gc?.();
+    return process.memoryUsage().heapUsed;
+  };
+
+  it('decodes a string once however many Property rows name it, and caps the rows', async () => {
+    const rowsInFile = 20000;
+    const { pool, data } = bigPool(rowsInFile);
+    const property = new Uint8Array(rowsInFile * 4);
+    const view = new DataView(property.buffer);
+    for (let i = 0; i < rowsInFile; i++) {
+      view.setUint16(i * 2, 2 + i, true);
+      view.setUint16(rowsInFile * 2 + i * 2, 1, true);
+    }
+    const before = heap();
+    const info = await read({ poolBytes: pool, dataBytes: data, propertyBytes: property });
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+    expect(info.warnings.join(' ')).toMatch(/20,000 rows; only the first 5,000 were read/);
+    expect(field(info, 'Package', 'Properties in database')).toBe('20,000');
+  });
+
+  it('gives up on _Columns past its row cap and shows presence instead of counts', async () => {
+    const rows = 60000;
+    const { pool, data } = bigPool(1);
+    const columns = new Uint8Array(rows * 8);
+    const view = new DataView(columns.buffer);
+    for (let i = 0; i < rows; i++) {
+      view.setUint16(i * 2, 1, true);
+    }
+    const before = heap();
+    const info = await read({
+      poolBytes: pool,
+      dataBytes: data,
+      columnsBytes: columns,
+      tables: [{ name: 'File', columns: ['s', 'i4'], rows: 3 }],
+    });
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+    expect(field(info, 'What it installs', 'Files installed')).toBe('Yes');
+  });
+
+  it('stops decoding once the budget of kept characters is spent', async () => {
+    // 2,000 distinct 2,048-character values would be 4 M characters; the budget is 2 M.
+    const count = 2000;
+    const pool = new Uint8Array(4 * (2 * count + 1));
+    const view = new DataView(pool.buffer);
+    for (let i = 1; i <= 2 * count; i++) {
+      view.setUint16(i * 4, i <= count ? 8 : 4096, true);
+      view.setUint16(i * 4 + 2, 1, true);
+    }
+    const data = new Uint8Array(count * 8 + count * 4096).fill(0x61);
+    const property = new Uint8Array(count * 4);
+    const pv = new DataView(property.buffer);
+    for (let i = 0; i < count; i++) {
+      pv.setUint16(i * 2, 1 + i, true);
+      pv.setUint16(count * 2 + i * 2, count + 1 + i, true);
+    }
+    const info = await read({ poolBytes: pool, dataBytes: data, propertyBytes: property });
+    expect(info.warnings.join(' ')).toMatch(/more text than MarkCopy reads/);
+  });
+
+  it('keeps the Embedded files list bounded when the directory names thousands of streams', async () => {
+    const streams = Array.from({ length: 5000 }, (_, i) => ({ name: `Extra${i}`, size: 1 }));
+    const info = await read({ streams });
+    const embedded = section(info, 'Embedded files');
+    expect(embedded?.kind === 'table' && embedded.rows.length).toBe(200);
+    expect(embedded?.kind === 'table' && embedded.note).toBe(
+      'Showing the first 200 of 5,000 streams.',
+    );
   });
 });

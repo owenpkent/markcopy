@@ -37,6 +37,20 @@ const MAX_SUMMARY_PROPERTIES = 64;
 // A property value or name is a line; anything longer is not one.
 const MAX_STRING_CHARS = 2048;
 const MAX_LISTED_STREAMS = 200;
+// Property rows read. A real package has a few hundred; the stream cap alone
+// would allow a million.
+const MAX_PROPERTIES = 5000;
+// _Columns rows read: about a thousand for the standard schema. Past this the
+// row widths cannot be trusted, so counts fall back to presence.
+const MAX_COLUMN_ROWS = 50000;
+// Characters of decoded pool strings held in all. Each string is decoded once
+// and kept, so this is what a package's strings can cost, however many rows
+// name them. Real packages use well under a tenth of it.
+const MAX_DECODED_CHARS = 2 * 1024 * 1024;
+// Table and column names are identifiers.
+const MAX_NAME_CHARS = 128;
+// Streams kept for the Embedded files list, per kind. The rest are counted.
+const MAX_KEPT_ROWS = 200;
 
 const SUMMARY_NAME = String.fromCharCode(5) + 'SummaryInformation';
 const SIGNATURE_NAME = String.fromCharCode(5) + 'DigitalSignature';
@@ -152,7 +166,7 @@ function readSummary(bytes: Uint8Array): Map<number, SummaryValue> {
     } else if (type === 30 && has(at + 4, 4)) {
       const length = view.getUint32(at + 4, true);
       if (length <= 65536 && has(at + 8, length)) {
-        let slice = bytes.subarray(at + 8, at + 8 + length);
+        let slice = bytes.subarray(at + 8, at + 8 + Math.min(length, MAX_STRING_CHARS * 4));
         const nul = slice.indexOf(0);
         slice = nul < 0 ? slice : slice.subarray(0, nul);
         out.set(id, clean(decoderFor(codePage).decode(slice)));
@@ -160,7 +174,7 @@ function readSummary(bytes: Uint8Array): Map<number, SummaryValue> {
     } else if (type === 31 && has(at + 4, 4)) {
       const chars = view.getUint32(at + 4, true);
       if (chars <= 32768 && has(at + 8, chars * 2)) {
-        const slice = bytes.subarray(at + 8, at + 8 + chars * 2);
+        const slice = bytes.subarray(at + 8, at + 8 + Math.min(chars, MAX_STRING_CHARS) * 2);
         out.set(id, clean(new TextDecoder('utf-16le').decode(slice).replace(/\0.*$/s, '')));
       }
     } else if (type === 64 && has(at + 4, 8)) {
@@ -180,7 +194,10 @@ function readSummary(bytes: Uint8Array): Map<number, SummaryValue> {
 interface Strings {
   /** Bytes per string reference in a table: 2, or 3 for a pool of more than 64K strings. */
   width: number;
-  get(id: number): string;
+  /** The string with this ID, cut to `max` characters; decoded once and kept. */
+  get(id: number, max?: number): string;
+  /** True once the budget of decoded characters ran out and later strings came back empty. */
+  readonly exhausted: boolean;
 }
 
 function readPool(pool: Uint8Array, data: Uint8Array): Strings {
@@ -208,19 +225,38 @@ function readPool(pool: Uint8Array, data: Uint8Array): Strings {
     length[id] = size;
     offset += size;
   }
-  return {
+  // One cache per cut length, so a table name (short) never poisons a value.
+  const caches = new Map<number, Map<number, string>>();
+  let budget = MAX_DECODED_CHARS;
+  const strings: Strings = {
     width,
-    get(id) {
+    exhausted: false,
+    get(id, max = MAX_STRING_CHARS) {
       if (id <= 0 || id >= entries || start[id] + length[id] > data.length) {
         return '';
       }
-      const slice = data.subarray(
-        start[id],
-        start[id] + Math.min(length[id], MAX_STRING_CHARS * 4),
-      );
-      return clean(decoder.decode(slice));
+      let cache = caches.get(max);
+      if (!cache) {
+        cache = new Map();
+        caches.set(max, cache);
+      }
+      const known = cache.get(id);
+      if (known !== undefined) {
+        return known;
+      }
+      if (budget <= 0) {
+        (strings as { exhausted: boolean }).exhausted = true;
+        return '';
+      }
+      // Decode only the bytes that can be kept (4 per character covers UTF-8).
+      const slice = data.subarray(start[id], start[id] + Math.min(length[id], max * 4));
+      const text = printable(decoder.decode(slice).slice(0, max));
+      budget -= text.length + 1;
+      cache.set(id, text);
+      return text;
     },
   };
+  return strings;
 }
 
 /** Column-major integer reads, 2 bytes or 3 for string references. */
@@ -237,13 +273,16 @@ function readRefs(bytes: Uint8Array, at: number, width: number, count: number): 
 function rowWidths(columns: Uint8Array, strings: Strings): Map<string, number | undefined> {
   const width = strings.width;
   const count = Math.floor(columns.length / (2 * width + 4));
+  if (count > MAX_COLUMN_ROWS) {
+    return new Map();
+  }
   const tables = readRefs(columns, 0, width, count);
   const types = new DataView(columns.buffer, columns.byteOffset, columns.byteLength);
   // Layout, column-major: Table[count], Number[count], Name[count], Type[count].
   const typesStart = count * (2 * width + 2);
   const out = new Map<string, number | undefined>();
   for (let i = 0; i < count; i++) {
-    const name = strings.get(tables[i]);
+    const name = strings.get(tables[i], MAX_NAME_CHARS);
     if (!name) {
       continue;
     }
@@ -365,8 +404,34 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   const cfb = await openCfb(reader);
   const warnings: string[] = [];
 
+  // Only the tables read below are remembered: a hostile directory can name
+  // 65,000 of them.
+  const wanted = new Set([
+    '_StringPool',
+    '_StringData',
+    '_Columns',
+    'Property',
+    'Binary',
+    ...COUNTED.map(([table]) => table),
+  ]);
   const tables = new Map<string, CfbEntry>();
-  const others: { name: string; size: number }[] = [];
+  // WiX names its cabinet streams "Name.cab" or "Name.CABinet".
+  const cabinet = /\.cab(inet)?$/i;
+  const groups: { label: string; test: RegExp; count: number; size: number }[] = [
+    { label: 'custom action binaries (Binary.*)', test: /^Binary\./, count: 0, size: 0 },
+    { label: 'icons (Icon.*)', test: /^Icon\./, count: 0, size: 0 },
+    {
+      label: 'signature certificates and hashes (MsiDigital*)',
+      test: /^MsiDigital/,
+      count: 0,
+      size: 0,
+    },
+  ];
+  // Rows for the Embedded files list are kept only up to a cap; the rest are counted.
+  const cabinetRows: string[][] = [];
+  const otherRows: string[][] = [];
+  let cabinetCount = 0;
+  let otherCount = 0;
   let summaryEntry: CfbEntry | undefined;
   let signatureEntry: CfbEntry | undefined;
   let signatureEx = false;
@@ -385,9 +450,26 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     } else {
       const decoded = decodeStreamName(entry.name);
       if (decoded.table) {
-        tables.set(decoded.name, entry);
+        if (wanted.has(decoded.name)) {
+          tables.set(decoded.name, entry);
+        }
+        continue;
+      }
+      const name = printable(decoded.name);
+      const group = groups.find((g) => g.test.test(name));
+      if (cabinet.test(name)) {
+        cabinetCount++;
+        if (cabinetRows.length < MAX_KEPT_ROWS) {
+          cabinetRows.push([name, formatBytes(entry.size)]);
+        }
+      } else if (group) {
+        group.count++;
+        group.size += entry.size;
       } else {
-        others.push({ name: printable(decoded.name), size: entry.size });
+        otherCount++;
+        if (otherRows.length < MAX_KEPT_ROWS) {
+          otherRows.push([name, formatBytes(entry.size)]);
+        }
       }
     }
   }
@@ -430,6 +512,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
 
   // The database.
   const properties = new Map<string, string>();
+  let propertyRows = 0;
   const counts = new Map<string, number>();
   let strings: Strings | undefined;
   const poolEntry = tables.get('_StringPool');
@@ -451,14 +534,16 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
     const bytes = await tryRead(cfb, propertyEntry, MAX_PROPERTY_STREAM);
     if (bytes) {
       const n = Math.floor(bytes.length / (2 * strings.width));
-      const names = readRefs(bytes, 0, strings.width, n);
-      const values = readRefs(bytes, n * strings.width, strings.width, n);
-      for (let i = 0; i < n; i++) {
-        const name = strings.get(names[i]);
+      const read = Math.min(n, MAX_PROPERTIES);
+      const names = readRefs(bytes, 0, strings.width, read);
+      const values = readRefs(bytes, n * strings.width, strings.width, read);
+      for (let i = 0; i < read; i++) {
+        const name = strings.get(names[i], MAX_NAME_CHARS);
         if (name) {
           properties.set(name, strings.get(values[i]));
         }
       }
+      propertyRows = n;
     } else if (propertyEntry) {
       warnings.push('The Property table could not be read.');
     }
@@ -479,6 +564,15 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
         }
       }
     }
+  }
+
+  if (propertyRows > MAX_PROPERTIES) {
+    warnings.push(
+      `The Property table has ${formatNumber(propertyRows)} rows; only the first ${formatNumber(MAX_PROPERTIES)} were read.`,
+    );
+  }
+  if (strings?.exhausted) {
+    warnings.push('The package holds more text than MarkCopy reads, so some values are left out.');
   }
 
   // Package section.
@@ -535,7 +629,10 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
       ['Reinstall mode', properties.get('REINSTALLMODE')],
       ['Hides Modify', flag('ARPNOMODIFY')],
       ['Hides Remove', flag('ARPNOREMOVE')],
-      ['Properties in database', properties.size > 0 ? formatNumber(properties.size) : undefined],
+      [
+        'Properties in database',
+        properties.size > 0 ? formatNumber(Math.max(properties.size, propertyRows)) : undefined,
+      ],
     ]),
   ];
 
@@ -557,33 +654,22 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   // Embedded files: cabinets first, then the groups of small streams that
   // would otherwise bury them (one certificate and one hash per signed cabinet,
   // one icon per shortcut), then anything else.
-  const groups: [label: string, test: RegExp][] = [
-    ['custom action binaries (Binary.*)', /^Binary\./],
-    ['icons (Icon.*)', /^Icon\./],
-    ['signature certificates and hashes (MsiDigital*)', /^MsiDigital/],
-  ];
-  // WiX names its cabinet streams "Name.cab" or "Name.CABinet".
-  const CABINET = /\.cab(inet)?$/i;
-  const cabinets = others.filter((s) => CABINET.test(s.name));
-  const listed: string[][] = cabinets.map((s) => [s.name, formatBytes(s.size)]);
-  for (const [label, test] of groups) {
-    const members = others.filter((s) => test.test(s.name));
-    if (members.length > 0) {
-      const total = members.reduce((sum, s) => sum + s.size, 0);
-      listed.push([`${formatNumber(members.length)} ${label}`, formatBytes(total)]);
+  const listed: string[][] = [...cabinetRows];
+  for (const group of groups) {
+    if (group.count > 0) {
+      listed.push([`${formatNumber(group.count)} ${group.label}`, formatBytes(group.size)]);
     }
   }
-  for (const s of others) {
-    if (!CABINET.test(s.name) && !groups.some(([, test]) => test.test(s.name))) {
-      listed.push([s.name, formatBytes(s.size)]);
-    }
-  }
+  listed.push(...otherRows);
+  let total = listed.length + (cabinetCount - cabinetRows.length) + (otherCount - otherRows.length);
   if (storages > 0) {
     listed.push([`${formatNumber(storages)} embedded storages (transforms or sub-packages)`, '']);
+    total++;
   }
   sections.push(
     ...tableSection('Embedded files', ['Stream', 'Size'], listed, {
       limit: MAX_LISTED_STREAMS,
+      total,
       noun: 'streams',
     }),
   );

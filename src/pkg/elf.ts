@@ -632,7 +632,7 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
       async () => {
         const text = decode(await sectionData(reader, comment, MAX_COMMENT_BYTES));
         for (const part of text.split('\0')) {
-          const clean = printable(part).trim().slice(0, 200);
+          const clean = printable(part.slice(0, 400)).trim().slice(0, 200);
           if (clean && !compilers.includes(clean) && compilers.length < MAX_COMMENTS) {
             compilers.push(clean);
           }
@@ -663,8 +663,10 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
           if (eq <= 0) {
             continue;
           }
-          const key = printable(entry.slice(0, eq)).trim().slice(0, 64);
-          const value = printable(entry.slice(eq + 1))
+          const key = printable(entry.slice(0, Math.min(eq, 128)))
+            .trim()
+            .slice(0, 64);
+          const value = printable(entry.slice(eq + 1, eq + 601))
             .trim()
             .slice(0, 300);
           let list = modinfo.get(key);

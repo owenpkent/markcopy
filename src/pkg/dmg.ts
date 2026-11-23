@@ -12,7 +12,8 @@
 import { formatBytes } from '../binary/html';
 import { printable } from '../binary/text';
 import type { RangeReader } from '../binary/reader';
-import { child, parseXml, type XNode } from '../ooxml/xnode';
+import { parseXmlBounded } from '../binary/xml';
+import { child, type XNode } from '../ooxml/xnode';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
 import { readSigner, signatureSection } from './signature';
@@ -29,6 +30,11 @@ const MISH_HEADER = 204;
 const CHUNK_SIZE = 40;
 // A real image has at most a dozen partitions (GPT headers, free space, the volumes).
 const MAX_PARTITIONS = 64;
+// A property list of 64 partitions is about a thousand elements. A tree costs
+// about 100 times its text, so the element count bounds the memory.
+const MAX_PLIST_NODES = 20_000;
+// A partition or volume name, cut before it is cleaned or kept.
+const MAX_NAME = 256;
 // A CMS signature with its certificate chain is a few KB.
 const MAX_SIGNATURE_BYTES = 256 * 1024;
 const MAX_SIGNATURE_BLOBS = 16;
@@ -104,8 +110,9 @@ function dictGet(dict: XNode | undefined, key: string): XNode | undefined {
 
 function decodeBase64(text: string, maxBytes: number): Uint8Array {
   // The property list wraps its base64 across lines and tabs.
-  let clean = text.replace(/[^A-Za-z0-9+/=]/g, '');
   const limit = Math.ceil(maxBytes / 3) * 4;
+  // Line breaks and tabs wrap the base64, so allow some slack, but never scan megabytes of padding.
+  let clean = text.slice(0, limit * 2).replace(/[^A-Za-z0-9+/=]/g, '');
   if (clean.length > limit) {
     // Cut at a whole group of four so the prefix still decodes.
     clean = clean.slice(0, limit);
@@ -164,7 +171,13 @@ async function readPartitions(
     warnings.push('The partition list is larger than MarkCopy will read.');
     return { partitions: [], licence: false };
   }
-  const plist = parseXml(new TextDecoder().decode(await reader.bytes(xmlOffset, xmlLength)));
+  const plist = parseXmlBounded(
+    new TextDecoder().decode(await reader.bytes(xmlOffset, xmlLength)),
+    {
+      maxNodes: MAX_PLIST_NODES,
+      maxChars: MAX_PLIST_BYTES,
+    },
+  );
   const root = child(plist, 'plist');
   const fork = dictGet(root ? child(root, 'dict') : undefined, 'resource-fork');
   const blkx = dictGet(fork, 'blkx');
@@ -176,7 +189,9 @@ async function readPartitions(
   }
   for (const entry of entries.slice(0, MAX_PARTITIONS)) {
     const label = printable(
-      (dictGet(entry, 'Name')?.text ?? dictGet(entry, 'CFName')?.text ?? '').trim(),
+      (dictGet(entry, 'Name')?.text ?? dictGet(entry, 'CFName')?.text ?? '')
+        .slice(0, MAX_NAME)
+        .trim(),
     );
     const data = dictGet(entry, 'Data')?.text;
     if (data === undefined) {
