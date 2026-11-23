@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMenu, revealLabel, type MenuEntry } from '../src/webview/menu';
+import { createMenu, fit, revealLabel, type MenuEntry } from '../src/webview/menu';
 
 function makeRoot(): HTMLDivElement {
   document.body.innerHTML = '<div id="mc-menu" class="mc-menu" role="menu" hidden></div>';
@@ -389,5 +389,25 @@ describe('revealLabel', () => {
     expect(revealLabel('MacIntel', '')).toBe('Reveal in Finder');
     expect(revealLabel('Win32', '')).toBe('Reveal in File Explorer');
     expect(revealLabel('Linux x86_64', 'X11; Linux')).toBe('Open Containing Folder');
+  });
+});
+
+describe('fit', () => {
+  // A 300px-tall menu in a 600px-tall window, opened at various pointer rows.
+  it('opens below the pointer when there is room', () => {
+    expect(fit(100, 300, 600, 100)).toBe(100);
+  });
+
+  it('flips above the pointer near the bottom edge', () => {
+    expect(fit(550, 300, 600, 550)).toBe(250);
+  });
+
+  it('pins to the bottom edge when neither side has room', () => {
+    // 200px above, 150px below: the whole menu stays on screen, 4px from the edge.
+    expect(fit(200, 300, 350, 200)).toBe(46);
+  });
+
+  it('never starts above the top edge, even when taller than the window', () => {
+    expect(fit(100, 900, 600, 100)).toBe(4);
   });
 });

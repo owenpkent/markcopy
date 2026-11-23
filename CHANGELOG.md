@@ -4,6 +4,10 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Right-click menus stay inside the window.** A menu opened near the bottom or right edge could run off the bottom of the window or sit under the scrollbar. Menus and their submenus are now placed against the visible window (the scrollbars left out): they flip above or to the left of the pointer when they do not fit, pin to the edge when neither side has room, and scroll when taller than the window. Covered by unit tests of the placement rule, a headless Chrome check of a menu opened at the bottom-right corner, and a check by eye of the Markdown preview in the Extension Development Host.
+
 ### Planned
 
 - PlantUML support.
