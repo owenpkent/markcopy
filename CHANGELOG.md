@@ -6,7 +6,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
-- **Right-click menus stay inside the window.** A menu opened near the bottom or right edge could run off the bottom of the window or sit under the scrollbar. Menus and their submenus are now placed against the visible window (the scrollbars left out): they flip above or to the left of the pointer when they do not fit, pin to the edge when neither side has room, and scroll when taller than the window. Covered by unit tests of the placement rule, a headless Chrome check of a menu opened at the bottom-right corner, and a check by eye of the Markdown preview in the Extension Development Host.
+- **Right-click menus stay inside the window.** A menu opened near the bottom or right edge could run off the bottom of the window or sit under the scrollbar. Menus and their submenus are now placed against the visible window (the scrollbars left out): they flip above or to the left of the pointer when they do not fit, pin to the edge when neither side has room, and scroll when taller than the window. In a pane narrower than the menu, the menu is no wider than the pane: its labels are cut with an ellipsis, each cut row has a tooltip with the whole label, and the check marks and submenu arrows stay in view. Covered by unit tests of the placement rule, headless Chrome checks of a menu opened at the bottom-right corner and of a menu and its submenu in frames 160 to 320 px wide (every panel, arrow and check mark inside the frame, 4 px from each edge), and a check by eye of the Markdown preview in the Extension Development Host.
 
 ### Planned
 

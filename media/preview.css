@@ -975,7 +975,13 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   z-index: 1000;
   box-sizing: border-box;
   overflow-y: auto;
-  min-width: 220px;
+  overflow-x: hidden;
+  /* --mc-menu-max is the window's width less a margin, set on each panel by
+     src/webview/menu.ts. The minimum gives way to it too: a minimum width wins
+     over a maximum, so a 220px minimum in a 200px split pane would leave the
+     panel hanging off the edge, and a fixed panel cannot be scrolled to. */
+  max-width: var(--mc-menu-max, calc(100vw - 8px));
+  min-width: min(220px, var(--mc-menu-max, calc(100vw - 8px)));
   background: var(--vscode-menu-background, #fff);
   color: var(--vscode-menu-foreground, #1f2328);
   border: 1px solid var(--vscode-menu-border, #d1d9e0);
@@ -990,6 +996,18 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  /* A label longer than the panel may be is cut with an ellipsis rather than
+     run off its edge. menu.ts gives a cut row a tooltip with the whole label. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* In a row that also holds a check or a submenu arrow, it is the label that
+   gives way: the check and the arrow keep their place at either end. */
+.mc-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .mc-menu-item:hover,
 .mc-menu-item:focus {
@@ -1043,7 +1061,7 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
 /* Submenu panels are created on demand and appended to <body>; they carry
    .mc-menu too, so they inherit the panel chrome above. */
 .mc-menu--sub {
-  min-width: 160px;
+  min-width: min(160px, var(--mc-menu-max, calc(100vw - 8px)));
 }
 .mc-menu-item--submenu {
   display: flex;
