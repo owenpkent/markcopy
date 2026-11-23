@@ -14,7 +14,7 @@
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
 import { child, findAll, parseXml } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
-import { readSigner, type Signer } from './signer';
+import { isSignedData, readSigner, type Signer } from './signer';
 import { printable } from './text';
 import { readVersionResource, type VersionInfo } from './version';
 
@@ -58,6 +58,8 @@ export interface PeImport {
 export interface PeExports {
   /** The name the image exports under, which survives a rename of the file. */
   name: string;
+  /** The ordinal of the address table's first slot. Usually 1, and not always. */
+  base: number;
   /**
    * Entries of the export address table that hold an address: what the image
    * really exports. Absent when the table could not be read to count them.
@@ -98,7 +100,15 @@ export interface PeManifest {
 export interface PeSignature {
   /** Bytes of the certificate table. */
   size: number;
-  /** Who the signature names. Absent when the table is not PKCS #7 we can walk. */
+  /**
+   * Whether the table holds a PKCS #7 SignedData entry, the form an
+   * Authenticode signature takes. A table can exist without one: a bare X.509
+   * certificate signs nothing, and must not be reported as a signature.
+   */
+  signedData: boolean;
+  /** What each entry of the table says it is, in table order. */
+  entries: string[];
+  /** Who the signature names. Absent when there is no SignedData, or it cannot be walked. */
   signer?: Signer;
 }
 
@@ -159,6 +169,14 @@ const MAX_RESOURCE_ENTRIES = 4096;
 const MAX_VERSION_BYTES = 512 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_SIGNATURE_BYTES = 1024 * 1024;
+// A signed file has one entry, a dual-signed one two.
+const MAX_CERTIFICATES = 16;
+
+const CERTIFICATE_TYPES: Record<number, string> = {
+  1: 'X.509 certificate',
+  2: 'PKCS #7 SignedData',
+  4: 'Terminal Server certificate',
+};
 // A 256 pixel, 32-bit bitmap with its mask is about 270 KB; a PNG is smaller.
 const MAX_ICON_BYTES = 1024 * 1024;
 
@@ -602,17 +620,38 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   const security = directory(DIR_SECURITY);
   if (security) {
     await attempt('signature', async () => {
-      const head = await reader.view(security.address, 8);
-      const length = head.getUint32(0, true);
-      const type = head.getUint16(6, true);
-      info.signature = { size: security.size };
-      // 2 is a PKCS #7 SignedData, which is what Authenticode is.
-      if (type === 2 && length > 8) {
-        const der = await reader.upTo(
-          security.address + 8,
-          Math.min(length - 8, MAX_SIGNATURE_BYTES),
-        );
-        info.signature.signer = readSigner(der);
+      // The table is a run of WIN_CERTIFICATE entries, each padded to eight
+      // bytes. Only type 2, PKCS #7 SignedData, is an Authenticode signature;
+      // the table existing says nothing by itself. Every entry is looked at,
+      // within the table's declared size and the file's real one.
+      if (security.address + 8 > reader.size) {
+        // A directory pointing past the end of the file is a damaged file, not
+        // an empty certificate table.
+        throw new PeError(TRUNCATED);
+      }
+      const signature: PeSignature = { size: security.size, signedData: false, entries: [] };
+      info.signature = signature;
+      const end = Math.min(security.address + security.size, reader.size);
+      let at = security.address;
+      for (let i = 0; i < MAX_CERTIFICATES && at + 8 <= end; i++) {
+        const head = await reader.view(at, 8);
+        const length = head.getUint32(0, true);
+        const type = head.getUint16(6, true);
+        if (length < 8) {
+          break;
+        }
+        signature.entries.push(CERTIFICATE_TYPES[type] ?? `Type ${type}`);
+        if (type === 2 && !signature.signedData) {
+          const der = await reader.upTo(
+            at + 8,
+            Math.min(length - 8, MAX_SIGNATURE_BYTES, end - at - 8),
+          );
+          if (isSignedData(der)) {
+            signature.signedData = true;
+            signature.signer = readSigner(der);
+          }
+        }
+        at += (length + 7) & ~7;
       }
     });
   }
@@ -773,6 +812,7 @@ async function readExports(
 ): Promise<PeExports> {
   const head = await reader.view(offset, 40);
   const nameRva = head.getUint32(12, true);
+  const base = head.getUint32(16, true);
   const slots = head.getUint32(20, true);
   const named = head.getUint32(24, true);
   const namesRva = head.getUint32(32, true);
@@ -804,6 +844,7 @@ async function readExports(
   }
   return {
     name: nameRva === 0 ? '' : await reader.cstr(need(nameRva), 260),
+    base,
     functions,
     slots,
     named,

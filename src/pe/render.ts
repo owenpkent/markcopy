@@ -205,6 +205,22 @@ function signatureSection(info: PeInfo): string {
       'through a separate catalog instead, which this preview cannot see.</p>'
     );
   }
+  if (!signature.signedData) {
+    // A certificate table with no signature entry in it. A certificate on its
+    // own signs nothing, so this is not reported as a signature, and none of
+    // the "who signed it" rows are drawn.
+    const held = [...new Set(signature.entries)].join(', ');
+    return (
+      properties([
+        ['Status', 'Certificate data present, with no Authenticode signature recognized'],
+        ['Holds', held || 'Nothing MarkCopy can identify'],
+        ['Certificate table size', formatBytes(signature.size)],
+      ]) +
+      '<p class="mc-exe-note">An Authenticode signature is a PKCS #7 SignedData entry. This ' +
+      'file&#39;s certificate table has none that MarkCopy recognizes, so nothing here says the ' +
+      'file is signed.</p>'
+    );
+  }
   const rows: Row[] = [['Status', 'Embedded signature present, not verified by MarkCopy']];
   const signer = signature.signer;
   if (signer?.subject) {
@@ -338,7 +354,9 @@ function exportsSection(info: PeInfo): string {
     lead = `${number(exported.functions)} ${exported.functions === 1 ? 'function' : 'functions'}${as}, ${byName}.`;
     const unused = exported.slots - exported.functions;
     if (unused > 0) {
-      lead += ` Its ordinals run to ${number(exported.slots)}, with ${number(unused)} unused.`;
+      // The table's first slot is ordinal `base`, which is 1 for most
+      // libraries and 1,001 for crypt32.dll: the range is not 1 to the length.
+      lead += ` Its ordinals run from ${number(exported.base)} to ${number(exported.base + exported.slots - 1)}, with ${number(unused)} unused.`;
     }
   }
   let html = `<p>${lead}</p>`;

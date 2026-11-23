@@ -114,8 +114,23 @@ describe('renderPeHtml: content', () => {
   });
 
   it('says the signature is not verified even when the signer cannot be read', async () => {
+    // A ContentInfo that says it is SignedData and holds an empty one: a
+    // signature entry by its own account, with no signer to walk to.
+    const emptySignedData = Uint8Array.from([
+      0x30, 0x0f, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02, 0xa0, 0x02,
+      0x30, 0x00,
+    ]);
+    const html = await render({ certificate: emptySignedData });
+    expect(html).toContain('Embedded signature present, not verified by MarkCopy');
+    expect(html).not.toContain('Signer</td>');
+  });
+
+  // A certificate table is not a signature. Bytes filed as PKCS #7 that are
+  // not SignedData, or a bare certificate, sign nothing.
+  it('does not claim a signature for certificate data that is not one', async () => {
     const html = await render({ certificate: new Uint8Array(40).fill(0x41) });
-    expect(html).toContain('not verified by MarkCopy');
+    expect(html).toContain('Certificate data present, with no Authenticode signature recognized');
+    expect(html).not.toContain('Embedded signature present');
     expect(html).not.toContain('Signer</td>');
   });
 

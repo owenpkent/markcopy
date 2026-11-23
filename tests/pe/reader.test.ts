@@ -480,6 +480,7 @@ describe('readPe: exports', () => {
     });
     expect(info.exports).toEqual({
       name: 'tool.dll',
+      base: 1,
       functions: 2,
       slots: 2,
       named: 2,
@@ -508,8 +509,21 @@ describe('readPe: exports', () => {
     expect(info.exports).toMatchObject({ functions: 1, slots: 10, named: 1 });
     const html = renderPeHtml(info, { fileName: 'sparse.dll' });
     expect(html).toContain('1 function as sparse.dll, 1 by name.');
-    expect(html).toContain('Its ordinals run to 10, with 9 unused.');
+    expect(html).toContain('Its ordinals run from 1 to 10, with 9 unused.');
     expect(html).not.toContain('10 functions');
+  });
+
+  // The address table's first slot is the ordinal base, not 1: crypt32.dll's
+  // thousand slots are ordinals 1,001 to 2,000.
+  it("gives the ordinal range from the table's base, not from 1", async () => {
+    const info = await read({
+      dll: true,
+      exports: { dllName: 'based.dll', names: ['Only'], functions: 4, unused: [1, 2], base: 100 },
+    });
+    expect(info.exports).toMatchObject({ base: 100, functions: 2, slots: 4 });
+    const html = renderPeHtml(info, { fileName: 'based.dll' });
+    expect(html).toContain('Its ordinals run from 100 to 103, with 2 unused.');
+    expect(html).not.toContain('run to 4');
   });
 
   it('says nothing about ordinals when every slot is in use', async () => {
@@ -659,17 +673,36 @@ describe('readPe: signature', () => {
     });
   });
 
-  it('still reports a signature when the certificate blob cannot be parsed', async () => {
-    const info = await read({ certificate: new Uint8Array(40).fill(0x41) });
-    expect(info.signature).toBeDefined();
-    expect(info.signature?.size).toBe(48);
-    expect(info.signature?.signer).toBeUndefined();
+  it('recognizes a PKCS #7 SignedData entry as a signature', async () => {
+    const info = await read({ certificate: buildSignedData(signer) });
+    expect(info.signature).toMatchObject({ signedData: true, entries: ['PKCS #7 SignedData'] });
   });
 
-  it('still reports a signature for an entry that is not PKCS #7', async () => {
-    const info = await read({ certificate: buildSignedData(signer), certificateType: 1 });
-    expect(info.signature).toBeDefined();
+  // A certificate table is not a signature. Only a PKCS #7 SignedData entry is
+  // one, and an entry has to be that, not merely be labelled as that.
+  it('reports a table whose entry is labelled PKCS #7 but is not SignedData as unsigned', async () => {
+    const info = await read({ certificate: new Uint8Array(40).fill(0x41) });
+    expect(info.signature).toMatchObject({ size: 48, signedData: false });
     expect(info.signature?.signer).toBeUndefined();
+    expect(renderPeHtml(info, { fileName: 'a.exe' })).not.toContain('signature present');
+  });
+
+  it('does not call a bare X.509 certificate a signature', async () => {
+    // The same bytes that are a signature under type 2, filed under type 1.
+    const info = await read({ certificate: buildSignedData(signer), certificateType: 1 });
+    expect(info.signature).toMatchObject({ signedData: false, entries: ['X.509 certificate'] });
+    expect(info.signature?.signer).toBeUndefined();
+    const html = renderPeHtml(info, { fileName: 'a.exe' });
+    expect(html).toContain('Certificate data present, with no Authenticode signature recognized');
+    expect(html).toContain('<td>Holds</td><td>X.509 certificate</td>');
+    expect(html).not.toContain('Embedded signature present');
+    expect(html).not.toContain('<td>Signer</td>');
+    expect(html).not.toContain('Contoso');
+  });
+
+  it('names an entry type it does not know by its number', async () => {
+    const info = await read({ certificate: new Uint8Array(16), certificateType: 9 });
+    expect(info.signature).toMatchObject({ signedData: false, entries: ['Type 9'] });
   });
 
   it('has no signature when the directory is empty', async () => {
