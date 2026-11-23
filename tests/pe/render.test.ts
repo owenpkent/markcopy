@@ -9,11 +9,16 @@ const SIGNED_DATA_OID = tlv(
   0x06,
   Uint8Array.from([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02]),
 );
-const signerInfo = (): Uint8Array =>
+const ALGORITHM = tlv(0x30, tlv(0x06, Uint8Array.from([0x2a, 0x03, 0x04])));
+/** A SignerInfo. `value` is its signature; pass `null` to leave the field out. */
+const signerInfo = (value: Uint8Array | null = Uint8Array.of(1, 2, 3, 4)): Uint8Array =>
   tlv(
     0x30,
     tlv(0x02, Uint8Array.of(1)), // version
     tlv(0x30, tlv(0x30), tlv(0x02, Uint8Array.of(5))), // issuer and serial number
+    ALGORITHM, // digestAlgorithm
+    ALGORITHM, // digestEncryptionAlgorithm
+    ...(value === null ? [] : [tlv(0x04, value)]), // encryptedDigest
   );
 const signedDataWith = (signers: Uint8Array[]): Uint8Array =>
   tlv(
@@ -153,6 +158,52 @@ describe('renderPeHtml: content', () => {
   // SignedData with no signer is how a bundle of certificates is shipped. It
   // signs nothing, and was once reported as a signature because the entry was
   // SignedData at all.
+  // A signer has to be one. An empty SEQUENCE in the signers set, or a
+  // SignerInfo with no signature value in it, signed nothing.
+  it('does not claim a signature for a signer that carries no signature value', async () => {
+    const claims = async (signers: Uint8Array[]): Promise<boolean> =>
+      (await render({ certificate: signedDataWith(signers) })).includes(
+        'Embedded signature present',
+      );
+    expect(await claims([tlv(0x30)])).toBe(false);
+    expect(await claims([tlv(0x30), tlv(0x30), tlv(0x30)])).toBe(false);
+    expect(await claims([signerInfo(null)])).toBe(false);
+    expect(await claims([signerInfo(new Uint8Array(0))])).toBe(false);
+    // Something that is not a SEQUENCE at all, and a SEQUENCE of the wrong things.
+    expect(await claims([tlv(0x04, Uint8Array.of(1, 2, 3))])).toBe(false);
+    expect(
+      await claims([tlv(0x30, tlv(0x04, Uint8Array.of(1)), tlv(0x04, Uint8Array.of(2)))]),
+    ).toBe(false);
+    // One real signer among empty ones is still a signature.
+    expect(await claims([tlv(0x30), signerInfo()])).toBe(true);
+    expect(await claims([signerInfo()])).toBe(true);
+  });
+
+  it('accepts a signer with authenticated attributes, and one named by key identifier', async () => {
+    const withAttributes = tlv(
+      0x30,
+      tlv(0x02, Uint8Array.of(1)),
+      tlv(0x30, tlv(0x30), tlv(0x02, Uint8Array.of(5))),
+      ALGORITHM,
+      tlv(0xa0, tlv(0x30)), // authenticatedAttributes
+      ALGORITHM,
+      tlv(0x04, Uint8Array.of(9, 9)),
+      tlv(0xa1, tlv(0x30)), // unauthenticatedAttributes
+    );
+    const byKeyIdentifier = tlv(
+      0x30,
+      tlv(0x02, Uint8Array.of(3)),
+      tlv(0x80, Uint8Array.of(1, 2, 3, 4)),
+      ALGORITHM,
+      ALGORITHM,
+      tlv(0x04, Uint8Array.of(9)),
+    );
+    for (const signer of [withAttributes, byKeyIdentifier]) {
+      const html = await render({ certificate: signedDataWith([signer]) });
+      expect(html).toContain('Embedded signature present, not verified by MarkCopy');
+    }
+  });
+
   it('does not claim a signature for SignedData that has no signer', async () => {
     const html = await render({ certificate: signedDataWith([]) });
     expect(html).toContain('Certificate data present, with no Authenticode signature recognized');
