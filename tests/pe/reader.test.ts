@@ -78,7 +78,7 @@ describe('readPe: headers', () => {
     // ASLR 0x40, high-entropy 0x20, DEP 0x100, CFG 0x4000, force integrity 0x80, AppContainer 0x1000.
     const info = await read({ plus: true, dllCharacteristics: 0x40 | 0x20 | 0x100 | 0x4000 });
     expect(Object.fromEntries(info.mitigations)).toEqual({
-      'Address space layout randomization (ASLR)': true,
+      'Address randomization (ASLR)': true,
       'High-entropy ASLR': true,
       'DEP compatible (NX_COMPAT)': true,
       'Control Flow Guard': true,

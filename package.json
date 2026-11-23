@@ -336,6 +336,127 @@
         "priority": "default"
       },
       {
+        "viewType": "markcopy.packagePreview",
+        "displayName": "MarkCopy Package Info",
+        "selector": [
+          {
+            "filenamePattern": "*.deb"
+          },
+          {
+            "filenamePattern": "*.DEB"
+          },
+          {
+            "filenamePattern": "*.udeb"
+          },
+          {
+            "filenamePattern": "*.UDEB"
+          },
+          {
+            "filenamePattern": "*.rpm"
+          },
+          {
+            "filenamePattern": "*.RPM"
+          },
+          {
+            "filenamePattern": "*.msi"
+          },
+          {
+            "filenamePattern": "*.MSI"
+          },
+          {
+            "filenamePattern": "*.dmg"
+          },
+          {
+            "filenamePattern": "*.DMG"
+          },
+          {
+            "filenamePattern": "*.pkg"
+          },
+          {
+            "filenamePattern": "*.PKG"
+          },
+          {
+            "filenamePattern": "*.apk"
+          },
+          {
+            "filenamePattern": "*.APK"
+          },
+          {
+            "filenamePattern": "*.jar"
+          },
+          {
+            "filenamePattern": "*.JAR"
+          },
+          {
+            "filenamePattern": "*.war"
+          },
+          {
+            "filenamePattern": "*.WAR"
+          },
+          {
+            "filenamePattern": "*.ear"
+          },
+          {
+            "filenamePattern": "*.EAR"
+          },
+          {
+            "filenamePattern": "*.vsix"
+          },
+          {
+            "filenamePattern": "*.VSIX"
+          },
+          {
+            "filenamePattern": "*.whl"
+          },
+          {
+            "filenamePattern": "*.WHL"
+          },
+          {
+            "filenamePattern": "*.nupkg"
+          },
+          {
+            "filenamePattern": "*.NUPKG"
+          },
+          {
+            "filenamePattern": "*.snupkg"
+          },
+          {
+            "filenamePattern": "*.SNUPKG"
+          },
+          {
+            "filenamePattern": "*.so"
+          },
+          {
+            "filenamePattern": "*.SO"
+          },
+          {
+            "filenamePattern": "*.elf"
+          },
+          {
+            "filenamePattern": "*.ELF"
+          },
+          {
+            "filenamePattern": "*.ko"
+          },
+          {
+            "filenamePattern": "*.KO"
+          },
+          {
+            "filenamePattern": "*.so.*"
+          },
+          {
+            "filenamePattern": "*.AppImage"
+          },
+          {
+            "filenamePattern": "*.appimage"
+          },
+          {
+            "filenamePattern": "*.APPIMAGE"
+          }
+        ],
+        "priority": "default"
+      },
+      {
         "viewType": "markcopy.stlPreview",
         "displayName": "MarkCopy 3D Preview",
         "selector": [
@@ -1004,6 +1125,7 @@
   "dependencies": {
     "dompurify": "^3.4.18",
     "fflate": "^0.8.3",
+    "fzstd": "0.1.1",
     "highlight.js": "^11.12.0",
     "katex": "^0.19.1",
     "markdown-it": "^15.0.3",
@@ -1017,6 +1139,7 @@
     "three": "^0.187.0",
     "turndown": "^7.2.5",
     "turndown-plugin-gfm": "^1.0.2",
+    "xz-decompress": "0.2.3",
     "yaml": "^2.9.1"
   },
   "overrides": {

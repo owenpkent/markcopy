@@ -1,6 +1,6 @@
 # Documents
 
-Read Word, PowerPoint, PDF, and LaTeX files in the editor as structured, copyable text, and look inside a Windows executable without running it.
+Read Word, PowerPoint, PDF, and LaTeX files in the editor as structured, copyable text. Looking inside an executable or a package without running it has its own page: [File information](files.md).
 
 ## Word preview
 
@@ -77,22 +77,5 @@ With none of those found, the preview says so and names these same options rathe
 The preview recompiles whenever you save the document, or a `.bib`, `.sty`, `.cls`, or `.tikz` file beside it, since a thesis is usually a root file that pulls in chapters and a bibliography. To recompile without saving, use the floating **Recompile** button, the refresh icon in the editor title bar, **MarkCopy: Recompile LaTeX** from the Command Palette, or **Recompile LaTeX** in the right-click menu. For a project where the file you are editing is a chapter rather than the document to compile, either add a `% !TEX root = ../main.tex` comment near the top of the chapter, or set `markcopy.tex.rootFile`; either way MarkCopy compiles the root file and still shows its PDF while you edit the chapter.
 
 Your source and its build files are never touched by any of this: MarkCopy compiles into a temporary folder of its own and deletes it when you close the preview.
-
-## Executable info preview
-
-MarkCopy registers as the editor for `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` and `.efi` files (either case), so opening one shows a page about the file instead of VS Code's "file is binary" notice. It is for answering "what is this file?" without running it.
-
-- **Icon.** The file's own icon, above its name: the largest image of the first icon in the file, drawn at up to 48 pixels. A file with no icon of its own (most DLLs) shows none.
-- **Version.** The version resource Explorer's Details tab reads: description, product, company, file and product versions, copyright, original file name and any other strings, plus the numeric versions, build flags and language.
-- **File.** Type, architecture ("Any CPU" for .NET), PE32 or PE32+, subsystem, size, SHA-256, build time (or "not recorded" for a reproducible build), minimum Windows version, .NET runtime, linker version, image base, entry point, size in memory, header checksum, and any data appended after the program, such as an installer payload.
-- **Signature.** Whether an embedded Authenticode signature is present, and the signer, organization, issuer and certificate validity dates it names. **Nothing is verified**: not the signature, the hash, the certificate chain, revocation or expiry, and the page says so. A file can carry a certificate with any name in it, so treat these as the file's claims, and use `Get-AuthenticodeSignature` or Explorer's Digital Signatures tab for a verdict. Files signed through a catalog (many Windows components) show as having no embedded signature.
-- **Permissions and protections.** From the manifest, the requested execution level, UI access, DPI awareness and identity; from the headers, ASLR, high-entropy ASLR, DEP, Control Flow Guard, forced integrity and AppContainer, and large address aware for 32-bit files.
-- **Debug information, Sections, Imports and Exports.** The PDB path and symbol ID, the sections, each imported library with a count of its functions and whether it loads at start or on first use, and the export count with the first 100 names.
-
-The file is **only read as bytes**. It is never run, loaded, or handed to the operating system, and there is no **Open in Default App** row in this preview's menu, because for an executable the default app is the file itself. A file on disk is read in ranges, not loaded whole; the SHA-256 is computed for files up to 256 MB (a larger one shows "Not computed"), and a file on a virtual or remote file system is read whole and limited to 64 MB. A damaged or hostile file produces a notice or a warning on one table, not a crash.
-
-It is built on the same shared shell as the Word and Excel previews, so right-click **Copy as Rich Text** and **Copy as Markdown**, a table's **Copy Table** (with Markdown, CSV, TSV and PNG under **Copy as**), **Save as PDF / Word / PowerPoint**, Reveal in file manager, the themes and Search Google all work. It adds no settings.
-
-Not shown: 16-bit and DOS executables (the page says so), ELF and Mach-O files, the full list of imported function names, resources other than the icon, version block and manifest, signature verification, countersignature and timestamp details, and .NET metadata beyond the runtime version and flags.
 
 [Back to the user guide](README.md)

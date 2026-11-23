@@ -12,28 +12,23 @@
 // hostile.
 //
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
-import { child, findAll, parseXml } from '../ooxml/xnode';
+import { parseXmlBounded } from '../binary/xml';
+import { child, findAll } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
 import { isSignedData, readSigner, signerCount, type Signer } from './signer';
-import { printable } from './text';
+import {
+  RangeReader as Reader,
+  ReadError as PeError,
+  TRUNCATED,
+  type ByteSource,
+} from '../binary/reader';
+import { printable } from '../binary/text';
 import { readVersionResource, type VersionInfo } from './version';
 
-/** An error whose message is written to be shown to the reader as is. */
-export class PeError extends Error {}
-
-/** Random access to the file. `read` may return fewer bytes only at the end of the file. */
-export interface ByteSource {
-  readonly size: number;
-  read(offset: number, length: number): Promise<Uint8Array>;
-}
-
-/** A ByteSource over bytes already in memory. */
-export function bytesSource(bytes: Uint8Array): ByteSource {
-  return {
-    size: bytes.length,
-    read: (offset, length) => Promise.resolve(bytes.subarray(offset, offset + length)),
-  };
-}
+// The shared reader's error under this feature's name, so a file the ranged
+// reader gives up on and one whose PE headers make no sense are the same thing
+// to the preview: a message to show.
+export { ReadError as PeError, bytesSource, type ByteSource } from '../binary/reader';
 
 export interface PeSection {
   name: string;
@@ -153,15 +148,13 @@ export interface PeInfo {
   warnings: string[];
 }
 
-const PAGE = 0x10000;
-// 16 MiB of distinct pages. A real image needs well under one: the headers,
-// the directories and a version resource. A file built to send the reader all
-// over itself runs out of budget instead of out of memory.
-const MAX_PAGES = 256;
-const MAX_READ = 4 * 1024 * 1024;
 const MAX_SECTIONS = 96;
 const MAX_IMPORTS = 1024;
 const MAX_THUNKS = 16384;
+// Across every imported library together. The per-library and per-table caps
+// multiply to sixteen million entries, each a 64-bit compare; a real image,
+// even a browser's, imports a few thousand functions in all.
+const MAX_TOTAL_THUNKS = 262144;
 const MAX_EXPORT_NAMES = 100;
 // An export is addressed by a 16-bit ordinal, so a table has no use for more
 // slots than that, and a header that claims more is not counted.
@@ -169,6 +162,7 @@ const MAX_EXPORT_SLOTS = 0x10000;
 const MAX_RESOURCE_ENTRIES = 4096;
 const MAX_VERSION_BYTES = 512 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
+const MAX_MANIFEST_NODES = 5000;
 const MAX_SIGNATURE_BYTES = 1024 * 1024;
 // A signed file has one entry, a dual-signed one two.
 const MAX_CERTIFICATES = 16;
@@ -180,80 +174,6 @@ const CERTIFICATE_TYPES: Record<number, string> = {
 };
 // A 256 pixel, 32-bit bitmap with its mask is about 270 KB; a PNG is smaller.
 const MAX_ICON_BYTES = 1024 * 1024;
-
-const TRUNCATED = 'the file ends before the data its headers point to.';
-
-class Reader {
-  private readonly pages = new Map<number, Uint8Array>();
-
-  constructor(private readonly source: ByteSource) {}
-
-  get size(): number {
-    return this.source.size;
-  }
-
-  private async page(index: number): Promise<Uint8Array> {
-    let page = this.pages.get(index);
-    if (!page) {
-      if (this.pages.size >= MAX_PAGES) {
-        throw new PeError('its tables point to more of the file than MarkCopy will read.');
-      }
-      const start = index * PAGE;
-      page = await this.source.read(start, Math.min(PAGE, this.size - start));
-      this.pages.set(index, page);
-    }
-    return page;
-  }
-
-  async bytes(offset: number, length: number): Promise<Uint8Array> {
-    if (
-      !Number.isSafeInteger(offset) ||
-      !Number.isSafeInteger(length) ||
-      offset < 0 ||
-      length < 0 ||
-      length > MAX_READ ||
-      offset + length > this.size
-    ) {
-      throw new PeError(TRUNCATED);
-    }
-    const out = new Uint8Array(length);
-    let done = 0;
-    while (done < length) {
-      const pos = offset + done;
-      const index = Math.floor(pos / PAGE);
-      const page = await this.page(index);
-      const within = pos - index * PAGE;
-      const take = Math.min(length - done, page.length - within);
-      if (take <= 0) {
-        // The source returned less than the size it reported.
-        throw new PeError(TRUNCATED);
-      }
-      out.set(page.subarray(within, within + take), done);
-      done += take;
-    }
-    return out;
-  }
-
-  async view(offset: number, length: number): Promise<DataView> {
-    const bytes = await this.bytes(offset, length);
-    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  }
-
-  /** As much as exists of `length` bytes at `offset`: for data whose end the file may cut short. */
-  async upTo(offset: number, length: number): Promise<Uint8Array> {
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= this.size) {
-      throw new PeError(TRUNCATED);
-    }
-    return this.bytes(offset, Math.max(0, Math.min(length, this.size - offset)));
-  }
-
-  /** A NUL-terminated string, decoded as UTF-8 (a superset of the ASCII the format specifies). */
-  async cstr(offset: number, max = 512): Promise<string> {
-    const bytes = await this.upTo(offset, max);
-    const end = bytes.indexOf(0);
-    return printable(new TextDecoder().decode(end < 0 ? bytes : bytes.subarray(0, end)));
-  }
-}
 
 const MACHINES: Record<number, string> = {
   0x014c: 'x86 (32-bit)',
@@ -467,7 +387,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     checksum: opt.getUint32(64, true),
     largeAddressAware: (characteristics & 0x20) !== 0,
     mitigations: [
-      ['Address space layout randomization (ASLR)', (dllFlags & 0x40) !== 0],
+      ['Address randomization (ASLR)', (dllFlags & 0x40) !== 0],
       ['High-entropy ASLR', (dllFlags & 0x20) !== 0],
       // The header flag, under its own name. Whether DEP is in force is not
       // this bit's to say: 64-bit Windows enforces it for every native 64-bit
@@ -546,16 +466,19 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     });
   }
 
+  const thunks = { left: MAX_TOTAL_THUNKS };
   const imports = directory(DIR_IMPORT);
   if (imports) {
     await attempt('import table', async () => {
-      info.imports.push(...(await readImports(reader, need, need(imports.address), plus)));
+      info.imports.push(...(await readImports(reader, need, need(imports.address), plus, thunks)));
     });
   }
   const delayed = directory(DIR_DELAY_IMPORT);
   if (delayed) {
     await attempt('delay-load import table', async () => {
-      info.imports.push(...(await readDelayImports(reader, need, need(delayed.address), plus)));
+      info.imports.push(
+        ...(await readDelayImports(reader, need, need(delayed.address), plus, thunks)),
+      );
     });
   }
 
@@ -736,11 +659,17 @@ async function findResource(
 }
 
 /** Count a NUL-terminated array of import thunks, 4 bytes each in PE32 and 8 in PE32+. */
-async function countThunks(reader: Reader, offset: number, plus: boolean): Promise<number> {
+async function countThunks(
+  reader: Reader,
+  offset: number,
+  plus: boolean,
+  budget: { left: number },
+): Promise<number> {
   const width = plus ? 8 : 4;
   const chunk = 512;
+  const most = Math.min(MAX_THUNKS, budget.left);
   let count = 0;
-  while (count < MAX_THUNKS) {
+  while (count < most) {
     const bytes = await reader.upTo(offset + count * width, chunk * width);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const entries = Math.floor(bytes.length / width);
@@ -752,11 +681,16 @@ async function countThunks(reader: Reader, offset: number, plus: boolean): Promi
         ? view.getBigUint64(i * width, true) === 0n
         : view.getUint32(i * width, true) === 0;
       if (zero) {
+        budget.left -= count;
         return count;
       }
       count++;
+      if (count >= most) {
+        break;
+      }
     }
   }
+  budget.left -= count;
   return count;
 }
 
@@ -765,6 +699,7 @@ async function readImports(
   need: (rva: number) => number,
   offset: number,
   plus: boolean,
+  budget: { left: number },
 ): Promise<PeImport[]> {
   const out: PeImport[] = [];
   for (let i = 0; i < MAX_IMPORTS; i++) {
@@ -779,7 +714,7 @@ async function readImports(
       library: await reader.cstr(need(name), 260),
       // The lookup table is the one a bound image leaves untouched; the
       // address table is all an old linker wrote.
-      functions: await countThunks(reader, need(lookup || address), plus),
+      functions: await countThunks(reader, need(lookup || address), plus, budget),
       delayLoaded: false,
     });
   }
@@ -791,6 +726,7 @@ async function readDelayImports(
   need: (rva: number) => number,
   offset: number,
   plus: boolean,
+  budget: { left: number },
 ): Promise<PeImport[]> {
   const out: PeImport[] = [];
   for (let i = 0; i < MAX_IMPORTS; i++) {
@@ -808,7 +744,7 @@ async function readDelayImports(
     }
     out.push({
       library: await reader.cstr(need(name), 260),
-      functions: names === 0 ? 0 : await countThunks(reader, need(names), plus),
+      functions: names === 0 ? 0 : await countThunks(reader, need(names), plus, budget),
       delayLoaded: true,
     });
   }
@@ -878,7 +814,12 @@ function readManifest(bytes: Uint8Array): PeManifest | undefined {
       : bytes[0] === 0xfe && bytes[1] === 0xff
         ? 'utf-16be'
         : 'utf-8';
-  const root = parseXml(new TextDecoder(encoding).decode(bytes));
+  // Bounded: a manifest is a few dozen elements, and a tree costs a hundred
+  // times its text, so a quarter megabyte of empty elements is not parsed.
+  const root = parseXmlBounded(new TextDecoder(encoding).decode(bytes), {
+    maxNodes: MAX_MANIFEST_NODES,
+    maxDepth: 64,
+  });
   const clean = (value: string | undefined): string | undefined => {
     const text = value === undefined ? '' : printable(value).trim().slice(0, 200);
     return text || undefined;

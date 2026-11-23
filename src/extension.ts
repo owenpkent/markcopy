@@ -38,6 +38,7 @@ import { XlsxEditorProvider } from './xlsxEditor';
 import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
 import { ExeEditorProvider } from './exeEditor';
+import { PackageEditorProvider } from './packageEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
 import { GifEditorProvider } from './gifEditor';
@@ -174,6 +175,23 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       ExeEditorProvider.viewType,
       new ExeEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Packages and installers (.deb, .rpm, .msi, .jar and the rest) open as a
+    // page of their metadata (a read-only custom editor). Read as bytes, never
+    // installed or run.
+    vscode.window.registerCustomEditorProvider(
+      PackageEditorProvider.viewType,
+      new PackageEditorProvider(
         context,
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),

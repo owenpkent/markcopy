@@ -24,6 +24,7 @@ const MARKDOWN_VIEW = 'markcopy.markdownPreview';
 const CSV_VIEW = 'markcopy.csvPreview';
 const TEX_VIEW = 'markcopy.texPreview';
 const EXE_VIEW = 'markcopy.exePreview';
+const PACKAGE_VIEW = 'markcopy.packagePreview';
 
 /**
  * Poll `probe` until it returns something, or give up.
@@ -289,6 +290,27 @@ suite('MarkCopy custom editors', () => {
       `expected a custom-editor tab for Library.DLL, saw: ${JSON.stringify(customTabs())}`,
     );
     assert.strictEqual(second.viewType, EXE_VIEW, 'Library.DLL opened in some other editor');
+  });
+
+  test('.deb, .MSI and .so.1 files open in the package preview, not as binary', async () => {
+    // A few arbitrary bytes each: the editor claims the tab on the filename and
+    // reports a file it cannot read as a notice in the panel, as the executable
+    // test above relies on. Nothing here is a real package, and nothing is
+    // checked into the repo. `libdemo.so.1` is the versioned shared-object name
+    // that only the `*.so.*` pattern matches.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-'));
+    for (const name of ['tool.deb', 'Setup.MSI', 'libdemo.so.1']) {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      fs.writeFileSync(uri.fsPath, Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]));
+
+      await vscode.commands.executeCommand('vscode.open', uri);
+      const tab = await waitFor(() => customTabs().find((t) => t.uri === uri.toString()));
+      assert.ok(
+        tab,
+        `expected a custom-editor tab for ${name}, saw: ${JSON.stringify(customTabs())}`,
+      );
+      assert.strictEqual(tab.viewType, PACKAGE_VIEW, `${name} opened in some other editor`);
+    }
   });
 
   test('a file that is not a document still opens rather than failing to load', async () => {

@@ -52,3 +52,14 @@ describe('open in default app row on an executable preview', () => {
     expect(h.rightClick(h.find('p')).labels()).toContain('Open in Default App');
   });
 });
+
+// The same rule for a package: the default app for a .deb, .msi or AppImage is
+// an installer or the file itself (tests/packageEditor.test.ts covers the host).
+describe('open in default app row on a package preview', () => {
+  it('is absent for the package kind, while Reveal stays', async () => {
+    await h.render({ html: '<p>curl 8.5.0</p>', kind: 'package' });
+    const labels = h.rightClick(h.find('p')).labels();
+    expect(labels).not.toContain('Open in Default App');
+    expect(labels).toContain(revealLabel());
+  });
+});

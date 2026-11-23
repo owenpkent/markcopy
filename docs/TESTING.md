@@ -15,7 +15,7 @@ The manual layer is smaller than it was. What keeps a row in it is needing a rea
 
 ### Fuzzing
 
-Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), Windows executables (`pe`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
+Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), Windows executables (`pe`), packages and installers (`pkg`), ffprobe/ffmpeg output (`video-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
 
 ```bash
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
@@ -28,6 +28,8 @@ Three targets check a property rather than only looking for crashes. `links` thr
 The `3mf` target (`fuzz/targets/3mf.fuzz.ts`) runs `read3mf`, then the section maths on a model or the G-code reader on a sliced file; `gcode` (`fuzz/targets/gcode.fuzz.ts`) runs `parseGcode` and `readSliceInfo` and asserts the output arrays agree with the segment count. Both have dictionaries (`fuzz/dict/3mf.dict`, `fuzz/dict/gcode.dict`) and are in the nightly matrix. The `3mf` target found, within 20 seconds, a 1.2 KB file declaring a 184 MB part that made the zip reader allocate all of it; `src/ooxml/zip.ts` now refuses it. Local runs on 2026-11-20 after the fix: `3mf` 910,848 runs in 46 s and `gcode` 181,617 runs in 21 s, no findings.
 
 The `pe` target (`fuzz/targets/pe.fuzz.ts`) runs `readPe` and then `renderPeHtml`, and treats anything but a `PeError` as a finding. It has no seed corpus, because no executable is checked into the repo: the target writes a minimal PE32 header over any input that lacks one, so mutation reaches the directories and tables behind it. It is in the nightly matrix. Local run on 2026-11-22: 394,932 runs in 46 s, no findings.
+
+The `pkg` target (`fuzz/targets/pkg.fuzz.ts`) runs `readPackage` and then `renderPackageHtml`, and treats anything but a `PackageError` as a finding. Like `pe` it has no seed corpus, because no package is checked into the repo. `readPackage` picks a reader from the first bytes of the file, so the first input byte chooses one of thirteen shapes (ELF, RPM, Debian, Windows Installer, macOS installer, five zip-based names (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`), an empty zip, an Alpine gzip, and a disk image) and the target writes that format's magic over the start of the rest of the input (a disk image's trailer over its end) together with a file name that sends the dispatcher the same way, so mutation reaches the headers and tables behind it. It is in the nightly matrix. It also fails an input that was read without error but cost too much (over 3 s, over 256 MB of heap growth, or a page of over 4 MB), since a reader that allocates a gigabyte and returns a small page throws nothing. Local runs on 2026-11-23: 507,592 runs in 61 s with no findings before those cost checks existed, which is exactly why they were added (see the memory audit under the package preview below); 341,276 runs in 46 s with no findings after the fixes and with the checks on. The `pe` target was not rerun after the icon reader was added; its last local run (394,932 runs in 46 s, no findings) predates it.
 
 The `messages` target runs every webview message parser (Markdown and CSV, the Office previews, PDF, LaTeX, STL, video, GIF, image and audio) over generated messages and throws when one accepts a type or setting key its surface does not allow, a `navigate` step other than 1 or -1, or a review edit that lost the page's original object; the image and audio surfaces include `navigate`, the review messages and their `*.review` settings (`tests/messagesFuzzTarget.test.ts` is its regression test).
 
@@ -286,6 +288,89 @@ Measured so far, manually on Windows 11 on 2026-11-22 with a script over the par
 - [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, a table's **Copy Table** and its CSV and TSV work; **Search Google** works on a selection; **Save as PDF**, **Save as Word** and **Save as PowerPoint** export the whole page.
 - [ ] Light, dark, and green themes are all legible, including the tables, notes and the signature caveat.
 - [ ] A file on a virtual or remote file system opens if it is under 64 MB, and over that shows a notice.
+
+## Package info preview (.deb, .rpm, .msi, .dmg, .pkg, .apk, .jar, ...)
+
+Open real files in the Extension Development Host, one or two per family below. Never install, run, mount or open any of them outside the preview for this pass: the preview must not either. Get a Debian package from a distribution mirror, not from a build you trust less than the page's claims.
+
+Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the readers (not through the extension host):
+
+- Windows Installer: 7 real `.msi` files from 45 KB to 906 MB compared with Windows Installer's own database API (property count, product name, version, install scope, language and the row counts of eight tables). All matched, and each was read in under 25 ms.
+- Debian: a Debian `hello` package (xz control archive) and an Ubuntu one (zstd) compared with an independent extraction of the control file. RPM: a Fedora `hello` package compared with an independent header parse. Alpine: the `musl` package.
+- ELF: three real shared libraries (x86-64 and AArch64) and one statically linked Go executable compared with `file` and an independent header reader. No real kernel module or AppImage was checked.
+- macOS installer: two real signed packages (one product archive, one flat component package), file lists and signer names compared with an independent read of the table of contents.
+- Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
+- Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
+
+Memory audit, 2026-11-23: an adversarial pass over the readers, with generated files run one at a time in a separate process under a 4 GB heap limit, found six that aborted the process and several that held it for seconds. The same files were run again after the fixes, each in its own process under a 1 GB limit:
+
+| Input                                                                         | Size   | Before                       | After                          |
+| ----------------------------------------------------------------------------- | ------ | ---------------------------- | ------------------------------ |
+| Android package, string pool naming one string 100,000 times                  | 642 B  | abort at 4.2 GB after 28 s   | 15 ms, 6 MB heap, a warning    |
+| Windows Installer, 65,000 Property rows naming one string                     | 862 KB | abort at 4.2 GB after 11.6 s | 17 ms, 7 MB heap, a warning    |
+| Windows Installer, large `_Columns` table                                     | 4 MB   | 9.6 s                        | 13 ms                          |
+| RPM, 200 files under one 2 MiB directory name                                 | 2 MB   | abort at 4.2 GB after 28 s   | 14 ms, 7 MB heap               |
+| RPM, forty tags over one region of eight million strings                      | 23 MB  | 35 s, 2.5 GB                 | 42 ms, 16 MB heap, a warning   |
+| Debian package, Zstandard frame with a 1.9 GiB window behind skippable frames | 250 B  | 1.97 GB buffer, 10.9 s       | 11 ms, a warning               |
+| Debian package, 420,000 empty gzip members                                    | 8 MB   | 4.7 s                        | 15 ms, a warning               |
+| Debian package, 15 MiB checksum list of short lines                           | 15 KB  | about 150 MB                 | 83 ms, 6 MB heap               |
+| Alpine package of tar long-name headers                                       | 3 MB   | 1.9 s, quadratic             | 48 ms                          |
+| macOS installer, 1 MiB directory name with 1,000 children                     | 1.3 KB | 1.6 GB heap, a 210 MB page   | 30 ms, 7 MB heap, a 59 KB page |
+| macOS installer, 8 MiB directory name with 5,000 children                     | 9 KB   | abort after 16.6 s           | refused in 1 ms                |
+| macOS installer, 16 MiB table of contents of empty elements                   | 16 KB  | 1.14 GB heap                 | refused in 1 ms                |
+| Disk image, 3 MB property list of empty elements                              | 3 MB   | 230 MB heap                  | 22 ms, 11 MB heap, a warning   |
+
+Peak resident memory after the fixes was between 63 and 132 MB for every row, most of it the Node process itself. The measurements are from one Windows 11 machine, by script, not in the extension host, whose own heap limit was not measured. Each case has a regression test that builds it at a size where the old code would have cost a few hundred megabytes and asserts the heap grows by under 64 MB. Three gaps that first pass left were closed the same day:
+
+- **The executable reader, with generated files.** 29 attack files built with the test fixture and by patching bytes (1,024 libraries aliasing one 20,000-entry thunk region, resource directories that point at themselves, 4,096 entries at every level, manifests of 256 KiB of empty or deeply nested elements, 32 certificates of 64 name fields, a 1 MiB junk certificate blob, 96 overlapping sections, icons whose headers lie), each run in its own process, plus 6,000 mutated images in one. No crash, no runaway and nothing thrown but `PeError`: the worst took 34 ms and 77 MB. It found two gaps short of that, both fixed: a file under 1 MB whose two thousand import descriptors shared one long name made a 3 MB page (the page now draws the first 500 libraries), and a PNG icon, which goes to the webview unchanged, was checked only for its signature and size (it must now open with a whole header chunk, be eight bits a channel and be at most 512 KiB).
+- **Redraws when the file changes.** A test with a file watcher that fires on demand showed 300 change events starting 301 simultaneous draws, each of which reads the file and, for these two previews, hashes all of it. `tests/ooxmlRedraw.test.ts` pins the fix in `src/ooxmlEditor.ts`: one draw at a time, a burst during a draw costs exactly one more, events with nothing running are gathered for 250 ms, and nothing draws or posts after the tab closes. This applies to every preview built on that scaffold, the workbook, deck and Word previews included.
+- **In the extension host itself.** `test-integration/hostileFiles.test.ts` runs inside the extension host of a real VS Code, in CI only, and measures the host from within. On the GitHub runner on 2026-11-23: the 250-byte Debian package grew the heap by 17 MB, the 642-byte Android package by under 1 MB, and the 1.3 KB macOS installer by 3 MB, with no stall over 18 ms; a 4 MB file rewritten 60 times with its preview open grew it by 1 MB with no stall over 1 ms. The test fails past 256 MB of heap growth, 768 MB of resident growth or a 3 s stall.
+
+Still not measured: the extension host on Windows or macOS (the runner is Linux), and a preview open on a file that is rewritten for minutes rather than seconds.
+
+On 2026-11-23 a Debian package was opened in the Extension Development Host and its page drew, which is the only check made in the editor so far; that pass is what showed the page as a narrow table beside a wide empty panel. The layout that replaced it (two columns of sections, facts tables without a header row, long one and two column grids drawn several to a line, the size and hash second) was then checked by headless Chrome screenshots of the rendered markup with the real `media/preview.css`, not in the editor: a `.deb`, an `.rpm`, an `.msi`, an Android `.apk`, a macOS `.pkg`, `notepad.exe` and `kernel32.dll`, in the dark, light and green themes, at 1500, 1100 and 760 px wide. **The rows below are otherwise unchecked in the editor**: the menu, copy and the exports are unverified, and so is the icon, which the screenshots drew from an inline image where the editor sends it as a separate message.
+
+Every format:
+
+- [ ] Each file opens in the preview, not in VS Code's "file is binary" notice. An uppercase extension does too, and so does `libfoo.so.1`.
+- [ ] The page ends with a File section whose format and size are right and whose SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
+- [ ] No row, link or menu item installs, runs or opens the file. Right-click: there is **no Open in Default App**; **Reveal in file manager** works.
+- [ ] A text file renamed to each extension shows a notice in the panel, not a crash and not a blank page. So does a truncated copy of a real package.
+- [ ] Right-click: **Copy Rich Text**, **Copy as** > **Markdown**, a table's **Copy Table** and its CSV and TSV work; **Search Google** works on a selection; **Save as PDF**, **Save as Word** and **Save as PowerPoint** export the whole page.
+- [ ] Light, dark, and green themes are all legible, including the tables and notes.
+- [ ] A file on a virtual or remote file system opens if it is under 64 MB, and over that shows a notice.
+- [ ] Any signature section names who the file claims signed it and says nothing was verified.
+
+Linux packages (`.deb`, `.rpm`, Alpine `.apk`):
+
+- [ ] The fields match `dpkg-deb --info`, `rpm -qip` or the `.PKGINFO` of the same file: name, version, architecture, maintainer, description, dependencies. A Debian package with an xz control archive and one with zstd both open; one with a bzip2 or lzma control archive shows a warning and still opens.
+- [ ] The page says which maintainer scripts or scriptlets exist and shows none of their text.
+- [ ] An RPM's file list has sizes, `rpmlib(...)` dependencies are hidden and counted, and a signed one shows the key ID.
+- [ ] An Alpine package is recognised as Alpine, not as Android.
+
+Windows Installer (`.msi`):
+
+- [ ] Product name, version, manufacturer, the product, upgrade and package codes, platform and install scope match the file's Properties or Orca. The table counts (files, components, features, registry values, shortcuts, services, custom actions) are plausible.
+- [ ] A patch, a transform and a merge module are labelled as such and do not show the product page.
+- [ ] A signed installer shows its signer; a large one opens at once.
+
+macOS (`.dmg`, `.pkg`):
+
+- [ ] A disk image shows its size, compression, checksum type and partitions, says whether it is encrypted and signed, and does not show the app's name or version, which it cannot read.
+- [ ] An installer package shows its title, identifiers, versions, install location, components, which components run scripts, the file list and the signing certificate names.
+
+Linux binaries (`.so`, `*.so.*`, `.elf`, `.ko`, `.AppImage`):
+
+- [ ] Type, architecture, SONAME, build ID, interpreter, stripped or not, protections and needed libraries match `readelf` or `file` for the same file.
+- [ ] A kernel module shows its module information; an AppImage shows its payload size and is not run.
+
+Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):
+
+- [ ] A Java archive shows its manifest, Maven coordinates when there are some, the class count and Java version; a signed one shows its signer.
+- [ ] A VS Code extension shows its identity, engine, activation events and contribution counts.
+- [ ] A wheel shows its metadata, requirements and entry points; a NuGet package its dependencies by framework and whether it carries build or install scripts.
+- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed only with scheme v2 or later shows the scheme without a signer. Its label and icon are not shown.
+- [ ] A `.zip` renamed to `.jar` with none of these inside shows its contents only.
 
 ## CSV / TSV grid
 

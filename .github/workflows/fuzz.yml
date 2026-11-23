@@ -43,6 +43,7 @@ jobs:
             messages,
             docx,
             pe,
+            pkg,
             links,
             markdown-html,
             paste-export,

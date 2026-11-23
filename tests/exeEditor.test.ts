@@ -45,7 +45,8 @@ vi.mock('vscode', () => ({
 }));
 
 import { DocxEditorProvider } from '../src/docxEditor';
-import { ExeEditorProvider, readRange } from '../src/exeEditor';
+import { ExeEditorProvider } from '../src/exeEditor';
+import { readRange } from '../src/fileInspect';
 import { readPe } from '../src/pe';
 import { buildPe, iconBitmap } from './pe/fixture';
 import type * as vscode from 'vscode';

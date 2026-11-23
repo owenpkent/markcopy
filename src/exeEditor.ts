@@ -1,17 +1,8 @@
-import * as vscode from 'vscode';
-import { createHash } from 'node:crypto';
-import { open, type FileHandle } from 'node:fs/promises';
+import type * as vscode from 'vscode';
 import { posix } from 'node:path';
 import { escapeAttr } from './escape';
-import {
-  bytesSource,
-  formatBytes,
-  ICON_MEDIA_ID,
-  PeError,
-  readPe,
-  renderPeHtml,
-  type PeInfo,
-} from './pe';
+import { inspectFile } from './fileInspect';
+import { ICON_MEDIA_ID, PeError, readPe, renderPeHtml, type PeInfo } from './pe';
 import {
   OoxmlEditorProvider,
   describeReadError,
@@ -23,101 +14,16 @@ import {
 // only the ones the shared shell itself draws from.
 const REDRAW_SETTINGS = ['markcopy.theme', 'markcopy.styleProfile', 'markcopy.wrapCode'];
 
-// Hashing reads every byte, which the metadata does not: past this size the
-// preview shows the headers at once rather than keep a disk busy for a number
-// most readers of a multi-gigabyte installer did not open the file to get.
-const HASH_LIMIT = 256 * 1024 * 1024;
-
-// A file that is not on a local disk (a virtual or remote file system) can only
-// be read whole, so it has to fit in memory to be read at all.
-const WHOLE_FILE_LIMIT = 64 * 1024 * 1024;
-
-const HASH_CHUNK = 1024 * 1024;
-
 export interface Inspection {
   info: PeInfo;
   sha256?: string;
   hashNote?: string;
 }
 
-/**
- * Read `length` bytes at `offset`, or as many as the file has.
- *
- * One read may return fewer bytes than were asked for without being at the end
- * of the file, on a network share for one. A ByteSource promises a short
- * answer only at the end, and the reader caches what it gets as the whole
- * page, so a short read passed straight through would make a complete file
- * look truncated. This keeps reading until the range is full or a read
- * returns nothing.
- */
-export async function readRange(
-  handle: Pick<FileHandle, 'read'>,
-  offset: number,
-  length: number,
-): Promise<Uint8Array> {
-  const buffer = new Uint8Array(length);
-  let filled = 0;
-  while (filled < length) {
-    const { bytesRead } = await handle.read(buffer, filled, length - filled, offset + filled);
-    if (bytesRead === 0) {
-      break;
-    }
-    filled += bytesRead;
-  }
-  return buffer.subarray(0, filled);
-}
-
-async function hashFile(handle: FileHandle, size: number): Promise<string> {
-  const hash = createHash('sha256');
-  const chunk = Buffer.allocUnsafe(Math.min(HASH_CHUNK, Math.max(size, 1)));
-  let position = 0;
-  for (;;) {
-    const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
-    if (bytesRead === 0) {
-      break;
-    }
-    hash.update(chunk.subarray(0, bytesRead));
-    position += bytesRead;
-  }
-  return hash.digest('hex');
-}
-
-/**
- * Read a file's PE metadata and its SHA-256.
- *
- * A file on disk is read in ranges through a file handle, so the size of the
- * file never becomes the size of a buffer. Nothing here runs or loads it.
- */
+/** Read a file's PE metadata and its SHA-256. Nothing here runs or loads it. */
 export async function inspectExecutable(uri: vscode.Uri): Promise<Inspection> {
-  if (uri.scheme === 'file') {
-    const handle = await open(uri.fsPath, 'r');
-    try {
-      const size = (await handle.stat()).size;
-      const info = await readPe({
-        size,
-        read: (offset, length) => readRange(handle, offset, length),
-      });
-      return size <= HASH_LIMIT
-        ? { info, sha256: await hashFile(handle, size) }
-        : {
-            info,
-            hashNote: `Not computed for files over ${formatBytes(HASH_LIMIT).split(' (')[0]}`,
-          };
-    } finally {
-      await handle.close();
-    }
-  }
-  const { size } = await vscode.workspace.fs.stat(uri);
-  if (size > WHOLE_FILE_LIMIT) {
-    throw new PeError(
-      `it is ${formatBytes(size).split(' (')[0]} and not on a local disk, where MarkCopy reads files of up to ${formatBytes(WHOLE_FILE_LIMIT).split(' (')[0]}.`,
-    );
-  }
-  const bytes = await vscode.workspace.fs.readFile(uri);
-  return {
-    info: await readPe(bytesSource(bytes)),
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-  };
+  const { result, sha256, hashNote } = await inspectFile(uri, readPe);
+  return { info: result, sha256, hashNote };
 }
 
 // A read-only custom editor for Windows executables (.exe, .dll, .sys and the

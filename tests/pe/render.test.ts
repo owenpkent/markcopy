@@ -258,8 +258,8 @@ describe('renderPeHtml: content', () => {
       exports: { dllName: 'x.dll', names },
     });
     expect(html).toContain('2 libraries.');
-    expect(html).toContain('<td>At start</td>');
-    expect(html).toContain('<td>On first use</td>');
+    expect(html).toContain('<td>4 functions</td>');
+    expect(html).toContain('<td>1 function, loaded on first use</td>');
     expect(html).toContain('Showing the first 100 of 120 names.');
   });
 

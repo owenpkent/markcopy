@@ -7,7 +7,17 @@
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
 import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
-import { printable } from './text';
+import {
+  block,
+  formatBytes,
+  formatNumber as number,
+  grid,
+  pageHead,
+  properties,
+  table,
+  type Row,
+} from '../binary/html';
+import { printable } from '../binary/text';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -24,36 +34,7 @@ export interface RenderOptions {
   hashNote?: string;
 }
 
-type Row = [label: string, value: string];
-
-const number = (value: number): string => value.toLocaleString('en-US');
-
-export function formatBytes(bytes: number): string {
-  const exact = `${number(bytes)} ${bytes === 1 ? 'byte' : 'bytes'}`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let unit = '';
-  for (const next of units) {
-    if (value < 1024) {
-      break;
-    }
-    value /= 1024;
-    unit = next;
-  }
-  return unit ? `${value.toFixed(value < 10 ? 2 : 1)} ${unit} (${exact})` : exact;
-}
-
 const hex = (value: number): string => `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
-
-function table(headers: string[], rows: string[][]): string {
-  const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
-  const body = rows
-    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
-    .join('');
-  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-}
-
-const properties = (rows: Row[]): string => table(['Property', 'Value'], rows);
 
 // The names Explorer's Details tab uses, in the order it shows them. A string
 // the file defines under any other key is listed after these, under its own key.
@@ -323,14 +304,16 @@ const MAX_IMPORT_ROWS = 500;
 // A library or symbol name longer than this is not one a linker wrote.
 const MAX_NAME_CHARS = 256;
 
+// Two columns, each value complete in itself, so that a long import table can
+// be drawn as a list (see grid). A library is loaded when the program starts
+// unless it says otherwise, so only the exception is spelled out.
 function importsSection(info: PeInfo): string {
   const shown = info.imports.slice(0, MAX_IMPORT_ROWS);
-  const html = table(
-    ['Library', 'Functions', 'Loaded'],
+  const html = grid(
+    ['Library', 'Functions'],
     shown.map((entry) => [
       entry.library.slice(0, MAX_NAME_CHARS),
-      number(entry.functions),
-      entry.delayLoaded ? 'On first use' : 'At start',
+      `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}${entry.delayLoaded ? ', loaded on first use' : ''}`,
     ]),
   );
   return info.imports.length > shown.length
@@ -361,7 +344,7 @@ function exportsSection(info: PeInfo): string {
   }
   let html = `<p>${lead}</p>`;
   if (exported.names.length > 0) {
-    html += table(
+    html += grid(
       ['Exported name'],
       exported.names.map((name) => [name.slice(0, MAX_NAME_CHARS)]),
     );
@@ -372,34 +355,27 @@ function exportsSection(info: PeInfo): string {
   return html;
 }
 
-/**
- * One headed part of the page. The page lays these out in two columns when it
- * is wide enough (see .mc-exe in media/preview.css), so a short table of
- * properties does not sit beside half a screen of nothing. `wide` is for a
- * grid that needs the whole width: many columns, or a long list.
- */
-function block(heading: string, body: string, wide = false): string {
-  return `<div class="mc-info-section${wide ? ' mc-info-wide' : ''}"><h2>${escapeHtml(heading)}</h2>${body}</div>`;
-}
-
 export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   const description = info.version?.strings.find(([key]) => key === 'FileDescription')?.[1];
   const summary = `${info.kind}, ${architecture(info)}`;
-  const parts: string[] = [];
+  let icon = '';
   if (info.icon) {
     const width = Math.min(ICON_SIDE, info.icon.width);
     const height = Math.max(1, Math.round((info.icon.height * width) / info.icon.width));
     // No src: the bytes follow in a media message and the webview fills it in.
-    parts.push(
-      `<p class="mc-exe-icon"><img ${MEDIA_ATTR}="${ICON_MEDIA_ID}" alt="File icon" width="${width}" height="${height}"></p>`,
-    );
+    icon = `<p class="mc-exe-icon"><img ${MEDIA_ATTR}="${ICON_MEDIA_ID}" alt="File icon" width="${width}" height="${height}"></p>`;
   }
-  parts.push(
-    `<h1>${escapeHtml(printable(options.fileName))}</h1>`,
-    description
-      ? `<p><strong>${escapeHtml(description)}</strong><br>${escapeHtml(summary)}</p>`
-      : `<p>${escapeHtml(summary)}</p>`,
-  );
+  const parts: string[] = [
+    pageHead(
+      printable(options.fileName),
+      [
+        description
+          ? `<p><strong>${escapeHtml(description)}</strong><br>${escapeHtml(summary)}</p>`
+          : `<p>${escapeHtml(summary)}</p>`,
+      ],
+      icon,
+    ),
+  ];
   for (const warning of info.warnings) {
     parts.push(`<p class="mc-exe-note">${escapeHtml(warning)}</p>`);
   }
