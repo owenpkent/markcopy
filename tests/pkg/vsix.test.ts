@@ -256,3 +256,17 @@ describe('readZipPackage: a hostile extension', () => {
     await expectSafe(vsix([{ name: '.signature.p7s', data: 'x' }]), 'x.vsix');
   });
 });
+
+describe('readZipPackage: bounded XML in a vsix', () => {
+  it('warns about a vsixmanifest nested past the depth bound, and still shows the package', async () => {
+    const deep = `${'<a>'.repeat(300)}${'</a>'.repeat(300)}`;
+    const info = await readZip(
+      buildZip([
+        { name: 'extension.vsixmanifest', data: deep },
+        { name: 'extension/package.json', data: JSON.stringify(packageJson) },
+      ]),
+    );
+    expect(info.warnings).toContain('extension.vsixmanifest is not valid XML.');
+    expect(info.title).toBe('Demo Extension 1.2.3');
+  });
+});

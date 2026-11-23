@@ -1,7 +1,8 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { parseAxml, parseManifest, type ManifestNode } from '../../src/pkg/axml';
 import { PackageError } from '../../src/pkg/model';
-import { buildAxml, type AxmlElement } from './axmlFixture';
+import { buildAxml, buildPoolBomb, type AxmlElement } from './axmlFixture';
 
 const RLO = String.fromCharCode(0x202e);
 
@@ -203,7 +204,7 @@ describe('parseManifest', () => {
   });
 
   it('stops a text manifest at the depth cap', () => {
-    const xml = `${'<a>'.repeat(500)}${'</a>'.repeat(500)}`;
+    const xml = `${'<a>'.repeat(120)}${'</a>'.repeat(120)}`;
     let depth = 0;
     for (
       let node: ManifestNode | undefined = parseManifest(new TextEncoder().encode(xml));
@@ -213,5 +214,52 @@ describe('parseManifest', () => {
       depth++;
     }
     expect(depth).toBeLessThanOrEqual(101);
+  });
+});
+
+describe('parseAxml: string pool bombs', () => {
+  const heap = (): number => {
+    globalThis.gc?.();
+    return process.memoryUsage().heapUsed;
+  };
+
+  it('does not decode a pool of many offsets that share one long string', () => {
+    // 50,000 strings, all at one 16,000-character string: decoding every one
+    // used to cost count times length.
+    const bytes = buildPoolBomb({ count: 50_000, chars: 16_000, attrs: 1000 });
+    const before = heap();
+    const warnings: string[] = [];
+    const root = parseAxml(bytes, warnings);
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+    expect(root.name).toBe('manifest');
+    // The long string is decoded once and cut: every attribute shares it.
+    expect(root.attrs['manifest']).toBeDefined();
+    expect(root.attrs['manifest'].length).toBe(4096);
+    expect(warnings).toEqual([]);
+  });
+
+  it('refuses a pool that declares more strings than the cap', () => {
+    expect(() => parseAxml(buildPoolBomb({ count: 50_001, chars: 8 }))).toThrow(PackageError);
+  });
+
+  it('budgets the characters kept across distinct long strings, and says so', () => {
+    // 600 distinct 4,096-character strings is 2.4 million characters, over the pool budget.
+    const bytes = buildPoolBomb({ count: 700, chars: 4096, distinct: true, attrs: 600 });
+    const before = heap();
+    const warnings: string[] = [];
+    const root = parseAxml(bytes, warnings);
+    expect(heap() - before).toBeLessThan(64 * 1024 * 1024);
+    expect(warnings).toContain(
+      'The manifest has more text than MarkCopy reads, so some values are blank.',
+    );
+    // The last attribute named a string read after the budget was spent.
+    expect(root.attrs['manifest']).toBe('');
+  });
+});
+
+describe('parseManifest: bounded text XML', () => {
+  it('rejects a text manifest nested past the XML depth bound as invalid XML', () => {
+    const xml = `${'<a>'.repeat(300)}${'</a>'.repeat(300)}`;
+    expect(() => parseManifest(new TextEncoder().encode(xml))).toThrow(PackageError);
   });
 });

@@ -6,7 +6,8 @@
 // called out rather than left in a file list.
 import { printable } from '../binary/text';
 import { formatNumber } from '../binary/html';
-import { child, children, findAll, parseXml, type XNode } from '../ooxml/xnode';
+import { parseXmlBounded } from '../binary/xml';
+import { child, children, findAll, type XNode } from '../ooxml/xnode';
 import { propertySection, tableSection, type InfoSection } from './model';
 import { readSigner, signatureSection } from './signature';
 import {
@@ -27,7 +28,7 @@ const MAX_FOLDER_NAMES = 64;
 const MAX_LISTED_FILES = 12;
 
 const text = (node: XNode | undefined, max = 500): string | undefined => {
-  const value = node ? printable(node.text.trim()).slice(0, max) : '';
+  const value = node ? printable(node.text.slice(0, max).trim()) : '';
   return value || undefined;
 };
 
@@ -58,7 +59,7 @@ export async function readNupkg(
   const xml = await readTextEntry(zip, nuspec, MAX_NUSPEC_BYTES, warnings, 'The nuspec');
   if (xml !== undefined) {
     try {
-      const root = child(parseXml(xml), 'package');
+      const root = child(parseXmlBounded(xml), 'package');
       metadata = root ? child(root, 'metadata') : undefined;
       if (!metadata) {
         warnings.push('The nuspec has no package metadata.');
@@ -89,21 +90,24 @@ export async function readNupkg(
       ['License URL', licenseNode ? field('licenseUrl') : undefined],
       ['Requires license acceptance', field('requireLicenseAcceptance')],
       ['Homepage', field('projectUrl')],
-      ['Repository', repository ? printable(repository.attrs.url ?? '').slice(0, 500) : undefined],
+      [
+        'Repository',
+        repository ? printable((repository.attrs.url ?? '').slice(0, 500)) : undefined,
+      ],
       [
         'Repository type',
-        repository ? printable(repository.attrs.type ?? '').slice(0, 40) : undefined,
+        repository ? printable((repository.attrs.type ?? '').slice(0, 40)) : undefined,
       ],
-      ['Commit', repository ? printable(repository.attrs.commit ?? '').slice(0, 80) : undefined],
+      ['Commit', repository ? printable((repository.attrs.commit ?? '').slice(0, 80)) : undefined],
       ['Tags', field('tags')],
       ['Development dependency', field('developmentDependency')],
       ['Minimum NuGet client', field('minClientVersion')],
       [
         'Package types',
         typeNodes
-          .map((n) => printable(n.attrs.name ?? ''))
-          .filter(Boolean)
           .slice(0, 10)
+          .map((n) => printable((n.attrs.name ?? '').slice(0, 100)))
+          .filter(Boolean)
           .join(', '),
       ],
     ]),
@@ -111,11 +115,11 @@ export async function readNupkg(
   // Descriptions keep their line breaks so paragraphs survive.
   const descriptionNode = metadata ? child(metadata, 'description') : undefined;
   const description = descriptionNode
-    ? printable(descriptionNode.text.trim(), true).slice(0, MAX_TEXT_CHARS) || undefined
+    ? printable(descriptionNode.text.slice(0, MAX_TEXT_CHARS).trim(), true) || undefined
     : undefined;
   const notes = metadata ? child(metadata, 'releaseNotes') : undefined;
   const firstNote = notes
-    ? printable(notes.text.trim(), true)
+    ? printable(notes.text.slice(0, MAX_TEXT_CHARS).trim(), true)
         .split(/\n\s*\n/)[0]
         ?.trim()
     : undefined;
@@ -144,8 +148,8 @@ export async function readNupkg(
       if (dependencies.length < MAX_DEPENDENCY_ROWS) {
         dependencies.push([
           framework,
-          printable(dep.attrs.id ?? '').slice(0, 200),
-          printable(dep.attrs.version ?? '').slice(0, 100),
+          printable((dep.attrs.id ?? '').slice(0, 200)),
+          printable((dep.attrs.version ?? '').slice(0, 100)),
         ]);
       }
     }
@@ -153,7 +157,13 @@ export async function readNupkg(
   if (depsNode) {
     addDependencies(depsNode, '(any)');
     for (const group of children(depsNode, 'group')) {
-      addDependencies(group, printable(group.attrs.targetFramework ?? '').slice(0, 100) || '(any)');
+      if (dependencies.length >= MAX_DEPENDENCY_ROWS) {
+        break;
+      }
+      addDependencies(
+        group,
+        printable((group.attrs.targetFramework ?? '').slice(0, 100)) || '(any)',
+      );
     }
   }
   before.push(

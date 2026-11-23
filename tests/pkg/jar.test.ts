@@ -303,3 +303,13 @@ describe('readZipPackage: hostile Java archives', () => {
     await expectSafe(bytes, 'x.jar');
   });
 });
+
+describe('parseJarManifest: long lines', () => {
+  it('cuts a very long header name and value before keeping them', () => {
+    const parsed = parseJarManifest(`${'N'.repeat(100_000)}: ${'v'.repeat(100_000)}
+`);
+    expect(parsed.length).toBe(1);
+    expect(parsed[0][0].length).toBeLessThanOrEqual(200);
+    expect(parsed[0][1].length).toBeLessThanOrEqual(4096);
+  });
+});

@@ -42,7 +42,7 @@ export function parseHeaders(text: string): { headers: Headers; body: string } {
 }
 
 const clean = (value: string | undefined): string | undefined =>
-  value === undefined ? undefined : printable(value).slice(0, MAX_VALUE_CHARS);
+  value === undefined ? undefined : printable(value.slice(0, MAX_VALUE_CHARS));
 
 function entryPoints(text: string): string[][] {
   const rows: string[][] = [];

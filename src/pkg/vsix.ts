@@ -6,7 +6,8 @@
 // before it is shown.
 import { printable } from '../binary/text';
 import { formatNumber } from '../binary/html';
-import { child, findAll, parseXml, type XNode } from '../ooxml/xnode';
+import { parseXmlBounded } from '../binary/xml';
+import { child, findAll, type XNode } from '../ooxml/xnode';
 import { propertySection, tableSection, type InfoSection } from './model';
 import { signatureSection } from './signature';
 import { readTextEntry, type ZipArchive, type ZipFlavour } from './zipRange';
@@ -27,7 +28,7 @@ const isObject = (value: unknown): value is Json =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 function str(value: unknown, max = 500): string | undefined {
-  return typeof value === 'string' ? printable(value).slice(0, max) : undefined;
+  return typeof value === 'string' ? printable(value.slice(0, max)) : undefined;
 }
 
 function strings(value: unknown): string[] {
@@ -44,7 +45,7 @@ const unresolved = (value: string | undefined): boolean =>
   value !== undefined && /^%.*%$/.test(value);
 
 function textOf(node: XNode | undefined): string | undefined {
-  const text = node ? printable(node.text.trim(), true).slice(0, MAX_TEXT_CHARS) : undefined;
+  const text = node ? printable(node.text.slice(0, MAX_TEXT_CHARS).trim(), true) : undefined;
   return text || undefined;
 }
 
@@ -92,7 +93,7 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
     : undefined;
   if (text) {
     try {
-      const root = child(parseXml(text), 'PackageManifest');
+      const root = child(parseXmlBounded(text), 'PackageManifest');
       metadata = child(root ?? EMPTY, 'Metadata');
       identity = metadata ? child(metadata, 'Identity') : undefined;
       assets = root ? findAll(root, 'Asset') : [];
@@ -100,13 +101,14 @@ export async function readVsix(zip: ZipArchive): Promise<ZipFlavour> {
       warnings.push('extension.vsixmanifest is not valid XML.');
     }
   }
-  const property = (id: string): string | undefined => {
-    const found = metadata
-      ? findAll(metadata, 'Property').find((p) => p.attrs.Id === id)
-      : undefined;
-    const value = found ? printable(found.attrs.Value ?? '').slice(0, 500) : '';
-    return value || undefined;
-  };
+  // One walk for every property lookup, first occurrence of an Id winning.
+  const properties = new Map<string, string>();
+  for (const p of metadata ? findAll(metadata, 'Property') : []) {
+    if (p.attrs.Id !== undefined && !properties.has(p.attrs.Id)) {
+      properties.set(p.attrs.Id, printable((p.attrs.Value ?? '').slice(0, 500)));
+    }
+  }
+  const property = (id: string): string | undefined => properties.get(id) || undefined;
   const asset = (type: string): string | undefined => {
     const found = assets.find((a) => a.attrs.Type === type);
     return str(found?.attrs.Path);

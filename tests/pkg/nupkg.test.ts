@@ -242,3 +242,23 @@ describe('readZipPackage: a hostile NuGet package', () => {
     );
   });
 });
+
+describe('readZipPackage: bounded XML in a NuGet package', () => {
+  it('warns about a nuspec nested past the depth bound', async () => {
+    const info = await readZip(pkg(`${'<a>'.repeat(300)}${'</a>'.repeat(300)}`));
+    expect(info.warnings).toContain('The nuspec is not valid XML.');
+  });
+
+  it('caps empty dependency groups as well as dependencies', async () => {
+    const groups = Array.from(
+      { length: 3000 },
+      (_, i) => `<group targetFramework="net${i}"/>`,
+    ).join('');
+    const info = await readZip(
+      pkg(nuspec(`<id>a</id><version>1</version><dependencies>${groups}</dependencies>`)),
+    );
+    const table = section(info, 'Dependencies') as { rows: string[][]; note?: string };
+    expect(table.rows.length).toBe(200);
+    expect(table.note).toBe('Showing the first 200 of 2,000 dependencies.');
+  });
+});

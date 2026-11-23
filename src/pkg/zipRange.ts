@@ -34,7 +34,11 @@ export const MAX_ZIP_ENTRIES = 100_000;
 // of MAX_ZIP_ENTRIES short names fits in half of this.
 export const MAX_DIRECTORY_BYTES = 12 * 1024 * 1024;
 // A name is shown, not used; a longer one is cut rather than carried around.
-const MAX_NAME_CHARS = 1024;
+const MAX_NAME_CHARS = 512;
+// Characters of names kept across the directory. Real archives use a few million;
+// past this, later names are kept short so a directory of long names stays small.
+const MAX_NAME_TOTAL = 8 * 1024 * 1024;
+const SHORT_NAME_CHARS = 64;
 // Inflate in small pushes: one push can expand about a thousandfold, so this
 // bounds the output of a single step to a few megabytes.
 const INFLATE_STEP = 8 * 1024;
@@ -98,20 +102,19 @@ const u64 = (view: DataView, at: number): number => {
   return high >= 0x200000 ? Number.NaN : high * 2 ** 32 + view.getUint32(at, true);
 };
 
-function decodeName(raw: Uint8Array, utf8: boolean): string {
+function decodeName(raw: Uint8Array, utf8: boolean, max: number): string {
+  // Decode only what can be kept: a name field is up to 64 KiB and the
+  // directory can hold a hundred thousand of them.
   let text: string;
   if (utf8) {
-    text = new TextDecoder().decode(raw);
+    text = new TextDecoder().decode(raw.subarray(0, max * 4)).slice(0, max);
   } else {
     // Bit 11 clear means the legacy code page. Latin-1 is exact for ASCII,
     // which is nearly every name in practice.
-    text = '';
-    for (const b of raw) {
-      text += String.fromCharCode(b);
-    }
+    const codes = Array.from(raw.subarray(0, max));
+    text = String.fromCharCode(...codes);
   }
-  const clean = printable(text);
-  return clean.length > MAX_NAME_CHARS ? clean.slice(0, MAX_NAME_CHARS) : clean;
+  return printable(text);
 }
 
 interface Located {
@@ -227,6 +230,7 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
   }
   const view = new DataView(directory.buffer);
   const entries: ZipEntry[] = [];
+  let nameBudget = MAX_NAME_TOTAL;
   let totalUncompressed = 0;
   let totalCompressed = 0;
   let pos = 0;
@@ -303,7 +307,12 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       complete = false;
       continue;
     }
-    const name = decodeName(raw, (flags & 0x800) !== 0);
+    const name = decodeName(
+      raw,
+      (flags & 0x800) !== 0,
+      nameBudget > 0 ? MAX_NAME_CHARS : SHORT_NAME_CHARS,
+    );
+    nameBudget -= name.length;
     entries.push({
       name,
       compressedSize,

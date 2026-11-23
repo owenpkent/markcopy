@@ -77,7 +77,7 @@ describe('openZip: the directory', () => {
 
   it('cuts a very long name', async () => {
     const zip = await open(buildZip([{ name: 'n'.repeat(5000), data: 'x' }]));
-    expect(zip.entries[0].name.length).toBe(1024);
+    expect(zip.entries[0].name.length).toBe(512);
   });
 
   it('finds the end record past a comment, and ignores a fake one inside it', async () => {
@@ -301,5 +301,31 @@ describe('openZip: hostile input', () => {
         expect(error).toBeInstanceOf(PackageError);
       }
     }
+  });
+});
+
+describe('openZip: name budget', () => {
+  it('keeps later names short once the directory has spent its character budget', async () => {
+    // 17,000 names of 600 characters: past the 8 million character budget.
+    const count = 17_000;
+    const name = 'n'.repeat(600);
+    const record = 46 + name.length;
+    const bytes = new Uint8Array(count * record + 22);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < count; i++) {
+      const at = i * record;
+      view.setUint32(at, 0x02014b50, true);
+      view.setUint16(at + 28, name.length, true);
+      bytes.set(new TextEncoder().encode(name), at + 46);
+    }
+    const eocd = count * record;
+    view.setUint32(eocd, 0x06054b50, true);
+    view.setUint16(eocd + 10, count, true);
+    view.setUint32(eocd + 12, count * record, true);
+    const zip = await open(bytes);
+    expect(zip.entries.length).toBe(count);
+    expect(zip.entries[0].name.length).toBe(512);
+    expect(zip.entries[count - 1].name.length).toBe(64);
+    expect(zip.entries.reduce((n, e) => n + e.name.length, 0)).toBeLessThan(9_000_000);
   });
 });

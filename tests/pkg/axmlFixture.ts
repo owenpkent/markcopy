@@ -206,3 +206,86 @@ export function buildAxml(root: AxmlElement, options: AxmlOptions = {}): Uint8Ar
   const inner = [...poolChunk, ...map, ...body.parts];
   return Uint8Array.from(chunk(0x0003, 8, [], inner));
 }
+
+/**
+ * An AXML whose string pool declares `count` strings, written by hand from the
+ * same layout: string 0 is the element name "manifest", the others are
+ * `chars` characters of "a". With `distinct` each string has its own data;
+ * otherwise all of them share one copy, as the hostile samples did. One
+ * element carries `attrs` attributes whose string values name pool entries 1..attrs.
+ */
+export function buildPoolBomb(options: {
+  count: number;
+  chars: number;
+  distinct?: boolean;
+  attrs?: number;
+}): Uint8Array {
+  const { count, chars, distinct = false, attrs = 0 } = options;
+  const record = (text: string): number[] => {
+    const out = new Out();
+    const length = (n: number): void => {
+      if (n > 0x7f) {
+        out.u8(0x80 | (n >> 8)).u8(n & 0xff);
+      } else {
+        out.u8(n);
+      }
+    };
+    length(text.length);
+    length(text.length);
+    for (const ch of text) {
+      out.u8(ch.charCodeAt(0));
+    }
+    return out.u8(0).parts;
+  };
+  const data = new Out();
+  const offsets = new Out();
+  const name = record('manifest');
+  data.bytes(name);
+  const bigAt = data.length;
+  const big = record('a'.repeat(chars));
+  data.bytes(big);
+  for (let i = 0; i < count; i++) {
+    if (i === 0) {
+      offsets.u32(0);
+    } else if (distinct && i > 1) {
+      offsets.u32(data.length);
+      data.bytes(big);
+    } else {
+      offsets.u32(bigAt);
+    }
+  }
+  const poolChunk = chunk(
+    0x0001,
+    28,
+    new Out()
+      .u32(count)
+      .u32(0)
+      .u32(0x100)
+      .u32(28 + count * 4)
+      .u32(0).parts,
+    [...offsets.parts, ...data.parts],
+  );
+  const rows = new Out();
+  for (let i = 1; i <= attrs; i++) {
+    rows.u32(0xffffffff).u32(0).u32(0xffffffff).u16(8).u8(0).u8(0x03).u32(i);
+  }
+  const start = new Out()
+    .u32(1)
+    .u32(0xffffffff)
+    .u32(0xffffffff)
+    .u32(0)
+    .u16(0x14)
+    .u16(0x14)
+    .u16(attrs)
+    .u16(0)
+    .u16(0)
+    .u16(0).parts;
+  const element = chunk(0x0102, 16, start.slice(0, 8), [...start.slice(8), ...rows.parts]);
+  const end = chunk(
+    0x0103,
+    16,
+    [1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],
+    new Out().u32(0xffffffff).u32(0).parts,
+  );
+  return Uint8Array.from(chunk(0x0003, 8, [], [...poolChunk, ...element, ...end]));
+}

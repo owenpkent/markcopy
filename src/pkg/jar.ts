@@ -24,6 +24,7 @@ const MAX_SIGNATURE_BYTES = 1024 * 1024;
 const MAX_MANIFEST_LINES = 20_000;
 const MAX_ATTRIBUTES = 500;
 const MAX_VALUE_CHARS = 4096;
+const MAX_NAME_CHARS = 200;
 // A value in the "other attributes" table is shown in a cell.
 const MAX_CELL_CHARS = 300;
 const MAX_OTHER_ROWS = 60;
@@ -56,7 +57,10 @@ export function parseJarManifest(text: string): [string, string][] {
     flush();
     const colon = line.indexOf(':');
     if (colon > 0) {
-      current = [printable(line.slice(0, colon)), line.slice(colon + 1).replace(/^ /, '')];
+      current = [
+        printable(line.slice(0, Math.min(colon, MAX_NAME_CHARS))),
+        line.slice(colon + 1, colon + 1 + MAX_VALUE_CHARS + 1).replace(/^ /, ''),
+      ];
     }
   }
   flush();

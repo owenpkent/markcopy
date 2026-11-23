@@ -75,7 +75,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
     : undefined;
   if (bytes) {
     try {
-      manifest = parseManifest(bytes);
+      manifest = parseManifest(bytes, warnings);
     } catch (error) {
       if (!(error instanceof PackageError)) {
         throw error;
