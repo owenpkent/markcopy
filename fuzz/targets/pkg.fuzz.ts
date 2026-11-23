@@ -64,22 +64,54 @@ export function shaped(data: Buffer): { bytes: Buffer; name: string } {
 
 // readPackage is async (it reads through a ByteSource), so this target is too;
 // Jazzer.js awaits the promise, and fuzz/run.js runs it without --sync.
+// What one input may cost. An error is not the only way a reader fails: the
+// first version of this target ran half a million inputs clean while a
+// 642-byte file could take the extension host to 4 GB, because a reader that
+// spends a gigabyte and then returns a small page throws nothing. These turn
+// cost into something the fuzzer can find. They are far above what any input
+// the fuzzer can produce should need (a real 900 MB installer reads in 25 ms),
+// so a slow CI machine does not trip them.
+export const MAX_MILLISECONDS = 3000;
+export const MAX_HTML_CHARS = 4 * 1024 * 1024;
+export const MAX_HEAP_GROWTH = 256 * 1024 * 1024;
+
+/** Thrown when an input was read without error but cost more than a preview may. */
+export class CostError extends Error {}
+
 // A PackageError is the reader's documented answer to a file it cannot
 // describe; anything else (a RangeError from a view past the buffer, a
-// TypeError) is a finding.
+// TypeError, or a CostError from the limits above) is a finding.
 export async function fuzz(data: Buffer): Promise<void> {
   const { bytes, name } = shaped(data);
   for (const [input, fileName] of [
     [data, 'fuzz.bin'],
     [bytes, name],
   ] as const) {
+    const started = performance.now();
+    const heap = process.memoryUsage().heapUsed;
+    let html = '';
     try {
       const info = await readPackage(bytesSource(input), fileName);
-      renderPackageHtml(info, { fileName, fileSize: input.length, sha256: 'f'.repeat(64) });
+      html = renderPackageHtml(info, { fileName, fileSize: input.length, sha256: 'f'.repeat(64) });
     } catch (err) {
       if (!(err instanceof PackageError)) {
         throw err;
       }
+    }
+    const took = performance.now() - started;
+    const grew = process.memoryUsage().heapUsed - heap;
+    if (took > MAX_MILLISECONDS) {
+      throw new CostError(`${fileName}: ${input.length} bytes took ${Math.round(took)} ms to read`);
+    }
+    if (html.length > MAX_HTML_CHARS) {
+      throw new CostError(
+        `${fileName}: ${input.length} bytes made a page of ${html.length} characters`,
+      );
+    }
+    if (grew > MAX_HEAP_GROWTH) {
+      throw new CostError(
+        `${fileName}: ${input.length} bytes grew the heap by ${Math.round(grew / 1048576)} MB`,
+      );
     }
   }
 }

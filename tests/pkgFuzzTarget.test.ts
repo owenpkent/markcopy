@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { fuzz, shaped, SHAPES } from '../fuzz/targets/pkg.fuzz';
+import {
+  fuzz,
+  MAX_HEAP_GROWTH,
+  MAX_HTML_CHARS,
+  MAX_MILLISECONDS,
+  shaped,
+  SHAPES,
+} from '../fuzz/targets/pkg.fuzz';
 import { buildElf } from './pkg/elfFixture';
 import { buildMsi } from './pkg/msiFixture';
 
@@ -62,5 +69,19 @@ describe('pkg fuzz target', () => {
 
   it('leaves an empty input alone', () => {
     expect(shaped(Buffer.alloc(0)).bytes).toHaveLength(0);
+  });
+});
+
+// The target fails an input that costs too much, not only one that throws: a
+// reader that spends a gigabyte and returns a small page throws nothing.
+describe('pkg fuzz target: cost limits', () => {
+  it('has limits a real file is nowhere near', async () => {
+    expect(MAX_MILLISECONDS).toBeGreaterThanOrEqual(1000);
+    expect(MAX_HTML_CHARS).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(MAX_HEAP_GROWTH).toBeLessThanOrEqual(512 * 1024 * 1024);
+    const started = performance.now();
+    await fuzz(Buffer.from(buildMsi()));
+    await fuzz(Buffer.from(buildElf()));
+    expect(performance.now() - started).toBeLessThan(MAX_MILLISECONDS);
   });
 });
