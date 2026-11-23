@@ -3,7 +3,7 @@
 // A wheel is a zip with a <name>-<version>.dist-info folder: METADATA is a
 // mail-style header block (core metadata), WHEEL says how it was built, and
 // entry_points.txt lists the commands it installs.
-import { printable } from '../binary/text';
+import { clip, printable } from '../binary/text';
 import { formatNumber } from '../binary/html';
 import { propertySection, tableSection, type InfoSection } from './model';
 import { readTextEntry, type ZipArchive, type ZipEntry, type ZipFlavour } from './zipRange';
@@ -15,6 +15,10 @@ const MAX_VALUE_CHARS = 2000;
 // A package with more than a few hundred requirements is unheard of.
 const MAX_REPEATED = 2000;
 const MAX_SCRIPT_LINES = 2000;
+// Startup files are a line or two; this many are read, each to this size.
+const MAX_STARTUP_FILES = 20;
+const MAX_STARTUP_BYTES = 16 * 1024;
+const MAX_STARTUP_LINES = 200;
 const MAX_PARAGRAPH_CHARS = 2000;
 
 type Headers = [string, string][];
@@ -172,12 +176,50 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
       ['File list (RECORD)', hasRecord ? 'Yes' : 'No'],
     ]),
   );
-  // Wheels run no code when installed, but two things in them run later: a .pth
-  // file is read at every Python start and executes any line beginning "import",
-  // and scripts under <name>.data/scripts are installed onto the PATH.
-  const pth = zip.exactEntries.filter((e) =>
-    /^([^/]+\.data\/(purelib|platlib)\/)?[^/]+\.pth$/i.test(e.name),
-  );
+  // Wheels run no code when installed, but three things in them run later.
+  // Python's site module (docs.python.org/3.15/library/site.html) reads, from
+  // site-packages at every start: name.pth, whose lines starting "import" and a
+  // space or tab are executed (deprecated in 3.15); and, from 3.15, name.start,
+  // whose lines each name a pkg.mod:callable that is called. An import line in a
+  // .pth is ignored when a .start of the same base name is beside it. In a wheel
+  // these files sit at the root or under <name>.data/purelib or platlib. Scripts
+  // under <name>.data/scripts are installed onto the PATH.
+  const startup = zip.exactEntries
+    .filter((e) => /^(?:[^/]+\.data\/(?:purelib|platlib)\/)?[^/]+\.(?:pth|start)$/.test(e.name))
+    .slice(0, MAX_STARTUP_FILES);
+  const startNames = new Set(startup.filter((e) => e.name.endsWith('.start')).map((e) => e.name));
+  const startupRows: [string, string][] = [];
+  for (const entry of startup) {
+    const isStart = entry.name.endsWith('.start');
+    const text = await readTextEntry(zip, entry, MAX_STARTUP_BYTES, warnings, entry.name);
+    const lines = (text ?? '').split(/\r\n|\n|\r/, MAX_STARTUP_LINES);
+    let what: string;
+    if (text === undefined) {
+      what = isStart
+        ? 'Runs entry points on Python 3.15 and later (not inspected)'
+        : 'May run code on every Python start (not inspected)';
+    } else if (isStart) {
+      const points = lines.map((l) => l.trim()).filter((l) => l !== '' && l[0] !== '#');
+      what = `Runs on Python 3.15 and later, at every start: ${
+        points.length === 0
+          ? 'no entry points'
+          : points
+              .slice(0, 3)
+              .map((l) => clip(l, 120))
+              .join(', ')
+      }`;
+    } else {
+      const call = lines.find((l) => /^import[ \t]/.test(l));
+      const ignored = startNames.has(`${entry.name.slice(0, -3)}start`);
+      what =
+        call === undefined
+          ? 'Path entries only: nothing here runs code'
+          : ignored
+            ? 'Has an import line, which Python 3.15 and later ignore because a .start file of the same name is beside it'
+            : `Runs code at every Python start (an import line, deprecated since 3.15): ${clip(call, 160)}`;
+    }
+    startupRows.push([entry.name, printable(what)]);
+  }
   const dataScripts = zip.exactEntries.filter(
     (e) => !e.isDirectory && /^[^/]+\.data\/scripts\//i.test(e.name),
   );
@@ -185,21 +227,13 @@ export async function readWheel(zip: ZipArchive, distInfo: ZipEntry): Promise<Zi
     ...propertySection(
       'Code that runs',
       [
-        [
-          '.pth files',
-          pth.length > 0
-            ? pth
-                .slice(0, 10)
-                .map((e) => e.name)
-                .join(', ')
-            : undefined,
-        ],
+        ...startupRows,
         [
           'Scripts installed to the PATH',
           dataScripts.length > 0 ? `${dataScripts.length} files under *.data/scripts` : undefined,
         ],
       ],
-      'A .pth file is read each time Python starts, and a line in it that begins with "import" is executed. Read these files before installing the wheel.',
+      'Only a .pth line that starts with "import" runs code (the other lines add folders to the module path). A .start file runs its entry points on Python 3.15 and later. Read these files before installing the wheel.',
     ),
   );
   const scriptsText = await read('entry_points.txt', MAX_SMALL_BYTES, 'entry_points.txt');

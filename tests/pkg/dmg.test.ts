@@ -7,6 +7,7 @@ import type { InfoSection, PackageInfo } from '../../src/pkg/model';
 import { buildSignedData } from '../pe/fixture';
 import {
   buildCodeSignature,
+  buildSuperBlob,
   buildDmg,
   buildEncryptedDmg,
   buildMish,
@@ -128,7 +129,7 @@ describe('readDmg: disk image', () => {
     expect(image['Segment']).toBe('2 of 3');
     expect(image['License agreement']).toContain('Yes');
     expect(image['Checksum']).toBe('CRC-28');
-    expect(image['Internet-enabled']).toBe('Yes');
+    expect(image['Internet-enabled flag']).toBe('Set');
   });
 
   it('says plainly that the file system inside is not read', async () => {
@@ -150,10 +151,61 @@ describe('readDmg: disk image', () => {
     expect(sig['Issued by']).toBe('Developer ID Certification Authority');
   });
 
-  it('keeps a signature whose blob it cannot walk, without a signer', async () => {
-    const info = await read({ codeSignature: new Uint8Array(64).fill(7) });
-    expect(rowsOf(info, 'Signature')['Status']).toContain('present');
-    expect(rowsOf(info, 'Signature')['Signer']).toBeUndefined();
+  it('reports an ad-hoc signature (a CodeDirectory and no CMS slot) as having no signer', async () => {
+    const info = await read({
+      codeSignature: buildSuperBlob([
+        { type: 0, magic: 0xfade0c02, body: new Uint8Array(32) },
+        { type: 2, magic: 0xfade0c01, body: new Uint8Array(8) },
+      ]),
+    });
+    const sig = rowsOf(info, 'Signature');
+    expect(sig['Status']).toContain('Ad-hoc code signature (no signer)');
+    expect(sig['Status']).not.toContain('signature present');
+    expect(sig['Signer']).toBeUndefined();
+    expect(sig['Contents']).toBe('CodeDirectory, Requirements');
+  });
+
+  it('does not call a container with only a notarization ticket a signature', async () => {
+    const info = await read({
+      codeSignature: buildSuperBlob([
+        { type: 0x10002, magic: 0xfade0b01, body: new Uint8Array(40) },
+      ]),
+    });
+    const sig = rowsOf(info, 'Signature');
+    expect(sig['Status']).toContain('not shown as signed');
+    expect(sig['Contents']).toBe('Notarization ticket');
+    expect(sig['Signer']).toBeUndefined();
+  });
+
+  it('does not call a CMS slot that holds no signer a signature', async () => {
+    const info = await read({
+      codeSignature: buildSuperBlob([
+        { type: 0x10000, magic: 0xfade0b01, body: new Uint8Array(40).fill(7) },
+      ]),
+    });
+    const sig = rowsOf(info, 'Signature');
+    expect(sig['Status']).toContain('does not hold a PKCS #7 signature');
+    expect(sig['Status']).not.toContain('present, not verified');
+  });
+
+  it('reports unrecognised bytes at the signature range as such', async () => {
+    const wrongMagic = buildCodeSignature(
+      buildSignedData({ subject: { commonName: 'S' }, issuer: { commonName: 'I' } }),
+    );
+    wrongMagic[0] ^= 1;
+    const cases = [new Uint8Array(64).fill(7), wrongMagic, new Uint8Array(4).fill(1)];
+    for (const codeSignature of cases) {
+      const sig = rowsOf(await read({ codeSignature }), 'Signature');
+      expect(sig['Status']).toContain('does not recognise');
+    }
+    // A blob count or an offset the container cannot hold.
+    const lies = buildCodeSignature(
+      buildSignedData({ subject: { commonName: 'S' }, issuer: { commonName: 'I' } }),
+    );
+    new DataView(lies.buffer).setUint32(16, 0xffffff, false);
+    expect(rowsOf(await read({ codeSignature: lies }), 'Signature')['Status']).toContain(
+      'does not recognise',
+    );
   });
 
   it('shows only the fact and the size for an encrypted image', async () => {

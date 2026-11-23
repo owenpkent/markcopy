@@ -362,3 +362,11 @@ describe('readZipPackage: nuspec attributes and elements', () => {
     expect(value(info, 'Package', 'Package types')).toBe('Template 1.0');
   });
 });
+
+describe('readZipPackage: NuGet signature test', () => {
+  it('does not report a block that is not a signature with a signer', async () => {
+    const block = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x01]);
+    const info = await readZip(pkg(FULL, [{ name: '.signature.p7s', data: block }]));
+    expect(value(info, 'Signature', 'Status')).toContain('could not be read as a signature');
+  });
+});

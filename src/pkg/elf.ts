@@ -734,7 +734,13 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   if (segments.length > 0 && h.type !== 1) {
     protections.push([
       'Position-independent (PIE)',
-      kind.pie ? 'Yes' : h.type === 2 ? 'No (fixed load address)' : undefined,
+      kind.pie
+        ? dyn.pie
+          ? 'Yes'
+          : 'Probably (it has an interpreter and no SONAME, but no PIE flag)'
+        : h.type === 2
+          ? 'No (fixed load address)'
+          : undefined,
     ]);
     protections.push([
       'Non-executable stack',

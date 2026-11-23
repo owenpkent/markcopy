@@ -11,7 +11,8 @@
 import type { RangeReader } from '../binary/reader';
 import { printable } from '../binary/text';
 import { Inflate } from 'fflate';
-import { PackageError, type InfoSection } from './model';
+import { PackageError, type InfoSection, type PropertySection } from './model';
+import { isSignedData, readSigner, signatureSection, signerCount, type Signer } from './signature';
 
 const SIG_EOCD = 0x06054b50;
 const SIG_EOCD64_LOCATOR = 0x07064b50;
@@ -517,20 +518,145 @@ export async function readBytesEntry(
   }
 }
 
+/** A Signature section for a file that has signature-like parts but no signature the page can stand behind. */
+export function signatureNotEstablished(status: string): InfoSection {
+  return { kind: 'properties', heading: 'Signature', rows: [['Status', status]] };
+}
+
+/** Whether these bytes are a PKCS #7 block that says someone signed: SignedData with a SignerInfo that holds a signature value. */
+export function isSignature(der: Uint8Array): boolean {
+  return isSignedData(der) && signerCount(der) > 0;
+}
+
+// Signature blocks read. apksig allows ten signers; a few more candidates are
+// read in case some are orphans, and no more than this are ever opened.
+const MAX_V1_CANDIDATES = 16;
+// Bytes of signature blocks read in all, whatever the entries declare.
+const MAX_V1_TOTAL_BYTES = 2 * 1024 * 1024;
+const MAX_V1_BLOCK_BYTES = 1024 * 1024;
+// Signer names shown when there are several.
+const MAX_V1_NAMES = 3;
+
+export interface V1Signatures {
+  /** Blocks paired with their .SF that read as a signature, in directory order, paired ones first. */
+  signed: { name: string; signer?: Signer }[];
+  /** Why no signature is established, when blocks exist but none is. */
+  notEstablished?: string;
+}
+
+const foldAscii = (text: string): string => text.replace(/[a-z]/g, (c) => c.toUpperCase());
+
 /**
- * The Signature section for a signature file that is there but is not a
- * PKCS #7 block MarkCopy can read. A file with a signature's name proves
- * nothing, so the page says what was found and no more.
+ * The v1 (JAR) signatures of an archive. A signature is a block
+ * `META-INF/X.RSA|.DSA|.EC` together with `META-INF/X.SF`; a block with no
+ * .SF is ignored with a warning and a .SF with no block signs nothing, which
+ * is how apksig's V1SchemeVerifier treats them (it matches names exactly).
+ * The JDK's verifier folds case in the base name, so JAR files are paired
+ * with `caseInsensitive`; APKs are not.
+ *
+ * Every candidate is considered, paired ones first, within a count and a
+ * byte budget, so an orphan or an unreadable block ahead of the real one
+ * costs a warning and not the signature.
  */
-export function unreadableSignature(what: string): InfoSection {
-  return {
-    kind: 'properties',
-    heading: 'Signature',
-    rows: [
-      [
-        'Status',
-        `${what} is present but could not be read as a signature, so nothing is known about it`,
-      ],
-    ],
-  };
+export async function readV1Signatures(
+  zip: ZipArchive,
+  caseInsensitive: boolean,
+  warnings: string[],
+): Promise<V1Signatures> {
+  const flags = caseInsensitive ? 'i' : '';
+  const blockPattern = new RegExp(String.raw`^META-INF/(.+)\.(RSA|DSA|EC)$`, flags);
+  const filePattern = new RegExp(String.raw`^META-INF/(.+)\.SF$`, flags);
+  const key = (base: string): string => (caseInsensitive ? foldAscii(base) : base);
+  const files = new Set<string>();
+  const blocks: { entry: ZipEntry; paired: boolean }[] = [];
+  for (const entry of zip.exactEntries) {
+    const file = filePattern.exec(entry.name);
+    if (file) {
+      files.add(key(file[1]));
+    }
+  }
+  const used = new Set<string>();
+  for (const entry of zip.exactEntries) {
+    const block = blockPattern.exec(entry.name);
+    if (block) {
+      const paired = files.has(key(block[1]));
+      blocks.push({ entry, paired });
+      if (paired) {
+        used.add(key(block[1]));
+      }
+    }
+  }
+  const orphanFiles = [...files].filter((f) => !used.has(f)).length;
+  const unpaired = blocks.filter((b) => !b.paired).length;
+  const ordered = [...blocks.filter((b) => b.paired), ...blocks.filter((b) => !b.paired)];
+
+  const signed: V1Signatures['signed'] = [];
+  let unreadable = 0;
+  let budget = MAX_V1_TOTAL_BYTES;
+  let skipped = 0;
+  for (const [index, { entry, paired }] of ordered.entries()) {
+    if (!paired) {
+      continue;
+    }
+    if (index >= MAX_V1_CANDIDATES || budget <= 0) {
+      skipped++;
+      continue;
+    }
+    try {
+      const der = await zip.readEntry(entry, Math.min(MAX_V1_BLOCK_BYTES, budget));
+      budget -= der.length;
+      if (isSignature(der)) {
+        signed.push({ name: entry.name, signer: readSigner(der) });
+      } else {
+        unreadable++;
+      }
+    } catch (error) {
+      if (!(error instanceof PackageError)) {
+        throw error;
+      }
+      unreadable++;
+    }
+  }
+  if (unpaired > 0) {
+    warnings.push(
+      `${unpaired} signature block${unpaired === 1 ? ' has' : 's have'} no matching .SF file in META-INF and ${unpaired === 1 ? 'was' : 'were'} ignored.`,
+    );
+  }
+  if (unreadable > 0) {
+    warnings.push(
+      `${unreadable} signature block${unreadable === 1 ? '' : 's'} in META-INF could not be read as ${unreadable === 1 ? 'a signature' : 'signatures'}.`,
+    );
+  }
+  if (orphanFiles > 0) {
+    warnings.push(
+      `${orphanFiles} .SF file${orphanFiles === 1 ? ' has' : 's have'} no signature block in META-INF.`,
+    );
+  }
+  if (skipped > 0) {
+    warnings.push('More signature blocks than MarkCopy reads were skipped.');
+  }
+  let notEstablished: string | undefined;
+  if (signed.length === 0 && blocks.length > 0) {
+    notEstablished =
+      unreadable > 0
+        ? 'A META-INF signature block is present but could not be read as a signature, so nothing is known about it'
+        : 'A META-INF signature block has no matching .SF file, so it does not form a signature';
+  }
+  return { signed, notEstablished };
+}
+
+/** The section for v1 signatures that were found: the first signer, and a count and names when there are several. */
+export function v1Section(scheme: string, v1: V1Signatures): PropertySection {
+  const section = signatureSection(scheme, v1.signed[0]?.signer);
+  if (v1.signed.length > 1) {
+    const names = v1.signed
+      .slice(0, MAX_V1_NAMES)
+      .map((s) => s.signer?.subject ?? s.name)
+      .join(', ');
+    section.rows.push([
+      'Signatures',
+      `${v1.signed.length} (${names}${v1.signed.length > MAX_V1_NAMES ? ', and more' : ''})`,
+    ]);
+  }
+  return section;
 }

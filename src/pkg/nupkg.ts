@@ -13,7 +13,8 @@ import { readSigner, signatureSection } from './signature';
 import {
   readBytesEntry,
   readTextEntry,
-  unreadableSignature,
+  isSignature,
+  signatureNotEstablished,
   type ZipArchive,
   type ZipEntry,
   type ZipFlavour,
@@ -257,11 +258,12 @@ export async function readNupkg(
       warnings,
       'The signature',
     );
-    const signer = der ? readSigner(der) : undefined;
     after.push(
-      signer
-        ? signatureSection('NuGet package', signer)
-        : unreadableSignature('The package signature file'),
+      der && isSignature(der)
+        ? signatureSection('NuGet package', readSigner(der))
+        : signatureNotEstablished(
+            'The package signature file is present but could not be read as a signature, so nothing is known about it',
+          ),
     );
   }
 

@@ -37,8 +37,21 @@ export interface XarFile {
 export interface XarSpec {
   files?: XarFile[];
   creationTime?: string;
-  /** A bare DER certificate for the table's RSA signature. */
+  /** A bare DER certificate for the table's RSA signature (shorthand for a default signature element). */
   certificate?: Uint8Array;
+  /** The signature element, with fields that can be bent. */
+  signature?: {
+    /** 'signature' (RSA) or 'x-signature' (CMS). */
+    element?: 'signature' | 'x-signature';
+    /** Omit the style attribute with ''. */
+    style?: string;
+    /** Declared offset and size; null leaves the element out. */
+    offset?: number | null;
+    size?: number | null;
+    certificate?: Uint8Array | null;
+    /** Do not reserve 256 bytes of heap for the signature. */
+    noHeapBytes?: boolean;
+  };
   /** Raw XML to use as the table instead of building one. */
   rawToc?: string;
   /** Compress the table of contents some other way than zlib. */
@@ -53,8 +66,9 @@ const ENCODING_STYLE = {
 };
 
 export function buildXar(spec: XarSpec = {}): Uint8Array {
-  const heap: Uint8Array[] = [new Uint8Array(20)];
-  let heapLength = 20;
+  const reserved = (spec.signature ?? spec.certificate) && !spec.signature?.noHeapBytes ? 256 : 0;
+  const heap: Uint8Array[] = [new Uint8Array(20 + reserved)];
+  let heapLength = 20 + reserved;
   let id = 0;
 
   const fileXml = (file: XarFile): string => {
@@ -87,9 +101,18 @@ export function buildXar(spec: XarSpec = {}): Uint8Array {
   };
 
   const filesXml = (spec.files ?? []).map(fileXml).join('');
-  const signature = spec.certificate
-    ? `<signature style="RSA"><offset>20</offset><size>256</size><KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><X509Data>` +
-      `<X509Certificate>${btoa(String.fromCharCode(...spec.certificate))}</X509Certificate></X509Data></KeyInfo></signature>`
+  const sig = spec.signature ?? (spec.certificate ? {} : undefined);
+  const sigCert =
+    sig?.certificate === undefined ? spec.certificate : (sig.certificate ?? undefined);
+  const element = sig?.element ?? 'signature';
+  const signature = sig
+    ? `<${element}${sig.style === '' ? '' : ` style="${sig.style ?? 'RSA'}"`}>` +
+      (sig.offset === null ? '' : `<offset>${sig.offset ?? 20}</offset>`) +
+      (sig.size === null ? '' : `<size>${sig.size ?? 256}</size>`) +
+      (sigCert
+        ? `<KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><X509Data><X509Certificate>${btoa(String.fromCharCode(...sigCert))}</X509Certificate></X509Data></KeyInfo>`
+        : '') +
+      `</${element}>`
     : '';
   const tocXml =
     spec.rawToc ??
@@ -124,7 +147,8 @@ export interface PackageInfoSpec {
   identifier?: string;
   version?: string;
   installLocation?: string;
-  auth?: string;
+  /** The auth attribute; null leaves it out. */
+  auth?: string | null;
   installKBytes?: number;
   numberOfFiles?: number;
   preinstall?: boolean;
@@ -143,7 +167,7 @@ export function packageInfoXml(spec: PackageInfoSpec = {}): string {
     ['identifier', spec.identifier ?? 'com.example.tool'],
     ['version', spec.version ?? '1.2.3'],
     ['install-location', spec.installLocation ?? '/usr/local'],
-    ['auth', spec.auth ?? 'root'],
+    ...(spec.auth === null ? [] : [['auth', spec.auth ?? 'root']]),
   ]
     .map(([k, v]) => `${k}="${xmlEscape(v)}"`)
     .join(' ');

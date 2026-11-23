@@ -26,6 +26,7 @@ import {
   strings,
   TYPE,
   type RpmSpec,
+  type Tag,
 } from './rpmFixture';
 
 const RLO = String.fromCharCode(0x202e);
@@ -158,7 +159,7 @@ describe('readRpm: scripts and contents', () => {
       'Post-uninstall (%postun)',
       'Post-transaction (%posttrans)',
     ]);
-    expect(scripts.get('Post-install (%post)')).toContain('as root');
+    expect(scripts.get('Post-install (%post)')).toContain('Runs after');
     expect(JSON.stringify(info)).not.toContain('ldconfig');
     expect(JSON.stringify(info)).not.toContain('echo done');
   });
@@ -231,11 +232,17 @@ describe('readRpm: signature', () => {
     expect(section.get('Key ID')).toBe(KEY_ID_HEX);
   });
 
-  it('still reports a signature whose packet cannot be read, without a key ID', async () => {
-    const info = await readSpec({ signature: [bin(268, new Uint8Array([1, 2, 3]))] });
+  it('reports a signature whose packet is cut short, without a key ID', async () => {
+    const info = await readSpec({ signature: [bin(268, new Uint8Array([0x88, 3, 3]))] });
     const section = properties(info, 'Signature');
     expect(section.get('Status')).toContain('OpenPGP signature present');
     expect(section.has('Key ID')).toBe(false);
+  });
+
+  it('does not call a legacy tag that is not OpenPGP data a signature, and says so', async () => {
+    const info = await readSpec({ signature: [bin(268, new Uint8Array([1, 2, 3]))] });
+    expect(info.sections.some((s) => s.heading === 'Signature')).toBe(false);
+    expect(info.warnings).toContain('A signature tag in the package does not hold OpenPGP data.');
   });
 
   it('has no signature section for an unsigned package', async () => {
@@ -437,23 +444,50 @@ describe('readRpm: memory and work bounds', () => {
 describe('readRpm: trigger scripts and the full script inventory', () => {
   const noScripts = [1023, 1024, 1026, 1152];
 
+  /** The four tags rpm needs for a trigger family: scripts, programs, trigger names, script indexes. */
+  const triggers = (
+    family: 'normal' | 'file' | 'transfile',
+    scripts: string[],
+    programs: string[],
+    names: string[],
+    indexes: number[],
+  ): ReturnType<typeof str>[] => {
+    const [body, program, name, index] = {
+      normal: [1065, 1092, 1066, 1069],
+      file: [5066, 5067, 5069, 5070],
+      transfile: [5076, 5077, 5079, 5080],
+    }[family];
+    return [
+      strings(body, scripts),
+      strings(program, programs),
+      strings(name, names),
+      int32(index, ...indexes),
+    ];
+  };
+
   it('shows a Scripts section for a package whose only scripts are file triggers', async () => {
     const info = await readSpec({
       without: noScripts,
-      main: [strings(5066, ['echo watched'])],
+      main: triggers('file', ['echo watched'], ['/bin/sh'], ['/usr/lib/foo'], [0]),
     });
     const scripts = properties(info, 'Scripts');
     expect([...scripts.keys()]).toEqual(['File triggers (%filetriggerin ...)']);
-    expect(scripts.get('File triggers (%filetriggerin ...)')).toContain('1 script, run as root');
+    expect(scripts.get('File triggers (%filetriggerin ...)')).toContain('1 script, run when files');
     expect(JSON.stringify(info)).not.toContain('echo watched');
   });
 
   it('counts ordinary, file and transaction file triggers next to the install scripts', async () => {
     const info = await readSpec({
       main: [
-        strings(1065, ['a', 'b']),
-        strings(5066, ['c']),
-        strings(5076, ['d', 'e', 'f']),
+        ...triggers('normal', ['a', 'b'], ['/bin/sh', '/bin/sh'], ['x', 'y'], [0, 1]),
+        ...triggers('file', ['c'], ['/bin/sh'], ['/p'], [0]),
+        ...triggers(
+          'transfile',
+          ['d', 'e', 'f'],
+          ['/bin/sh', '<lua>', '/bin/sh'],
+          ['/p', '/q', '/r'],
+          [0, 1, 2],
+        ),
         str(5103, 'x'),
         str(1079, 'y'),
       ],
@@ -463,9 +497,25 @@ describe('readRpm: trigger scripts and the full script inventory', () => {
     expect(scripts.get('Transaction file triggers (%transfiletriggerin ...)')).toContain(
       '3 scripts',
     );
+    expect(scripts.get('Transaction file triggers (%transfiletriggerin ...)')).toContain('<lua>');
     expect(scripts.has('Pre-install (%pre)')).toBe(true);
     expect(scripts.has('Pre-uninstall transaction (%preuntrans)')).toBe(true);
     expect(scripts.has('Verify (%verify)')).toBe(true);
+  });
+
+  it('does not report trigger scripts that no trigger entry points at, or without programs', async () => {
+    const orphan = await readSpec({ without: noScripts, main: [strings(5066, ['echo'])] });
+    expect(orphan.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+    const noIndex = await readSpec({
+      without: noScripts,
+      main: triggers('file', ['echo'], ['/bin/sh'], ['/p'], [5]),
+    });
+    expect(noIndex.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+    const noProgram = await readSpec({
+      without: noScripts,
+      main: triggers('file', ['echo'], [], ['/p'], [0]),
+    });
+    expect(noProgram.sections.some((s) => s.heading === 'Scripts')).toBe(false);
   });
 
   it('shows a verify-only package', async () => {
@@ -528,8 +578,11 @@ describe('readRpm: trigger scripts and the full script inventory', () => {
     expect(properties(info, 'Scripts').get('Post-install (%post)')!.length).toBeLessThan(600);
   });
 
-  it('shows a trigger scriptlet that has only a program array', async () => {
-    const info = await readSpec({ without: noScripts, main: [strings(5067, ['/sbin/ldconfig'])] });
+  it('shows a trigger whose script array is empty but whose program is set', async () => {
+    const info = await readSpec({
+      without: noScripts,
+      main: triggers('file', [''], ['/sbin/ldconfig'], ['/usr/lib'], [0]),
+    });
     const row = properties(info, 'Scripts').get('File triggers (%filetriggerin ...)');
     expect(row).toContain('1 script');
     expect(row).toContain('/sbin/ldconfig');
@@ -542,76 +595,112 @@ describe('readRpm: trigger scripts and the full script inventory', () => {
     const DNSMASQ =
       'dSBkbnNtYXNxIC0gIkRuc21hc3EgREhDUCBhbmQgRE5TIHNlcnZlciIgL3Zhci9saWIvZG5zbWFzcQAA';
     const EQUAL = 0x08;
+    const NUL = String.fromCharCode(0);
     const sysusers = (line: string): string => {
-      const padded = line + ' '.repeat((3 - (line.length % 3)) % 3);
+      const padded = line + NUL.repeat((3 - (line.length % 3)) % 3);
       return Buffer.from(padded).toString('base64');
     };
+    const provide = (name: string, flags: number, version: string): Tag[] => [
+      strings(1047, [name]),
+      int32(1112, flags),
+      strings(1113, [version]),
+    ];
+    const accounts = async (main: Tag[]): Promise<PackageInfo> =>
+      readSpec({ without: noScripts, main });
+    const row = (info: PackageInfo): string | undefined =>
+      properties(info, 'Scripts').get('System users and groups');
 
     it('names the user from the documentation example', async () => {
-      const info = await readSpec({
-        without: noScripts,
-        main: [
-          strings(1047, ['user(dnsmasq)', 'group(dnsmasq)']),
-          int32(1112, EQUAL, 0),
-          strings(1113, [DNSMASQ, '']),
-        ],
-      });
-      const row = properties(info, 'Scripts').get('System users and groups');
-      expect(row).toBe('Created as root: user dnsmasq');
+      const info = await accounts([
+        strings(1047, ['user(dnsmasq)', 'group(dnsmasq)']),
+        int32(1112, EQUAL, 0),
+        strings(1113, [DNSMASQ, '']),
+      ]);
+      expect(row(info)).toBe('Creates: user dnsmasq');
     });
 
     it('names groups, memberships and locked users, and counts those past the cap', async () => {
       const lines = ['g wheel2 515', 'm klangd klong', 'u! svc - "Service"'];
-      const info = await readSpec({
-        without: noScripts,
-        main: [
-          strings(1047, ['group(wheel2)', 'groupmember(klangd/klong)', 'user(svc)']),
-          int32(1112, EQUAL, EQUAL, EQUAL),
-          strings(1113, lines.map(sysusers)),
-        ],
-      });
-      expect(properties(info, 'Scripts').get('System users and groups')).toBe(
-        'Created as root: group wheel2, klangd added to group klong, user svc (locked)',
+      const info = await accounts([
+        strings(1047, ['group(wheel2)', 'groupmember(klangd/klong)', 'user(svc)']),
+        int32(1112, EQUAL, EQUAL, EQUAL),
+        strings(1113, lines.map(sysusers)),
+      ]);
+      expect(row(info)).toBe(
+        'Creates: group wheel2, klangd added to group klong, user svc (locked)',
       );
       const count = 30;
-      const many = await readSpec({
-        without: noScripts,
-        main: [
-          strings(
-            1047,
-            Array.from({ length: count }, (_, i) => `user(u${i})`),
-          ),
-          int32(1112, ...new Array<number>(count).fill(EQUAL)),
-          strings(
-            1113,
-            Array.from({ length: count }, (_, i) => sysusers(`u u${i}`)),
-          ),
-        ],
-      });
-      expect(properties(many, 'Scripts').get('System users and groups')).toContain('and 10 more');
+      const many = await accounts([
+        strings(
+          1047,
+          Array.from({ length: count }, (_, i) => `user(u${i})`),
+        ),
+        int32(1112, ...new Array<number>(count).fill(EQUAL)),
+        strings(
+          1113,
+          Array.from({ length: count }, (_, i) => sysusers(`u u${i}`)),
+        ),
+      ]);
+      expect(row(many)).toContain('and 10 more');
     });
 
-    it('ignores an ordinary provide, a user() name without the equal flag, and a tag 5109', async () => {
-      const info = await readSpec({
-        without: noScripts,
-        main: [
-          strings(1047, ['user(x)', 'libfoo', 'group(y)']),
-          int32(1112, 0, EQUAL, 0),
-          strings(1113, [DNSMASQ, '1.0', '']),
-          strings(5109, ['u fabricated']),
-        ],
-      });
+    it('takes the name from the decoded line when it disagrees with the capability name', async () => {
+      const info = await accounts(provide('user(shown)', EQUAL, sysusers('u actual')));
+      expect(row(info)).toBe('Creates: user actual');
+    });
+
+    it('counts a versioned ordinary capability such as user(ordinary) = 1.2.3 as nothing', async () => {
+      const info = await accounts(provide('user(ordinary)', EQUAL, '1.2.3'));
+      expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+      expect(info.warnings).toEqual([]);
+      expect(table(info, 'Provides').rows).toEqual([['user(ordinary)', '= 1.2.3']]);
+    });
+
+    it('does not count a version that is not Base64', async () => {
+      const info = await accounts(provide('user(odd)', EQUAL, '!!not base64!!'));
       expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
     });
 
-    it('falls back to the capability name when the version is not base64', async () => {
-      const info = await readSpec({
-        without: noScripts,
-        main: [strings(1047, ['user(odd)']), int32(1112, EQUAL), strings(1113, ['!!not base64!!'])],
-      });
-      expect(properties(info, 'Scripts').get('System users and groups')).toBe(
-        'Created as root: user(odd)',
-      );
+    it('does not count Base64 that decodes to something that is not a sysusers line', async () => {
+      for (const text of ['hello world', 'x name', 'u', 'm onlyone', '']) {
+        const info = await accounts(provide('user(x)', EQUAL, sysusers(text)));
+        expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+      }
+    });
+
+    it('requires the equal flag bit, and ignores the other flag bits', async () => {
+      const wrong = await accounts(provide('user(a)', 0x02 | 0x04, sysusers('u a')));
+      expect(wrong.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+      const none = await accounts(provide('user(a)', 0, sysusers('u a')));
+      expect(none.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+      const extra = await accounts(provide('user(a)', EQUAL | 0x4000, sysusers('u a')));
+      expect(row(extra)).toBe('Creates: user a');
+    });
+
+    it('accepts whitespace inside the Base64 the way rpm does, and refuses a bad length', async () => {
+      const text = sysusers('u spaced');
+      const split = `${text.slice(0, 4)} \n${text.slice(4)}`;
+      expect(row(await accounts(provide('user(a)', EQUAL, split)))).toBe('Creates: user spaced');
+      const short = await accounts(provide('user(a)', EQUAL, text.slice(0, text.length - 1)));
+      expect(short.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+    });
+
+    it('does not count a value over the inspection cap, and warns once', async () => {
+      const long = sysusers(`u ${'a'.repeat(2000)}`);
+      const info = await accounts([
+        strings(1047, ['user(long)', 'user(also)']),
+        int32(1112, EQUAL, EQUAL),
+        strings(1113, [long, long]),
+      ]);
+      expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
+      expect(info.warnings).toEqual([
+        "Some entries in the package's Provides were too long to inspect, so any accounts they create are not listed.",
+      ]);
+    });
+
+    it('does not read the computed sysusers tag 5109', async () => {
+      const info = await accounts([strings(5109, ['u fabricated'])]);
+      expect(info.sections.some((s) => s.heading === 'Scripts')).toBe(false);
     });
   });
 
@@ -662,14 +751,25 @@ describe('readRpm: version 6 signatures', () => {
     expect(section.get('Signatures')).toBe('2');
   });
 
-  it('still reports a v6 signature that cannot be decoded, without a key ID', async () => {
+  it('does not call an undecodable v6 entry a signature, and does not fall back to a legacy one', async () => {
+    const info = await readSpec({
+      signature: [strings(278, ['!!! not base64 !!!']), bin(268, pgpSignatureV4(1, OTHER))],
+    });
+    expect(info.sections.some((s) => s.heading === 'Signature')).toBe(false);
+    expect(info.warnings).toContain(
+      'A signature entry in the package could not be decoded as OpenPGP data.',
+    );
+  });
+
+  it('reports the valid v6 signatures and counts the invalid ones', async () => {
     const info = await readSpec({
       without: [268],
-      signature: [strings(278, ['!!! not base64 !!!'])],
+      signature: [strings(278, [b64(pgpSignatureV4(22)), 'AAAA'])],
     });
-    const section = properties(info, 'Signature');
-    expect(section.get('Status')).toContain('OpenPGP v6 signature present');
-    expect(section.has('Key ID')).toBe(false);
+    expect(properties(info, 'Signature').get('Key ID')).toBe(KEY_ID_HEX);
+    expect(info.warnings).toContain(
+      'A signature entry in the package could not be decoded as OpenPGP data.',
+    );
   });
 
   it('reads at most 16 signatures and each from a bounded string', async () => {

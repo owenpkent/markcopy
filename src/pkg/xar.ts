@@ -353,7 +353,8 @@ function readDistribution(root: XNode): Distribution {
     minOs: findAll(root, 'os-version')
       .map((n) => attrText(n, 'min'))
       .find((v) => v),
-    checks: findAll(root, 'installation-check').length > 0,
+    // The element must name a script: that is what makes it run JavaScript.
+    checks: findAll(root, 'installation-check').some((n) => attrText(n, 'script') !== undefined),
     licence: attrText(findAll(root, 'license')[0], 'file'),
     readme: attrText(findAll(root, 'readme')[0], 'file'),
     choices,
@@ -361,28 +362,89 @@ function readDistribution(root: XNode): Distribution {
   };
 }
 
-function signatureFrom(toc: XNode): InfoSection[] {
-  const sig = child(toc, 'signature') ?? child(toc, 'x-signature');
-  if (!sig) {
+/** The first certificate in a signature element, decoded, or undefined when it has none or is not Base64. */
+function firstCertificate(sig: XNode): { present: boolean; der?: Uint8Array } {
+  const cert = findAll(sig, 'X509Certificate').find((c) => /\S/.test(c.text.slice(0, 4096)));
+  if (!cert) {
+    return { present: false };
+  }
+  try {
+    const base64 = (cert.text.length > MAX_CERTIFICATE_BYTES * 2 ? '' : cert.text).replace(
+      /[^A-Za-z0-9+/=]/g,
+      '',
+    );
+    if (base64.length > 0 && base64.length <= Math.ceil((MAX_CERTIFICATE_BYTES * 4) / 3)) {
+      return { present: true, der: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)) };
+    }
+  } catch {
+    // Not Base64: the element is there, its certificate is not readable.
+  }
+  return { present: true };
+}
+
+/**
+ * The Signature section, from what Apple's xar defines as a signed archive
+ * (xar/lib/signature.c): a `signature` (RSA) or `x-signature` (CMS) element
+ * with a style, an offset into the heap and a non-zero size, whose bytes lie
+ * inside this file, and at least one X509Certificate. The bytes themselves are
+ * never read or checked. An element that falls short is reported as exactly
+ * that, with no signer; certificates with no signature element claim nothing.
+ */
+function signatureFrom(toc: XNode, heapStart: number, fileSize: number): InfoSection[] {
+  const found: { kind: string; node: XNode }[] = [
+    ...children(toc, 'signature').map((node) => ({ kind: 'RSA (signature)', node })),
+    ...children(toc, 'x-signature').map((node) => ({ kind: 'CMS (x-signature)', node })),
+  ].slice(0, 4);
+  if (found.length === 0) {
     return [];
   }
-  const cert = findAll(sig, 'X509Certificate')[0];
-  let signer;
-  if (cert) {
-    try {
-      const base64 = (cert.text.length > MAX_CERTIFICATE_BYTES * 2 ? '' : cert.text).replace(
-        /[^A-Za-z0-9+/=]/g,
-        '',
-      );
-      if (base64.length > 0 && base64.length <= Math.ceil((MAX_CERTIFICATE_BYTES * 4) / 3)) {
-        const raw = atob(base64);
-        signer = readCertificate(Uint8Array.from(raw, (c) => c.charCodeAt(0)));
-      }
-    } catch {
-      signer = undefined;
+  const problems: string[] = [];
+  const valid: { kind: string; der?: Uint8Array }[] = [];
+  for (const { kind, node } of found) {
+    const offset = int(child(node, 'offset')?.text);
+    const size = int(child(node, 'size')?.text);
+    const cert = firstCertificate(node);
+    let problem: string | undefined;
+    if (!attrText(node, 'style')) {
+      problem = 'it has no style';
+    } else if (offset === undefined) {
+      problem = 'it has no offset';
+    } else if (size === undefined || size === 0) {
+      problem = 'its size is missing or zero';
+    } else if (heapStart + offset + size > fileSize) {
+      problem = 'its bytes are not inside the file';
+    } else if (!cert.present) {
+      problem = 'it carries no certificate';
+    }
+    if (problem) {
+      problems.push(`${kind}: ${problem}`);
+    } else {
+      valid.push({ kind, der: cert.der });
     }
   }
-  return [signatureSection('Apple installer', signer)];
+  if (valid.length === 0) {
+    return [
+      {
+        kind: 'properties',
+        heading: 'Signature',
+        rows: [
+          [
+            'Status',
+            `A signature element is present but is not a usable signature (${problems.join('; ')}). MarkCopy shows no signer for it.`,
+          ],
+        ],
+      },
+    ];
+  }
+  let signer;
+  try {
+    signer = valid[0].der ? readCertificate(valid[0].der) : undefined;
+  } catch {
+    signer = undefined;
+  }
+  const section = signatureSection('Apple installer', signer);
+  section.rows.splice(1, 0, ['Kind', valid.map((v) => v.kind).join(', ')]);
+  return [section];
 }
 
 export async function readXar(reader: RangeReader): Promise<PackageInfo> {
@@ -490,7 +552,7 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
     },
   );
   const created = utcDate(text(child(toc, 'creation-time')));
-  const signature = signatureFrom(toc);
+  const signature = signatureFrom(toc, heapStart, reader.size);
 
   if (!isInstaller) {
     return {
@@ -511,6 +573,13 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
       : fromRefs.reduce((s, r) => s + (r.installKBytes ?? 0), 0);
   const fileCount = components.reduce((s, c) => s + (c.files ?? 0), 0);
   const asRoot = components.some((c) => c.auth === 'root');
+  // Only what PackageInfo says: auth="root" is a statement, "none" is a
+  // statement, and an absent attribute is not evidence of either.
+  const rootRow = asRoot
+    ? 'Yes (PackageInfo auth="root")'
+    : components.some((c) => c.auth !== undefined)
+      ? `No (PackageInfo auth="${components.find((c) => c.auth !== undefined)?.auth}")`
+      : undefined;
   const version = distribution?.version ?? single?.version;
   const name = distribution?.title ?? single?.identifier;
 
@@ -553,16 +622,14 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
         ['Identifier', single?.identifier],
         ['Version', version],
         ['Install location', single?.installLocation],
-        ['Installs as root', asRoot ? 'Yes' : components.length > 0 ? 'No' : undefined],
+        ['Installs as root', rootRow],
         ['Host architectures', distribution?.hostArchitectures],
         ['Minimum macOS', distribution?.minOs],
         ['Installed size', installKBytes > 0 ? formatBytes(installKBytes * 1024) : undefined],
         ['Files installed', fileCount > 0 ? formatNumber(fileCount) : undefined],
         [
           'Installation checks',
-          distribution?.checks
-            ? 'Yes (runs JavaScript to decide whether it can install)'
-            : undefined,
+          distribution?.checks ? 'Yes (the Distribution names a JavaScript check)' : undefined,
         ],
         ['License', distribution?.licence],
         ['Read me', distribution?.readme],
@@ -588,7 +655,7 @@ export async function readXar(reader: RangeReader): Promise<PackageInfo> {
       }),
       ...tableSection('Scripts', ['Component', 'Scripts', 'Runs as'], scriptRows, {
         noun: 'components',
-        lead: 'These components carry installer scripts. MarkCopy does not show them; they run during installation with the permissions listed.',
+        lead: 'These components name or carry installer scripts. MarkCopy does not show them. Scripts named in PackageInfo run during installation.',
       }),
       ...contents,
       ...signature,

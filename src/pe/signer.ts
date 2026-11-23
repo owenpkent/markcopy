@@ -155,6 +155,74 @@ export function isSignedData(der: Uint8Array): boolean {
   );
 }
 
+/**
+ * How many signers a PKCS #7 SignedData carries, at most `max`. A signer is a
+ * SignerInfo of the right shape that holds a signature value: see isSignerInfo.
+ *
+ * SignedData with none is a legitimate thing and not a signature: it is how a
+ * bundle of certificates is shipped ("certs-only"). Something has to have
+ * signed for there to be a signature, so the reader asks this before it says
+ * a file carries one.
+ */
+export function signerCount(der: Uint8Array, max = 16): number {
+  const outer = tlvAt(der, 0, der.length);
+  if (outer?.tag !== 0x30) {
+    return 0;
+  }
+  const wrapped = children(der, outer, 2)[1];
+  const signed = wrapped?.tag === 0xa0 ? tlvAt(der, wrapped.start, wrapped.end) : undefined;
+  if (signed?.tag !== 0x30) {
+    return 0;
+  }
+  // version, digestAlgorithms, contentInfo, then optional certificates and
+  // CRLs, then signerInfos: the last element, and a SET like the second.
+  const parts = children(der, signed, 8);
+  const signers = parts.length > 3 ? parts[parts.length - 1] : undefined;
+  if (signers?.tag !== 0x31) {
+    return 0;
+  }
+  return children(der, signers, max).filter((info) => isSignerInfo(der, info)).length;
+}
+
+// SignerInfo ::= SEQUENCE {
+//   version                    INTEGER,
+//   issuerAndSerialNumber      SEQUENCE   (or, in later versions, [0] a key identifier),
+//   digestAlgorithm            SEQUENCE,
+//   authenticatedAttributes    [0] IMPLICIT OPTIONAL,
+//   digestEncryptionAlgorithm  SEQUENCE,
+//   encryptedDigest            OCTET STRING,
+//   unauthenticatedAttributes  [1] IMPLICIT OPTIONAL }
+//
+// Counting any SEQUENCE in the set as a signer let an empty one stand for a
+// signature. A signer is one that has this shape and, above all, a signature
+// value that is not empty. This still only reads what the file claims: whether
+// that value is a good signature of anything is not looked at.
+function isSignerInfo(der: Uint8Array, info: Tlv): boolean {
+  if (info.tag !== 0x30) {
+    return false;
+  }
+  const fields = children(der, info, 8);
+  let i = 0;
+  if (fields[i++]?.tag !== 0x02) {
+    return false;
+  }
+  const identifier = fields[i++]?.tag;
+  if (identifier !== 0x30 && identifier !== 0x80) {
+    return false;
+  }
+  if (fields[i++]?.tag !== 0x30) {
+    return false;
+  }
+  if (fields[i]?.tag === 0xa0) {
+    i++;
+  }
+  if (fields[i++]?.tag !== 0x30) {
+    return false;
+  }
+  const value = fields[i];
+  return value?.tag === 0x04 && value.end > value.start;
+}
+
 export function readSigner(der: Uint8Array): Signer | undefined {
   // ContentInfo ::= SEQUENCE { contentType OID, [0] EXPLICIT SignedData }
   const outer = tlvAt(der, 0, der.length);

@@ -89,7 +89,7 @@ describe('readAlpineApk: scripts and signature', () => {
     const info = await readSpec({ scripts: ['.post-install', '.trigger'] });
     const scripts = properties(info, 'Scripts');
     expect([...scripts.keys()]).toEqual(['.post-install', '.trigger', 'Trigger paths']);
-    expect(scripts.get('.post-install')).toContain('as root');
+    expect(scripts.get('.post-install')).toContain('Runs');
     expect(scripts.get('Trigger paths')).toBe('/usr/share/ca-certificates /etc/ssl/certs');
     expect(JSON.stringify(info)).not.toContain('exit 0');
   });

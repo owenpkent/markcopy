@@ -7,12 +7,17 @@ import { printable } from '../binary/text';
 import { formatBytesShort, formatNumber } from '../binary/html';
 import { parseManifest, type ManifestNode } from './axml';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
-import { readSigner, signatureSection, type Signer } from './signature';
-import { readBytesEntry, unreadableSignature, type ZipArchive, type ZipFlavour } from './zipRange';
+import {
+  readBytesEntry,
+  readV1Signatures,
+  signatureNotEstablished,
+  v1Section,
+  type ZipArchive,
+  type ZipFlavour,
+} from './zipRange';
 
 // A large app's manifest, with thousands of components, is still well under this.
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
-const MAX_SIGNATURE_BYTES = 1024 * 1024;
 const MAX_PERMISSIONS = 2000;
 const MAX_FEATURES = 500;
 const MAX_ABIS = 32;
@@ -206,12 +211,9 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   // Signature: v1 is a JAR-style PKCS #7 block with names to read. v2 and
   // later live in the APK Signing Block, whose certificate MarkCopy does not parse.
   const after: InfoSection[] = [];
-  const block = zip.exactEntries.find((e) => /^META-INF\/[^/]+\.(RSA|DSA|EC)$/i.test(e.name));
-  let signer: Signer | undefined;
-  if (block) {
-    const der = await readBytesEntry(zip, block, MAX_SIGNATURE_BYTES, warnings, 'The v1 signature');
-    signer = der ? readSigner(der) : undefined;
-  }
+  // apksig matches the block and .SF names exactly.
+  const v1 = await readV1Signatures(zip, false, warnings);
+  const signer = v1.signed[0]?.signer;
   let ids: number[] | undefined;
   try {
     ids = await zip.signingBlockIds();
@@ -224,18 +226,17 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   // Only schemes whose IDs are present are named. A block with none of them
   // (empty, padding only, unknown IDs) is reported as a container, not as a signature.
   const schemes = [
-    ...(signer ? ['v1'] : []),
+    ...(v1.signed.length > 0 ? ['v1'] : []),
     ...new Set((ids ?? []).map((id) => SIGNING_SCHEMES[id]).filter(Boolean)),
   ];
-  if (block && !signer) {
-    warnings.push('The META-INF signature block could not be read.');
-  }
   if (schemes.length > 0) {
-    const section = signatureSection(`APK Signature Scheme ${schemes.join(', ')}`, signer);
+    const section = v1Section(`APK Signature Scheme ${schemes.join(', ')}`, v1);
     if (!signer) {
       section.rows.push([
         'Signer',
-        'Not read (v2 and later signatures keep the certificate in the signing block, which MarkCopy does not parse)',
+        v1.signed.length > 0
+          ? 'Not read (the certificate names could not be read)'
+          : 'Not read (v2 and later signatures keep the certificate in the signing block, which MarkCopy does not parse)',
       ]);
     }
     after.push(section);
@@ -253,8 +254,8 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
         ],
       ]),
     );
-  } else if (block) {
-    after.push(unreadableSignature('A META-INF signature block'));
+  } else if (v1.notEstablished) {
+    after.push(signatureNotEstablished(v1.notEstablished));
   } else {
     after.push(
       ...propertySection('Signature', [

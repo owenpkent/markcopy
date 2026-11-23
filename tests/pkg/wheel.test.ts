@@ -236,16 +236,77 @@ describe('readZipPackage: wheel entry identity', () => {
   });
 });
 
-describe('readZipPackage: what a wheel runs', () => {
-  it('calls out .pth files and scripts installed to the PATH', async () => {
+describe('readZipPackage: what a wheel runs at startup', () => {
+  const rowFor = (info: Awaited<ReturnType<typeof readZip>>, name: string): string =>
+    value(info, 'Code that runs', name) ?? '';
+
+  it('lists a .start file as the only startup hook, with its Python version scope', async () => {
+    const info = await readZip(
+      wheel(METADATA, [{ name: 'demo.start', data: 'demo:initialize\n' }]),
+    );
+    expect(rowFor(info, 'demo.start')).toContain('Python 3.15 and later');
+    expect(rowFor(info, 'demo.start')).toContain('demo:initialize');
+  });
+
+  it('says a matching .start makes the .pth import line inert on 3.15 and later', async () => {
     const info = await readZip(
       wheel(METADATA, [
-        { name: 'evil.pth', data: 'import os' },
+        { name: 'demo.pth', data: 'import demo\n' },
+        { name: 'demo.start', data: '# comment\n\ndemo:go\n' },
+      ]),
+    );
+    expect(rowFor(info, 'demo.pth')).toContain('ignore');
+    expect(rowFor(info, 'demo.pth')).not.toContain('Runs code');
+    expect(rowFor(info, 'demo.start')).toContain('demo:go');
+    expect(rowFor(info, 'demo.start')).not.toContain('comment');
+  });
+
+  it('does not say a .pth with only path lines runs code', async () => {
+    const info = await readZip(
+      wheel(METADATA, [{ name: 'paths.pth', data: '# libs\nlib\n../other\n' }]),
+    );
+    expect(rowFor(info, 'paths.pth')).toContain('Path entries only');
+    expect(rowFor(info, 'paths.pth')).not.toContain('Runs code');
+  });
+
+  it('shows the first import line of a .pth that has one', async () => {
+    const info = await readZip(
+      wheel(METADATA, [{ name: 'evil.pth', data: 'lib\nimport os; os.system("x")\nimport b\n' }]),
+    );
+    expect(rowFor(info, 'evil.pth')).toContain('Runs code at every Python start');
+    expect(rowFor(info, 'evil.pth')).toContain('import os; os.system("x")');
+    expect(rowFor(info, 'evil.pth')).not.toContain('import b');
+  });
+
+  it('does not treat a line that merely starts with the letters import as code', async () => {
+    const info = await readZip(wheel(METADATA, [{ name: 'a.pth', data: 'imports/dir\n' }]));
+    expect(rowFor(info, 'a.pth')).toContain('Path entries only');
+  });
+
+  it('finds startup files under the .data purelib and platlib folders, and scripts', async () => {
+    const info = await readZip(
+      wheel(METADATA, [
+        { name: 'demo_pkg-1.4.0.data/purelib/x.pth', data: 'import x\n' },
+        { name: 'demo_pkg-1.4.0.data/platlib/y.start', data: 'y:go\n' },
         { name: 'demo_pkg-1.4.0.data/scripts/run.sh', data: 'x' },
       ]),
     );
-    expect(value(info, 'Code that runs', '.pth files')).toBe('evil.pth');
-    expect(value(info, 'Code that runs', 'Scripts installed to the PATH')).toContain('1 files');
+    expect(rowFor(info, 'demo_pkg-1.4.0.data/purelib/x.pth')).toContain('Runs code');
+    expect(rowFor(info, 'demo_pkg-1.4.0.data/platlib/y.start')).toContain('y:go');
+    expect(rowFor(info, 'Scripts installed to the PATH')).toContain('1 files');
+    expect((section(info, 'Code that runs') as { note?: string }).note).toContain(
+      'Only a .pth line that starts with "import" runs code',
+    );
+  });
+
+  it('marks a startup file larger than the read cap as not inspected', async () => {
+    const info = await readZip(
+      wheel(METADATA, [{ name: 'big.pth', data: `${'a'.repeat(20000)}\n` }]),
+    );
+    expect(rowFor(info, 'big.pth')).toContain('not inspected');
+  });
+
+  it('has no Code that runs section for an ordinary wheel', async () => {
     expect(hasSection(await readZip(wheel()), 'Code that runs')).toBe(false);
   });
 });

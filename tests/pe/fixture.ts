@@ -603,6 +603,8 @@ export interface PeSpec {
   certificate?: Uint8Array;
   /** wCertificateType of that entry. 2 is PKCS_SIGNED_DATA, the default. */
   certificateType?: number;
+  /** What the entry says its length is, when it should lie. */
+  certificateLength?: number;
   /** Bytes after the last section: given directly, or as a length of 0x5A fill. */
   overlay?: Uint8Array | number;
   /** Overrides the NumberOfSections field without adding sections. */
@@ -848,7 +850,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   let certBytes = new Uint8Array(0);
   if (spec.certificate) {
     const win = new Bytes()
-      .u32(8 + spec.certificate.length) // dwLength, without the padding
+      .u32(spec.certificateLength ?? 8 + spec.certificate.length) // dwLength, without the padding
       .u16(0x0200) // wRevision
       .u16(spec.certificateType ?? 2)
       .raw(spec.certificate)
