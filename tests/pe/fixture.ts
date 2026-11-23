@@ -315,12 +315,24 @@ function buildVersionResource(spec: VersionSpec): Uint8Array {
  * relative to the start of the section; a data entry's address is an RVA.
  */
 function buildResources(
-  items: { type: number; name: number; data: Uint8Array }[],
+  items: { type: number; name: number | string; data: Uint8Array }[],
   baseRva: number,
 ): Uint8Array {
   const types = [...new Set(items.map((item) => item.type))].sort((a, b) => a - b);
+  // Within a directory the named entries come first, in name order, and the
+  // numbered ones after them, ascending.
+  const order = (a: number | string, b: number | string): number =>
+    typeof a === 'string'
+      ? typeof b === 'string'
+        ? a.toUpperCase() < b.toUpperCase()
+          ? -1
+          : 1
+        : -1
+      : typeof b === 'string'
+        ? 1
+        : a - b;
   const byType = types.map((type) =>
-    items.filter((item) => item.type === type).sort((a, b) => a.name - b.name),
+    items.filter((item) => item.type === type).sort((a, b) => order(a.name, b.name)),
   );
   let at = 16 + 8 * types.length;
   const nameTableAt = byType.map((list) => {
@@ -335,6 +347,17 @@ function buildResources(
       return here;
     }),
   );
+  // A named entry points at its name: a 16-bit length, then UTF-16.
+  const nameAt = byType.map((list) =>
+    list.map((item) => {
+      if (typeof item.name !== 'string') {
+        return 0;
+      }
+      const here = at;
+      at += 2 + item.name.length * 2;
+      return here;
+    }),
+  );
   let dataAt = alignTo(at, 4);
   const dataOffsets = byType.map((list) =>
     list.map((item) => {
@@ -343,16 +366,20 @@ function buildResources(
       return here;
     }),
   );
-  const table = (ids: number): Bytes => new Bytes().u32(0).u32(0).u16(0).u16(0).u16(0).u16(ids);
+  const table = (ids: number, named = 0): Bytes =>
+    new Bytes().u32(0).u32(0).u16(0).u16(0).u16(named).u16(ids);
   const out = new Bytes();
   out.raw(table(types.length).bytes());
   types.forEach((type, t) => {
     out.u32(type).u32(0x80000000 | nameTableAt[t]);
   });
-  byType.forEach((list) => {
-    out.raw(table(list.length).bytes());
+  byType.forEach((list, t) => {
+    const named = list.filter((item) => typeof item.name === 'string').length;
+    out.raw(table(list.length - named, named).bytes());
     list.forEach((item, n) => {
-      out.u32(item.name).u32(0x80000000 | leafAt[byType.indexOf(list)][n]);
+      out
+        .u32(typeof item.name === 'string' ? (0x80000000 | nameAt[t][n]) >>> 0 : item.name)
+        .u32(0x80000000 | leafAt[t][n]);
     });
   });
   byType.forEach((list, t) => {
@@ -366,6 +393,16 @@ function buildResources(
         .u32(item.data.length)
         .u32(0)
         .u32(0);
+    });
+  });
+  byType.forEach((list) => {
+    list.forEach((item) => {
+      if (typeof item.name === 'string') {
+        out.u16(item.name.length);
+        for (const ch of item.name) {
+          out.u16(ch.charCodeAt(0));
+        }
+      }
     });
   });
   byType.forEach((list, t) => {
@@ -528,6 +565,10 @@ export interface PeSpec {
   version?: VersionSpec;
   /** Manifest XML, stored as an RT_MANIFEST resource. */
   manifest?: string;
+  /** The resource ID the manifest is stored under. 1, the process manifest, unless given. */
+  manifestId?: number;
+  /** Further manifest resources beside it, each under a name or another ID. */
+  extraManifests?: { name: number | string; xml: string }[];
   /**
    * Icon images, each its own RT_ICON resource under its `id`, plus one
    * RT_GROUP_ICON listing them all. A group entry with no `data` names an id
@@ -755,12 +796,15 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   // .rsrc
   const RSRC_RVA = RDATA_RVA + alignTo(rdataBytes.length, SECTION_ALIGN);
   const RSRC_RAW = RDATA_RAW + rdataBytes.length;
-  const resourceItems: { type: number; name: number; data: Uint8Array }[] = [];
+  const resourceItems: { type: number; name: number | string; data: Uint8Array }[] = [];
   if (spec.version) {
     resourceItems.push({ type: 16, name: 1, data: buildVersionResource(spec.version) });
   }
   if (spec.manifest !== undefined) {
-    resourceItems.push({ type: 24, name: 1, data: ascii(spec.manifest) });
+    resourceItems.push({ type: 24, name: spec.manifestId ?? 1, data: ascii(spec.manifest) });
+  }
+  for (const extra of spec.extraManifests ?? []) {
+    resourceItems.push({ type: 24, name: extra.name, data: ascii(extra.xml) });
   }
   if (spec.icons && spec.icons.length > 0) {
     for (const icon of spec.icons) {

@@ -162,8 +162,14 @@ function bitmapToPng(data: Uint8Array): PeIcon | undefined {
   ) {
     return undefined;
   }
+  // How many colour table entries follow the header. An indexed bitmap has
+  // one per value unless it says fewer. A 24 or 32 bit one needs none, and may
+  // still carry some (biClrUsed, as a hint for palette devices): they are not
+  // used to draw, but they are there, and the pixels start after them. Reading
+  // them as pixels drew the palette's first colour instead of the icon.
+  const declared = view.getUint32(32, true);
   const paletteSize =
-    bitCount <= 8 ? Math.min(view.getUint32(32, true) || 1 << bitCount, 1 << bitCount) : 0;
+    bitCount <= 8 ? Math.min(declared || 1 << bitCount, 1 << bitCount) : Math.min(declared, 256);
   const pixels = 40 + paletteSize * 4;
   const rowBytes = ((width * bitCount + 31) >>> 5) * 4;
   const maskRowBytes = ((width + 31) >>> 5) * 4;

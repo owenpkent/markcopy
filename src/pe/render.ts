@@ -6,7 +6,7 @@
 // through escapeHtml, and the webview sanitizes the result again on arrival.
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
-import type { PeInfo, PeSection } from './read';
+import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
 import {
   block,
   formatBytes,
@@ -237,6 +237,12 @@ function protectionSection(info: PeInfo): string {
   for (const [label, on] of info.mitigations) {
     // High-entropy ASLR needs a 64-bit address space, so it says nothing about a 32-bit image.
     if (narrow && label === 'High-entropy ASLR') {
+      continue;
+    }
+    if (label === NX_COMPAT_LABEL && !narrow && !on) {
+      // A clear flag is not "no DEP" here: for a native 64-bit program
+      // Windows enforces it regardless, so "No" would misdescribe the file.
+      rows.push([label, 'Flag not set (64-bit Windows enforces DEP regardless)']);
       continue;
     }
     rows.push([label, on ? 'Yes' : 'No']);
