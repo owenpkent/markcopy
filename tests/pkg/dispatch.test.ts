@@ -43,7 +43,7 @@ describe('readPackage: files it cannot identify', () => {
 describe('readPackage: routing by content, with a real file', () => {
   it('reads an ELF file as ELF, whatever it is named', async () => {
     const info = await read(buildElf(), 'libdemo.so.1');
-    expect(info.format).toMatch(/^ELF|Linux|AppImage/);
+    expect(info.format).toMatch(/^(?:ELF|Linux|AppImage)/);
     const again = await read(buildElf(), 'notes.txt');
     expect(again.format).toBe(info.format);
   });
