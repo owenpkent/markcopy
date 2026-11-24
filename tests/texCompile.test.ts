@@ -245,7 +245,7 @@ describe('findTex', () => {
     }
   });
 
-  it('skips a candidate whose probe fails and returns the next one that runs clean', async () => {
+  it('disables latexmk rc files during discovery and skips a failed probe', async () => {
     // Models the actual bug: MiKTeX's latexmk.exe exists but cannot run
     // without Perl, so 'auto' has to move past it to tectonic rather than
     // trusting that the file being present means it works.
@@ -260,6 +260,7 @@ describe('findTex', () => {
         return child;
       });
       const found = await findTex(undefined, 'auto', HOST, { PATH: dir });
+      expect(vi.mocked(spawn).mock.calls[0][1]).toEqual(['-norc', '-version']);
       expect(found).toEqual({
         path: join(dir, HOST === 'win32' ? 'tectonic.exe' : 'tectonic'),
         engine: 'tectonic',
@@ -352,10 +353,12 @@ describe('findTex', () => {
 });
 
 describe('compileArgs', () => {
-  it('drives latexmk with its own multi-pass build', () => {
+  it('drives latexmk with startup rc files and shell escape disabled', () => {
     const args = compileArgs({ path: 'latexmk', engine: 'latexmk' }, 'main.tex', 'out');
     expect(args).toEqual([
+      '-norc',
       '-pdf',
+      '-pdflatex=pdflatex -no-shell-escape %O %S',
       '-interaction=nonstopmode',
       '-halt-on-error',
       '-file-line-error',
@@ -373,6 +376,7 @@ describe('compileArgs', () => {
     for (const engine of ['pdflatex', 'xelatex', 'lualatex'] as const) {
       const args = compileArgs({ path: engine, engine }, 'main.tex', 'out');
       expect(args).toEqual([
+        '-no-shell-escape',
         '-interaction=nonstopmode',
         '-halt-on-error',
         '-file-line-error',
@@ -403,19 +407,10 @@ describe('compileArgs', () => {
     expect(input.startsWith('\\')).toBe(false);
   });
 
-  it('never lets any engine run arbitrary commands out of the document', () => {
-    // \write18 under -shell-escape would let a document run whatever it
-    // wants the moment its .tex file is opened for a preview.
-    const engines: TexTools[] = [
-      { path: 'latexmk', engine: 'latexmk' },
-      { path: 'tectonic', engine: 'tectonic' },
-      { path: 'pdflatex', engine: 'pdflatex' },
-      { path: 'xelatex', engine: 'xelatex' },
-      { path: 'lualatex', engine: 'lualatex' },
-    ];
-    for (const tools of engines) {
-      const args = compileArgs(tools, 'main.tex', 'out');
-      expect(args.join(' ')).not.toMatch(/--?shell-escape/);
+  it.each(['-draft.tex', '&format.tex', '\\backslash.tex'])('passes %s as a file path', (input) => {
+    for (const engine of ['latexmk', 'tectonic', 'pdflatex', 'xelatex', 'lualatex'] as const) {
+      const args = compileArgs({ path: engine, engine }, input, 'out');
+      expect(args.at(-1)).toBe(`./${input}`);
     }
   });
 });
@@ -840,6 +835,11 @@ describe('compile', () => {
       { file: './main.tex', line: 12, message: 'Undefined control sequence.' },
     ]);
     expect(failure.log).toBe(logContent);
+    expect(vi.mocked(spawn)).toHaveBeenCalledWith(
+      tools.path,
+      expect.any(Array),
+      expect.objectContaining({ env: expect.objectContaining({ TECTONIC_UNTRUSTED_MODE: '1' }) }),
+    );
   });
 
   it('throws CompileCancelled, not CompileFailed, when the signal aborts mid-run', async () => {

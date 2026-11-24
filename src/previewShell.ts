@@ -11,12 +11,19 @@
 // which `webview/context` menu contributions apply to a right-click.
 import * as vscode from 'vscode';
 
+export const ALLOW_REMOTE_IMAGES = 'markcopy.allowRemoteImages';
+
+export function allowRemoteImages(): boolean {
+  return vscode.workspace.getConfiguration('markcopy').get<boolean>('allowRemoteImages') === true;
+}
+
 export function htmlShell(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,
   webviewId = 'markcopy.preview',
 ): string {
   const nonce = getNonce();
+  const remoteImages = allowRemoteImages();
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js'),
   );
@@ -28,7 +35,9 @@ export function htmlShell(
   );
   const csp = [
     `default-src 'none'`,
-    `img-src ${webview.cspSource} https: data: blob:`,
+    `img-src ${webview.cspSource} data: blob:${remoteImages ? ' https:' : ''}`,
+    `base-uri 'none'`,
+    `form-action 'none'`,
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource} data:`,
     // Same-origin only: lets html-to-image fetch and embed KaTeX fonts when
@@ -54,6 +63,10 @@ export function htmlShell(
 <title>MarkCopy Preview</title>
 </head>
 <body data-vscode-context='{"webviewId":"${webviewId}","preventDefaultContextMenuItems":true}'>
+  <aside id="mc-remote-images" hidden>
+    <span role="alert">A remote image was blocked. MarkCopy can load HTTPS images when Allow Remote Images is enabled.</span>
+    <button type="button">Open MarkCopy Settings</button>
+  </aside>
   <div id="content" class="markdown-body"></div>
   <div id="mc-menu" class="mc-menu" role="menu" hidden></div>
   <div id="mc-toast" class="mc-toast" hidden></div>

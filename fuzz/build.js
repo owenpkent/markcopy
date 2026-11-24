@@ -18,6 +18,7 @@ const pureWebview = [
   'videoInfo',
   'links',
   'markdownConvert',
+  'parts',
 ].map((n) => `src/webview/${n}.ts`);
 
 const entryPoints = [

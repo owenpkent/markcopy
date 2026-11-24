@@ -12,7 +12,18 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
+- **LaTeX settings that do not affect the build no longer restart it.** Only `compile`, `engine`, `enginePath` and `rootFile` cancel and rerun a build.
+- **The remote image notice appears only for HTTPS images.** The setting does not allow `http:` images, so the prompt no longer offers it for them.
+- **Saving a comments file keeps its permissions.** Saves no longer turn an existing sidecar owner-only.
 - **Right-click menus stay inside the window.** A menu opened near the bottom or right edge could run off the bottom of the window or sit under the scrollbar. Menus and their submenus are now placed against the visible window (the scrollbars left out): they flip above or to the left of the pointer when they do not fit, pin to the edge when neither side has room, and scroll when taller than the window. In a pane narrower than the menu, the menu is no wider than the pane: its labels are cut with an ellipsis, each cut row has a tooltip with the whole label, and the check marks and submenu arrows stay in view. Covered by unit tests of the placement rule, headless Chrome checks of a menu opened at the bottom-right corner and of a menu and its submenu in frames 160 to 320 px wide (every panel, arrow and check mark inside the frame, 4 px from each edge), and a check by eye of the Markdown preview in the Extension Development Host.
+
+### Security
+
+- **Remote images require opt-in.** Shared previews and PDF exports block remote images by default. Enable `markcopy.allowRemoteImages` in user settings to allow HTTPS images. PDF print pages also restrict scripts and other network requests. Manual print pages are kept in a `print-preview` folder under the extension's storage (readable by snap-packaged browsers, unlike the system temp directory) with a 15-minute cleanup timer and a startup sweep. Activation also deletes the `.html` print pages earlier versions left in that storage folder.
+- **LaTeX compilation asks first.** Compiling requires a trusted workspace and consent per preview unless you opt in to `auto`. Switching to `off` cancels an active build and blocks every compile action. `latexmk` skips startup rc files, supported TeX engines disable shell escape with `-no-shell-escape` (accepted by both TeX Live and MiKTeX), and Tectonic runs in its untrusted mode.
+- **Bounded document previews.** Office and PDF previews cap file reads. Office and 3MF previews check ZIP metadata before extraction and validate actual output during inflation. PDF and LaTeX comment sidecars validate saved and incoming notes and replace local files atomically without following a sidecar symlink.
+- **Workspace Trust.** MarkCopy declares limited support in Restricted Mode: documents still preview, while LaTeX compiling, ffmpeg and the Chromium PDF renderer need a trusted workspace. The settings that name programs or control compiling and remote images are listed as restricted.
+- **Comment files are never overwritten after a partial load.** If a `.mccomments.json` file has an entry MarkCopy cannot load, the valid entries are shown, a warning explains that comment saving is off for that document, and the file is left untouched. A comment save that fails validation now shows a warning instead of being dropped, and the note editor limits note length and count.
 
 ### Planned
 

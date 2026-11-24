@@ -6,10 +6,13 @@ import { EOL_CRLF, EOL_LF, editTargetsDocument, planBlockEdit } from './blockEdi
 import { PdfEditorProvider } from './pdfEditor';
 import {
   buildPdfPage,
+  createPrintPreviewDir,
   createProfileDir,
   findBrowser,
   removeQuietly,
   renderPdf,
+  removeLegacyPrintPages,
+  sweepPrintPreviewDirs,
   type PageSize,
 } from './pdfExport';
 import {
@@ -30,7 +33,7 @@ import {
 } from './csv';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseMarkdownMessage, type MarkdownMessage } from './messages/markdown';
-import { htmlShell } from './previewShell';
+import { ALLOW_REMOTE_IMAGES, allowRemoteImages, htmlShell } from './previewShell';
 import { openExternalLink } from './externalLink';
 import { htmlToDocx, reportSummary, type DocxReport } from './docxExport';
 import { htmlToPptx, reportSummary as pptxReportSummary, type PptxReport } from './pptxExport';
@@ -46,7 +49,12 @@ import { GifEditorProvider } from './gifEditor';
 import { ImageEditorProvider } from './imageEditor';
 import { AudioEditorProvider } from './audioEditor';
 import { sweepProxyDir } from './videoProxy';
-import { TexEditorProvider, recompileActiveTex, texPanelFor } from './texEditor';
+import {
+  disposeTexPreviews,
+  TexEditorProvider,
+  recompileActiveTex,
+  texPanelFor,
+} from './texEditor';
 import { sweepTexRoot } from './texCompile';
 
 const VIEW_TYPE = 'markcopy.preview';
@@ -76,6 +84,7 @@ interface PreviewState {
   // This preview's pending debounced render (see scheduleUpdate). Per preview, so
   // typing in one document cannot cancel another preview's render.
   timer?: ReturnType<typeof setTimeout>;
+  ready?: boolean;
 }
 
 // Every live preview: the side panel, plus one per document opened *as* a
@@ -110,6 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // It is here for the window that was killed rather than closed, which never got
   // to run that cleanup. Fire and forget: nothing downstream waits on a sweep.
   void sweepProxyDir();
+  void sweepPrintPreviewDirs(context.globalStorageUri.fsPath);
+  void removeLegacyPrintPages(context.globalStorageUri.fsPath);
   // Same story for LaTeX build directories, which are larger and more numerous.
   void sweepTexRoot();
 
@@ -474,7 +485,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Re-render when a MarkCopy setting (style profile, theme, sync) changes.
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('markcopy')) {
+      if (e.affectsConfiguration(ALLOW_REMOTE_IMAGES)) {
+        for (const state of previews) {
+          state.ready = false;
+          state.panel.webview.html = htmlShell(context, state.panel.webview);
+        }
+      } else if (e.affectsConfiguration('markcopy')) {
         for (const state of previews) {
           update(state);
         }
@@ -659,6 +675,7 @@ function openTexPreview(uri: vscode.Uri, preserveFocus: boolean): void {
 }
 
 export function deactivate(): void {
+  disposeTexPreviews();
   // Spread: disposing fires onDidDispose, which deletes from the set.
   for (const state of [...previews]) {
     state.panel.dispose();
@@ -903,8 +920,6 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
   const panel = state.panel;
   previews.add(state);
 
-  panel.webview.html = htmlShell(context, panel.webview);
-
   const disposables: vscode.Disposable[] = [
     panel.webview.onDidReceiveMessage((raw) => {
       const msg = parseMarkdownMessage(raw);
@@ -912,6 +927,10 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         return;
       }
       switch (msg.type) {
+        case 'ready':
+          state.ready = true;
+          update(state);
+          break;
         case 'openExternal':
           void openInDefaultApp(state.docUri);
           break;
@@ -973,7 +992,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
     }
   });
 
-  update(state);
+  panel.webview.html = htmlShell(context, panel.webview);
   return state;
 }
 
@@ -1013,6 +1032,9 @@ function update(state: PreviewState, ackEdit?: number): void {
   if (state.timer !== undefined) {
     clearTimeout(state.timer);
     state.timer = undefined;
+  }
+  if (!state.ready) {
+    return;
   }
   const doc = vscode.workspace.textDocuments.find(
     (d) => d.uri.toString() === state.docUri.toString(),
@@ -1451,7 +1473,10 @@ async function runExport(
   const pageSize = cfg.get<PageSize>('pdf.pageSize', 'Letter');
   const name = exportBaseName(docUri);
 
-  const browser = await findBrowser(cfg.get<string>('pdf.browserPath', ''));
+  // An untrusted workspace never launches a browser; use the print-by-hand page.
+  const browser = vscode.workspace.isTrusted
+    ? await findBrowser(cfg.get<string>('pdf.browserPath', ''))
+    : undefined;
   if (!browser) {
     await printViaBrowser(context, bodyHtml, name, pageSize, 'no-browser');
     return;
@@ -1679,9 +1704,8 @@ function exportBaseName(docUri: vscode.Uri): string {
 }
 
 // The manual route, kept for machines with no Chromium-family browser installed
-// and as the escape hatch when a headless render fails: write the page to the
-// extension's storage folder and open it in the default browser, where it invokes
-// the print dialog itself.
+// and as the escape hatch when a headless render fails: open a short-lived
+// temporary page in the default browser, where it invokes the print dialog.
 async function printViaBrowser(
   context: vscode.ExtensionContext,
   bodyHtml: string,
@@ -1689,16 +1713,15 @@ async function printViaBrowser(
   pageSize: PageSize,
   reason: 'no-browser' | 'fallback',
 ): Promise<void> {
+  let dir: string | undefined;
   try {
     const html = await buildPdfHtml(context, bodyHtml, name, { pageSize, autoPrint: true });
-    const dir = context.globalStorageUri;
-    await vscode.workspace.fs.createDirectory(dir);
-    const safe = trimDashes(name.replace(/[^\w.-]+/g, '-')) || 'markcopy';
-    const fileUri = vscode.Uri.joinPath(dir, `${safe}.html`);
+    dir = await createPrintPreviewDir(context.globalStorageUri.fsPath);
+    const fileUri = vscode.Uri.file(join(dir, 'export.html'));
     await vscode.workspace.fs.writeFile(fileUri, Buffer.from(html, 'utf8'));
-    // globalStorageUri uses the `vscode-userdata:` scheme, which the OS shell
-    // can't open; re-wrap the on-disk path as a `file:` URI for the browser.
-    await vscode.env.openExternal(vscode.Uri.file(fileUri.fsPath));
+    if (!(await vscode.env.openExternal(fileUri))) {
+      throw new Error('Could not open the print preview in your browser.');
+    }
     if (reason === 'no-browser') {
       void vscode.window.showInformationMessage(
         'MarkCopy: no Chrome, Edge, or Chromium found for a direct PDF export, so the preview ' +
@@ -1712,6 +1735,9 @@ async function printViaBrowser(
       );
     }
   } catch (err) {
+    if (dir) {
+      await removeQuietly(dir);
+    }
     void vscode.window.showErrorMessage(`MarkCopy: could not export PDF (${String(err)}).`);
   }
 }
@@ -1734,6 +1760,7 @@ async function buildPdfHtml(
     katexCss: /class="(katex|mc-math)/.test(bodyHtml) ? await inlineKatexFonts(context) : '',
     pageSize: opts.pageSize,
     autoPrint: opts.autoPrint,
+    allowRemoteImages: allowRemoteImages(),
   });
 }
 

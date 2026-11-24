@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import { revealInOs, openInDefaultApp } from './revealInOs';
-import { readFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
+import { MAX_PDF_BYTES, readDocument } from './documentFile';
 import { parseTexMessage } from './messages/tex';
 import { applyMarkcopySetting } from './settingsScope';
-import { readComments, writeComments } from './pdfEditor';
+import { readComments, warnCommentsRejected, writeComments } from './pdfEditor';
 import {
   CompileCancelled,
   CompileFailed,
@@ -91,7 +91,7 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
       if (msg.type === 'ready') {
-        await session.start();
+        await session.run();
       } else if (msg.type === 'openExternal') {
         // The compiled PDF the preview shows, never a path from the webview.
         const pdf = await session.snapshotUri();
@@ -102,9 +102,11 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
         // The .tex source, not the temp PDF it compiles to.
         revealInOs(document.uri);
       } else if (msg.type === 'texRecompile') {
-        await session.run();
+        await session.run('manual');
       } else if (msg.type === 'saveComments') {
         await writeComments(session.commentsUri(), msg.comments);
+      } else if (msg.type === 'saveCommentsRejected') {
+        warnCommentsRejected();
       } else if (msg.type === 'updateSetting') {
         await applyMarkcopySetting(msg.key, msg.value, document.uri);
       }
@@ -131,25 +133,16 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
         void webview.postMessage({ type: 'setTheme', value });
       }
       if (e.affectsConfiguration('markcopy.tex', document.uri)) {
-        session.invalidateTools();
-        // The setting a reader reaches for right after "no LaTeX engine
-        // installed" is exactly this one, so it is worth retrying on their
-        // behalf rather than waiting for the next save. Not when compiling is
-        // switched off, though: that would turn ticking `tex.compile` back to
-        // "off" into one more unwanted compile on the way there.
-        const mode = vscode.workspace
-          .getConfiguration('markcopy', document.uri)
-          .get<string>('tex.compile', 'auto');
-        if (mode !== 'off') {
-          void session.run();
-        }
+        session.configurationChanged(e);
       }
     });
+    const trustListener = vscode.workspace.onDidGrantWorkspaceTrust(() => void session.run());
 
     panel.onDidDispose(() => {
       active.delete(entry);
       saveListener.dispose();
       configListener.dispose();
+      trustListener.dispose();
       void session.dispose();
       this.onDismiss?.(document.uri);
     });
@@ -231,11 +224,18 @@ export function texPanelFor(uri: vscode.Uri): vscode.WebviewPanel | undefined {
 export function recompileActiveTex(): boolean {
   for (const entry of active) {
     if (entry.panel.active) {
-      void entry.session.run();
+      void entry.session.run('manual');
       return true;
     }
   }
   return false;
+}
+
+/** Close active previews and cancel their compilers when the extension stops. */
+export function disposeTexPreviews(): void {
+  for (const entry of [...active]) {
+    entry.panel.dispose();
+  }
 }
 
 /**
@@ -247,7 +247,6 @@ export function recompileActiveTex(): boolean {
  */
 class CompileSession {
   private abort: AbortController | undefined;
-  private running = false;
   // Set when `run` is asked to start again while one is already in flight (a
   // second save landing before the first compile settles, or Recompile
   // clicked while the spinner is up). Restarting immediately would throw away
@@ -256,9 +255,8 @@ class CompileSession {
   // the current one is done, rather than aborting it.
   private rerunRequested = false;
   private disposed = false;
-  // Looked up once and kept for the panel's life. Under `auto`, `start` hands
-  // straight over to `run`, and without this the PATH walk would happen twice
-  // for one compile, then again on every save.
+  private consentedRoot: string | undefined;
+  // Cache successful discovery so recompiling on save does not probe again.
   private tools: TexTools | undefined;
   private outDir: string | undefined;
   // The last successfully compiled PDF, which is what the preview shows. Held
@@ -277,8 +275,7 @@ class CompileSession {
   }
 
   /** The file actually handed to the engine, which is not always this document. */
-  rootFile(): string {
-    const cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri);
+  rootFile(cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri)): string {
     const configured = cfg.get<string>('tex.rootFile', '').trim() || undefined;
     const folder = vscode.workspace.getWorkspaceFolder(this.document.uri);
     return resolveRootFile(
@@ -311,65 +308,121 @@ class CompileSession {
     return isInsideDir(dirname(this.rootFile()), uri.fsPath);
   }
 
-  /** First contact: decide whether to compile at all, and say so if not. */
-  async start(): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri);
-    const mode = cfg.get<string>('tex.compile', 'auto');
-    if (mode === 'off') {
-      // No action button: this is a dead end until a setting changes, and a
-      // button that cannot help is worse than no button.
-      this.post({ state: 'unavailable', text: compileUnavailable('disabled', process.platform) });
-      return;
+  /** Check the same policy for every route, including before starting discovery. */
+  private canCompile(
+    cfg: vscode.WorkspaceConfiguration,
+    rootFile: string,
+    manual = false,
+  ): boolean {
+    if (this.disposed) {
+      return false;
     }
-    const tools = await this.find(cfg);
-    if (!tools) {
-      this.post({ state: 'unavailable', text: compileUnavailable('missing', process.platform) });
-      return;
+    const mode = cfg.get<string>('tex.compile', 'ask');
+    const trusted = vscode.workspace.isTrusted;
+    if (!trusted || mode === 'off') {
+      this.consentedRoot = undefined;
+      this.cancel();
+      const reason = trusted ? 'disabled' : 'untrusted';
+      this.post({ state: 'unavailable', text: compileUnavailable(reason, process.platform) });
+      return false;
     }
-    if (mode === 'ask') {
-      // The escape hatch for a thesis-scale document, where compiling the moment
-      // a preview opens is a wait nobody asked for.
-      this.post({
-        state: 'unavailable',
-        text: compileOffer(basename(this.rootFile()), tools.engine),
-        action: 'Compile',
-      });
-      return;
+    if (manual) {
+      if (this.consentedRoot !== rootFile) {
+        this.cancel();
+      }
+      this.consentedRoot = rootFile;
     }
-    await this.run();
+    if (mode === 'auto' || this.consentedRoot === rootFile) {
+      return true;
+    }
+    this.consentedRoot = undefined;
+    this.cancel();
+    this.post({
+      state: 'unavailable',
+      text: compileOffer(basename(rootFile)),
+      action: 'Compile',
+    });
+    return false;
   }
 
-  /** Compile, and show the result. */
-  async run(): Promise<void> {
-    if (this.running) {
+  private cancel(): void {
+    this.rerunRequested = false;
+    this.abort?.abort();
+  }
+
+  configurationChanged(event: vscode.ConfigurationChangeEvent): void {
+    const toolChanged =
+      event.affectsConfiguration('markcopy.tex.engine', this.document.uri) ||
+      event.affectsConfiguration('markcopy.tex.enginePath', this.document.uri);
+    // Only the settings that decide what is compiled, with what, or whether it
+    // may run restart a build. Others (recompileOnSave) are read when needed.
+    if (
+      !toolChanged &&
+      !event.affectsConfiguration('markcopy.tex.compile', this.document.uri) &&
+      !event.affectsConfiguration('markcopy.tex.rootFile', this.document.uri)
+    ) {
+      return;
+    }
+    if (toolChanged) {
+      this.consentedRoot = undefined;
+    }
+    this.tools = undefined;
+    this.cancel();
+    void this.run();
+  }
+
+  /** Compile and show the result. Only the command and preview button grant consent. */
+  async run(trigger: 'automatic' | 'manual' = 'automatic'): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri);
+    const rootFile = this.rootFile(cfg);
+    if (!this.canCompile(cfg, rootFile, trigger === 'manual')) {
+      return;
+    }
+    if (this.abort) {
       this.rerunRequested = true;
       return;
     }
-    const cfg = vscode.workspace.getConfiguration('markcopy', this.document.uri);
-    const tools = await this.find(cfg);
-    if (!tools) {
-      this.post({ state: 'unavailable', text: compileUnavailable('missing', process.platform) });
-      return;
-    }
 
-    this.running = true;
-    this.abort = new AbortController();
-    const abort = this.abort;
+    const abort = new AbortController();
+    this.abort = abort;
+    const stillAllowed = () =>
+      !abort.signal.aborted &&
+      this.canCompile(vscode.workspace.getConfiguration('markcopy', this.document.uri), rootFile);
     try {
-      const rootFile = this.rootFile();
       this.post({ state: 'compiling', text: compiling(basename(rootFile)) });
+      const tools = this.tools ?? (await this.find(cfg, abort.signal));
+      if (!stillAllowed()) {
+        return;
+      }
+      if (!tools) {
+        this.post({ state: 'unavailable', text: compileUnavailable('missing', process.platform) });
+        return;
+      }
+      this.tools = tools;
 
       const outDir = outDirFor(rootFile);
       await ensureTexDir(outDir);
+      if (this.disposed) {
+        await this.cleanBuildDir(outDir);
+        return;
+      }
       // Kept for the panel's life rather than per compile, so latexmk's .aux and
       // friends survive between saves and the second compile is the fast one.
       this.outDir = outDir;
-
-      const result = await compile({ tools, rootFile, outDir, signal: abort.signal });
-      if (this.disposed) {
+      if (!stillAllowed()) {
         return;
       }
-      const bytes = await readFile(result.pdf);
+
+      const result = await compile({ tools, rootFile, outDir, signal: abort.signal });
+      if (!stillAllowed()) {
+        return;
+      }
+      const output = await readDocument(vscode.Uri.file(result.pdf), MAX_PDF_BYTES);
+      const bytes = Buffer.from(output.buffer, output.byteOffset, output.byteLength);
+      const comments = await readComments(this.commentsUri());
+      if (!stillAllowed()) {
+        return;
+      }
       this.snapshot.set(bytes);
       // Base64 for the same reason the PDF preview uses it: postMessage turns a
       // Uint8Array into a plain indexed object with no length, which pdf.js
@@ -377,12 +430,13 @@ class CompileSession {
       await this.webview.postMessage({
         type: 'load',
         data: bytes.toString('base64'),
-        comments: await readComments(this.commentsUri()),
+        comments,
       });
-      this.post({ state: 'ok' });
+      if (stillAllowed()) {
+        this.post({ state: 'ok' });
+      }
     } catch (err) {
-      if (this.disposed || err instanceof CompileCancelled) {
-        // Cancelled means the panel is going away. There is nobody left to tell.
+      if (!stillAllowed() || err instanceof CompileCancelled) {
         return;
       }
       const errors = err instanceof CompileFailed ? err.errors : [];
@@ -395,7 +449,6 @@ class CompileSession {
         action: 'Recompile',
       });
     } finally {
-      this.running = false;
       this.abort = undefined;
       // A disposed panel has nobody left to show a rerun to, and its temp
       // directory may already be on the way out; only honour the request while
@@ -414,14 +467,16 @@ class CompileSession {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    this.rerunRequested = false; // nothing left to honour a rerun for
-    this.abort?.abort();
+    this.cancel();
     await this.snapshot.dispose();
     const dir = this.outDir;
     this.outDir = undefined;
-    if (!dir) {
-      return;
+    if (dir) {
+      await this.cleanBuildDir(dir);
     }
+  }
+
+  private async cleanBuildDir(dir: string): Promise<void> {
     // The build directory is keyed by the root file, not by the panel, so two
     // previews of one document (a split view, or a chapter and its root) share
     // it. Closing one of them must not delete the other's build out from under
@@ -437,26 +492,13 @@ class CompileSession {
     await removeQuietly(dir);
   }
 
-  /**
-   * Drop the memoized engine choice so the next compile re-resolves it.
-   *
-   * `tools` is looked up once and kept for the panel's life (see `find`
-   * below), so without this a reader who changes `markcopy.tex.engine` or
-   * `.enginePath` -- typically right after a failed compile, since that
-   * overlay's own "no LaTeX engine installed" text sends them to settings --
-   * would see nothing happen until they closed and reopened the tab.
-   */
-  invalidateTools(): void {
-    this.tools = undefined;
-  }
-
-  private async find(cfg: vscode.WorkspaceConfiguration): Promise<TexTools | undefined> {
-    if (!this.tools) {
-      const configured = cfg.get<string>('tex.enginePath', '').trim() || undefined;
-      const preferred = cfg.get<string>('tex.engine', 'auto') as 'auto' | TexEngine;
-      this.tools = await findTex(configured, preferred);
-    }
-    return this.tools;
+  private find(
+    cfg: vscode.WorkspaceConfiguration,
+    signal: AbortSignal,
+  ): Promise<TexTools | undefined> {
+    const configured = cfg.get<string>('tex.enginePath', '').trim() || undefined;
+    const preferred = cfg.get<'auto' | TexEngine>('tex.engine', 'auto');
+    return findTex(configured, preferred, process.platform, process.env, signal);
   }
 
   private post(msg: {

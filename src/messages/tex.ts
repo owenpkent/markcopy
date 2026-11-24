@@ -1,6 +1,8 @@
 import {
   asMessage,
+  commentsMessage,
   settingMessage,
+  type RejectedCommentsMessage,
   type SaveCommentsMessage,
   type UpdateSettingMessage,
 } from './common';
@@ -14,6 +16,7 @@ export type TexMessage =
   | { type: 'openExternal' }
   | { type: 'texRecompile' }
   | SaveCommentsMessage
+  | RejectedCommentsMessage
   | UpdateSettingMessage;
 
 export function parseTexMessage(raw: unknown): TexMessage | undefined {
@@ -28,7 +31,7 @@ export function parseTexMessage(raw: unknown): TexMessage | undefined {
     case 'texRecompile':
       return { type: msg.type };
     case 'saveComments':
-      return { type: 'saveComments', comments: msg.comments };
+      return commentsMessage(msg);
     case 'updateSetting':
       return settingMessage(msg, isPdfSetting);
     default:

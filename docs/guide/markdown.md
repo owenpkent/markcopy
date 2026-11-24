@@ -42,7 +42,9 @@ Inline `$...$` and display `$$...$$` Markdown math render as equations. Right-cl
 
 ## Local images
 
-Local images render in the preview. Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file; remote (`http(s):`), `data:`, and `blob:` images are unchanged. The same goes for an image written as HTML, `<img src="docs/logo.png" width="200">`, which is how a README usually sizes one. An image that gives both a width and a height keeps its shape when a narrow pane shrinks it.
+Local images render in the preview. Relative and absolute paths (`![](media/x.png)`, `![](./diagram.png)`) resolve to the right file. HTML images such as `<img src="docs/logo.png" width="200">` work too. An image that gives both a width and a height keeps its shape when a narrow pane shrinks it.
+
+Remote images are blocked by default. When a preview reports blocked images, its settings link opens MarkCopy settings. Enable `markcopy.allowRemoteImages` in your user settings to allow HTTPS images in previews and PDF exports. Plain HTTP images are always blocked.
 
 A display equation too long for the pane wraps onto further lines after an `=`, `+`, or similar operator, keeping its display size. One with nowhere to break (a single wide fraction, say), or one using `	ag` or an `align`-style environment, which only KaTeX's display mode supports, scrolls sideways inside its own box instead.
 

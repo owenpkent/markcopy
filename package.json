@@ -18,6 +18,21 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Previews of local documents work in Restricted Mode. Compiling LaTeX and the external media and PDF tools (ffmpeg, a Chromium browser) need a trusted workspace.",
+      "restrictedConfigurations": [
+        "markcopy.allowRemoteImages",
+        "markcopy.video.ffmpegPath",
+        "markcopy.pdf.browserPath",
+        "markcopy.tex.compile",
+        "markcopy.tex.engine",
+        "markcopy.tex.enginePath",
+        "markcopy.tex.rootFile"
+      ]
+    }
+  },
   "categories": [
     "Visualization",
     "Other"
@@ -812,6 +827,12 @@
           "default": true,
           "markdownDescription": "Show the MarkCopy preview automatically when you open a Markdown, CSV, or TSV file, in that file's own tab rather than as a split beside it. A tab you have pinned, or one with unsaved changes, is left in the text editor. Turn off to reach the preview only from the **Show Preview** button, **Reopen Editor With...**, or **MarkCopy: Open Rich Preview to the Side**, which still opens the side-by-side layout on request. A `.tex` file previews beside its source instead: its preview is a compiled PDF, so putting it over the source would leave nothing to edit."
         },
+        "markcopy.allowRemoteImages": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Allow HTTPS images in document previews and PDF exports. Off by default because loading a remote image tells its server your IP address and when you opened the document. Local and embedded images still display. This setting can only be changed in your own user settings."
+        },
         "markcopy.image.background": {
           "type": "string",
           "enum": [
@@ -1049,13 +1070,14 @@
             "ask",
             "off"
           ],
-          "default": "auto",
+          "default": "ask",
+          "scope": "machine",
           "enumDescriptions": [
-            "Compile as soon as a LaTeX preview opens, and again on every save.",
-            "Say what would be compiled and offer a button, instead of starting on its own.",
-            "Never compile; the preview says so rather than showing a document."
+            "Compile trusted LaTeX as soon as its preview opens, and again on save when enabled.",
+            "Ask before the first compile in each preview. Saving can recompile only after you consent.",
+            "Never compile, including saves and manual recompile commands."
           ],
-          "markdownDescription": "What to do when a LaTeX preview opens. MarkCopy compiles the document to a PDF in a temp folder and shows that; your source and its build files are never touched, and the temp folder is deleted when the tab closes. Set this to `ask` for thesis-scale documents, where compiling on open is a wait you did not ask for."
+          "markdownDescription": "When MarkCopy may run your installed LaTeX engine. The default `ask` requires a deliberate compile in each preview; `auto` is an opt-in for trusted documents. `off` blocks every compile trigger. This setting is machine-scoped so a workspace cannot enable compilation. Output is kept in a temporary folder, but a TeX engine is not an operating-system sandbox: compile only sources you trust."
         },
         "markcopy.tex.engine": {
           "type": "string",
@@ -1068,6 +1090,7 @@
             "lualatex"
           ],
           "default": "auto",
+          "scope": "machine",
           "markdownDescription": "Which LaTeX engine to compile with. `auto` prefers `latexmk`, then `tectonic`, then `pdflatex`, because the first two rerun the document themselves until cross-references and the bibliography settle. Choose `xelatex` or `lualatex` if your document uses `fontspec` or system fonts, which `pdflatex` cannot do."
         },
         "markcopy.tex.enginePath": {

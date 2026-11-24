@@ -178,7 +178,7 @@ export class AudioEditorProvider implements vscode.CustomReadonlyEditorProvider 
     uri: vscode.Uri,
     isDisposed: () => boolean,
   ): Promise<void> {
-    if (uri.scheme !== 'file') {
+    if (uri.scheme !== 'file' || !vscode.workspace.isTrusted) {
       return;
     }
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);

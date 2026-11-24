@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
 import { renderWorkbookHtml, WorkbookError } from './xlsx';
 import {
@@ -58,7 +59,7 @@ export class XlsxEditorProvider extends OoxmlEditorProvider {
 
   private async renderWorkbook(uri: vscode.Uri, sheetIndex: number): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
-    const bytes = await vscode.workspace.fs.readFile(uri);
+    const bytes = await readDocument(uri);
     const html = renderWorkbookHtml(bytes, {
       sheetIndex,
       maxRows: cfg.get<number>('xlsx.maxRows', 5000),

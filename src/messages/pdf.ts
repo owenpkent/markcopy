@@ -1,6 +1,8 @@
 import {
   asMessage,
+  commentsMessage,
   settingMessage,
+  type RejectedCommentsMessage,
   type SaveCommentsMessage,
   type UpdateSettingMessage,
 } from './common';
@@ -12,6 +14,7 @@ export type PdfMessage =
   | { type: 'revealInOS' }
   | { type: 'openExternal' }
   | SaveCommentsMessage
+  | RejectedCommentsMessage
   | UpdateSettingMessage;
 
 export function parsePdfMessage(raw: unknown): PdfMessage | undefined {
@@ -25,7 +28,7 @@ export function parsePdfMessage(raw: unknown): PdfMessage | undefined {
     case 'openExternal':
       return { type: msg.type };
     case 'saveComments':
-      return { type: 'saveComments', comments: msg.comments };
+      return commentsMessage(msg);
     case 'updateSetting':
       return settingMessage(msg, isPdfSetting);
     default:

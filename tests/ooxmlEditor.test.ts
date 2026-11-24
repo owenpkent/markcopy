@@ -331,4 +331,40 @@ describe('OoxmlEditorProvider settings redraw', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(renders()).toHaveLength(2);
   });
+
+  it('reinstalls the CSP when the remote image setting changes', async () => {
+    const workspace = vi.mocked(vsMock.workspace);
+    let allowRemoteImages = false;
+    workspace.getConfiguration.mockImplementation(
+      () =>
+        ({
+          get: (key: string, fallback: unknown) =>
+            key === 'allowRemoteImages' ? allowRemoteImages : fallback,
+        }) as unknown as vscode.WorkspaceConfiguration,
+    );
+    let onConfig: ((e: vscode.ConfigurationChangeEvent) => void) | undefined;
+    workspace.onDidChangeConfiguration.mockImplementation(((
+      cb: (e: vscode.ConfigurationChangeEvent) => void,
+    ) => {
+      onConfig = cb;
+      return { dispose: () => undefined };
+    }) as never);
+    const provider = new TestEditorProvider(fakeContext, vi.fn(), vi.fn(), vi.fn());
+    const { panel, post } = createPanel();
+    await provider.resolveCustomEditor(fakeDocument, panel);
+    expect(panel.webview.html).toContain('img-src vscode-resource: data: blob:;');
+
+    const change = { affectsConfiguration: (key: string) => key === 'markcopy.allowRemoteImages' };
+    allowRemoteImages = true;
+    onConfig?.(change);
+    expect(panel.webview.html).toContain('img-src vscode-resource: data: blob: https:;');
+    await post({ type: 'ready' });
+    expect(panel.webview.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'render' }),
+    );
+
+    allowRemoteImages = false;
+    onConfig?.(change);
+    expect(panel.webview.html).toContain('img-src vscode-resource: data: blob:;');
+  });
 });

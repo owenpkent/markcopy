@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
 import { renderDeckHtml, DeckError } from './pptx/read';
 import {
@@ -44,7 +45,7 @@ export class PptxEditorProvider extends OoxmlEditorProvider {
 
   private async renderDeck(uri: vscode.Uri): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
-    const bytes = await vscode.workspace.fs.readFile(uri);
+    const bytes = await readDocument(uri);
     const deck = renderDeckHtml(bytes, {
       maxSlides: cfg.get<number>('pptx.maxSlides', 100),
       showNotes: cfg.get<boolean>('pptx.showNotes', true),

@@ -232,7 +232,11 @@ export async function findTex(
   preferred: 'auto' | TexEngine,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<TexTools | undefined> {
+  if (signal?.aborted) {
+    return undefined;
+  }
   const trimmed = configured?.trim();
   if (trimmed) {
     // A configured path's own file name tells us which engine it is when
@@ -258,7 +262,10 @@ export async function findTex(
         : (await isExecutable(candidate))
           ? candidate
           : undefined;
-      if (found !== undefined && (!mustRun || (await engineRuns(found, engine)))) {
+      if (signal?.aborted) {
+        return undefined;
+      }
+      if (found !== undefined && (!mustRun || (await engineRuns(found, engine, signal)))) {
         return { path: found, engine };
       }
     }
@@ -282,13 +289,20 @@ export async function findTex(
  * deciding what to use, and missing, not executable, and wedged all mean the
  * same thing here, which is to try the next candidate.
  */
-async function engineRuns(enginePath: string, engine: TexEngine): Promise<boolean> {
-  // Tectonic is the odd one out: it wants `--version` and rejects `-version`.
-  const arg = engine === 'tectonic' ? '--version' : '-version';
+async function engineRuns(
+  enginePath: string,
+  engine: TexEngine,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const args = engine === 'tectonic' ? ['--version'] : ['-version'];
+  if (engine === 'latexmk') {
+    args.unshift('-norc');
+  }
   try {
-    const probe = await run(enginePath, [arg], {
+    const probe = await run(enginePath, args, {
       cwd: dirname(enginePath),
       stallMs: PROBE_TIMEOUT_MS,
+      signal,
     });
     return probe.code === 0;
   } catch {
@@ -302,21 +316,22 @@ async function engineRuns(enginePath: string, engine: TexEngine): Promise<boolea
 
 /** Full argv (excluding the executable itself) to compile `input` into `outDir`. */
 export function compileArgs(tools: TexTools, input: string, outDir: string): string[] {
-  // -shell-escape (and --shell-escape) is never added here, for any engine,
-  // under any circumstance: it lets a document's own LaTeX source run
-  // arbitrary shell commands via \write18, and the entire point of a preview
-  // is that opening someone's repository must not run whatever it contains.
+  // TeX recognizes command-line switches, inline commands, and format selection
+  // by the first character even when spawn passes the filename as one argument.
+  const file = /^[-\\&]/.test(input) ? `./${input}` : input;
   switch (tools.engine) {
     case 'latexmk':
-      // latexmk drives its own multi-pass build, which is exactly why it is
-      // preferred over the bare engines below.
+      // Startup rc files are Perl programs. The explicit compiler command also
+      // disables shell escape even if the TeX installation enables it by default.
       return [
+        '-norc',
         '-pdf',
+        '-pdflatex=pdflatex -no-shell-escape %O %S',
         '-interaction=nonstopmode',
         '-halt-on-error',
         '-file-line-error',
         `-outdir=${outDir}`,
-        input,
+        file,
       ];
     case 'tectonic':
       // Also self-driving on passes. `--keep-logs` looks removable, and is
@@ -326,16 +341,17 @@ export function compileArgs(tools: TexTools, input: string, outDir: string): str
       // a failed compile would have nothing to parse. `--print` sends the
       // engine's own chatter to stdout, where `onOutput` and the failure
       // fallback below can see it.
-      return ['-o', outDir, '--keep-logs', '--print', input];
+      return ['-o', outDir, '--keep-logs', '--print', file];
     case 'pdflatex':
     case 'xelatex':
     case 'lualatex':
       return [
+        '-no-shell-escape',
         '-interaction=nonstopmode',
         '-halt-on-error',
         '-file-line-error',
         `-output-directory=${outDir}`,
-        input,
+        file,
       ];
     default: {
       const exhaustive: never = tools.engine;
@@ -737,6 +753,7 @@ export function engineFailureText(output: string): string {
 
 interface RunOptions {
   cwd: string;
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   stallMs?: number;
   onLine?: (line: string) => void;
@@ -800,8 +817,11 @@ function killTree(child: ReturnType<typeof spawn>, signal: NodeJS.Signals | unde
 function run(
   command: string,
   args: string[],
-  { cwd, signal, stallMs, onLine }: RunOptions,
+  { cwd, env, signal, stallMs, onLine }: RunOptions,
 ): Promise<{ code: number; stdout: string }> {
+  if (signal?.aborted) {
+    return Promise.reject(new CompileCancelled());
+  }
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
@@ -812,6 +832,7 @@ function run(
       // instead), so this is skipped there.
       child = spawn(command, args, {
         cwd,
+        env,
         windowsHide: true,
         detached: process.platform !== 'win32',
       });
@@ -973,6 +994,10 @@ export async function compile(opts: {
     // its own path.
     const result = await run(tools.path, compileArgs(tools, basename(rootFile), outDir), {
       cwd: dirname(rootFile),
+      // Tectonic's original CLI supports this environment switch as well as
+      // the newer subcommands, without adding options older binaries reject.
+      env:
+        tools.engine === 'tectonic' ? { ...process.env, TECTONIC_UNTRUSTED_MODE: '1' } : undefined,
       signal,
       stallMs: STALL_TIMEOUT_MS,
       onLine: onOutput,

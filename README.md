@@ -59,6 +59,8 @@ The preview follows your VS Code theme with GitHub-light and GitHub-dark palette
 
 **Developing MarkCopy:** start with [Contributing](.github/CONTRIBUTING.md), then [Architecture](docs/ARCHITECTURE.md) and [Testing](docs/TESTING.md). Security reports go through [SECURITY](.github/SECURITY.md). Release notes are in the [changelog](CHANGELOG.md).
 
+MarkCopy requires a trusted VS Code workspace. Remote images are off by default, including in PDF exports. The LaTeX preview asks before running your installed TeX engine in each new preview. See [Settings](docs/guide/settings.md#settings).
+
 ## Roadmap
 
 - PlantUML support.

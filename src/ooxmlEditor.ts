@@ -3,7 +3,7 @@ import { escapeGlobName } from './globEscape';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { posix } from 'node:path';
 import { applyMarkcopySetting } from './settingsScope';
-import { htmlShell } from './previewShell';
+import { ALLOW_REMOTE_IMAGES, htmlShell } from './previewShell';
 import { openExternalLink } from './externalLink';
 import { classifyLink } from './preview-utils';
 import { parseOoxmlMessage, type OoxmlMessage } from './messages/ooxml';
@@ -381,7 +381,9 @@ export abstract class OoxmlEditorProvider implements vscode.CustomReadonlyEditor
     // could not have changed.
     disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (this.redrawSettings.some((key) => e.affectsConfiguration(key, document.uri))) {
+        if (e.affectsConfiguration(ALLOW_REMOTE_IMAGES)) {
+          webview.html = htmlShell(this.context, webview, this.viewType);
+        } else if (this.redrawSettings.some((key) => e.affectsConfiguration(key, document.uri))) {
           void draw();
         }
       }),

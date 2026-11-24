@@ -53,6 +53,7 @@ describe.each<[string, Parser]>([
 
 describe('parseMarkdownMessage', () => {
   it('accepts the bare messages', () => {
+    expect(parseMarkdownMessage({ type: 'ready' })).toEqual({ type: 'ready' });
     expect(parseMarkdownMessage({ type: 'revealInOS' })).toEqual({ type: 'revealInOS' });
     expect(parseMarkdownMessage({ type: 'openExternal' })).toEqual({ type: 'openExternal' });
     expect(parseMarkdownMessage({ type: 'openSettings' })).toEqual({ type: 'openSettings' });
@@ -201,14 +202,7 @@ describe('parseMarkdownMessage', () => {
   });
 
   it('ignores types that belong to other surfaces', () => {
-    for (const type of [
-      'ready',
-      'saveFrame',
-      'saveComments',
-      'texRecompile',
-      'selectSheet',
-      'readFile',
-    ]) {
+    for (const type of ['saveFrame', 'saveComments', 'texRecompile', 'selectSheet', 'readFile']) {
       expect(parseMarkdownMessage({ type })).toBeUndefined();
     }
   });
@@ -281,9 +275,21 @@ describe('parsePdfMessage and parseTexMessage', () => {
       expect(parse({ type: 'openExternal', path: '/etc/passwd' })).toEqual({
         type: 'openExternal',
       });
-      expect(parse({ type: 'saveComments', comments: [{ page: 1 }] })).toEqual({
+      const comment = { id: 'c1', page: 1, xPct: 0.5, yPct: 0.5, text: 'A note' };
+      expect(parse({ type: 'saveComments', comments: [comment] })).toEqual({
         type: 'saveComments',
-        comments: [{ page: 1 }],
+        comments: [comment],
+      });
+      // An invalid payload is reported, not silently dropped, so the host can warn.
+      expect(parse({ type: 'saveComments', comments: [{ page: 1 }] })).toEqual({
+        type: 'saveCommentsRejected',
+      });
+      expect(parse({ type: 'saveComments', comments: null })).toEqual({
+        type: 'saveCommentsRejected',
+      });
+      expect(parse({ type: 'saveComments', comments: [] })).toEqual({
+        type: 'saveComments',
+        comments: [],
       });
       expect(parse({ type: 'updateSetting', key: 'theme', value: 'dark' })).toEqual({
         type: 'updateSetting',

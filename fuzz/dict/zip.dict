@@ -1,6 +1,6 @@
-# libFuzzer dictionary for the zip target (src/ooxml/zip.ts, fflate unzipSync).
-# Record signatures: fflate walks the end-of-central-directory, central
-# directory and local headers by these.
+# libFuzzer dictionary for the zip target (src/ooxml/zip.ts).
+# Record signatures for the end-of-central-directory, central directory,
+# and local headers.
 local_header="PK\x03\x04"
 central_header="PK\x01\x02"
 eocd="PK\x05\x06"
