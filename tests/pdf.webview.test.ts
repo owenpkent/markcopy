@@ -134,6 +134,33 @@ describe('PDF All Text', () => {
   });
 });
 
+describe('LaTeX compile card', () => {
+  it('lets a press on its button through instead of starting a pan', async () => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'texState',
+          state: 'unavailable',
+          text: 'Compile main.tex?',
+          action: 'Compile',
+        },
+        origin: window.origin,
+      }),
+    );
+    await settle();
+    // Each test imports the webview afresh, and earlier imports still listen and
+    // build their own card; the newest card is this test's.
+    const button = [...document.querySelectorAll<HTMLButtonElement>('.mc-tex-button')].pop()!;
+    expect(button.textContent).toBe('Compile');
+    // A pan captures the pointer, which moves the click off the button.
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+    expect(document.body.classList.contains('mc-grabbing')).toBe(false);
+    button.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0 }));
+    button.click();
+    expect(posted).toContainEqual({ type: 'texRecompile' });
+  });
+});
+
 describe('PDF comment draft across a reload', () => {
   it('saves the draft, not the original text, after the document reloads', async () => {
     await loadDoc();

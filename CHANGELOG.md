@@ -12,6 +12,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
+- **The LaTeX preview's Compile and Recompile buttons respond to a click.** In the default hand mode, pressing the button started a pan, which captured the pointer and moved the click off the button, so only the right-click Recompile worked. Found in a manual check of the trusted-workspace compile.
 - **LaTeX settings that do not affect the build no longer restart it.** Only `compile`, `engine`, `enginePath` and `rootFile` cancel and rerun a build.
 - **The remote image notice appears only for HTTPS images.** The setting does not allow `http:` images, so the prompt no longer offers it for them.
 - **Saving a comments file keeps its permissions.** Saves no longer turn an existing sidecar owner-only.

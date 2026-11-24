@@ -1205,7 +1205,9 @@ document.addEventListener('pointerdown', (e) => {
   if (
     e.button !== 0 ||
     mode !== 'hand' ||
-    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar')
+    // The LaTeX card's Compile button included: capturing the pointer for a pan
+    // would move the click off the button, so it would do nothing.
+    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, .mc-tex-card')
   ) {
     return;
   }
