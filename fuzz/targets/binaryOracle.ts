@@ -105,8 +105,10 @@ export function checkPage(label: string, html: string, input: Uint8Array): void 
     for (const [, name, value] of match[3].matchAll(ATTRIBUTE)) {
       const allowed = ATTRIBUTES[name];
       if (!Object.hasOwn(ATTRIBUTES, name) || !allowed.test(value)) {
+        // Reported as data, not rebuilt as `name="value"`: the message is for
+        // a person reading a fuzz finding and is never put into a page.
         throw new PageError(
-          `${label}: unexpected attribute ${JSON.stringify(`${name}="${value}"`.slice(0, 120))}`,
+          `${label}: unexpected attribute ${JSON.stringify({ name, value: value.slice(0, 120) })}`,
         );
       }
     }
