@@ -575,3 +575,165 @@ describe('readXar: claims about installing', () => {
     ).toBeUndefined();
   });
 });
+
+describe('readXar: guards', () => {
+  const entryXml = (inner: string): string => `<xar><toc>${inner}</toc></xar>`;
+  const dist = (xml: string) => read(buildXar({ files: [{ name: 'Distribution', data: xml }] }));
+
+  it('refuses a one-byte table of contents as not a zlib stream', async () => {
+    const bytes = new Uint8Array(29);
+    const header = new DataView(bytes.buffer);
+    header.setUint32(0, 0x78617221, false);
+    header.setUint16(4, 28, false);
+    header.setBigUint64(8, 1n, false);
+    header.setBigUint64(16, 10n, false);
+    await expect(read(bytes)).rejects.toThrow(/not a zlib stream/);
+  });
+
+  it('refuses a document with no toc element', async () => {
+    await expect(read(buildXar({ rawToc: '<xar><other/></xar>' }))).rejects.toThrow(
+      /no table of contents/,
+    );
+  });
+
+  it('finds a toc element that has no xar element around it', async () => {
+    const info = await read(buildXar({ rawToc: '<toc/>' }));
+    expect(info.format).toBe('xar archive');
+  });
+
+  it('counts a data-bearing entry with no type as a file, and a typed directory as not', async () => {
+    const toc = entryXml(
+      '<file><name>untyped</name><data><length>1</length><offset>20</offset><size>7</size></data></file>' +
+        '<file><name>dir</name><type>directory</type></file>',
+    );
+    expect(tableOf(await read(buildXar({ rawToc: toc })), 'Contents')).toEqual([
+      ['untyped', '7 bytes'],
+    ]);
+  });
+
+  it('reads a size that is not plain digits, or too big to be exact, as zero', async () => {
+    const file = (size: string) =>
+      `<file><name>f</name><type>file</type><data><size>${size}</size></data></file>`;
+    for (const size of ['12abc', '', '99999999999999999999']) {
+      const info = await read(buildXar({ rawToc: entryXml(file(size)) }));
+      expect(tableOf(info, 'Contents')).toEqual([['f', '0 bytes']]);
+    }
+    const padded = await read(buildXar({ rawToc: entryXml(file(' 7 ')) }));
+    expect(tableOf(padded, 'Contents')).toEqual([['f', '7 bytes']]);
+  });
+
+  it('converts a creation time with an offset to UTC, and drops one that is not a date', async () => {
+    const created = async (value: string) =>
+      rowsOf(
+        await read(buildXar({ rawToc: entryXml(`<creation-time>${value}</creation-time>`) })),
+        'Archive',
+      )['Created'];
+    expect(await created('2024-03-05T10:20:30+02:00')).toBe('2024-03-05 08:20:30 UTC');
+    expect(await created('2024-03-05T10:20:30Z')).toBe('2024-03-05 10:20:30 UTC');
+    expect(await created('not a date')).toBeUndefined();
+  });
+
+  it('shows a Base64 name with no Base64 characters as written', async () => {
+    const toc = entryXml('<file><name enctype="base64">***</name><type>file</type></file>');
+    expect(tableOf(await read(buildXar({ rawToc: toc })), 'Contents')[0][0]).toBe('***');
+  });
+
+  it('warns when the table lists more entries than it will walk', async () => {
+    // Name-less entries also reach the empty-name path. 50,001 elements stay under the node cap.
+    const toc = entryXml('<file/>'.repeat(50_001));
+    const info = await read(buildXar({ rawToc: toc }));
+    expect(info.warnings.join(' ')).toContain('more entries than MarkCopy will read');
+  });
+
+  it('warns that an entry with no offset could not be read', async () => {
+    const toc = entryXml(
+      '<file><name>Distribution</name><type>file</type><data><length>5</length><size>5</size></data></file>',
+    );
+    const info = await read(buildXar({ rawToc: toc }));
+    expect(info.warnings).toContain('The Distribution file could not be read.');
+  });
+
+  it('warns when a PackageInfo has no pkg-info element', async () => {
+    const info = await read(buildXar({ files: [{ name: 'PackageInfo', data: '<other/>' }] }));
+    expect(info.warnings).toContain('The package description at PackageInfo could not be read.');
+  });
+
+  it('reads only the first 64 packages and says so', async () => {
+    const files = Array.from({ length: 65 }, (_, i) => ({
+      name: `p${i}`,
+      children: [{ name: 'PackageInfo', data: packageInfoXml({ identifier: `com.p${i}` }) }],
+    }));
+    const info = await read(buildXar({ files }));
+    expect(info.warnings).toContain('Only the first 64 of 65 packages were read.');
+    expect(tableOf(info, 'Components')).toHaveLength(64);
+  });
+
+  it('merges bundles by id, and keeps a bundle with no id or no bundle-version list', async () => {
+    const xml =
+      '<pkg-info identifier="com.a">' +
+      '<bundle id="x" path="./X.app"/>' +
+      '<bundle id="y" CFBundleVersion="9"/>' +
+      '<bundle CFBundleShortVersionString="1.0" path="p"/>' +
+      '</pkg-info>';
+    const info = await read(buildXar({ files: [{ name: 'PackageInfo', data: xml }] }));
+    expect(tableOf(info, 'Bundles')).toEqual([
+      ['x', '', './X.app'],
+      ['y', '9', ''],
+      ['', '1.0', 'p'],
+    ]);
+  });
+
+  it('skips a pkg-ref with no id, merges repeats, and drops duplicate or untitled choices', async () => {
+    const info = await dist(
+      '<installer-gui-script><pkg-ref/><pkg-ref id="a"/><pkg-ref id="a" version="2"/>' +
+        '<choice title="X"/><choice title="X"/><choice/></installer-gui-script>',
+    );
+    expect(tableOf(info, 'Components')).toEqual([['a', '2', '', '']]);
+    expect(tableOf(info, 'Choices')).toEqual([['X']]);
+  });
+
+  it('stops at 200 pkg-refs and 100 choices', async () => {
+    const refs = Array.from({ length: 201 }, (_, i) => `<pkg-ref id="r${i}"/>`).join('');
+    const choices = Array.from({ length: 101 }, (_, i) => `<choice title="c${i}"/>`).join('');
+    const info = await dist(`<installer-gui-script>${refs}${choices}</installer-gui-script>`);
+    const ids = tableOf(info, 'Components').map((r) => r[0]);
+    expect(ids).toHaveLength(200);
+    expect(ids).not.toContain('r200');
+    const titles = tableOf(info, 'Choices').map((r) => r[0]);
+    expect(titles).toHaveLength(100);
+    expect(titles).not.toContain('c100');
+  });
+
+  describe('certificates inside a signature element', () => {
+    const signed = async (certificateText: string) =>
+      rowsOf(
+        await read(
+          buildXar({
+            rawToc: entryXml(
+              '<signature style="RSA"><offset>0</offset><size>1</size>' +
+                `<KeyInfo><X509Data><X509Certificate>${certificateText}</X509Certificate></X509Data></KeyInfo></signature>`,
+            ),
+          }),
+        ),
+        'Signature',
+      );
+
+    it('reports a signature but no signer when the certificate is not Base64', async () => {
+      const rows = await signed('A');
+      expect(rows['Status']).toContain('signature present, not verified');
+      expect(rows['Signer']).toBeUndefined();
+    });
+
+    it('reports a signature but no signer when the certificate is not DER', async () => {
+      const rows = await signed('QUJD');
+      expect(rows['Status']).toContain('signature present, not verified');
+      expect(rows['Signer']).toBeUndefined();
+    });
+
+    it('does not decode a certificate element larger than the certificate cap', async () => {
+      const rows = await signed('QUJD'.repeat(40_000));
+      expect(rows['Status']).toContain('signature present, not verified');
+      expect(rows['Signer']).toBeUndefined();
+    });
+  });
+});

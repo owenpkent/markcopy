@@ -792,3 +792,176 @@ describe('readRpm: version 6 signatures', () => {
     expect(openPgpIssuer(pgpSignatureV6(22, KEY_ID))).toEqual({ algorithm: 22, keyId: KEY_ID_HEX });
   });
 });
+
+describe('readRpm: signature packet guards', () => {
+  /** A version 4 signature body with the given hashed and unhashed subpacket bytes. */
+  const v4Body = (hashed: number[], unhashed: number[], algorithm = 1): number[] => [
+    4,
+    0,
+    algorithm,
+    8,
+    hashed.length >> 8,
+    hashed.length & 255,
+    ...hashed,
+    unhashed.length >> 8,
+    unhashed.length & 255,
+    ...unhashed,
+    0xab,
+    0xcd,
+    0,
+    8,
+    0xff,
+  ];
+  /** A new-format signature packet with a one-byte length (bodies under 192 bytes). */
+  const packet = (body: number[]): Uint8Array => Uint8Array.from([0xc2, body.length, ...body]);
+  const issuerSub = [9, 16, ...KEY_ID];
+  const OTHER = [1, 2, 3, 4, 5, 6, 7, 8];
+  const OTHER_HEX = '0102030405060708';
+
+  it('rejects input that is too short or lacks the packet marker bit', () => {
+    expect(openPgpIssuer(Uint8Array.from([0xc2, 4]))).toBeUndefined();
+    expect(openPgpIssuer(Uint8Array.from([0x42, 4, 4, 0, 1, 8, 0, 0, 0, 0, 0, 0]))).toBeUndefined();
+  });
+
+  it('reads a new-format two-byte length (192 to 223 first byte)', () => {
+    // A 200-byte hashed filler subpacket pushes the body past 191 bytes.
+    const filler = [192, 8, 2, ...new Array<number>(199).fill(0)];
+    const body = v4Body(filler, issuerSub);
+    expect(body.length).toBeGreaterThan(192);
+    const first = 192 + ((body.length - 192) >> 8);
+    const second = (body.length - 192) & 255;
+    const bytes = Uint8Array.from([0xc2, first, second, ...body]);
+    expect(openPgpIssuer(bytes)).toEqual({ algorithm: 1, keyId: KEY_ID_HEX });
+  });
+
+  it('reads a new-format five-byte length (first byte 255)', () => {
+    const body = v4Body([], issuerSub);
+    const bytes = Uint8Array.from([0xc2, 255, 0, 0, 0, body.length, ...body]);
+    expect(openPgpIssuer(bytes)).toEqual({ algorithm: 1, keyId: KEY_ID_HEX });
+  });
+
+  it('refuses a partial length, which a signature never uses', () => {
+    const body = v4Body([], issuerSub);
+    expect(openPgpIssuer(Uint8Array.from([0xc2, 0xe1, ...body]))).toBeUndefined();
+  });
+
+  it('reads old-format packets with 1, 2 and 4 byte lengths, and refuses an indeterminate one', () => {
+    const body = v4Body([], issuerSub);
+    const expected = { algorithm: 1, keyId: KEY_ID_HEX };
+    expect(openPgpIssuer(Uint8Array.from([0x88, body.length, ...body]))).toEqual(expected);
+    expect(openPgpIssuer(Uint8Array.from([0x89, 0, body.length, ...body]))).toEqual(expected);
+    expect(openPgpIssuer(Uint8Array.from([0x8a, 0, 0, 0, body.length, ...body]))).toEqual(expected);
+    expect(openPgpIssuer(Uint8Array.from([0x8b, ...body]))).toBeUndefined();
+  });
+
+  it('refuses a packet that is not a signature, or whose length is under four', () => {
+    const body = v4Body([], issuerSub);
+    expect(openPgpIssuer(Uint8Array.from([0xc3, body.length, ...body]))).toBeUndefined();
+    expect(openPgpIssuer(Uint8Array.from([0xc2, 3, 4, 0, 1]))).toBeUndefined();
+  });
+
+  it('reads a version 3 packet, and refuses one too short to hold the key ID', () => {
+    expect(openPgpIssuer(pgpSignatureV3(17))).toEqual({ algorithm: 17, keyId: KEY_ID_HEX });
+    expect(openPgpIssuer(Uint8Array.from([0x88, 6, 3, 5, 0, 0, 0, 0]))).toBeUndefined();
+  });
+
+  it('refuses an unknown version, and a version 4 body under ten bytes', () => {
+    expect(openPgpIssuer(packet([5, 0, 1, 8, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeUndefined();
+    expect(openPgpIssuer(packet([4, 0, 1, 8, 0, 0, 0, 0, 0]))).toBeUndefined();
+  });
+
+  it('skips a subpacket with a two-byte length (192 to 254) to reach the issuer after it', () => {
+    // First byte 192, second 8: length 200, then the type byte (2) and 199 bytes of filler.
+    const filler = [192, 8, 2, ...new Array<number>(199).fill(0)];
+    const bytes = Uint8Array.from([0xc2, 255, 0, 0, 0, 0, ...v4Body(filler, issuerSub)]);
+    const length = bytes.length - 6;
+    new DataView(bytes.buffer).setUint32(2, length);
+    expect(openPgpIssuer(bytes)).toEqual({ algorithm: 1, keyId: KEY_ID_HEX });
+  });
+
+  it('skips a subpacket with a five-byte length (255) to reach the issuer after it', () => {
+    const filler = [255, 0, 0, 0, 3, 2, 0, 0];
+    expect(openPgpIssuer(packet(v4Body(filler, issuerSub)))).toEqual({
+      algorithm: 1,
+      keyId: KEY_ID_HEX,
+    });
+  });
+
+  it('stops at a five-byte subpacket length that is cut short, with no key ID', () => {
+    expect(openPgpIssuer(packet(v4Body([255, 0, 0], [])))).toEqual({
+      algorithm: 1,
+      keyId: undefined,
+    });
+  });
+
+  it('stops at a zero-length subpacket and at one that runs past its area', () => {
+    const afterZero = [0, 16, ...issuerSub];
+    expect(openPgpIssuer(packet(v4Body([], afterZero)))?.keyId).toBeUndefined();
+    const overshoot = [40, 16, ...KEY_ID];
+    expect(openPgpIssuer(packet(v4Body([], overshoot)))?.keyId).toBeUndefined();
+  });
+
+  it('takes the key ID from the last 8 bytes of a version 4 issuer fingerprint (length 22)', () => {
+    const fingerprint = Array.from({ length: 20 }, (_, i) => i);
+    const sub = [22, 33, 4, ...fingerprint];
+    expect(openPgpIssuer(packet(v4Body([], sub)))).toEqual({
+      algorithm: 1,
+      keyId: '0c0d0e0f10111213',
+    });
+  });
+
+  it('takes the key ID from the first 8 bytes of a version 6 issuer fingerprint (length 34)', () => {
+    const fingerprint = Array.from({ length: 32 }, (_, i) => i + 1);
+    const sub = [34, 33, 6, ...fingerprint];
+    expect(openPgpIssuer(packet(v4Body([], sub)))).toEqual({
+      algorithm: 1,
+      keyId: '0102030405060708',
+    });
+  });
+
+  it('ignores a fingerprint of the wrong length or version, and one that follows an issuer', () => {
+    const wrongLength = [21, 33, 4, ...new Array<number>(19).fill(7)];
+    expect(openPgpIssuer(packet(v4Body([], wrongLength)))?.keyId).toBeUndefined();
+    const wrongVersion = [22, 33, 5, ...new Array<number>(20).fill(7)];
+    expect(openPgpIssuer(packet(v4Body([], wrongVersion)))?.keyId).toBeUndefined();
+    const fingerprint = [22, 33, 4, ...new Array<number>(20).fill(7)];
+    expect(openPgpIssuer(packet(v4Body([], [...issuerSub, ...fingerprint])))?.keyId).toBe(
+      KEY_ID_HEX,
+    );
+  });
+
+  it('finds the issuer in the hashed area when the unhashed one is empty', () => {
+    expect(openPgpIssuer(packet(v4Body([9, 16, ...OTHER], [])))?.keyId).toBe(OTHER_HEX);
+  });
+
+  it('counts several undecodable v6 entries in one warning', async () => {
+    const info = await readSpec({ without: [268], signature: [strings(278, ['AAAA', 'AAAA'])] });
+    expect(info.warnings).toContain(
+      '2 signature entries in the package could not be decoded as OpenPGP data.',
+    );
+    expect(info.sections.some((s) => s.heading === 'Signature')).toBe(false);
+  });
+
+  it('falls back to the later legacy signature tags, and names no algorithm it does not know', async () => {
+    const info = await readSpec({
+      without: [268],
+      signature: [bin(1002, pgpSignatureV4(99, OTHER))],
+    });
+    const section = properties(info, 'Signature');
+    expect(section.get('Status')).toBe('OpenPGP signature present, not verified by MarkCopy');
+    expect(section.get('Key ID')).toBe(OTHER_HEX);
+  });
+
+  it('reports a file list whose directory indexes do not match the names', async () => {
+    const info = await readSpec({
+      files: [],
+      main: [strings(1117, ['a', 'b']), int32(1116, 0), strings(1118, ['/d/'])],
+    });
+    expect(info.warnings).toContain('The file list could not be read.');
+    expect(info.sections.some((s) => s.heading === 'Contents')).toBe(false);
+  });
+
+  it('refuses headers that carry no package name', async () => {
+    await expect(readSpec({ without: [1000] })).rejects.toThrow('no package name');
+  });
+});

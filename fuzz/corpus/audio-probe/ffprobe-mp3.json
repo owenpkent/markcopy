@@ -1,0 +1,40 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "mp3",
+            "codec_long_name": "MP3 (MPEG audio layer 3)",
+            "codec_type": "audio",
+            "sample_rate": "44100",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "duration": "0.200000",
+            "bit_rate": "128000",
+            "tags": {
+                "encoder": "Lavc62.11"
+            }
+        }
+    ],
+    "format": {
+        "format_name": "mp3",
+        "format_long_name": "MP2/3 (MPEG audio layer 2/3)",
+        "duration": "0.200000",
+        "bit_rate": "166320",
+        "tags": {
+            "title": "Test tone",
+            "artist": "MarkCopy",
+            "album": "Fuzz seeds",
+            "date": "2026",
+            "track": "3",
+            "genre": "Test",
+            "comment": "line one\nline two",
+            "encoder": "Lavf62.3.100"
+        }
+    }
+}

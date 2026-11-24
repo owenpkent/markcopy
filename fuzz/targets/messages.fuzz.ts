@@ -49,6 +49,7 @@ const GRID_OPS = [
 
 const TYPES = {
   markdown: [
+    'ready',
     'revealInOS',
     'openExternal',
     'revealLine',

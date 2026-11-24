@@ -16,6 +16,7 @@ import {
   type PackageInfo,
 } from './model';
 import { readTar, tarData } from './tar';
+import { own } from '../binary/own';
 
 // Real control archives are a few kilobytes to a few hundred; a package with a
 // very large file list reaches a few megabytes. These leave room for those and
@@ -256,14 +257,14 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
   const controlSuffix = suffixOf(controlMember);
   if (controlMember.truncated) {
     warnings.push('The file ends inside the control archive, so the package fields are not shown.');
-  } else if (!(controlSuffix in COMPRESSION)) {
+  } else if (own(COMPRESSION, controlSuffix) === undefined) {
     warnings.push(`The control archive uses an unknown compression (${printable(controlSuffix)}).`);
   } else {
     try {
       unpacked = await unpack(reader, controlMember, controlSuffix);
       if (!unpacked) {
         warnings.push(
-          `The control archive is ${COMPRESSION[controlSuffix]} compressed, which MarkCopy cannot read, so the package fields are not shown.`,
+          `The control archive is ${own(COMPRESSION, controlSuffix)} compressed, which MarkCopy cannot read, so the package fields are not shown.`,
         );
       }
     } catch (error) {
@@ -410,7 +411,7 @@ export async function readDeb(reader: RangeReader): Promise<PackageInfo> {
     ]);
   }
   if (dataMember) {
-    const compression = COMPRESSION[suffixOf(dataMember)] ?? printable(suffixOf(dataMember));
+    const compression = own(COMPRESSION, suffixOf(dataMember)) ?? printable(suffixOf(dataMember));
     packageRows.push([
       'Package data',
       `${compression} compressed, ${formatBytes(dataMember.size)}${dataMember.truncated ? ' (the file ends before it does)' : ''}`,

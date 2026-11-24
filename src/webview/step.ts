@@ -16,6 +16,10 @@ import { PartTreeBuilder, type PartNode } from './parts';
 /** A STEP file the viewer cannot show; the message is for the person. */
 export class StepError extends Error {}
 
+// More nodes than this is not an assembly to preview: it is a loop, or a tree
+// that would cost more to walk than to refuse.
+const MAX_NODE_VISITS = 1_000_000;
+
 export interface OcctMesh {
   name?: string;
   color?: number[];
@@ -67,6 +71,8 @@ export interface StepModel {
 
 export interface StepOptions {
   maxTriangles?: number;
+  /** Nodes the assembly walk may visit before it refuses the file (MAX_NODE_VISITS). */
+  maxNodeVisits?: number;
   fallbackColor?: [number, number, number];
 }
 
@@ -179,7 +185,7 @@ export function readStep(
     colors,
     normals: allNormals ? normals : null,
     colored,
-    parts: stepParts(result.root, all, placed, triangles),
+    parts: stepParts(result.root, all, placed, triangles, options.maxNodeVisits ?? MAX_NODE_VISITS),
   };
 }
 
@@ -191,6 +197,7 @@ function stepParts(
   all: OcctMesh[],
   placed: Map<number, [number, number]>,
   total: number,
+  maxVisits: number,
 ): PartNode {
   const builder = new PartTreeBuilder(total);
   const used = new Set<number>();
@@ -207,11 +214,21 @@ function stepParts(
   // An explicit stack: the tree is the file's, and may be as deep as it likes.
   type Step = { node: OcctNode; top: boolean } | 'end';
   const todo: Step[] = root && typeof root === 'object' ? [{ node: root, top: true }] : [];
+  let visits = 0;
   while (todo.length > 0) {
     const step = todo.pop() as Step;
     if (step === 'end') {
       builder.end();
       continue;
+    }
+    // A guard on the walk itself, as glb.ts has. The engine builds a fresh
+    // object per node, but nothing here should rely on that: a node reachable
+    // twice is walked twice, so a shared node makes the walk exponential and a
+    // cycle makes it endless (the step fuzz target found both, 2026-11-23).
+    if (++visits > maxVisits) {
+      throw new StepError(
+        'This STEP file has an assembly tree too large to show, or one that loops.',
+      );
     }
     const { node, top } = step;
     const own = Array.isArray(node.meshes) ? node.meshes : [];

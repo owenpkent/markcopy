@@ -660,3 +660,33 @@ describe('glbParts', () => {
     expect(tree.children[0].ranges).toHaveLength(n);
   });
 });
+
+describe('readGlb: lists that are not lists', () => {
+  // The glb fuzz target found `"scenes":[{"nodes":0}]` throwing a TypeError
+  // from the scene walk (roots is not iterable) rather than a GlbError. Every
+  // list the walks iterate is checked first; the crash input is kept in
+  // fuzz/corpus/glb/scene-nodes-not-a-list.seed.
+  const asset = { version: '2.0' };
+  const cases: Array<[string, Json]> = [
+    ['scene nodes a number', { asset, scenes: [{ nodes: 0 }] }],
+    ['nodes an object', { asset, scenes: [{ nodes: [0] }], nodes: { 0: {} } }],
+    ['a node null', { asset, scenes: [{ nodes: [0] }], nodes: [null] }],
+    ['children a number', { asset, scenes: [{ nodes: [0] }], nodes: [{ children: 3 }] }],
+    ['primitives a string', { asset, meshes: [{ primitives: 'abc' }] }],
+    ['a primitive null', { asset, meshes: [{ primitives: [null] }] }],
+    ['attributes a number', { asset, meshes: [{ primitives: [{ attributes: 7 }] }] }],
+    ['a mesh a number', { asset, meshes: [5] }],
+    ['extensionsRequired a string', { asset, extensionsRequired: 'KHR' }],
+  ];
+  for (const [name, json] of cases) {
+    it(`refuses ${name} with a GlbError`, async () => {
+      await expect(readGlb(glb(json))).rejects.toThrow(GlbError);
+    });
+  }
+
+  it('refuses the input the fuzzer found', async () => {
+    const { asGlb } = await import('../fuzz/targets/glb.fuzz');
+    const seed = readFileSync(join(__dirname, '../fuzz/corpus/glb/scene-nodes-not-a-list.seed'));
+    await expect(readGlb(asGlb(seed))).rejects.toThrow(GlbError);
+  });
+});

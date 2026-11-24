@@ -1,0 +1,25 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "opus",
+            "codec_long_name": "Opus (Opus I’Žeractive Audio Codec)",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels":"0.206500",
+            "tags": {
+          }
+        }
+    ],
+    "format": {
+        "format_name": "ogg",
+        "format_long_name": "Ogg",
+        "duration": "0.206500",
+        "bit_rate": "139041"
+    }
+}
