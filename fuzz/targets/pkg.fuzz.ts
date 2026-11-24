@@ -100,16 +100,18 @@ export function shaped(
 export async function readAndCheck(input: Buffer, fileName: string): Promise<string> {
   const done = startCost(fileName, input.length);
   let html = '';
+  let info: unknown;
   try {
-    const info = await readPackage(bytesSource(input), fileName);
-    html = renderPackageHtml(info, { fileName, fileSize: input.length, sha256: 'f'.repeat(64) });
+    const read = await readPackage(bytesSource(input), fileName);
+    info = read;
+    html = renderPackageHtml(read, { fileName, fileSize: input.length, sha256: 'f'.repeat(64) });
   } catch (err) {
     if (!(err instanceof PackageError)) {
       throw err;
     }
   }
   done(html);
-  checkPage(fileName, html, input);
+  checkPage(fileName, html, input, info);
   return html;
 }
 

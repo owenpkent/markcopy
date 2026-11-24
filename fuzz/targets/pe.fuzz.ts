@@ -45,16 +45,18 @@ export function withHeader(data: Buffer): Buffer {
 export async function readAndCheck(bytes: Buffer): Promise<string> {
   const done = startCost('fuzz.exe', bytes.length);
   let html = '';
+  let info: unknown;
   try {
-    const info = await readPe(bytesSource(bytes));
-    html = renderPeHtml(info, { fileName: 'fuzz.exe', sha256: 'f'.repeat(64) });
+    const read = await readPe(bytesSource(bytes));
+    info = read;
+    html = renderPeHtml(read, { fileName: 'fuzz.exe', sha256: 'f'.repeat(64) });
   } catch (err) {
     if (!(err instanceof PeError)) {
       throw err;
     }
   }
   done(html);
-  checkPage('fuzz.exe', html, bytes);
+  checkPage('fuzz.exe', html, bytes, info);
   return html;
 }
 

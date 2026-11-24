@@ -47,6 +47,9 @@ const family =
   variantMatch && Object.hasOwn(VARIANTS, variantMatch[1]) ? VARIANTS[variantMatch[1]] : undefined;
 const variant = family && family.formats.includes(variantMatch[2]) ? variantMatch[2] : undefined;
 const target = variant ? variantMatch[1] : requested;
+// The environment every Jazzer child gets, a run and a merge alike: a variant's
+// format variable, so a merge minimizes against the same shapes the run used.
+const childEnv = variant ? { ...process.env, [family.env]: variant } : process.env;
 const seconds = merge ? 1 : Number(args[1] ?? process.env.FUZZ_SECONDS ?? 60);
 const root = path.resolve(__dirname, '..');
 const targetFile = path.join(root, 'out/fuzz/fuzz/targets', `${target}.fuzz.js`);
@@ -108,7 +111,7 @@ if (merge) {
       '-merge=1',
       '-rss_limit_mb=2048',
     ],
-    { cwd: root, stdio: 'inherit' },
+    { cwd: root, stdio: 'inherit', env: childEnv },
   );
   if (mergeRun.status === 0 && readdirSync(fresh).length === 0) {
     // Measured on Windows with Jazzer.js 4: the merge runs, but libFuzzer records
@@ -170,7 +173,7 @@ const runSession = (budget) =>
     {
       cwd: root,
       stdio: 'inherit',
-      env: variant ? { ...process.env, [family.env]: variant } : process.env,
+      env: childEnv,
     },
   );
 

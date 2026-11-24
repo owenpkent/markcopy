@@ -36,8 +36,10 @@ export function checkModel(label: string, model: ModelArrays, maxTriangles: numb
   }
   let nodes = 0;
   const walk = (node: PartNode, depth: number): void => {
-    if (++nodes > MAX_PART_NODES + 1) {
-      fail(`the parts tree has more than ${MAX_PART_NODES} nodes`);
+    // PartTreeBuilder keeps at most MAX_PART_NODES ordinary nodes, and adds the
+    // unnamed root and one "More parts" overflow node beside them.
+    if (++nodes > MAX_PART_NODES + 2) {
+      fail(`the parts tree has more than ${MAX_PART_NODES} nodes plus its root and overflow`);
     }
     if (depth > MAX_PART_DEPTH + 1) {
       fail(`the parts tree is deeper than ${MAX_PART_DEPTH}`);

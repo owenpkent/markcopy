@@ -93,8 +93,44 @@ function fileHolds(input: Uint8Array, text: string): boolean {
   return bytes.includes(text, 0, 'latin1') || bytes.includes(text, 0, 'utf16le');
 }
 
-/** Throws a PageError when `html` holds markup or engine text it should not. */
-export function checkPage(label: string, html: string, input: Uint8Array): void {
+/**
+ * Every string value (never a key) in what a reader returned. The page shows
+ * decoded and cleaned text (a decompressed .PKGINFO, a version string with its
+ * bidi controls stripped), which the raw bytes do not hold, so a word the
+ * reader's own output carries as text came from the file. A word that appears
+ * only in the page was made by the renderer.
+ */
+export function decodedStrings(value: unknown): string {
+  const out: string[] = [];
+  const seen = new Set<object>();
+  const visit = (v: unknown): void => {
+    if (typeof v === 'string') {
+      out.push(v);
+    } else if (v !== null && typeof v === 'object' && !ArrayBuffer.isView(v) && !seen.has(v)) {
+      seen.add(v);
+      const items = v instanceof Map || v instanceof Set ? [...v.values()] : Object.values(v);
+      if (v instanceof Map) {
+        items.push(...v.keys());
+      }
+      items.forEach(visit);
+    }
+  };
+  visit(value);
+  return out.join('\n');
+}
+
+/**
+ * Throws a PageError when `html` holds markup or engine text it should not.
+ * `decoded` is what the reader returned: engine text is allowed when the file's
+ * raw bytes or the reader's decoded strings hold it.
+ */
+export function checkPage(
+  label: string,
+  html: string,
+  input: Uint8Array,
+  decoded: unknown = undefined,
+): void {
+  const readerText = decodedStrings(decoded);
   for (let at = html.indexOf('<'); at >= 0; at = html.indexOf('<', at + 1)) {
     const end = html.indexOf('>', at);
     const tag = end < 0 ? html.slice(at, at + 80) : html.slice(at, end + 1);
@@ -118,7 +154,11 @@ export function checkPage(label: string, html: string, input: Uint8Array): void 
     const found = word.startsWith('[')
       ? text.includes(word)
       : new RegExp(`\\b${word}\\b`).test(text);
-    if (found && !fileHolds(input, word.replace(/ $/, ''))) {
+    const bare = word.replace(/ $/, '');
+    const fromReader = word.startsWith('[')
+      ? readerText.includes(bare)
+      : new RegExp(`\\b${word}\\b`).test(readerText);
+    if (found && !fileHolds(input, bare) && !fromReader) {
       const at = text.indexOf(word);
       throw new PageError(
         `${label}: the page says ${JSON.stringify(word)} and the file does not (${JSON.stringify(text.slice(Math.max(0, at - 60), at + 60))})`,

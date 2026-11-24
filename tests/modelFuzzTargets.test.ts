@@ -5,12 +5,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { asGlb, fuzz as fuzzGlb, glbOf } from '../fuzz/targets/glb.fuzz';
+import { asGlb, fuzz as fuzzGlb, glbOf, MAX_TRIANGLES } from '../fuzz/targets/glb.fuzz';
 import { checkMtlName, fuzz as fuzzObj } from '../fuzz/targets/obj.fuzz';
 import { engineResult, fuzz as fuzzStep } from '../fuzz/targets/step.fuzz';
 import { checkDetails, fuzz as fuzzAudio } from '../fuzz/targets/audio-probe.fuzz';
 import { checkModel } from '../fuzz/targets/modelOracle';
 import { readGlb } from '../src/webview/glb';
+import { MAX_PART_NODES } from '../src/webview/parts';
 
 const root = join(__dirname, '..');
 const leaf = (ranges: Array<[number, number]>) => ({ name: 'p', children: [], ranges });
@@ -58,6 +59,43 @@ describe('glb fuzz target', () => {
     expect(glb.length % 4).toBe(0);
     expect(glb.readUInt32LE(8)).toBe(glb.length);
     expect(glb.readUInt32LE(12)).toBe(8);
+  });
+
+  it('accepts the full tree PartTreeBuilder can make: the cap plus a root and an overflow node', async () => {
+    // One triangle, instanced 20001 times through a custom _ID accessor with no
+    // buffer view, so the tree holds the cap of ordinary nodes plus "More parts".
+    const json = {
+      asset: { version: '2.0' },
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [{ mesh: 0, extensions: { EXT_mesh_gpu_instancing: { attributes: { _ID: 1 } } } }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [
+        {
+          bufferView: 0,
+          componentType: 5126,
+          count: 3,
+          type: 'VEC3',
+          min: [0, 0, 0],
+          max: [1, 1, 0],
+        },
+        { componentType: 5125, count: MAX_PART_NODES + 1, type: 'SCALAR' },
+      ],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: 36 }],
+      buffers: [{ byteLength: 36 }],
+      extensionsUsed: ['EXT_mesh_gpu_instancing'],
+    };
+    const bin = Buffer.from(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]).buffer);
+    const bytes = glbOf(Buffer.from(JSON.stringify(json)), bin);
+    const model = await readGlb(bytes, { maxTriangles: MAX_TRIANGLES });
+    let nodes = 0;
+    const count = (n: { children: unknown[] }): void => {
+      nodes++;
+      (n.children as (typeof n)[]).forEach(count);
+    };
+    count(model.parts);
+    expect(nodes).toBe(MAX_PART_NODES + 2);
+    await fuzzGlb(bytes);
   });
 
   it('accepts the seeds, junk, and an empty input', async () => {

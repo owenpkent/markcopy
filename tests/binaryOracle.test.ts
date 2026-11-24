@@ -14,6 +14,7 @@ import {
   startCost,
 } from '../fuzz/targets/binaryOracle';
 import { iconBitmap, buildPe } from './pe/fixture';
+import { buildApk, PKGINFO } from './pkg/alpineFixture';
 import { buildDeb } from './pkg/debFixture';
 import { buildElf } from './pkg/elfFixture';
 import { buildMsi } from './pkg/msiFixture';
@@ -64,6 +65,41 @@ describe('checkPage', () => {
     expect(() =>
       checkPage('x', '<table class="mc-info-props"><tr><td>a &lt; b</td></tr></table>', none),
     ).not.toThrow();
+  });
+
+  it('accepts engine text the reader decoded from the file, not only raw bytes', async () => {
+    // A gzip-compressed description holding "undefined": the raw bytes do not.
+    const apk = buildApk({
+      signature: null,
+      pkginfo: PKGINFO.replace('URL retrieval utility and library', 'Error on undefined variables'),
+    });
+    const name = 'x.apk';
+    const info = await readPackage(bytesSource(apk), name);
+    const html = renderPackageHtml(info, {
+      fileName: name,
+      fileSize: apk.length,
+      sha256: 'f'.repeat(64),
+    });
+    expect(html).toContain('undefined');
+    expect(() => checkPage(name, html, apk)).toThrow(PageError);
+    expect(() => checkPage(name, html, apk, info)).not.toThrow();
+
+    // A bidi control the reader strips: the file holds "un<RLO>defined".
+    const description = `un${String.fromCodePoint(0x202e)}defined behavior`;
+    const pe = buildPe({ version: { strings: [['FileDescription', description]] } });
+    const peInfo = await readPe(bytesSource(pe));
+    const peHtml = renderPeHtml(peInfo, { fileName: 'x.exe', sha256: 'f'.repeat(64) });
+    expect(() => checkPage('x.exe', peHtml, pe, peInfo)).not.toThrow();
+  });
+
+  it('still fails engine text the reader did not decode from the file', async () => {
+    const pe = buildPe({ version: { strings: [['FileDescription', 'Plain tool']] } });
+    const info = await readPe(bytesSource(pe));
+    const html = renderPeHtml(info, { fileName: 'x.exe', sha256: 'f'.repeat(64) });
+    expect(() => checkPage('x.exe', html, pe, info)).not.toThrow();
+    // A renderer that writes a word its reader never returned.
+    expect(() => checkPage('x.exe', `${html}<p>undefined</p>`, pe, info)).toThrow(PageError);
+    expect(() => checkPage('x.exe', `${html}<p>[object Object]</p>`, pe, info)).toThrow(PageError);
   });
 
   it('fails engine text the file does not hold, and passes it when the file does', () => {
