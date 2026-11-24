@@ -39,11 +39,24 @@ jobs:
             stl,
             3mf,
             gcode,
+            glb,
+            obj,
+            step,
             video-probe,
+            audio-probe,
             messages,
             docx,
             pe,
             pkg,
+            pkg-elf,
+            pkg-rpm,
+            pkg-deb,
+            pkg-msi,
+            pkg-xar,
+            pkg-zip,
+            pkg-alpine,
+            pkg-dmg,
+            file-source,
             links,
             markdown-html,
             paste-export,
@@ -141,26 +154,46 @@ jobs:
             dir="${dir%/}"
             target="${dir#crashes/}"
             inputs=("$dir"/crash-* "$dir"/oom-* "$dir"/timeout-* "$dir"/slow-unit-*)
-            # No input file means the target failed some other way (build or
-            # install); the failed job in the run says why, so there is no issue.
-            [ ${#inputs[@]} -gt 0 ] || continue
-            title="Fuzz crash: $target"
-            first="${inputs[0]}"
-            {
-              echo "The nightly fuzz run found an input that makes the \`$target\` target fail."
-              echo
-              echo "Run: $RUN_URL (artifact \`fuzz-crash-$target\`, file \`$(basename "$first")\`)"
-              echo
-              echo "Input ($(wc -c < "$first") bytes, base64; large inputs are in the artifact only):"
-              echo '```'
-              if [ "$(wc -c < "$first")" -le 4000 ]; then base64 -w 76 "$first"; else echo "(see artifact)"; fi
-              echo '```'
-              echo
-              echo "End of the fuzzer log:"
-              echo '```'
-              tail -n 40 "$dir/fuzz.log"
-              echo '```'
-            } > body.md
+            if [ ${#inputs[@]} -eq 0 ]; then
+              # No input file, but the fuzz step ran (it wrote the log) and
+              # failed, so the target itself is broken: for example it no
+              # longer loads. That once went unnoticed for three nights, so it
+              # gets an issue of its own. No log means install or checkout
+              # failed, which the failed job in the run shows.
+              [ -f "$dir/fuzz.log" ] || continue
+              title="Fuzz target broken: $target"
+              # Variants replay as their catch-all target.
+              base="$target"
+              case "$target" in image-* | pkg-*) base="${target%%-*}" ;; esac
+              {
+                echo "The nightly fuzz run could not fuzz the \`$target\` target: it failed without a crashing input."
+                echo
+                echo "Run: $RUN_URL"
+                echo
+                echo "Reproduce with \`npm run fuzz:replay -- $base\`. End of the fuzzer log:"
+                echo '```'
+                tail -n 40 "$dir/fuzz.log"
+                echo '```'
+              } > body.md
+            else
+              title="Fuzz crash: $target"
+              first="${inputs[0]}"
+              {
+                echo "The nightly fuzz run found an input that makes the \`$target\` target fail."
+                echo
+                echo "Run: $RUN_URL (artifact \`fuzz-crash-$target\`, file \`$(basename "$first")\`)"
+                echo
+                echo "Input ($(wc -c < "$first") bytes, base64; large inputs are in the artifact only):"
+                echo '```'
+                if [ "$(wc -c < "$first")" -le 4000 ]; then base64 -w 76 "$first"; else echo "(see artifact)"; fi
+                echo '```'
+                echo
+                echo "End of the fuzzer log:"
+                echo '```'
+                tail -n 40 "$dir/fuzz.log"
+                echo '```'
+              } > body.md
+            fi
             number=$(gh issue list --state open --search "\"$title\" in:title" \
               --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")
             if [ -n "$number" ]; then

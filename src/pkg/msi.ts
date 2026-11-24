@@ -16,6 +16,7 @@ import { asciiLower } from './ascii';
 import { openCfb, STREAM, type Cfb, type CfbEntry } from './cfb';
 import { propertySection, rows, tableSection, type InfoSection, type PackageInfo } from './model';
 import { isSignedData, readSigner, signatureSection, signerCount } from './signature';
+import { own } from '../binary/own';
 
 const CLSID_MSI = '{000C1084-0000-0000-C000-000000000046}';
 const CLSID_TRANSFORM = '{000C1082-0000-0000-C000-000000000046}';
@@ -789,7 +790,7 @@ export async function readMsi(reader: RangeReader): Promise<PackageInfo> {
   const template = text(7);
   const [platformText, languageText] = template && !isPatch ? template.split(';') : [];
   const platform = platformText
-    ? (PLATFORMS[asciiLower(platformText.trim())] ?? platformText)
+    ? (own(PLATFORMS, asciiLower(platformText.trim())) ?? platformText)
     : undefined;
   const words = num(15);
   const pages = num(14);

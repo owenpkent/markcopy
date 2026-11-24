@@ -1,0 +1,73 @@
+# Tokens for the pe target (fuzz/targets/pe.fuzz.ts): what readPe and its
+# resource, version, manifest, icon, CLR and signature readers branch on.
+# Version-resource keys are UTF-16LE, as Windows writes them. The prototype
+# names are here because a file naming one once reached a lookup table
+# (docs/FUZZING-STRATEGY.md).
+
+# headers and sections
+kw1="MZ"
+kw2="PE\x00\x00"
+kw3="\x0b\x01"
+kw4="\x0b\x02"
+kw5="L\x01"
+kw6="d\x86"
+kw7="d\xaa"
+kw8=".text"
+kw9=".rdata"
+kw10=".data"
+kw11=".rsrc"
+kw12=".reloc"
+kw13=".pdata"
+
+# version resource (UTF-16LE)
+kw14="V\x00S\x00_\x00V\x00E\x00R\x00S\x00I\x00O\x00N\x00_\x00I\x00N\x00F\x00O\x00"
+kw15="S\x00t\x00r\x00i\x00n\x00g\x00F\x00i\x00l\x00e\x00I\x00n\x00f\x00o\x00"
+kw16="V\x00a\x00r\x00F\x00i\x00l\x00e\x00I\x00n\x00f\x00o\x00"
+kw17="T\x00r\x00a\x00n\x00s\x00l\x00a\x00t\x00i\x00o\x00n\x00"
+kw18="C\x00o\x00m\x00p\x00a\x00n\x00y\x00N\x00a\x00m\x00e\x00"
+kw19="F\x00i\x00l\x00e\x00D\x00e\x00s\x00c\x00r\x00i\x00p\x00t\x00i\x00o\x00n\x00"
+kw20="F\x00i\x00l\x00e\x00V\x00e\x00r\x00s\x00i\x00o\x00n\x00"
+kw21="P\x00r\x00o\x00d\x00u\x00c\x00t\x00N\x00a\x00m\x00e\x00"
+kw22="P\x00r\x00o\x00d\x00u\x00c\x00t\x00V\x00e\x00r\x00s\x00i\x00o\x00n\x00"
+kw23="O\x00r\x00i\x00g\x00i\x00n\x00a\x00l\x00F\x00i\x00l\x00e\x00n\x00a\x00m\x00e\x00"
+kw24="L\x00e\x00g\x00a\x00l\x00C\x00o\x00p\x00y\x00r\x00i\x00g\x00h\x00t\x00"
+kw25="I\x00n\x00t\x00e\x00r\x00n\x00a\x00l\x00N\x00a\x00m\x00e\x00"
+kw26="\xbd\x04\xef\xfe"
+
+# manifest
+kw27="<?xml"
+kw28="<assembly"
+kw29="manifestVersion"
+kw30="assemblyIdentity"
+kw31="requestedExecutionLevel"
+kw32="level=\x22"
+kw33="uiAccess=\x22"
+kw34="asInvoker"
+kw35="highestAvailable"
+kw36="requireAdministrator"
+kw37="dpiAware"
+kw38="supportedOS"
+kw39="urn:schemas-microsoft-com:asm.v1"
+kw40="urn:schemas-microsoft-com:asm.v3"
+
+# debug, CLR, icons
+kw41="RSDS"
+kw42="BSJB"
+kw43="#~"
+kw44="#Strings"
+kw45="#Blob"
+kw46="\x89PNG\x0d\x0a\x1a\x0a"
+kw47="IHDR"
+kw48="(\x00\x00\x00"
+
+# Authenticode (DER)
+kw49="0\x82"
+kw50="\x06\x09*\x86H\x86\xf7\x0d\x01\x07\x02"
+kw51="\x06\x03U\x04\x03"
+kw52="\xa0\x82"
+
+# prototype names
+kw53="constructor"
+kw54="__proto__"
+kw55="hasOwnProperty"
+kw56="toString"

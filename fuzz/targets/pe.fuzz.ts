@@ -1,4 +1,5 @@
 import { bytesSource, PeError, readPe, renderPeHtml } from '../../src/pe';
+import { checkPage, startCost } from './binaryOracle';
 
 // Random bytes almost never begin with "MZ" and a valid PE header, so left
 // alone the fuzzer would spend its time on the first two checks of readPe.
@@ -40,20 +41,33 @@ export function withHeader(data: Buffer): Buffer {
   return out;
 }
 
+/** Read one image and check the page and what it cost (fuzz/targets/binaryOracle.ts). */
+export async function readAndCheck(bytes: Buffer): Promise<string> {
+  const done = startCost('fuzz.exe', bytes.length);
+  let html = '';
+  try {
+    const info = await readPe(bytesSource(bytes));
+    html = renderPeHtml(info, { fileName: 'fuzz.exe', sha256: 'f'.repeat(64) });
+  } catch (err) {
+    if (!(err instanceof PeError)) {
+      throw err;
+    }
+  }
+  done(html);
+  checkPage('fuzz.exe', html, bytes);
+  return html;
+}
+
 // readPe is async (it reads through a ByteSource), so this target is too;
 // Jazzer.js awaits the promise, and fuzz/run.js runs it without --sync.
 // A PeError is the reader's documented answer to a file it cannot describe;
-// anything else (a RangeError from a view past the buffer, a TypeError) is a
-// finding.
+// anything else (a RangeError from a view past the buffer, a TypeError, a
+// CostError or a PageError) is a finding. The cost and page checks are the
+// ones the pkg target has: until 2026-11-23 this target had neither.
 export async function fuzz(data: Buffer): Promise<void> {
-  for (const bytes of [data, withHeader(data)]) {
-    try {
-      const info = await readPe(bytesSource(bytes));
-      renderPeHtml(info, { fileName: 'fuzz.exe', sha256: 'f'.repeat(64) });
-    } catch (err) {
-      if (!(err instanceof PeError)) {
-        throw err;
-      }
-    }
+  await readAndCheck(data);
+  const headed = withHeader(data);
+  if (headed !== data) {
+    await readAndCheck(headed);
   }
 }

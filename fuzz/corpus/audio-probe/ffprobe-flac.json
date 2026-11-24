@@ -1,0 +1,37 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "flac",
+            "codec_long_name": "FLAC (Free Lossless Audio Codec)",
+            "codec_type": "audio",
+            "sample_rate": "44100",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "duration": "0.200000",
+            "bits_per_raw_sample": "16"
+        }
+    ],
+    "format": {
+        "format_name": "flac",
+        "format_long_name": "raw FLAC",
+        "duration": "0.200000",
+        "bit_rate": "435760",
+        "tags": {
+            "title": "Test tone",
+            "artist": "MarkCopy",
+            "album": "Fuzz seeds",
+            "date": "2026",
+            "track": "3",
+            "genre": "Test",
+            "comment": "line one\nline two",
+            "encoder": "Lavf62.3.100"
+        }
+    }
+}

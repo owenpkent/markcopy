@@ -1,0 +1,45 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "aac",
+            "codec_long_name": "AAC (Advanced Audio Coding)",
+            "codec_type": "audio",
+            "sample_rate": "44100",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "duration": "0.200000",
+            "bit_rate": "130418",
+            "tags": {
+                "language": "und",
+                "handler_name": "SoundHandler",
+                "vendor_id": "[0][0][0][0]"
+            }
+        }
+    ],
+    "format": {
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "duration": "0.200000",
+        "bit_rate": "188520",
+        "tags": {
+            "major_brand": "M4A ",
+            "minor_version": "512",
+            "compatible_brands": "M4A isomiso2",
+            "title": "Test tone",
+            "artist": "MarkCopy",
+            "album": "Fuzz seeds",
+            "date": "2026",
+            "encoder": "Lavf62.3.100",
+            "comment": "line one\nline two",
+            "genre": "Test",
+            "track": "3"
+        }
+    }
+}

@@ -4,9 +4,13 @@ import {
   MAX_HEAP_GROWTH,
   MAX_HTML_CHARS,
   MAX_MILLISECONDS,
+  PKG_FORMATS,
+  shapeFor,
   shaped,
   SHAPES,
 } from '../fuzz/targets/pkg.fuzz';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildElf } from './pkg/elfFixture';
 import { buildMsi } from './pkg/msiFixture';
 
@@ -83,5 +87,28 @@ describe('pkg fuzz target: cost limits', () => {
     await fuzz(Buffer.from(buildMsi()));
     await fuzz(Buffer.from(buildElf()));
     expect(performance.now() - started).toBeLessThan(MAX_MILLISECONDS);
+  });
+
+  it('narrows to one format for a variant, keeping a choice already inside it', () => {
+    const msi = SHAPES.findIndex((s) => s.format === 'msi');
+    expect(shapeFor(msi, 'msi')).toBe(SHAPES[msi]);
+    for (let choice = 0; choice < 256; choice++) {
+      expect(shapeFor(choice, 'zip').format).toBe('zip');
+      expect(shapeFor(choice, undefined)).toBe(SHAPES[choice % SHAPES.length]);
+    }
+    expect(shaped(Buffer.of(0, 1, 2, 3), 'rpm').name).toBe('fuzz.rpm');
+  });
+
+  it('lists the same formats fuzz/run.js and the nightly matrix offer as pkg-<format>', () => {
+    const run = readFileSync(join(__dirname, '../fuzz/run.js'), 'utf8');
+    const listed = /formats: \[('elf'[^\]]*)\]/
+      .exec(run)?.[1]
+      .split(',')
+      .map((f) => f.trim().slice(1, -1));
+    expect(listed).toEqual(PKG_FORMATS);
+    const nightly = readFileSync(join(__dirname, '../.github/workflows/fuzz.yml'), 'utf8');
+    for (const format of PKG_FORMATS) {
+      expect(nightly).toMatch(new RegExp(`\\bpkg-${format}\\b`));
+    }
   });
 });

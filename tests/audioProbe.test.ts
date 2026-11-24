@@ -164,3 +164,27 @@ describe('audioProbeArgs', () => {
     expect(args).toContain('json');
   });
 });
+
+describe('shapeAudioProbe: what only the fuzzer sent', () => {
+  // ffprobe reports whole channel counts; the audio-probe fuzz target sent
+  // "0.2065", which rounded to 0 and would have shown as "0 channels".
+  it('leaves out a channel count that is not a whole number', () => {
+    const json = (channels: unknown) =>
+      JSON.stringify({ streams: [{ codec_type: 'audio', codec_name: 'opus', channels }] });
+    expect(shapeAudioProbe(json('0.2065'))?.channels).toBeUndefined();
+    expect(shapeAudioProbe(json(2.5))?.channels).toBeUndefined();
+    expect(shapeAudioProbe(json(2))?.channels).toBe(2);
+    expect(shapeAudioProbe(json('6'))?.channels).toBe(6);
+  });
+
+  it('labels a codec or format named after a prototype member as given', () => {
+    const details = shapeAudioProbe(
+      JSON.stringify({
+        format: { format_name: 'constructor' },
+        streams: [{ codec_type: 'audio', codec_name: '__proto__' }],
+      }),
+    );
+    expect(details?.format).toBe('constructor');
+    expect(details?.codec).toBe('__proto__');
+  });
+});

@@ -292,7 +292,9 @@ export function parseAxml(bytes: Uint8Array, warnings: string[] = []): ManifestN
         const attributeCount = Math.min(view.getUint16(pos + 28, true), MAX_ATTRIBUTES);
         const node: ManifestNode = {
           name: pool?.get(nameIndex) ?? '',
-          attrs: {},
+          // No prototype: attribute names come from the file, and one named
+          // `__proto__` or `constructor` must be an attribute like any other.
+          attrs: Object.create(null) as Record<string, string>,
           children: [],
         };
         for (
@@ -344,7 +346,7 @@ export function parseAxml(bytes: Uint8Array, warnings: string[] = []): ManifestN
 }
 
 function fromXml(node: XNode, depth = 0): ManifestNode {
-  const attrs: Record<string, string> = {};
+  const attrs = Object.create(null) as Record<string, string>;
   for (const [key, value] of Object.entries(node.attrs)) {
     const name = localName(key);
     if (!key.startsWith('xmlns')) {

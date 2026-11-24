@@ -840,3 +840,192 @@ describe('readMsi: amplification bounds', () => {
     );
   });
 });
+
+describe('readMsi: summary property guards', () => {
+  const u32 = (v: number): number[] => [
+    v & 255,
+    (v >>> 8) & 255,
+    (v >>> 16) & 255,
+    (v >>> 24) & 255,
+  ];
+  const u16 = (v: number): number[] => [v & 255, (v >>> 8) & 255];
+  const pad4 = (bytes: number[]): number[] => {
+    const out = [...bytes];
+    while (out.length % 4 !== 0) {
+      out.push(0);
+    }
+    return out;
+  };
+  const vtI2 = (v: number): number[] => pad4([...u32(2), ...u16(v)]);
+  const vtI4 = (v: number): number[] => [...u32(3), ...u32(v)];
+  /** A VT_LPSTR with the given declared length (default: the bytes plus a NUL) and raw bytes. */
+  const vtLpstr = (bytes: number[], declared = bytes.length + 1): number[] =>
+    pad4([...u32(30), ...u32(declared), ...bytes, 0]);
+  const vtLpwstr = (text: string, declared = text.length + 1): number[] =>
+    pad4([
+      ...u32(31),
+      ...u32(declared),
+      ...[...text].flatMap((c) => u16(c.charCodeAt(0))),
+      ...u16(0),
+    ]);
+  const vtFiletime = (low: number, high: number): number[] => [
+    ...u32(64),
+    ...u32(low),
+    ...u32(high),
+  ];
+
+  /** A property set stream with one section, properties in the order given. */
+  function propertySet(props: [number, number[]][]): Uint8Array {
+    const table = 8 + props.length * 8;
+    let offset = table;
+    const index: number[] = [];
+    const values: number[] = [];
+    for (const [id, value] of props) {
+      index.push(...u32(id), ...u32(offset));
+      values.push(...value);
+      offset += value.length;
+    }
+    const header = [
+      ...u16(0xfffe),
+      ...u16(0),
+      ...u32(0x00020006),
+      ...new Array<number>(16).fill(0),
+    ];
+    header.push(...u32(1), ...new Array<number>(16).fill(0), ...u32(48));
+    return Uint8Array.from([...header, ...u32(offset), ...u32(props.length), ...index, ...values]);
+  }
+
+  const comments = async (props: [number, number[]][]) =>
+    field(await read({ summaryBytes: propertySet(props) }), 'Package', 'Comments');
+
+  it('decodes narrow strings with the code page the summary names', async () => {
+    // Each pair is the same word in the legacy encoding of its code page.
+    expect(
+      await comments([
+        [1, vtI2(932)],
+        [6, vtLpstr([0x93, 0xfa, 0x96, 0x7b])],
+      ]),
+    ).toBe('日本');
+    expect(
+      await comments([
+        [1, vtI2(936)],
+        [6, vtLpstr([0xd6, 0xd0, 0xce, 0xc4])],
+      ]),
+    ).toBe('中文');
+    expect(
+      await comments([
+        [1, vtI2(949)],
+        [6, vtLpstr([0xc7, 0xd1])],
+      ]),
+    ).toBe('한');
+    expect(
+      await comments([
+        [1, vtI2(950)],
+        [6, vtLpstr([0xa4, 0xa4])],
+      ]),
+    ).toBe('中');
+    expect(
+      await comments([
+        [1, vtI2(1251)],
+        [6, vtLpstr([0xe0])],
+      ]),
+    ).toBe('а');
+  });
+
+  it('falls back to Windows-1252 for a code page it does not know', async () => {
+    expect(
+      await comments([
+        [1, vtI2(12345)],
+        [6, vtLpstr([0xe9])],
+      ]),
+    ).toBe('é');
+  });
+
+  it('applies the code page even when its property comes after the string', async () => {
+    expect(
+      await comments([
+        [6, vtLpstr([0xc7, 0xd1])],
+        [1, vtI2(949)],
+      ]),
+    ).toBe('한');
+  });
+
+  it('reads a 16-bit and a 32-bit integer property (Page Count) as the minimum installer version', async () => {
+    const version = async (value: number[]) =>
+      field(
+        await read({ summaryBytes: propertySet([[14, value]]) }),
+        'Package',
+        'Minimum installer version',
+      );
+    expect(await version(vtI2(200))).toBe('2.0');
+    expect(await version(vtI4(301))).toBe('3.1');
+    expect(await version(vtI4(210))).toBe('2.1');
+    expect(await version(vtI4(0))).toBeUndefined();
+    expect(await version(vtI4(10000))).toBeUndefined();
+  });
+
+  it('leaves out a narrow string that declares more than 65,536 bytes', async () => {
+    expect(await comments([[6, vtLpstr([0x41], 65537)]])).toBeUndefined();
+    expect(await comments([[6, vtLpstr([0x41], 0xffffffff)]])).toBeUndefined();
+  });
+
+  it('leaves out a narrow string whose declared length runs past the stream', async () => {
+    expect(await comments([[6, vtLpstr([0x41, 0x42], 5000)]])).toBeUndefined();
+  });
+
+  it('stops a narrow string at its first NUL', async () => {
+    expect(await comments([[6, vtLpstr([0x61, 0x62, 0, 0x63, 0x64])]])).toBe('ab');
+  });
+
+  it('reads a wide string, and leaves out one that declares over 32,768 characters or runs past the stream', async () => {
+    expect(await comments([[6, vtLpwstr('Wide')]])).toBe('Wide');
+    expect(await comments([[6, vtLpwstr('x', 32769)]])).toBeUndefined();
+    expect(await comments([[6, vtLpwstr('xy', 4000)]])).toBeUndefined();
+  });
+
+  it('leaves out a time of zero, and shows a real one', async () => {
+    const created = async (value: number[]) =>
+      field(await read({ summaryBytes: propertySet([[12, value]]) }), 'Package', 'Created');
+    expect(await created(vtFiletime(0, 0))).toBeUndefined();
+    // 2023-11-14 22:13:20 UTC as 100 ns ticks since 1601.
+    const ticks = filetime(1700000000);
+    const low = Number(ticks & 0xffffffffn);
+    const high = Number(ticks >> 32n);
+    expect(await created(vtFiletime(low, high))).toBe('2023-11-14 22:13:20 UTC');
+  });
+
+  it('ignores a property set with the wrong byte order or no sections', async () => {
+    const wrongOrder = propertySet([[6, vtLpstr([0x41])]]);
+    wrongOrder[0] = 0xff;
+    wrongOrder[1] = 0xff;
+    expect(field(await read({ summaryBytes: wrongOrder }), 'Package', 'Comments')).toBeUndefined();
+    const noSections = propertySet([[6, vtLpstr([0x41])]]);
+    new DataView(noSections.buffer).setUint32(24, 0, true);
+    expect(field(await read({ summaryBytes: noSections }), 'Package', 'Comments')).toBeUndefined();
+  });
+
+  it('ignores a section offset outside the stream', async () => {
+    const stream = propertySet([[6, vtLpstr([0x41])]]);
+    new DataView(stream.buffer).setUint32(44, 0x7fffffff, true);
+    expect(field(await read({ summaryBytes: stream }), 'Package', 'Comments')).toBeUndefined();
+  });
+
+  it('names a known platform, and shows an unknown platform and a non-numeric language as written', async () => {
+    const rows = async (template: string) => {
+      const info = await read({ summary: { template } });
+      return {
+        platform: field(info, 'Package', 'Platform (from the summary template)'),
+        languages: field(info, 'Package', 'Languages'),
+      };
+    };
+    expect(await rows('x64;1033,1031')).toEqual({
+      platform: 'x64 (64-bit)',
+      languages: 'English (US) (1033), German (1031)',
+    });
+    expect(await rows('Intel64;99999')).toEqual({
+      platform: 'Itanium (64-bit)',
+      languages: '99999',
+    });
+    expect(await rows('Weird;abc')).toEqual({ platform: 'Weird', languages: 'abc' });
+  });
+});

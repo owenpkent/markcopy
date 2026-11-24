@@ -308,3 +308,185 @@ describe('parseManifest: bounded text XML', () => {
     expect(() => parseManifest(new TextEncoder().encode(xml))).toThrow(PackageError);
   });
 });
+
+describe('parseAxml: string pool and header guards', () => {
+  const u16 = (v: number): number[] => [v & 255, (v >>> 8) & 255];
+  const u32 = (v: number): number[] => [...u16(v & 0xffff), ...u16(v >>> 16)];
+  const NONE = 0xffffffff;
+
+  /** A chunk of the given type and header size; `size` defaults to the real length. */
+  const chunk = (type: number, headerSize: number, body: number[], size?: number): number[] => [
+    ...u16(type),
+    ...u16(headerSize),
+    ...u32(size ?? 8 + body.length),
+    ...body,
+  ];
+  /** A string pool whose string data is exactly `raw`, with one offset per entry in `offsets`. */
+  const rawPool = (raw: number[], offsets: number[], utf8 = false): number[] =>
+    chunk(0x0001, 28, [
+      ...u32(offsets.length),
+      ...u32(0),
+      ...u32(utf8 ? 0x100 : 0),
+      ...u32(28 + offsets.length * 4),
+      ...u32(0),
+      ...offsets.flatMap(u32),
+      ...raw,
+    ]);
+  const utf16 = (text: string): number[] => [
+    ...u16(text.length),
+    ...[...text].flatMap((c) => u16(c.charCodeAt(0))),
+    0,
+    0,
+  ];
+  /** A UTF-16 pool of these strings. */
+  const pool = (strings: string[]): number[] => {
+    const raw: number[] = [];
+    const offsets = strings.map((s) => {
+      const at = raw.length;
+      raw.push(...utf16(s));
+      return at;
+    });
+    return rawPool(raw, offsets);
+  };
+  interface RawAttr {
+    name: number;
+    raw: number;
+    type: number;
+    data: number;
+  }
+  /** A start-element chunk whose name is pool string `nameIndex`. */
+  const element = (nameIndex: number, attrs: RawAttr[] = []): number[] =>
+    chunk(0x0102, 16, [
+      ...u32(1),
+      ...u32(NONE),
+      ...u32(NONE),
+      ...u32(nameIndex),
+      ...u16(0x14),
+      ...u16(0x14),
+      ...u16(attrs.length),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...attrs.flatMap((a) => [
+        ...u32(NONE),
+        ...u32(a.name),
+        ...u32(a.raw),
+        ...u16(8),
+        0,
+        a.type,
+        ...u32(a.data),
+      ]),
+    ]);
+  const doc = (...chunks: number[][]): Uint8Array => {
+    const body = chunks.flat();
+    return Uint8Array.from(chunk(0x0003, 8, body));
+  };
+  /** The element name that comes out of a pool whose first string is `raw`. */
+  const nameFrom = (raw: number[], utf8: boolean): string =>
+    parseAxml(doc(rawPool(raw, [0], utf8), element(0))).name;
+
+  it('decodes a good string from the same hand-built pools, as a control', () => {
+    expect(nameFrom([2, 2, 0x61, 0x62], true)).toBe('ab');
+    expect(nameFrom([2, 0, 0x61, 0, 0x62, 0, 0, 0], false)).toBe('ab');
+  });
+
+  it('gives an empty string for a UTF-8 offset at or past the end of the pool', () => {
+    expect(parseAxml(doc(rawPool([2, 2, 0x61, 0x62], [100], true), element(0))).name).toBe('');
+  });
+
+  it('gives an empty string for a UTF-8 string cut off after its first length byte', () => {
+    expect(nameFrom([0x05], true)).toBe('');
+  });
+
+  it('gives an empty string for a UTF-8 string cut off inside a two-byte byte length', () => {
+    expect(nameFrom([0x01, 0x81], true)).toBe('');
+  });
+
+  it('reads only the bytes that exist when a UTF-8 length claims more', () => {
+    expect(nameFrom([5, 100, 0x61, 0x62], true)).toBe('ab');
+  });
+
+  it('gives an empty string for a UTF-16 string with no room for its length', () => {
+    expect(nameFrom([0x01], false)).toBe('');
+  });
+
+  it('gives an empty string for a UTF-16 string cut off inside a four-byte length', () => {
+    expect(nameFrom([0x01, 0x80], false)).toBe('');
+  });
+
+  it('reads a UTF-16 string with a four-byte length', () => {
+    expect(nameFrom([0x00, 0x80, 0x02, 0x00, 0x61, 0, 0x62, 0], false)).toBe('ab');
+  });
+
+  it('reads only the characters that exist when a UTF-16 length claims more', () => {
+    expect(nameFrom([100, 0, 0x61, 0, 0x62, 0], false)).toBe('ab');
+  });
+
+  it('refuses a string table chunk too short to hold its own header', () => {
+    const short = chunk(0x0001, 28, new Array<number>(12).fill(0), 20);
+    expect(() => parseAxml(doc(short, element(0)))).toThrow('damaged string table');
+  });
+
+  it('refuses a string table whose offset array runs past its chunk', () => {
+    const lying = chunk(0x0001, 28, [...u32(1000), ...u32(0), ...u32(0), ...u32(28), ...u32(0)]);
+    expect(() => parseAxml(doc(lying, element(0)))).toThrow('damaged string table');
+  });
+
+  it('refuses a string table whose string data starts past its chunk', () => {
+    const lying = chunk(0x0001, 28, [...u32(0), ...u32(0), ...u32(0), ...u32(0xffff), ...u32(0)]);
+    expect(() => parseAxml(doc(lying, element(0)))).toThrow('damaged string table');
+  });
+
+  it('reads a file whose header size and total size fields are zero', () => {
+    const bytes = buildAxml(tree);
+    bytes.fill(0, 2, 4);
+    bytes.fill(0, 4, 8);
+    expect(parseAxml(bytes).name).toBe('manifest');
+  });
+
+  it('shows each attribute value type in its own form', () => {
+    const strings = [
+      'm',
+      'float',
+      'attr',
+      'color',
+      'str',
+      'strRaw',
+      'strNone',
+      'odd',
+      'oddRaw',
+      's',
+    ];
+    const at = (name: string): number => strings.indexOf(name);
+    const root = parseAxml(
+      doc(
+        pool(strings),
+        element(0, [
+          { name: at('float'), raw: NONE, type: 0x04, data: 0x3fc00000 },
+          { name: at('attr'), raw: NONE, type: 0x02, data: 0x7f010001 },
+          { name: at('color'), raw: NONE, type: 0x1c, data: 0xff112233 },
+          { name: at('str'), raw: NONE, type: 0x03, data: at('s') },
+          { name: at('strRaw'), raw: at('s'), type: 0x03, data: 999 },
+          { name: at('strNone'), raw: NONE, type: 0x03, data: 999 },
+          { name: at('odd'), raw: NONE, type: 0x20, data: 0x10 },
+          { name: at('oddRaw'), raw: at('s'), type: 0x20, data: 0x10 },
+        ]),
+      ),
+    );
+    expect(root.attrs).toMatchObject({
+      float: '1.5',
+      attr: '?0x7f010001',
+      color: '#ff112233',
+      str: 's',
+      strRaw: 's',
+      strNone: '',
+      odd: '0x10',
+      oddRaw: 's',
+    });
+  });
+
+  it('refuses a text manifest that holds a comment and no element', () => {
+    const bytes = new TextEncoder().encode('<!-- nothing here -->');
+    expect(() => parseManifest(bytes)).toThrow(PackageError);
+  });
+});

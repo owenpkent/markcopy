@@ -4,6 +4,9 @@
 // FUZZ_IMAGE_FORMAT=<format>, so its inputs reach that format's header parser. Its
 // corpus is fuzz/.corpus/image-<format>/, seeded from the files in fuzz/corpus/image/
 // whose extension is that format's (.jpg and .jpeg for jpeg).
+// `pkg-<format>` (elf, rpm, deb, msi, xar, zip, alpine, dmg) runs the pkg target with
+// FUZZ_PKG_FORMAT=<format>, so every input reaches that format's reader. Its corpus is
+// seeded from the files in fuzz/corpus/pkg/ whose names start with `<format>-`.
 // A dictionary at fuzz/dict/<target>.dict, when present, is passed with -dict.
 // The time budget also comes from FUZZ_SECONDS (default 60). The evolved corpus
 // lives in fuzz/.corpus/<target>/ (untracked) and is seeded from the committed
@@ -23,8 +26,27 @@ const path = require('node:path');
 const merge = process.argv[2] === 'merge';
 const args = merge ? process.argv.slice(3) : process.argv.slice(2);
 const requested = args[0];
-const variant = /^image-(png|jpeg|webp|bmp|ico|avif|svg)$/.exec(requested ?? '')?.[1];
-const target = variant ? 'image' : requested;
+// A variant runs one target narrowed to one format through an environment
+// variable the target reads, and is seeded from the subset of that target's
+// seeds that `seed` accepts.
+const VARIANTS = {
+  image: {
+    formats: ['png', 'jpeg', 'webp', 'bmp', 'ico', 'avif', 'svg'],
+    env: 'FUZZ_IMAGE_FORMAT',
+    seed: (file, format) =>
+      (format === 'jpeg' ? ['.jpg', '.jpeg'] : [`.${format}`]).includes(path.extname(file)),
+  },
+  pkg: {
+    formats: ['elf', 'rpm', 'deb', 'msi', 'xar', 'zip', 'alpine', 'dmg'],
+    env: 'FUZZ_PKG_FORMAT',
+    seed: (file, format) => path.basename(file).startsWith(`${format}-`),
+  },
+};
+const variantMatch = /^([a-z0-9]+)-([a-z0-9]+)$/.exec(requested ?? '');
+const family =
+  variantMatch && Object.hasOwn(VARIANTS, variantMatch[1]) ? VARIANTS[variantMatch[1]] : undefined;
+const variant = family && family.formats.includes(variantMatch[2]) ? variantMatch[2] : undefined;
+const target = variant ? variantMatch[1] : requested;
 const seconds = merge ? 1 : Number(args[1] ?? process.env.FUZZ_SECONDS ?? 60);
 const root = path.resolve(__dirname, '..');
 const targetFile = path.join(root, 'out/fuzz/fuzz/targets', `${target}.fuzz.js`);
@@ -104,11 +126,10 @@ mkdirSync(evolved, { recursive: true });
 mkdirSync(crashes, { recursive: true });
 const seeds = path.join(root, 'fuzz/corpus', target);
 if (existsSync(seeds)) {
-  const wanted = variant === 'jpeg' ? ['.jpg', '.jpeg'] : [`.${variant}`];
   cpSync(seeds, evolved, {
     recursive: true,
     force: false,
-    filter: (src) => !variant || statSync(src).isDirectory() || wanted.includes(path.extname(src)),
+    filter: (src) => !variant || statSync(src).isDirectory() || family.seed(src, variant),
   });
 }
 
@@ -149,7 +170,7 @@ const runSession = (budget) =>
     {
       cwd: root,
       stdio: 'inherit',
-      env: variant ? { ...process.env, FUZZ_IMAGE_FORMAT: variant } : process.env,
+      env: variant ? { ...process.env, [family.env]: variant } : process.env,
     },
   );
 
