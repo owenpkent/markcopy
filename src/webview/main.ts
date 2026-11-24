@@ -55,6 +55,21 @@ const menu = document.getElementById('mc-menu') as HTMLDivElement;
 // whether it is the thing that took the keyboard, and when it gives it back.
 const contextMenu = createMenu(menu);
 const toastEl = document.getElementById('mc-toast') as HTMLDivElement;
+const remoteImageNotice = document.getElementById('mc-remote-images');
+
+remoteImageNotice?.querySelector('button')?.addEventListener('click', () => {
+  vscode.postMessage({ type: 'openSettings' });
+});
+document.addEventListener('securitypolicyviolation', (event) => {
+  if (
+    remoteImageNotice &&
+    event.effectiveDirective === 'img-src' &&
+    // The setting only allows https, so enabling it would not help an http image.
+    /^https:/i.test(event.blockedURI)
+  ) {
+    remoteImageNotice.hidden = false;
+  }
+});
 
 let sourceLines: string[] = [];
 let mermaidConfig: Record<string, unknown> = {};
@@ -157,6 +172,9 @@ let pendingRender: Record<string, unknown> | undefined;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
+  if (docChanged && remoteImageNotice) {
+    remoteImageNotice.hidden = true;
+  }
   // Display only, so it is a class on the body rather than part of the render:
   // the HTML is the same either way. An older host sends no value: wrap.
   currentWrapCode = msg.wrapCode === undefined ? true : Boolean(msg.wrapCode);
@@ -288,9 +306,8 @@ async function render(
   // means an XSS is not one CSP change away from firing. DOMPurify's defaults
   // strip <script>, inline event handlers, and javascript: URIs while keeping
   // formatting HTML, data-source-line attributes, and the mermaid placeholder
-  // (<pre class="mermaid-src">) intact. Remote https images are left alone so
-  // they still render; to also close the preview-open beacon vector, forbid
-  // external image loads here (FORBID_ATTR / a uponSanitizeAttribute hook).
+  // (<pre class="mermaid-src">) intact. The CSP enforces the remote image
+  // setting for every image load, including srcset, SVG, and CSS URLs.
   content.innerHTML = DOMPurify.sanitize(html);
   // A Word or PowerPoint picture is a reference until its bytes arrive; any
   // that already have (a redraw after a settings change, say) show at once.
@@ -1754,8 +1771,8 @@ function inlineCodeColors(root: HTMLElement): void {
 }
 
 // Replace webview-hosted image srcs with data URIs so they load from a plain
-// file:// page. Remote (http/https) and already-inlined (data:) images are left
-// untouched: they still load in the browser, and the CSP forbids fetching them.
+// file:// page. Leave HTTP(S) and data: URLs alone. The standalone export's
+// CSP enforces the remote image setting and always blocks plain HTTP.
 async function inlineImages(root: HTMLElement): Promise<void> {
   const imgs = Array.from(root.querySelectorAll('img'));
   await Promise.all(

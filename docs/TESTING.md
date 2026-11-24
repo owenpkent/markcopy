@@ -13,6 +13,14 @@ How MarkCopy gets verified, from the automated suites to the manual checklist th
 
 The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), a real media pipeline (playback and the frame grab, which jsdom cannot reach at all), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. The automated webview coverage is limited to the menu, clipboard, sheet-grid, and scroll-sync surfaces listed above.
 
+### Security hardening checks (2026-11-24)
+
+The final local run on Windows with Node 24.22.3 passed 3,590 tests across 158 files, with three platform-dependent skips, using two workers. The skipped cases include creating a file symlink for the sidecar test, which this Windows session did not permit. Lint, type-checking, both bundle builds, and compilation of the integration-test sources passed. The repaired 3MF fuzz target loaded and processed `sample.3mf`; this was a startup check, not a fuzz campaign. A fresh audit of the unchanged dependency lockfile reported zero known vulnerabilities.
+
+Formatting was checked against the 443 supported tracked and new files using the repository's Prettier configuration and ignore rules. The recursive `npm run format:check` could not scan a protected generated path under `.vscode-test/user-data`, so the explicit file list avoided that local cache.
+
+A background Edge 158.0.4370.33 check used temporary profiles and a local connection counter to exercise the actual exported page. Its content rendered and injected scripts, event handlers, and refresh metadata remained inactive. Remote images made zero connections with the default policy and two connection attempts after explicit opt-in. The local endpoint deliberately closed connections without serving an image. These checks cover the PDF export policy and bootstrap. The desktop VS Code integration suite and installed TeX engines were not run locally.
+
 ### Fuzzing
 
 Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), GLB models (`glb`), OBJ models and their MTL files and `mtllib` names (`obj`), MarkCopy's handling of the STEP engine's output (`step`), Windows executables (`pe`), packages and installers (`pkg`, and `pkg-<format>` per format), reading those from disk against reading them from memory (`file-source`), ffprobe/ffmpeg output (`video-probe`, `audio-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
@@ -136,7 +144,7 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] A `mindmap` diagram still renders with its radial layout (branches fanning out from the center), not a left-to-right tree.
 - [ ] Inline `$...$` and display `$$...$$` math render with KaTeX; turning `markcopy.math` off shows literal dollar signs again.
 - [ ] `[^note]` footnote references and definitions render as a numbered footnotes section, with back-links to the prose; an unreferenced `[^orphan]:` definition stays visible as plain text instead of disappearing, and `^[...]` inline footnote shorthand stays literal. Turning `markcopy.footnotes` off shows literal `[^note]` text again.
-- [ ] Relative and absolute local images render; remote images still load.
+- [ ] Relative and absolute local images render. With `markcopy.allowRemoteImages` at its default, a controlled HTTPS image makes no request and the blocked-image notice opens its user setting. Enable the setting with the preview open and check that it reloads and displays the image. Disable it again and check that the request is blocked. Plain HTTP stays blocked in either mode.
 - [ ] A raw HTML `<img src="wide.png" width="1600" height="400">` with a relative path renders, not just its alt text. In a pane narrower than the image it shrinks and keeps its 4:1 shape instead of being squashed.
 - [ ] A `$$...$$` equation with 40 terms wraps onto several centred lines after its `+` signs, at display size, with no line's superscripts touching the line below, and no scrollbar. An `E = mc^2 	ag{1}` equation still shows its `(1)` at the right. A single fraction too wide for the pane scrolls inside its own box with nothing clipped top or bottom, and the page itself never gets a sideways scrollbar.
 - [ ] In a pane narrower than about 520 px the page's side margins drop from 40 px to 16 px; a CSV or sheet preview keeps its own spacing.
@@ -221,7 +229,8 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Code block, table header, and blockquote backgrounds are present in the PDF (not flattened to white), diagrams and equations are intact, and the text is selectable.
 - [ ] Setting `markcopy.pdf.pageSize` to `A4` changes the exported page size.
 - [ ] Setting `markcopy.pdf.browserPath` to a nonsense path still asks where to save, then fails with a readable error naming that path and offering **Print from Browser**; taking it opens the preview in your browser with the print dialog.
-- [ ] Nothing is left behind in the temp directory after an export, successful or failed (`%TEMP%`/`$TMPDIR`, `markcopy-pdf-*`).
+- [ ] Headless export scratch directories are cleaned up after success or failure. Manual print previews use a separate `markcopy-pdf-preview-*` directory under `print-preview` in the extension's global storage that is removed after 15 minutes or swept at the next startup if left to expire. Stray `.html` files left in the global storage folder by an older version are deleted at startup.
+- [ ] Export a preview with a local image and a controlled HTTPS image. The local image appears on both print routes. The HTTPS image makes a request only when `markcopy.allowRemoteImages` is enabled. Check both headless export and **Print from Browser**.
 - [ ] Exporting over an existing PDF that then fails leaves the old file intact: point `markcopy.pdf.browserPath` at a nonsense path, export onto a PDF you already have, dismiss the error, and confirm the original still opens and is unchanged.
 - [ ] Exporting a CSV grid wider than the page fits every column onto the paper rather than cutting off the right-hand ones, including after dragging a column divider to widen it in the preview first.
 
@@ -515,6 +524,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 ### Comments
 
 - [ ] Right-click, **Add Comment Here** drops a pin; the note saves to `<file>.pdf.mccomments.json` next to the PDF.
+- [ ] Edit a note, reopen the PDF, and check that the updated note persists.
 - [ ] Deleting the last comment removes the sidecar file.
 
 ### Theming
@@ -997,7 +1007,7 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 
 ### Opening and first compile
 
-- [ ] ★ Double-click `sample.tex` in the Explorer: it opens in the text editor as usual (the entry is `option` priority, not `default`), and the LaTeX preview opens automatically beside it (`markcopy.autoPreview`, on by default), without stealing focus from the source. It compiles the document and shows the result through the same pdf.js viewer `.pdf` files use: rendered pages, not a "Failed to start PDF worker" message (the LaTeX host has to write the worker's address into its page the same way the PDF editor does).
+- [ ] ★ In a trusted workspace with the default `ask` setting, double-click `sample.tex`. The preview opens beside the text editor without stealing focus. Saving before the first compile leaves it waiting for consent. Select **Compile** and confirm that rendered PDF pages appear.
 - [ ] Close the preview tab, then click back into `sample.tex`'s editor (or switch away to another file and back): the preview stays closed rather than reopening on its own. Running **MarkCopy: Open Rich Preview to the Side** (or **Reopen Editor With...** > **MarkCopy LaTeX Preview**) reopens it, and it resumes auto-opening on focus after that.
 - [ ] With `markcopy.autoPreview` set to `false`, opening or focusing `sample.tex` leaves only the text editor open; the preview still opens via **Reopen Editor With...** or **MarkCopy: Open Rich Preview to the Side**.
 - [ ] `sample.tex` also opens this way via **MarkCopy: Open Rich Preview to the Side** (Command Palette, or right-click in the editor or Explorer), beside the source rather than replacing it.
@@ -1021,22 +1031,24 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 
 ### Root-file resolution
 
-- [ ] Create a second file next to `sample.tex`, starting with `% !TEX root = sample.tex`, and open it as a MarkCopy LaTeX preview: it compiles `sample.tex`, not the chapter file itself.
+- [ ] Create a second file next to `sample.tex`, starting with `% !TEX root = sample.tex`. Open its LaTeX preview and select **Compile**. The preview displays `sample.tex`'s PDF.
 - [ ] Set `markcopy.tex.rootFile` to a specific file and confirm it wins over a `% !TEX root` comment in the open document.
+- [ ] In `ask` mode, change to a new root after compiling once. A save waits for consent to compile the new root.
 - [ ] With neither the setting nor the comment present, the document being edited is what compiles, which is what `sample.tex` exercises on its own.
 - [ ] Saving the chapter file recompiles a preview open on it, so `markcopy.tex.recompileOnSave` is watching the chapter, not only the root.
 
 ### Settings
 
-- [ ] `markcopy.tex.compile: ask` shows an offer to compile naming the file and the detected engine, instead of compiling on open; its button compiles.
-- [ ] `markcopy.tex.compile: off` shows a message naming the setting and no button, and the engine never runs.
+- [ ] Close and reopen a preview with `markcopy.tex.compile` set to `ask`. The new preview waits for a deliberate compile again. Set `auto` in user settings and check that a new trusted preview compiles on open.
+- [ ] While a compile runs, switch `markcopy.tex.compile` to `off`. Check that the active run stops and that saves, the toolbar, and the Command Palette leave compilation disabled.
+- [ ] Open a disposable workspace in Restricted Mode. Documents preview, the LaTeX preview says compiling needs a trusted workspace, video and audio do not start ffmpeg, and PDF export offers the browser print page instead of a headless render. Trusting the workspace enables them.
 - [ ] `markcopy.tex.engine` set to a specific engine (`pdflatex`, `xelatex`, `lualatex`, `tectonic`, or `latexmk`) is used instead of the auto-detected one; picking one your machine does not have shows the missing-engine message.
 - [ ] `markcopy.tex.enginePath` pointed at a real engine's executable is used even when it is not on PATH; pointed at something that is not a LaTeX engine, the compile fails naming that path rather than silently trying another engine.
 - [ ] `markcopy.tex.rootFile` and `markcopy.tex.recompileOnSave` are covered above.
 
 ### No engine installed
 
-- [ ] With no LaTeX engine reachable (take it off `PATH` for the session, leaving `markcopy.tex.enginePath` empty so detection genuinely fails), opening `sample.tex` as a preview shows a message naming the platform's install options, Tectonic included as the lighter-weight one, instead of an error or a blank panel.
+- [ ] With no LaTeX engine reachable and `markcopy.tex.enginePath` empty, open `sample.tex` and select **Compile**. Check that the preview lists engine installation options.
 
 ### Copy actions and theming
 

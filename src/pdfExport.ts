@@ -8,7 +8,8 @@
 //
 // Nothing here touches the `vscode` module, so it is all unit-testable.
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, rm, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { access, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
@@ -247,6 +248,56 @@ export async function createProfileDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'markcopy-pdf-'));
 }
 
+const PRINT_PREVIEW_PREFIX = 'markcopy-pdf-preview-';
+const PRINT_PREVIEW_LIFETIME = 15 * 60 * 1000;
+
+/**
+ * Where print pages live: under the extension's own storage rather than the
+ * system temp directory, which a snap-packaged browser on Linux cannot read.
+ */
+export function printPreviewRoot(storageDir: string): string {
+  return join(storageDir, 'print-preview');
+}
+
+export async function createPrintPreviewDir(storageDir: string): Promise<string> {
+  const root = printPreviewRoot(storageDir);
+  await mkdir(root, { recursive: true });
+  const dir = await mkdtemp(join(root, PRINT_PREVIEW_PREFIX));
+  setTimeout(() => void removeQuietly(dir), PRINT_PREVIEW_LIFETIME).unref();
+  return dir;
+}
+
+/** Clean up expired previews left if the extension host exited before its timer. */
+export async function sweepPrintPreviewDirs(storageDir: string): Promise<void> {
+  const root = printPreviewRoot(storageDir);
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const cutoff = Date.now() - PRINT_PREVIEW_LIFETIME;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^markcopy-pdf-preview-[a-z0-9]{6}$/i.test(entry.name)) {
+      continue;
+    }
+    const dir = join(root, entry.name);
+    const info = await stat(dir).catch(() => undefined);
+    if (info && info.mtimeMs < cutoff) {
+      await removeQuietly(dir);
+    }
+  }
+}
+
+/**
+ * Earlier versions wrote each print page as `<document name>.html` straight into
+ * the storage folder and never removed it. Only `.html` files directly in that
+ * folder are deleted; the folder held nothing else of MarkCopy's.
+ */
+export async function removeLegacyPrintPages(storageDir: string): Promise<void> {
+  const entries = await readdir(storageDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase().endsWith('.html')) {
+      await rm(join(storageDir, entry.name), { force: true }).catch(() => undefined);
+    }
+  }
+}
+
 /**
  * Best-effort recursive delete; a leftover temp directory is not worth failing over.
  *
@@ -348,11 +399,24 @@ export function buildPdfPage(opts: {
   pageSize: PageSize;
   /** Have the page invoke the print dialog itself; only the manual browser route wants this. */
   autoPrint: boolean;
+  allowRemoteImages: boolean;
 }): string {
+  const csp = [
+    "default-src 'none'",
+    `img-src data:${opts.allowRemoteImages ? ' https:' : ''}`,
+    "style-src 'unsafe-inline'",
+    'font-src data:',
+    "base-uri 'none'",
+    "form-action 'none'",
+    `script-src '${EXPORT_SCRIPT_HASH}'`,
+  ].join('; ');
+  // Encode every '<' so preview content cannot close the inert JSON element.
+  const bodyJson = JSON.stringify(opts.bodyHtml).replace(/</g, '\\u003c');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="${csp}" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${escapeHtml(opts.title || 'MarkCopy')}</title>
 <style>${opts.previewCss}</style>
@@ -360,21 +424,38 @@ ${opts.katexCss ? `<style>${opts.katexCss}</style>` : ''}
 <style>${pdfCss(opts.pageSize)}</style>
 </head>
 <body class="mc-force-light" data-mc-theme="light">
-<div id="content" class="markdown-body">${opts.bodyHtml}</div>
-${opts.autoPrint ? AUTO_PRINT_SCRIPT : ''}
+<div id="content" class="markdown-body"></div>
+<script type="application/json" id="mc-export-body">${bodyJson}</script>
+<script${opts.autoPrint ? ' data-print' : ''}>${EXPORT_SCRIPT}</script>
 </body>
 </html>`;
 }
 
-// A headless render prints the page itself, so only the manual route needs this; a
-// `window.print()` racing `--print-to-pdf` would be at best redundant.
-const AUTO_PRINT_SCRIPT = `<script>
-window.addEventListener('load', function () {
-  var print = function () { setTimeout(function () { window.print(); }, 200); };
-  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(print, print); }
-  else { print(); }
-});
-</script>`;
+// The CSP restricts subresources and script execution. Parse the body in a
+// detached template first so markup like a refresh meta tag cannot navigate
+// the export page itself. The hash covers this fixed script on both routes.
+const EXPORT_SCRIPT = `
+const autoPrint = document.currentScript.hasAttribute('data-print');
+const source = document.getElementById('mc-export-body');
+const template = document.createElement('template');
+template.innerHTML = JSON.parse(source.textContent);
+template.content.querySelectorAll(
+  'base, embed, fencedframe, frame, frameset, iframe, link, meta, object, portal, script, template'
+).forEach(element => element.remove());
+source.remove();
+document.getElementById('content').append(template.content);
+if (autoPrint) {
+  window.addEventListener('load', () => {
+    const print = () => { setTimeout(() => { window.print(); }, 200); };
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(print, print);
+    } else {
+      print();
+    }
+  });
+}
+`;
+const EXPORT_SCRIPT_HASH = `sha256-${createHash('sha256').update(EXPORT_SCRIPT).digest('base64')}`;
 
 /**
  * Print tuning for the export page, layered on top of the preview's stylesheet.

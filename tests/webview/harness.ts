@@ -51,7 +51,10 @@ const ACTION_TIMEOUT_MS = 5000;
 
 /** What `src/previewShell.ts` serves. Pinned by the shell contract test. */
 const SHELL =
-  '<div id="content" class="markdown-body"></div>' +
+  '<aside id="mc-remote-images" hidden>' +
+  '<span role="alert">A remote image was blocked. MarkCopy can load HTTPS images when Allow Remote Images is enabled.</span>' +
+  '<button type="button">Open MarkCopy Settings</button>' +
+  '</aside><div id="content" class="markdown-body"></div>' +
   '<div id="mc-menu" class="mc-menu" role="menu" hidden></div>' +
   '<div id="mc-toast" class="mc-toast" hidden></div>';
 

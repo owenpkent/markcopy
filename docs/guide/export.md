@@ -14,6 +14,8 @@ It renders with a headless Chrome, Edge, or Chromium already installed on your m
 
 `markcopy.pdf.pageSize` sets the paper size (Letter, A4, or Legal). If your browser is installed somewhere unusual, point `markcopy.pdf.browserPath` at it. With no Chromium-family browser installed at all, MarkCopy falls back to opening the preview in your default browser for you to print by hand.
 
+PDF export embeds local images and blocks remote images by default. If you enable `markcopy.allowRemoteImages` in your user settings, the browser rendering the PDF can request HTTPS images from their hosts. The manual print preview contains a copy of the rendered document. MarkCopy stores that temporary page in its own storage folder, schedules it for deletion after 15 minutes and sweeps expired pages at startup. Without a trusted workspace MarkCopy does not launch a browser and always uses this print page.
+
 ## Save as Word
 
 **MarkCopy: Save as Word Document** (or **Save as Word…** in the preview's right-click menu) asks where to save, writes a `.docx`, and opens it.

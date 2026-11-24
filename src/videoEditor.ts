@@ -574,7 +574,7 @@ class ProxySession {
   async offer(): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('markcopy', this.source);
     const mode = cfg.get<string>('video.transcode', 'auto');
-    if (mode === 'off') {
+    if (mode === 'off' || !vscode.workspace.isTrusted) {
       this.post({ state: 'unavailable', reason: 'disabled' });
       return;
     }
@@ -802,6 +802,10 @@ class ProxySession {
    * telling them to go and install it.
    */
   private async find(cfg: vscode.WorkspaceConfiguration): Promise<FfmpegTools | undefined> {
+    // Never launch an external tool from an untrusted workspace.
+    if (!vscode.workspace.isTrusted) {
+      return undefined;
+    }
     this.tools ??= await findFfmpeg(cfg.get<string>('video.ffmpegPath', ''));
     return this.tools;
   }

@@ -49,6 +49,7 @@ const GRID_OPS = [
 
 const TYPES = {
   markdown: [
+    'ready',
     'revealInOS',
     'openExternal',
     'revealLine',
@@ -77,8 +78,23 @@ const TYPES = {
     'selectSheet',
     'readFile',
   ],
-  pdf: ['ready', 'revealInOS', 'openExternal', 'saveComments', 'updateSetting'],
-  tex: ['ready', 'revealInOS', 'openExternal', 'texRecompile', 'saveComments', 'updateSetting'],
+  pdf: [
+    'ready',
+    'revealInOS',
+    'openExternal',
+    'saveComments',
+    'saveCommentsRejected',
+    'updateSetting',
+  ],
+  tex: [
+    'ready',
+    'revealInOS',
+    'openExternal',
+    'texRecompile',
+    'saveComments',
+    'saveCommentsRejected',
+    'updateSetting',
+  ],
   stl: ['ready', 'revealInOS', 'saveFrame', 'openExternal', 'openAsText', 'updateSetting'],
   video: [
     'ready',

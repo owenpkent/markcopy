@@ -8,6 +8,7 @@ import type {
 } from 'pdfjs-dist';
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { fromHost } from './fromHost';
+import { MAX_COMMENT_COUNT, MAX_COMMENT_TEXT, MAX_COMMENT_TOTAL_TEXT } from '../pdfComments';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 
 // Minimal VS Code webview API surface we use.
@@ -118,6 +119,8 @@ window.addEventListener('message', (e: MessageEvent) => {
       }
     }
     load(base64ToBytes(msg.data as string)).catch(showFatal);
+  } else if (msg?.type === 'loadError' && typeof msg.message === 'string') {
+    showFatal(msg.message);
   } else if (msg?.type === 'setTheme' && typeof msg.value === 'string') {
     // markcopy.theme changed elsewhere (another surface or settings.json). Re-tint
     // to match, without persisting again.
@@ -683,6 +686,10 @@ function placePins(n: number): void {
 }
 
 function addCommentAt(pageEl: HTMLElement, clientX: number, clientY: number): void {
+  if (comments.length >= MAX_COMMENT_COUNT) {
+    toast(`A document can hold ${MAX_COMMENT_COUNT} comments. Delete one to add another.`, 3500);
+    return;
+  }
   const n = Number(pageEl.dataset.page);
   const rect = pageEl.getBoundingClientRect();
   const xPct = clamp01((clientX - rect.left) / rect.width);
@@ -716,6 +723,7 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
   noteEl = el;
 
   const textarea = el.querySelector('.mc-note-text') as HTMLTextAreaElement;
+  textarea.maxLength = MAX_COMMENT_TEXT;
   textarea.value = c.text;
 
   const rect = anchor.getBoundingClientRect();
@@ -727,9 +735,16 @@ function openNote(c: Comment, anchor: HTMLElement, isNew = false): void {
   const current = () => noteComment ?? c;
   const save = () => {
     const target = current();
+    const previous = target.text;
     target.text = textarea.value.trim();
     if (!target.text) {
       remove();
+      return;
+    }
+    const total = comments.reduce((sum, x) => sum + x.text.length, 0);
+    if (total > MAX_COMMENT_TOTAL_TEXT) {
+      target.text = previous;
+      toast('Comments in this document are too long to save. Shorten some notes.', 3500);
       return;
     }
     saveComments();
@@ -1190,7 +1205,9 @@ document.addEventListener('pointerdown', (e) => {
   if (
     e.button !== 0 ||
     mode !== 'hand' ||
-    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar')
+    // The LaTeX card's Compile button included: capturing the pointer for a pan
+    // would move the click off the button, so it would do nothing.
+    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, .mc-tex-card')
   ) {
     return;
   }

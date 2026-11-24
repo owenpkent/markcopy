@@ -414,15 +414,8 @@ describe('hostile and malformed input', () => {
   });
 
   it('refuses an entry on its declared size, before it is inflated', () => {
-    // The size limits used to be checked on the result of unzipSync, which is one
-    // step too late: by then the whole archive is already in memory, which is
-    // exactly what the limit exists to prevent.
-    //
-    // Patching the headers to claim 2 GB while the payload stays a few bytes is
-    // what makes that observable without building a real bomb. fflate hands the
-    // declared size to the filter before inflating and then grows its output as
-    // it goes, so the old post-inflate check measured the real 80 bytes and let
-    // this through. Refusing it can only come from reading the header.
+    // A tiny part claiming 2 GB should hit the declared size limit without
+    // reserving any output buffer for it.
     const bytes = buildXlsx({ sheets: [{ name: 'S', xml: sheetData([row(1, '<c r="A1"/>')]) }] });
     const buf = Buffer.from(bytes);
     const FAKE = 0x7f000000; // ~2 GB

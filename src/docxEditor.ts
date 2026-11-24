@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
 import { renderDocxHtml, DocxError } from './docx/read';
 import {
@@ -36,7 +37,7 @@ export class DocxEditorProvider extends OoxmlEditorProvider {
   }
 
   private async renderDocument(uri: vscode.Uri): Promise<RenderResult> {
-    const bytes = await vscode.workspace.fs.readFile(uri);
+    const bytes = await readDocument(uri);
     const math = vscode.workspace.getConfiguration('markcopy', uri).get<boolean>('math', true);
     const doc = renderDocxHtml(bytes, { math });
     return { html: doc.html, media: doc.media };

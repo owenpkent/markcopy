@@ -4,7 +4,6 @@ import {
   compileOffer,
   compileUnavailable,
   compiling,
-  engineLabel,
   errorLocation,
   installHint,
 } from '../src/texInfo';
@@ -16,27 +15,11 @@ describe('compiling', () => {
   });
 });
 
-describe('engineLabel', () => {
-  it('gives every engine its human name', () => {
-    expect(engineLabel('latexmk')).toBe('latexmk');
-    expect(engineLabel('tectonic')).toBe('Tectonic');
-    expect(engineLabel('pdflatex')).toBe('pdfTeX');
-    expect(engineLabel('xelatex')).toBe('XeTeX');
-    expect(engineLabel('lualatex')).toBe('LuaTeX');
-  });
-});
-
 describe('compileOffer', () => {
-  it('names the file and the engine', () => {
-    const message = compileOffer('paper.tex', 'latexmk');
+  it('names the file and advises using trusted projects', () => {
+    const message = compileOffer('paper.tex');
     expect(message).toContain('paper.tex');
-    expect(message).toContain('latexmk');
-  });
-
-  it('reassures the reader the source is left alone', () => {
-    // The one thing someone handed an unexpected "compile" button wants to
-    // know before pressing it, same reasoning as videoInfo's proxyOffer.
-    expect(compileOffer('paper.tex', 'tectonic')).toContain('without changing the file');
+    expect(message).toContain('trust');
   });
 });
 
@@ -75,6 +58,10 @@ describe('compileUnavailable', () => {
   it('names the setting when compiling is switched off', () => {
     const message = compileUnavailable('disabled', 'linux');
     expect(message).toContain('markcopy.tex.compile');
+  });
+
+  it('explains the trust requirement in Restricted Mode', () => {
+    expect(compileUnavailable('untrusted', 'linux')).toMatch(/trusted VS Code workspace/);
   });
 
   it('does not push an install on someone who turned compiling off', () => {

@@ -7,7 +7,7 @@
 // has, so the host formats these and sends finished strings to the overlay
 // rather than shipping error structures across and duplicating the wording.
 
-import type { TexEngine, TexError } from './texCompile';
+import type { TexError } from './texCompile';
 
 /** Shown while the engine is running. `name` is the file being compiled. */
 export function compiling(name: string): string {
@@ -15,18 +15,21 @@ export function compiling(name: string): string {
 }
 
 /** The `ask` mode offer, before anything is run. */
-export function compileOffer(name: string, engine: TexEngine): string {
-  return `MarkCopy can compile ${name} with ${engineLabel(engine)} and show the result as a PDF, without changing the file itself.`;
+export function compileOffer(name: string): string {
+  return `Compile ${name} to see its PDF preview. Only compile LaTeX projects you trust.`;
 }
 
-/** No engine found, or compiling is switched off in settings. */
+/** Explain why the preview cannot start the compiler. */
 export function compileUnavailable(
-  reason: 'missing' | 'disabled',
+  reason: 'missing' | 'disabled' | 'untrusted',
   platform: NodeJS.Platform,
 ): string {
   if (reason === 'disabled') {
     // Named so the way back is findable, same as proxyDisabled in videoInfo.ts.
     return 'Compiling is off (markcopy.tex.compile), so there is nothing to show here. Turn it on to see this document as a rendered PDF.';
+  }
+  if (reason === 'untrusted') {
+    return 'LaTeX compilation requires a trusted VS Code workspace.';
   }
   return `MarkCopy needs a LaTeX engine to turn this into a PDF preview. ${installHint(platform)}`;
 }
@@ -80,26 +83,6 @@ export function installHint(platform: NodeJS.Platform): string {
       // Covers linux and any other unix-like platform the same way: a distro
       // TeX Live package is the normal path, Tectonic the lighter one.
       return "Install your distro's TeX Live package, or Tectonic if you would rather not pull down several gigabytes: it is a single binary that fetches packages as your document needs them.";
-  }
-}
-
-/** Human name for an engine, e.g. 'latexmk', 'Tectonic', 'pdfTeX', 'XeTeX', 'LuaTeX'. */
-export function engineLabel(engine: TexEngine): string {
-  switch (engine) {
-    case 'latexmk':
-      return 'latexmk';
-    case 'tectonic':
-      return 'Tectonic';
-    case 'pdflatex':
-      return 'pdfTeX';
-    case 'xelatex':
-      return 'XeTeX';
-    case 'lualatex':
-      return 'LuaTeX';
-    default:
-      // Defensive: keeps the function total even if TexEngine grows a member
-      // this file has not been updated for yet.
-      return engine;
   }
 }
 

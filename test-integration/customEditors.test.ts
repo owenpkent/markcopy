@@ -772,7 +772,8 @@ suite('MarkCopy custom editors', () => {
     // a contributed key that does not match the key the code reads keeps
     // returning the hardcoded default and the setting silently does nothing.
     const cfg = vscode.workspace.getConfiguration('markcopy');
-    assert.strictEqual(cfg.get('tex.compile'), 'auto');
+    assert.strictEqual(cfg.get('tex.compile'), 'ask');
+    assert.strictEqual(cfg.get('allowRemoteImages'), false);
     assert.strictEqual(cfg.get('tex.engine'), 'auto');
     assert.strictEqual(cfg.get('tex.recompileOnSave'), true);
     assert.strictEqual(cfg.get('tex.rootFile'), '');

@@ -13,6 +13,7 @@ import { isPreviewSetting } from './settings';
 
 // Webview to host messages of the Markdown and CSV preview (src/extension.ts).
 export type MarkdownMessage =
+  | { type: 'ready' }
   | { type: 'revealInOS' }
   | { type: 'openExternal' }
   | { type: 'revealLine'; line: number }
@@ -55,6 +56,7 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     return undefined;
   }
   switch (msg.type) {
+    case 'ready':
     case 'revealInOS':
     case 'openExternal':
     case 'openSettings':

@@ -51,6 +51,7 @@ vi.mock('vscode', () => {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     env: { openExternal: vi.fn(), clipboard: { writeText: vi.fn(async () => undefined) } },
     workspace: {
+      isTrusted: true,
       getConfiguration: vi.fn(() => ({
         get: (key: string, fallback: unknown) =>
           key === 'video.transcode' ? 'auto' : key === 'video.review' ? reviewSetting.on : fallback,

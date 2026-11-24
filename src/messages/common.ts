@@ -6,6 +6,8 @@
 // so a handler is a `switch` over a narrowed union. These modules never import
 // `vscode`, which is what lets tests and the `messages` fuzz target drive them.
 
+import { parseComments, type PdfComment } from '../pdfComments';
+
 export type Dict = Record<string, unknown>;
 
 /** A message object with a string `type`, or undefined for anything else. */
@@ -81,8 +83,17 @@ export function saveFrame(msg: Dict): SaveFrameMessage | undefined {
 
 export interface SaveCommentsMessage {
   type: 'saveComments';
-  /** Anything but a non-empty array deletes the sidecar (see writeComments). */
-  comments: unknown;
+  comments: PdfComment[];
+}
+
+/** A saveComments payload that failed validation, kept so the host can say so. */
+export interface RejectedCommentsMessage {
+  type: 'saveCommentsRejected';
+}
+
+export function commentsMessage(msg: Dict): SaveCommentsMessage | RejectedCommentsMessage {
+  const comments = parseComments(msg.comments);
+  return comments ? { type: 'saveComments', comments } : { type: 'saveCommentsRejected' };
 }
 
 // Number() on an object with no prototype (or a throwing toString) throws

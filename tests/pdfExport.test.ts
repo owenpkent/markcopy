@@ -1,8 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { browserCandidates, buildPdfPage, findBrowser, pdfCss, printArgs } from '../src/pdfExport';
+import { basename, join } from 'node:path';
+import { JSDOM, VirtualConsole } from 'jsdom';
+import {
+  browserCandidates,
+  buildPdfPage,
+  createPrintPreviewDir,
+  findBrowser,
+  pdfCss,
+  printArgs,
+  printPreviewRoot,
+  removeLegacyPrintPages,
+  sweepPrintPreviewDirs,
+} from '../src/pdfExport';
 
 describe('browserCandidates', () => {
   it('finds Edge and Chrome under the Windows program folders', () => {
@@ -214,6 +225,7 @@ describe('buildPdfPage', () => {
       katexCss: '',
       pageSize: 'Letter',
       autoPrint: false,
+      allowRemoteImages: false,
       ...over,
     });
 
@@ -221,7 +233,6 @@ describe('buildPdfPage', () => {
     const html = page();
     expect(html).toContain('.markdown-body { color: red }');
     expect(html).toContain('@page { size: Letter;');
-    expect(html).toContain('<h1>Hi</h1>');
   });
 
   it('forces the light palette whatever the preview was showing', () => {
@@ -251,8 +262,58 @@ describe('buildPdfPage', () => {
   });
 
   it('only self-prints on the manual browser route', () => {
-    // A `window.print()` racing `--print-to-pdf` is at best redundant.
-    expect(page({ autoPrint: false })).not.toContain('window.print()');
-    expect(page({ autoPrint: true })).toContain('window.print()');
+    expect(page({ autoPrint: false })).not.toContain('<script data-print>');
+    expect(page({ autoPrint: true })).toContain('<script data-print>');
+  });
+
+  it('permits embedded images by default and only HTTPS images with opt-in', () => {
+    expect(page()).toContain("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+    expect(page({ allowRemoteImages: true })).toContain('img-src data: https:;');
+    expect(page()).toMatch(/script-src 'sha256-[^']+'/);
+  });
+
+  it('loads document markup as inert data and discards navigation and script tags', () => {
+    const bodyHtml =
+      '<h1>Hi</h1><meta http-equiv="refresh" content="0; url=#elsewhere">' +
+      '<script>document.title = "Unexpected title";</script>';
+    const html = page({ bodyHtml });
+    expect(html).not.toContain(bodyHtml);
+    const errors: Error[] = [];
+    const virtualConsole = new VirtualConsole();
+    virtualConsole.on('jsdomError', (error: Error) => errors.push(error));
+    const rendered = new JSDOM(html, { runScripts: 'dangerously', virtualConsole });
+    try {
+      const { document } = rendered.window;
+      expect(document.title).toBe('notes');
+      expect(document.querySelector('#content h1')?.textContent).toBe('Hi');
+      expect(document.querySelector('#content script, #content meta')).toBeNull();
+      expect(errors).toEqual([]);
+    } finally {
+      rendered.window.close();
+    }
+  });
+});
+
+describe('print preview storage', () => {
+  it('writes under the storage folder, sweeps old pages and removes legacy html files', async () => {
+    const storage = await mkdtemp(join(tmpdir(), 'markcopy-storage-test-'));
+    try {
+      const dir = await createPrintPreviewDir(storage);
+      expect(dir.startsWith(printPreviewRoot(storage))).toBe(true);
+
+      const old = join(printPreviewRoot(storage), 'markcopy-pdf-preview-abc123');
+      await mkdir(old);
+      const past = new Date(Date.now() - 60 * 60 * 1000);
+      await utimes(old, past, past);
+      await sweepPrintPreviewDirs(storage);
+      expect(await readdir(printPreviewRoot(storage))).toEqual([basename(dir)]);
+
+      await writeFile(join(storage, 'My-Notes.html'), 'legacy');
+      await writeFile(join(storage, 'keep.json'), '{}');
+      await removeLegacyPrintPages(storage);
+      expect((await readdir(storage)).sort()).toEqual(['keep.json', 'print-preview']);
+    } finally {
+      await rm(storage, { recursive: true, force: true });
+    }
   });
 });

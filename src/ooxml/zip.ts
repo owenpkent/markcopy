@@ -1,18 +1,9 @@
 // Unpacking the OPC (zip) container an Office document arrives in.
 //
-// An .xlsx, .docx and .pptx are all the same thing: a zip of XML parts. That
-// makes any of them a hostile-input surface
-// before a single tag is parsed: a few hundred kilobytes on disk can inflate to
-// gigabytes in memory, and the caller's only defence is to refuse early. Limits
-// are therefore applied in two layers: against the *declared* uncompressed size
-// of each entry before it is inflated, and again against what was actually
-// produced. See openZip for which attack each layer stops and which one is still
-// bounded only by maxFileBytes.
-//
-// Nothing is ever written to disk. fflate inflates into memory, so a malicious
-// entry name (`../../etc/passwd`, an absolute path, a symlink) has nothing to act
-// on: names are only ever used as map keys.
-import { unzipSync, strFromU8 } from 'fflate';
+// Check the archive's directory and size limits before extracting any parts.
+// Validate what the stream actually produces while inflating each part. Entries
+// are put in a map in memory, so their paths are never used for file access.
+import { Inflate, strFromU8 } from 'fflate';
 
 /** Caps chosen to refuse the pathological cases without bothering real files. */
 export interface ZipLimits {
@@ -30,8 +21,6 @@ export const DEFAULT_LIMITS: ZipLimits = {
   // Decks and documents full of photographs run to tens of megabytes without
   // being unusual, so the file cap matches maxTotalBytes: a package whose parts
   // all fit the inflate budget is one worth reading, whatever it weighs on disk.
-  // This is also the only bound on an entry whose header understates its size
-  // (see openZip), so it stays finite.
   maxFileBytes: 256 * 1024 * 1024,
   // Real workbooks run to a few dozen parts, plus one per sheet, drawing, and
   // image. A thousand is far past anything legitimate.
@@ -45,6 +34,26 @@ export const DEFAULT_LIMITS: ZipLimits = {
 // that a tiny, legitimately compressible part is never caught by it.
 const MAX_DEFLATE_RATIO = 1100;
 const DEFLATE_SLACK = 4096;
+// Each push can expand about a thousandfold. Small pushes limit transient
+// output before the callback can check the part's remaining budget.
+const INFLATE_STEP = 8 * 1024;
+// A DEFLATE stored block can buffer 65,535 bytes before yielding output. Allow
+// that, but bound growth if a stream stops producing data and has trailing bytes.
+const MAX_INFLATE_GAP = 128 * 1024;
+
+const EOCD_SIZE = 22;
+const CENTRAL_SIZE = 46;
+const LOCAL_SIZE = 30;
+const ZIP64_SENTINEL = 0xffffffff;
+
+interface Entry {
+  name: string;
+  method: number;
+  size: number;
+  offset: number;
+  start: number;
+  end: number;
+}
 
 /**
  * A package we will not or cannot read, with a message written to be shown.
@@ -82,51 +91,15 @@ export function openZip(bytes: Uint8Array, options: OpenOptions = {}): Parts {
     throw new OpcError(options.notZip ?? `this file is not an Office ${noun}.`);
   }
 
-  // Refuse on what the archive *declares* before anything is inflated. fflate
-  // runs this filter per entry ahead of decompressing it, so an entry whose
-  // header admits it expands to gigabytes is rejected while the file is still a
-  // few hundred kilobytes, which is how the bombs a generator produces look.
-  //
-  // What this does not catch is a header that lies low. fflate grows its output
-  // as it inflates rather than trusting the declared size, so an entry claiming
-  // 1 KB and delivering 2 GB is fully materialised before the running totals
-  // below see it. maxFileBytes is the only bound on that case today. Closing it
-  // properly needs the streaming Unzip API with a byte counter that can abort
-  // mid-entry, which is a larger change than this one.
-  let entries = 0;
-  let declared = 0;
-  let raw: Record<string, Uint8Array>;
   try {
-    raw = unzipSync(bytes, {
-      filter(file) {
-        entries++;
-        if (entries > limits.maxEntries) {
-          throw new OpcError(
-            `this ${noun} has more than ${limits.maxEntries} parts, more than the preview reads.`,
-          );
-        }
-        if (file.originalSize > limits.maxEntryBytes) {
-          throw new OpcError(`part "${file.name}" is too large to preview.`);
-        }
-        // A header can also lie high: fflate sizes the output buffer from the
-        // declared size, so a kilobyte of archive claiming a part just under
-        // the cap costs the whole cap in memory, zero-filled, and whatever the
-        // caller then does over that many bytes. Deflate cannot expand its
-        // input by more than about 1032 to 1, so a claim past that is refused
-        // for what it is before anything is allocated. The compressed size is
-        // a header field too, so it is held to the one thing that is not: no
-        // part is larger than the archive it is in.
-        const stored = Math.min(file.size, bytes.length);
-        if (file.originalSize > stored * MAX_DEFLATE_RATIO + DEFLATE_SLACK) {
-          throw new OpcError(`part "${file.name}" claims more data than it can hold.`);
-        }
-        declared += file.originalSize;
-        if (declared > limits.maxTotalBytes) {
-          throw new OpcError(`this ${noun} expands to more data than the preview can hold.`);
-        }
-        return true;
-      },
-    });
+    const parts: Parts = new Map();
+    for (const entry of readEntries(bytes, limits, noun)) {
+      const compressed = bytes.subarray(entry.start, entry.end);
+      const data = entry.method === 0 ? new Uint8Array(compressed) : inflatePart(entry, compressed);
+      // Zip paths are '/'-separated by spec, but writers in the wild emit '\'.
+      parts.set(normalizePath(entry.name), data);
+    }
+    return parts;
   } catch (err) {
     // A limit refusal is the answer, not an unpacking failure to be reworded.
     if (err instanceof OpcError) {
@@ -134,24 +107,216 @@ export function openZip(bytes: Uint8Array, options: OpenOptions = {}): Parts {
     }
     throw new OpcError(`this ${noun} could not be unpacked (${String(err)}).`);
   }
+}
 
-  const names = Object.keys(raw);
+function zip64Number(view: DataView, offset: number): number {
+  const value = Number(view.getBigUint64(offset, true));
+  if (!Number.isSafeInteger(value)) {
+    throw new Error('invalid ZIP64 value');
+  }
+  return value;
+}
 
-  const parts: Parts = new Map();
-  let total = 0;
-  for (const name of names) {
-    const data = raw[name];
-    if (data.length > limits.maxEntryBytes) {
+function locateDirectory(view: DataView): { offset: number; end: number; count: number } {
+  const length = view.byteLength;
+  const first = Math.max(0, length - EOCD_SIZE - 0xffff);
+  let at = length - EOCD_SIZE;
+  for (; at >= first; at--) {
+    if (
+      view.getUint32(at, true) === 0x06054b50 &&
+      at + EOCD_SIZE + view.getUint16(at + 20, true) <= length
+    ) {
+      break;
+    }
+  }
+  if (at < first) {
+    throw new Error('missing zip directory end record');
+  }
+  const disk = view.getUint16(at + 4, true);
+  const directoryDisk = view.getUint16(at + 6, true);
+  let count = view.getUint16(at + 10, true);
+  let onDisk = view.getUint16(at + 8, true);
+  let size = view.getUint32(at + 12, true);
+  let offset = view.getUint32(at + 16, true);
+  if (
+    disk === 0xffff ||
+    directoryDisk === 0xffff ||
+    count === 0xffff ||
+    onDisk === 0xffff ||
+    size === ZIP64_SENTINEL ||
+    offset === ZIP64_SENTINEL
+  ) {
+    const locator = at - 20;
+    if (locator < 0 || view.getUint32(locator, true) !== 0x07064b50) {
+      throw new Error('missing ZIP64 locator');
+    }
+    const record = zip64Number(view, locator + 8);
+    if (record > locator - 56 || view.getUint32(record, true) !== 0x06064b50) {
+      throw new Error('invalid ZIP64 directory end record');
+    }
+    if (view.getUint32(record + 16, true) !== 0 || view.getUint32(record + 20, true) !== 0) {
+      throw new Error('split zip archives are unsupported');
+    }
+    onDisk = zip64Number(view, record + 24);
+    count = zip64Number(view, record + 32);
+    size = zip64Number(view, record + 40);
+    offset = zip64Number(view, record + 48);
+    at = record;
+  } else if (disk !== 0 || directoryDisk !== 0) {
+    throw new Error('split zip archives are unsupported');
+  }
+  if (onDisk !== count || offset > at || size > at - offset) {
+    throw new Error('invalid zip directory bounds');
+  }
+  return { offset, end: offset + size, count };
+}
+
+/** ZIP64 replaces only the saturated fields, in size, compressed size, offset order. */
+function zip64EntryFields(view: DataView, at: number, end: number, fields: number[]): number[] {
+  const required = fields.filter((field) => field === ZIP64_SENTINEL).length * 8;
+  for (; at + 4 <= end;) {
+    const id = view.getUint16(at, true);
+    const length = view.getUint16(at + 2, true);
+    at += 4;
+    if (at + length > end) {
+      break;
+    }
+    if (id === 1 && length >= required) {
+      return fields.map((field) => {
+        if (field !== ZIP64_SENTINEL) {
+          return field;
+        }
+        const value = zip64Number(view, at);
+        at += 8;
+        return value;
+      });
+    }
+    at += length;
+  }
+  throw new Error('invalid ZIP64 entry fields');
+}
+
+function readEntries(bytes: Uint8Array, limits: ZipLimits, noun: string): Entry[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const directory = locateDirectory(view);
+  if (directory.count > limits.maxEntries) {
+    throw new OpcError(
+      `this ${noun} has more than ${limits.maxEntries} parts, more than the preview reads.`,
+    );
+  }
+  const entries: Entry[] = [];
+  let at = directory.offset;
+  let declared = 0;
+  for (let index = 0; index < directory.count; index++) {
+    if (at + CENTRAL_SIZE > directory.end || view.getUint32(at, true) !== 0x02014b50) {
+      throw new Error('invalid zip directory entry');
+    }
+    const flags = view.getUint16(at + 8, true);
+    const method = view.getUint16(at + 10, true);
+    const nameStart = at + CENTRAL_SIZE;
+    const extraStart = nameStart + view.getUint16(at + 28, true);
+    const extraEnd = extraStart + view.getUint16(at + 30, true);
+    const next = extraEnd + view.getUint16(at + 32, true);
+    if (next > directory.end) {
+      throw new Error('truncated zip directory entry');
+    }
+    const name = strFromU8(bytes.subarray(nameStart, extraStart), (flags & 0x800) === 0);
+    let [size, compressed, offset] = [
+      view.getUint32(at + 24, true),
+      view.getUint32(at + 20, true),
+      view.getUint32(at + 42, true),
+    ];
+    if (size === ZIP64_SENTINEL || compressed === ZIP64_SENTINEL || offset === ZIP64_SENTINEL) {
+      [size, compressed, offset] = zip64EntryFields(view, extraStart, extraEnd, [
+        size,
+        compressed,
+        offset,
+      ]);
+    }
+    if (size > limits.maxEntryBytes) {
       throw new OpcError(`part "${name}" is too large to preview.`);
     }
-    total += data.length;
-    if (total > limits.maxTotalBytes) {
+    if (size > Math.min(compressed, bytes.length) * MAX_DEFLATE_RATIO + DEFLATE_SLACK) {
+      throw new OpcError(`part "${name}" claims more data than it can hold.`);
+    }
+    declared += size;
+    if (declared > limits.maxTotalBytes) {
       throw new OpcError(`this ${noun} expands to more data than the preview can hold.`);
     }
-    // Zip paths are '/'-separated by spec, but writers in the wild emit '\'.
-    parts.set(normalizePath(name), data);
+    if (method !== 0 && method !== 8) {
+      throw new OpcError(`part "${name}" uses an unsupported compression method.`);
+    }
+    if (offset + LOCAL_SIZE > directory.offset || view.getUint32(offset, true) !== 0x04034b50) {
+      throw new OpcError(`part "${name}" has an invalid local header.`);
+    }
+    if ((flags | view.getUint16(offset + 6, true)) & 1) {
+      throw new OpcError(`part "${name}" is encrypted.`);
+    }
+    if (method !== view.getUint16(offset + 8, true)) {
+      throw new OpcError(`part "${name}" has inconsistent compression methods.`);
+    }
+    const start =
+      offset + LOCAL_SIZE + view.getUint16(offset + 26, true) + view.getUint16(offset + 28, true);
+    if (start > directory.offset || compressed > directory.offset - start) {
+      throw new OpcError(`part "${name}" has invalid data bounds.`);
+    }
+    if (method === 0 && compressed !== size) {
+      throw new OpcError(`part "${name}" has an inconsistent stored size.`);
+    }
+    entries.push({ name, method, size, offset, start, end: start + compressed });
+    at = next;
   }
-  return parts;
+  // A compressed byte can be processed at most once across all parts. Keep the
+  // original directory order for callers, even when local records are reordered.
+  let end = 0;
+  for (const entry of [...entries].sort((a, b) => a.offset - b.offset)) {
+    if (entry.offset < end) {
+      throw new OpcError(`part "${entry.name}" overlaps another part.`);
+    }
+    end = entry.end;
+  }
+  return entries;
+}
+
+function inflatePart(entry: Entry, compressed: Uint8Array): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  let produced = 0;
+  let lastOutput = 0;
+  const sizeError = () => new OpcError(`part "${entry.name}" does not match its declared size.`);
+  const inflate = new Inflate((chunk) => {
+    // The declared individual and combined sizes already fit the limits. Stop
+    // as soon as a stream exceeds its own validated share of that budget.
+    produced += chunk.length;
+    if (produced > entry.size) {
+      throw sizeError();
+    }
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+    }
+  });
+  for (let start = 0; start < compressed.length; start += INFLATE_STEP) {
+    const end = Math.min(start + INFLATE_STEP, compressed.length);
+    const before = produced;
+    inflate.push(compressed.subarray(start, end), end === compressed.length);
+    if (produced > before) {
+      lastOutput = end;
+    } else if (end - lastOutput > MAX_INFLATE_GAP) {
+      throw new OpcError(`part "${entry.name}" has too much compressed data without output.`);
+    }
+  }
+  if (compressed.length === 0 || produced !== entry.size) {
+    throw sizeError();
+  }
+  if (chunks.length === 1) {
+    return chunks[0];
+  }
+  const data = new Uint8Array(produced);
+  let at = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, at);
+    at += chunk.length;
+  }
+  return data;
 }
 
 /**

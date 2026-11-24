@@ -66,6 +66,8 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Threat model
 
+MarkCopy declares limited support in VS Code Restricted Mode (`capabilities.untrustedWorkspaces.supported: "limited"`). Previews work, but every code path that launches an external program (LaTeX compilers, ffmpeg and ffprobe, the Chromium PDF renderer) checks `workspace.isTrusted` and refuses in an untrusted workspace. `markcopy.allowRemoteImages`, `markcopy.video.ffmpegPath`, `markcopy.pdf.browserPath` and the `markcopy.tex.compile`, `engine`, `enginePath` and `rootFile` settings are listed as restricted configurations. Files opened in a trusted workspace are still treated as untrusted input.
+
 MarkCopy renders untrusted content (any Markdown, CSV/TSV, spreadsheet, Word document, presentation, executable, package or installer, PDF, STL model, or image you open) into a webview. It can render Mermaid diagrams from fenced code, parses PDFs with pdf.js, and parses STL meshes with Three.js, and decodes GIFs with the browser. The areas that matter are script execution in the preview, diagram rendering, PDF parsing, unpacking and parsing a workbook, parsing a mesh whose header declares its own size, writing an edited CSV cell back to the file, and running a browser to render a PDF export.
 
 LaTeX preview adds a more privileged parser boundary: it runs an installed TeX
@@ -79,7 +81,7 @@ A webview is untrusted: it renders content from files you did not write, so the 
 
 Messages in the other direction are checked too. Every webview's `message` listener first asks `fromHost()` (`src/webview/fromHost.ts`) whether the event came from the extension host, which VS Code delivers from the webview's outer frame: the event's origin must equal the page's own, or its source must be the parent window. Anything else is dropped before its payload is read. The video viewer never takes a media address from a message: the host writes the file's webview URI and the URI its ffmpeg proxy will have (the proxy's name is fixed per panel before any encode) into the page as `data-mc-src` and `data-mc-proxy-src`, and the `load` message only says which of the two to play, as the audio viewer already did for its one file. The PDF viewer, which the PDF editor, the LaTeX preview and the screenshot harness all host, reads its worker script's address from an attribute the host wrote into the page, not from a message, so the one URL it fetches is never message-supplied; a page without the attribute shows an error instead of fetching.
 
-Known gap: the PDF and LaTeX viewers write the `comments` array of a `saveComments` message to the document's `.mccomments.json` sidecar without checking the shape of its entries, so a page can still write any array there. The sidecar is data beside the document and is never executed.
+PDF and LaTeX comments are validated on receipt and when the sidecar is reopened. `src/pdfComments.ts` checks the count, unique IDs, positive integer page numbers, finite coordinates from 0 to 1, and per-note and aggregate text limits. `src/pdfEditor.ts` caps serialized sidecars at 2 MiB. Local writes create an exclusive temporary file beside the sidecar and rename it over the destination, so a sidecar symlink cannot redirect the write. Other filesystem providers use their own stat and rename semantics. A replaced sidecar keeps the permission bits of the file it replaces. If a sidecar exists but not every entry passes validation, MarkCopy shows the valid entries, warns once, and refuses to write that sidecar until it loads cleanly, so a bad entry cannot cause the rest to be overwritten. A webview save that fails validation shows a warning and writes nothing.
 
 The parsers are unit-tested and fuzzed (see [Fuzzing](../docs/TESTING.md#fuzzing)). The nightly Jazzer.js run also covers the zip, workbook, deck, Word, XML, CSV, Video and Image Notes, Markdown, GIF, image, STL, 3MF, G-code, GLB, OBJ and MTL, Windows executable, package and installer (each format also on its own), and video and audio probe parsers, MarkCopy's handling of what the STEP engine returns, link handling and sanitized Markdown output. It opens a `Fuzz crash:` issue when an input makes one fail, and a `Fuzz target broken:` issue when a target fails without one (for example when it no longer loads); `npm test` also loads every target and replays its seeds, so a broken target fails the pull request that breaks it. That is a way of finding bugs, not a guarantee: a clean run covers the inputs the fuzzer reached. It also only finds what a target treats as failure. The `pkg` target ran half a million inputs clean while the memory cases above existed, because a reader that spends a gigabyte and returns a small page throws nothing; it now fails an input that takes over three seconds, grows memory (the heap and array buffers together) by over 256 MB, or makes a page of over 4 MB, and the `pe` target does the same. Both also fail a page holding markup the renderers never write, or engine text such as `[native code]` or `undefined` that the file does not contain: that check found file text reaching `Object.prototype` through lookup tables (fixed with `src/binary/own.ts`), and the `file-source` target checks that reading a file from disk, in pieces, or twice gives the same page as reading it from memory. The plan behind these is [FUZZING-STRATEGY](../docs/FUZZING-STRATEGY.md).
 
@@ -89,7 +91,7 @@ The webview is served with a strict CSP and a fresh nonce per load:
 
 ```
 default-src 'none';
-img-src ${cspSource} https: data: blob:;
+img-src ${cspSource} data: blob:;
 style-src ${cspSource} 'unsafe-inline';
 font-src  ${cspSource} data:;
 connect-src ${cspSource};
@@ -97,7 +99,7 @@ script-src 'nonce-${nonce}' 'strict-dynamic';
 ```
 
 - Only the nonce-tagged bundle script can run. Inline scripts injected through Markdown `html: true` content cannot execute. `'strict-dynamic'` lets that nonce'd entry module import its own code-split chunks (`media/chunk-*.js`) without each one needing its own nonce; it does not relax anything else the policy already refuses.
-- `img-src` allows `https:`, `data:`, and `blob:` so remote images, embedded images, Mermaid SVGs, and html-to-image output display.
+- `img-src` allows `data:` and `blob:` for embedded images, Mermaid SVGs, and html-to-image output. HTTPS is added only when `markcopy.allowRemoteImages` is enabled in user settings. A workspace cannot set it. Plain HTTP stays blocked.
 - `connect-src ${cspSource}` is scoped to the webview's own origin only. It exists so `html-to-image` can fetch and embed KaTeX's web fonts when rasterizing a math equation to PNG (**Copy Equation as PNG**); Mermaid never needed this directive because it renders with system fonts. Being same-origin, it cannot be used to reach any external host.
 - All local assets (the script and stylesheet) are loaded through `webview.asWebviewUri`. `localResourceRoots` itself is not one fixed folder: it always includes the extension's own `media` folder, and the Markdown/CSV preview also grants the document's workspace folder (or, lacking one, the document's own directory) so relative local images resolve. The read-only PDF, LaTeX, STL, and spreadsheet editors keep `localResourceRoots` to just `media`, since each receives its content as bytes (or, for the spreadsheet, already-rendered markup) rather than a document-relative URI. The video editor also adds the video's own directory and the ffmpeg proxy directory, since it streams the file by URI rather than loading it into memory.
 
@@ -111,23 +113,13 @@ Mermaid is initialized with `securityLevel: 'strict'`, which sanitizes diagram-s
 
 ## PDF preview
 
-PDFs open in a read-only custom editor. The extension host reads the file with `workspace.fs.readFile` and hands the bytes to the webview; pdf.js parses and rasterises them entirely locally, with no network fetch. It runs under the same strict CSP as the rest of the webview: with no `'unsafe-eval'`, pdf.js detects the restriction and disables its eval-based fast paths. PDF parsing runs in a worker loaded from the bundled `media/pdf.worker.js`; page canvas rendering runs in the webview. The editor is read-only and never writes back to the PDF.
+PDFs open in a read-only custom editor. `src/documentFile.ts` caps PDF reads at 64 MiB and local Office reads at 256 MiB. For local files it checks the size on an open regular-file handle, reads a fixed buffer from that handle, and rejects size changes it detects. Other filesystem providers have a 64 MiB limit checked before and after the whole-file read. A provider can still allocate above that limit if the file grows between those calls. The webview renders the supplied PDF bytes locally with pdf.js and a bundled worker. Page canvas rendering runs in the webview. The CSP omits `'unsafe-eval'`, so pdf.js disables its eval-based fast paths.
 
 ## LaTeX preview
 
-Opening a `.tex`, `.ltx`, or `.latex` file can run `latexmk`, Tectonic, or a
-bare TeX engine in the source file's directory. The selected executable comes
-from the machine-scoped `markcopy.tex.enginePath` setting or fixed discovery,
-and is launched with an argument array rather than a shell. MarkCopy does not
-add `-shell-escape` (or its equivalent), but this is not an OS sandbox: TeX
-engines can read files available to the process and use their own file
-primitives, and local engine or latexmk configuration can affect a run.
+Every compile trigger checks Workspace Trust and `markcopy.tex.compile`. The default `ask` needs a deliberate compile in each preview before save-triggered builds can run. Consent covers the selected root and is cleared when the engine or executable setting changes. `auto` opts in to compilation on open. `off` blocks all triggers and cancels an active build. Compile mode, engine, and executable path are machine-scoped.
 
-Treat untrusted LaTeX as code and open it only with the same trust you would
-give an installed compiler. Output is kept
-under a hashed temporary directory, compilation is stopped after 45 seconds
-without output or on cancellation, and the directory is removed when the last
-preview closes (abandoned directories are swept after 24 hours).
+The selected executable is launched in the source directory with an argument array. MarkCopy skips `latexmk` startup rc files with `-norc`, disables shell escape in the bare TeX engines and `latexmk`'s `pdflatex` command with `-no-shell-escape`, and sets `TECTONIC_UNTRUSTED_MODE=1` for Tectonic. Compilers still run with the process's operating-system permissions and can read available files. Only compile sources and included files you trust. Output goes to a hashed temporary directory. Builds are stopped after 45 seconds without output or on cancellation. The output directory is removed when the last preview closes, and abandoned directories are swept after 24 hours.
 
 ## PDF export
 
@@ -136,12 +128,13 @@ preview closes (abandoned directories are swept after 24 hours).
 - **The executable is not taken from the document.** It is either the `markcopy.pdf.browserPath` setting or one of a fixed list of known install paths for the platform, and it is spawned with an argument array, never through a shell, so nothing in a document can influence the command. That setting is machine-scoped, so it can only come from your own user settings: a `.vscode/settings.json` travelling with a cloned repository cannot point MarkCopy at a program to run, even in a workspace you have trusted.
 - **The page carries no scripts.** The exported body is the preview's own DOM, which has already been through DOMPurify, so a `<script>` in the source Markdown is long gone before the export sees it. The one exception is the fallback route (no browser installed), whose page carries a `window.print()` MarkCopy wrote itself. The only other setting reaching that page, `markcopy.pdf.pageSize`, is checked against the three values it may take before it is written into a `<style>`, since the `enum` in package.json constrains the settings editor and not the file.
 - **The browser runs on a throwaway profile** (`--user-data-dir` in a fresh `mkdtemp` directory, plus `--disable-extensions` and `--disable-sync`), so the render touches none of your browsing profile, cookies, or extensions. The directory, page included, is deleted however the render ends.
-- **Remote images in a document are still fetched**, by the headless browser this time rather than the preview, because the export keeps `https:` image sources as they are. This is the same network access the preview already had, but it is worth knowing it happens outside the webview too.
+- **The export page has its own CSP.** It blocks network subresources by default and allows HTTPS images only when `markcopy.allowRemoteImages` is enabled. A hash-authorized script parses the preview markup in an inert template and removes scripts, frames, and navigation metadata before inserting the content.
+- **Manual print pages are temporary.** The fallback opens a file in a fresh `markcopy-pdf-preview-*` directory under `print-preview` in the extension's global storage (not the system temp directory, which snap-packaged browsers cannot read). Cleanup is scheduled after 15 minutes, and startup sweeps expired directories. Activation also deletes the `.html` pages earlier versions saved directly in global storage.
 - **One file is written, where you chose it.** The destination comes from a save dialog; the export never picks a path on your behalf. The browser renders to a scratch file inside the throwaway directory and the finished PDF is moved into place afterwards, so a render that fails leaves whatever was already at that path untouched.
 
 ## HTML in Markdown
 
-`markdown-it` is configured with `html: true`, so raw HTML in a document is passed through to the preview before the rendered result is sanitized by DOMPurify. The CSP prevents any inline script in that HTML from running, but be aware that raw HTML is still rendered and remote images may load. If you open Markdown from an untrusted source, this is the surface to keep in mind.
+`markdown-it` is configured with `html: true`. DOMPurify sanitizes the rendered result before it enters the preview, and the CSP blocks inline scripts in the markup. Raw HTML and Markdown image syntax are subject to the same remote image policy.
 
 ## Video preview
 
@@ -294,7 +287,7 @@ Edit mode in the Markdown preview is the second place MarkCopy writes to a file,
 
 An `.xlsx` is a zip of XML parts, which makes it a hostile-input surface before a single tag is parsed. `src/xlsx/` reads it in the extension host, never in the webview, and the resulting HTML goes through the same DOMPurify sanitize and the same CSP as everything else.
 
-- **Decompression is bounded.** A few hundred kilobytes on disk can inflate to gigabytes in memory, so `src/ooxml/zip.ts` caps the file size before unzipping (256 MB, the same as the inflate total, and the only bound on an entry whose header understates its size), the entry count, the size of any single inflated part, and the running total across all of them. Nothing is ever written to disk, so a malicious entry name (`../../etc/passwd`, an absolute path) has nothing to act on: names are only ever map keys.
+- **Decompression is bounded.** `src/ooxml/zip.ts` checks the file size, entry count, per-entry sizes, declared total, and non-overlapping compressed ranges before extracting anything. It checks stored sizes before copying and streams deflated entries in small pushes, stopping if the actual output exceeds the declared size or compressed input advances too far without output. It also rejects an output shorter than declared. The shared reader handles Office and 3MF previews. Entry names are only used as map keys.
 - **External relationships are refused.** A workbook can point outside its own package at another workbook on a share, a remote image, or a DDE/OLE link. Following one turns opening a file into a network fetch, which on Windows can hand your credentials to whatever host it names. Any relationship marked `TargetMode="External"` is dropped.
 - **Entity expansion cannot happen.** The parser (saxes) resolves the five predefined XML entities and never expands entities declared in a DTD, so the classic billion-laughs expansion and XXE are inert here structurally rather than by a check that could be forgotten. A test pins this, so replacing the parser with one that does expand them fails the suite rather than the extension host.
 - **The preview is read-only.** MarkCopy never writes to a workbook, so it cannot corrupt one. There is no equivalent of the CSV grid's cell writeback.
