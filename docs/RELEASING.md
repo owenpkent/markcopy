@@ -2,7 +2,44 @@
 
 How to cut a release and publish to both the VS Code Marketplace and Open VSX. This happens in **two separate phases**: cutting the release in git, and publishing to the registries. They are not the same step (see [Release steps](#release-steps)).
 
-## One-time setup
+## One-time setup: automated release (GitHub Actions)
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when a `vX.Y.Z` tag is pushed. It builds the `.vsix` once, records a build provenance attestation, attaches the file and its SHA-256 to a GitHub Release, and, after a reviewer approves the `release` environment, publishes that same file to the Marketplace and Open VSX with tokenless (OIDC) trusted publishing. It uses no secrets. Set up these four things once, before the first tagged release:
+
+### a. The `release` environment
+
+1. On GitHub: **Settings** → **Environments** → **New environment**, name it `release`.
+2. Under **Deployment protection rules**, tick **Required reviewers** and add `owenpkent`. Untick **Prevent self-review** if you are the only maintainer, otherwise you cannot approve your own release.
+3. Under **Deployment branches and tags**, choose **Selected branches and tags** → **Add deployment branch or tag rule** → type **Tag**, pattern `v*.*.*`.
+4. **Save protection rules.**
+
+### b. Protect release tags
+
+1. **Settings** → **Rules** → **Rulesets** → **New ruleset** → **New tag ruleset**.
+2. Name it `release tags`, set **Enforcement status** to **Active**.
+3. **Target tags** → **Add target** → **Include by pattern** → `v*`.
+4. Tick **Restrict deletions** and **Block force pushes** (this stops a tag being moved or deleted after it is cut).
+5. **Create**.
+
+### c. Marketplace trusted publishing policy
+
+1. Open <https://marketplace.visualstudio.com/manage>, pick the `OwenPKent` publisher, and open its **Trusted Publishing** page.
+2. Add a policy: a name (`markcopy-release`), repository owner `owenpkent`, repository `markcopy`, workflow file `release.yml`, environment `release`.
+3. Save. The job needs `id-token: write` (it has it) and runs `npx @vscode/vsce publish --oidc`; see [Publishing extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
+
+> **Unknown: a personal Microsoft account publisher.** `OwenPKent` is owned by a personal Microsoft account, and no source says whether such a publisher can use Trusted Publishing or only organization-owned ones. The first tagged release is the test. If the policy cannot be created or the publish is refused, use the [manual fallback](#manual-fallback-tokens) below for that release.
+
+### d. Open VSX trusted publisher
+
+1. Sign in at <https://open-vsx.org>, avatar → **Settings** → the `OwenPKent` namespace (you must be its owner; the Publisher Agreement stays signed as before).
+2. Add a **trusted publisher**: provider **GitHub**, owner `owenpkent`, repository `markcopy`, workflow file `release.yml`, environment `release`.
+3. Save. The publish step runs `npx ovsx publish <file> --trusted-publishing` and exchanges the job's OIDC token for a 15-minute publishing token. Open VSX matches on the workflow file with the ref stripped, so the environment is what ties it to an approved run.
+
+## Manual fallback: tokens
+
+Everything below this point is the manual token path. It remains the fallback if a workflow publish fails, and it is how every release went out before this workflow existed.
+
+> ⚠️ **The Marketplace PAT path ends on 2026-12-01.** Microsoft retires global Azure DevOps PATs that day, and the Marketplace token has to be global (**All accessible organizations**; an org-scoped token fails with a 401, as noted below). After that date the manual Marketplace path stops working. Trusted publishing is then the only route unless the publisher moves to an organizational Entra tenant. Open VSX tokens are unaffected.
 
 ### VS Code Marketplace (publisher `OwenPKent`)
 
@@ -30,7 +67,7 @@ Then authenticate `vsce` with a **Personal Access Token (PAT)**. This publisher 
 3. Create an access token: avatar → **Settings** → **Access Tokens** → **Generate new token**. Copy it (shown once).
 4. Create the namespace once (must match the publisher): `npx ovsx create-namespace OwenPKent -p <OVSX_TOKEN>`. (If it already exists, skip.)
 
-> Open VSX only supports token auth: there is no Entra/OIDC option, so a token is always required here.
+> Open VSX's manual path is token auth. Its OIDC route is the trusted publisher in [section d](#d-open-vsx-trusted-publisher), used by the workflow; a token is needed here only for the fallback.
 
 ### Verified publisher badge (optional)
 
@@ -94,7 +131,7 @@ Everything here happens **before** Phase 1 below; nothing in it is destructive, 
 
 ## Release steps
 
-Releasing has **two phases**, and it is easy to think you are done after the first. **Phase 1 puts the release in git; Phase 2 is what actually ships it to users.** Pushing a commit or tag does **not** publish anything: there is no CI automation for publishing (`.github/workflows/ci.yml` only builds and tests), so the extension stays at whatever version is currently live on the Marketplace / Open VSX until you run the Phase 2 `publish:` commands by hand. Confirm what is actually live at any time with:
+Releasing has **two phases**, and it is easy to think you are done after the first. **Phase 1 puts the release in git; Phase 2 is what actually ships it to users.** Pushing a commit does **not** publish anything. Pushing a `vX.Y.Z` tag starts [`release.yml`](../.github/workflows/release.yml), which builds and attaches the `.vsix` to a GitHub Release but publishes to the registries only once you approve the `release` environment, so the extension stays at whatever version is currently live on the Marketplace / Open VSX until you do (or, on the manual fallback, until you run the `publish:` commands by hand). Confirm what is actually live at any time with:
 
 ```bash
 npx vsce show OwenPKent.markcopy                       # Marketplace
@@ -120,9 +157,31 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
    git tag -a vx.y.z -m vx.y.z
    git push origin vx.y.z
    ```
-   The release now exists in git, but **it is not published**. Nothing is live to users yet.
+   The release now exists in git, and the tag push starts the release workflow. **Nothing is live to users yet.**
 
 ### Phase 2: publish to the registries
+
+#### Primary path: the release workflow
+
+Needs the [one-time setup](#one-time-setup-automated-release-github-actions) done.
+
+1. Pushing the tag (step 6) starts **Release** in the repository's Actions tab. The `build` job fails if the tag differs from `package.json`'s version, packages the `.vsix` with `vsce package`, writes `markcopy-<version>.vsix.sha256`, and attests the file. `github-release` then creates the GitHub Release with both files and that version's CHANGELOG section as its notes.
+2. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; re-run just the failed job from the run page.
+3. Verify the artifact and both registries:
+   ```bash
+   gh release download v<version> -p '*.vsix' -R owenpkent/markcopy
+   gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy
+   npx vsce show OwenPKent.markcopy
+   curl -s https://open-vsx.org/api/OwenPKent/markcopy
+   ```
+   Registry lag and a flapping version are normal for a few minutes; see [Troubleshooting Phase 2](#troubleshooting-phase-2).
+4. Step 13 below (the security advisory) still applies after both registries show the version.
+
+The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists, so publish by hand with the manual steps below, using the `.vsix` it attached.
+
+#### Manual fallback
+
+These are the steps used up to 1.8.0 and the fallback if the workflow publish fails. Skip step 11 if the workflow already made the GitHub Release.
 
 7. Package and smoke-test:
 
@@ -291,6 +350,6 @@ The first `npm run vsix` for 0.16.0 failed because the local `node_modules` pred
 ## Notes
 
 - Packaging from source runs `vscode:prepublish`, which invokes `npm run package` to make a production build. Publishing an existing `.vsix` skips rebuilding and uploads that artifact; the release steps above use this path for both registries.
-- The Marketplace and Open VSX both sign extensions server-side on publish; there is no publisher-managed signing key to configure.
+- The Marketplace signs every extension server-side on publish, and VS Code checks that signature on install. Open VSX signing was not confirmed when this was written (2026-11-24). Neither registry offers a publisher-managed signing key.
 - Both registries require a token for this MSA-owned publisher: a Marketplace **PAT** for VS Code and an **Open VSX token** for Open VSX. Keep both out of git via a local `.env` (see [Publishing secrets](#publishing-secrets-env)); `.env` is gitignored and `.vscodeignore` keeps it out of the `.vsix`.
-- Truly token-free (Entra ID / OIDC) publishing would require moving the publisher to an organizational Entra tenant with a service principal added as a publisher member. Not worth it for a solo publisher; revisit only if this becomes a CI pipeline.
+- The Entra ID path (`--azure-credential`) would require moving the publisher to an organizational Entra tenant with a service principal added as a publisher member, and was not worth it for a solo publisher. The release workflow uses the Marketplace's own Trusted Publishing instead, which needs no tenant; whether a personal-account publisher can use it is untested until the first tagged release.
