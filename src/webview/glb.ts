@@ -913,6 +913,63 @@ function bake(pieces: Piece[], triangles: number): Omit<GlbModel, 'parts'> {
       };
 }
 
+const isRecord = (value: unknown): boolean =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Refuse a JSON chunk whose lists are not lists of objects. Everything after
+ * this walks `scenes[].nodes`, `nodes[].children`, `meshes[].primitives` and the
+ * top-level arrays with `for...of` and property reads, and the JSON is the
+ * file's: `"nodes": 0` in a scene made the walk throw a TypeError instead of a
+ * GlbError (found by the glb fuzz target, 2026-11-23). glTF 2.0 requires every
+ * one of these to be an array, and every entry of the top-level ones an object.
+ */
+function refuseMalformed(json: Gltf): void {
+  const bad = (what: string): never => {
+    throw new GlbError(`This GLB file is not valid glTF: ${what}.`);
+  };
+  const list = (value: unknown, what: string, ofObjects: boolean): unknown[] => {
+    if (value === undefined) {
+      return [];
+    }
+    if (!Array.isArray(value)) {
+      return bad(`${what} is not a list`);
+    }
+    if (ofObjects && !value.every(isRecord)) {
+      bad(`an entry of ${what} is not an object`);
+    }
+    return value;
+  };
+  const record = json as Record<string, unknown>;
+  for (const key of [
+    'scenes',
+    'nodes',
+    'meshes',
+    'accessors',
+    'bufferViews',
+    'buffers',
+    'materials',
+  ]) {
+    list(record[key], key, true);
+  }
+  list(record.extensionsRequired, 'extensionsRequired', false);
+  list(record.extensionsUsed, 'extensionsUsed', false);
+  for (const scene of json.scenes ?? []) {
+    list(scene.nodes, 'the nodes of a scene', false);
+  }
+  for (const node of json.nodes ?? []) {
+    list(node.children, 'the children of a node', false);
+  }
+  for (const mesh of json.meshes ?? []) {
+    for (const primitive of list(mesh.primitives, 'the primitives of a mesh', true)) {
+      const attributes = (primitive as { attributes?: unknown }).attributes;
+      if (attributes !== undefined && !isRecord(attributes)) {
+        bad('the attributes of a primitive are not an object');
+      }
+    }
+  }
+}
+
 /**
  * Read a GLB into one colored triangle soup, Z-up. Refuses what MarkCopy does
  * not decode (Draco, meshopt), external buffers, and anything over the triangle
@@ -924,6 +981,7 @@ export async function readGlb(bytes: Uint8Array, options: GlbOptions = {}): Prom
   if (!json.asset || String(json.asset.version).split('.')[0] !== '2') {
     throw new GlbError('This GLB file is not glTF 2.0.');
   }
+  refuseMalformed(json);
   refuseCompression(json);
   if ((json.buffers ?? []).some((buffer) => buffer?.uri !== undefined)) {
     throw new GlbError(

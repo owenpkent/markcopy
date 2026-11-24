@@ -1,0 +1,36 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "pcm_s16le",
+            "codec_long_name": "PCM signed 16-bit little-endian",
+            "codec_type": "audio",
+            "sample_rate": "44100",
+            "channels": 2,
+            "bits_per_sample": 16,
+            "duration": "0.200000",
+            "bit_rate": "1411200"
+        }
+    ],
+    "format": {
+        "format_name": "wav",
+        "format_long_name": "WAV / WAVE (Waveform Audio)",
+        "duration": "0.200000",
+        "bit_rate": "1419120",
+        "tags": {
+            "artist": "MarkCopy",
+            "comment": "line one\nline two",
+            "date": "2026",
+            "genre": "Test",
+            "title": "Test tone",
+            "album": "Fuzz seeds",
+            "track": "3",
+            "encoder": "Lavf62.3.100"
+        }
+    }
+}

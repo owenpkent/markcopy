@@ -372,3 +372,42 @@ describe('loadStepEngine', () => {
     resetStepEngine();
   }, 30_000);
 });
+
+describe('readStep assembly walk guard', () => {
+  // The step fuzz target's stand-in engine found that a node reachable twice
+  // was walked twice: a shared node made the walk exponential and a cycle made
+  // it endless. The real engine builds a fresh object per node, so this is a
+  // guard on the walk, as glb.ts has, not a fix for a file that was seen.
+  const header = new TextEncoder().encode('ISO-10303-21;\nHEADER;\nENDSEC;\n');
+  const mesh = {
+    attributes: { position: { array: [0, 0, 0, 1, 0, 0, 0, 1, 0] } },
+    index: { array: [0, 1, 2] },
+  };
+  const engineWith = (root: unknown) => ({
+    ReadStepFile: () => ({ success: true, meshes: [mesh], root }) as never,
+  });
+
+  it('refuses a tree that loops back on itself', () => {
+    const node: { children: unknown[]; meshes: number[] } = { children: [], meshes: [0] };
+    node.children.push(node, node);
+    expect(() => readStep(engineWith(node), header)).toThrow(StepError);
+  });
+
+  it('refuses a tree whose shared nodes would be walked an exponential number of times', () => {
+    let node: { children: unknown[] } = { children: [] };
+    for (let depth = 0; depth < 40; depth++) {
+      node = { children: [node, node] };
+    }
+    const started = performance.now();
+    expect(() => readStep(engineWith(node), header)).toThrow(
+      /too large to show, or one that loops/,
+    );
+    expect(performance.now() - started).toBeLessThan(5000);
+  });
+
+  it('still reads an ordinary assembly', () => {
+    const root = { children: [{ name: 'Part', meshes: [0] }] };
+    const model = readStep(engineWith(root), header);
+    expect(model.positions.length).toBe(9);
+  });
+});

@@ -270,3 +270,87 @@ describe('gzip optional headers are bounded before the decoder sees them', () =>
     expect(() => gunzipBounded(method, MIB)).toThrow(PackageError);
   });
 });
+
+describe('gzip header guards', () => {
+  const head = (flags: number): number[] => [0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3];
+
+  it('refuses a header that sets FEXTRA but ends before the extra length', () => {
+    // Exactly ten bytes, so the fixed header passes and the two length bytes are missing.
+    expect(() => gunzipBounded(new Uint8Array(head(4)), MIB)).toThrow(PackageError);
+    expect(() => gunzipBounded(new Uint8Array(head(4)), MIB)).toThrow('damaged');
+  });
+
+  it('refuses a header that sets FHCRC but ends before the two checksum bytes', () => {
+    expect(() => gunzipBounded(new Uint8Array(head(2)), MIB)).toThrow('damaged');
+  });
+
+  it('skips the two header checksum bytes when FHCRC is set', () => {
+    const deflated = gzipSync(utf8('crc')).subarray(10);
+    const data = concat(new Uint8Array(head(2)), new Uint8Array([0xaa, 0xbb]), deflated);
+    expect(text(gunzipBounded(data, MIB))).toBe('crc');
+  });
+});
+
+describe('Zstandard frame header guards', () => {
+  const MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
+  const frame = (...rest: number[]): Uint8Array => new Uint8Array([...MAGIC, ...rest]);
+
+  it('refuses stray bytes after a good frame that cannot hold a magic number', () => {
+    const input = concat(b64(VECTOR_ZST), new Uint8Array([0x28, 0xb5]));
+    expect(() => unzstdBounded(input, MIB)).toThrow('damaged');
+  });
+
+  it('refuses a skippable frame whose size field is cut short', () => {
+    const input = new Uint8Array([0x5f, 0x2a, 0x4d, 0x18, 0x00, 0x00]);
+    expect(() => unzstdBounded(input, MIB)).toThrow('damaged');
+  });
+
+  it('refuses a stream made only of skippable frames', () => {
+    const skippable = new Uint8Array([0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0]);
+    expect(() => unzstdBounded(concat(skippable, skippable, skippable), MIB)).toThrow('damaged');
+  });
+
+  it('refuses a content size field that runs past the input', () => {
+    // Descriptor 0x40 asks for a 2-byte size; window byte present, only one size byte follows.
+    expect(() => unzstdBounded(frame(0x40, 0x00, 0x05), MIB)).toThrow('damaged');
+  });
+
+  it('refuses a header with the 8-byte size flag and no size bytes', () => {
+    expect(() => unzstdBounded(frame(0xe0), MIB)).toThrow(PackageError);
+  });
+
+  it('reads a single-segment frame whose one-byte content size is declared', () => {
+    // Descriptor 0x20: single segment, flag 0 means a 1-byte size (3), then one raw last block of 'abc'.
+    const input = frame(0x20, 0x03, 0x19, 0x00, 0x00, 0x61, 0x62, 0x63);
+    expect(text(unzstdBounded(input, MIB))).toBe('abc');
+  });
+
+  it('refuses a frame cut short before its first block header', () => {
+    // Magic, descriptor 0, window byte: the 3-byte block header never arrives.
+    expect(() => unzstdBounded(frame(0x00, 0x00), MIB)).toThrow(PackageError);
+  });
+
+  it('refuses the reserved block type', () => {
+    // Header 0x000007: last block, type 3.
+    expect(() => unzstdBounded(frame(0x00, 0x00, 0x07, 0x00, 0x00), MIB)).toThrow('damaged');
+  });
+
+  it('refuses a block larger than 128 KiB', () => {
+    // Header 0x100009: last block, raw, size 131073.
+    expect(() => unzstdBounded(frame(0x00, 0x00, 0x09, 0x00, 0x10), MIB)).toThrow('damaged');
+  });
+
+  it('steps over the checksum so the next frame is still found', () => {
+    // Descriptor 0x04 sets the checksum flag: empty raw last block, then four checksum bytes.
+    const first = frame(0x04, 0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0);
+    const out = unzstdBounded(concat(first, b64(VECTOR_ZST)), MIB);
+    expect(out.length).toBe(10240);
+  });
+
+  it('stops a frame with no declared size once its output passes the cap', () => {
+    // Window byte 0x68 (8 MiB), one RLE last block of 2000 bytes of 0x41, no content size to refuse early.
+    const input = frame(0x00, 0x68, 0x83, 0x3e, 0x00, 0x41);
+    expect(() => unzstdBounded(input, 1000)).toThrow('more data than MarkCopy will unpack');
+    expect(unzstdBounded(input, MIB).length).toBe(2000);
+  });
+});

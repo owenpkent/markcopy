@@ -18,6 +18,7 @@ import {
   type Row,
 } from '../binary/html';
 import { printable } from '../binary/text';
+import { own } from '../binary/own';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -139,7 +140,7 @@ function fileSection(info: PeInfo, options: RenderOptions): string {
   }
   rows.push(['Built', builtRow(info)]);
   if (info.subsystem === 2 || info.subsystem === 3) {
-    const name = WINDOWS_VERSIONS[info.subsystemVersion];
+    const name = own(WINDOWS_VERSIONS, info.subsystemVersion);
     rows.push([
       'Minimum Windows version',
       name ? `${info.subsystemVersion} (${name})` : info.subsystemVersion,
@@ -229,7 +230,7 @@ function manifestRows(info: PeInfo): Row[] {
   const manifest = info.manifest;
   const rows: Row[] = [];
   if (manifest?.executionLevel) {
-    const meaning = EXECUTION_LEVELS[manifest.executionLevel.toLowerCase()];
+    const meaning = own(EXECUTION_LEVELS, manifest.executionLevel.toLowerCase());
     rows.push([
       'Requested execution level',
       meaning ? `${manifest.executionLevel} (${meaning})` : manifest.executionLevel,

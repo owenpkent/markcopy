@@ -1,0 +1,36 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "opus",
+            "codec_long_name": "Opus (Opus Interactive Audio Codec)",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "duration": "0.206500",
+            "tags": {
+                "encoder": "Lavc62.11.100 libopus",
+                "title": "Test tone",
+                "artist": "MarkCopy",
+                "album": "Fuzz seeds",
+                "date": "2026",
+                "track": "3",
+                "genre": "Test",
+                "comment": "line one\nline two"
+            }
+        }
+    ],
+    "format": {
+        "format_name": "ogg",
+        "format_long_name": "Ogg",
+        "duration": "0.206500",
+        "bit_rate": "139041"
+    }
+}

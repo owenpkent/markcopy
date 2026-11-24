@@ -1,5 +1,6 @@
 import { findFfmpeg, run } from './videoProxy';
 import { AUDIO_TAG_KEYS, type AudioDetails, type AudioTagKey } from './messages/audioDetails';
+import { own } from './binary/own';
 
 // Host half of the audio details panel: one ffprobe run per opened file, shaped
 // into the small, validated AudioDetails the webview renders. No vscode import, so
@@ -139,21 +140,23 @@ export function shapeAudioProbe(json: string): AudioDetails | undefined {
   const formatName = typeof format.format_name === 'string' ? format.format_name : '';
   const firstName = formatName.split(',')[0];
   const formatLabel =
-    FORMAT_LABELS[firstName] ??
+    own(FORMAT_LABELS, firstName) ??
     (typeof format.format_long_name === 'string' ? format.format_long_name : formatName);
   if (formatLabel) {
     details.format = formatLabel.slice(0, 80);
   }
   const codecName = typeof stream?.codec_name === 'string' ? stream.codec_name : '';
   const codecLabel =
-    CODEC_LABELS[codecName] ??
+    own(CODEC_LABELS, codecName) ??
     (typeof stream?.codec_long_name === 'string' ? stream.codec_long_name : codecName);
   if (codecLabel) {
     details.codec = codecLabel.slice(0, 80);
   }
   details.sampleRate = positive(stream?.sample_rate);
   const channels = positive(stream?.channels);
-  details.channels = channels === undefined ? undefined : Math.round(channels);
+  // A channel count is a whole number. Rounding a fraction could give 0, which
+  // the panel would show as "0 channels" (found by the audio-probe fuzz target).
+  details.channels = channels !== undefined && Number.isInteger(channels) ? channels : undefined;
   const layout = layoutLabel(details.channels, stream?.channel_layout);
   if (layout) {
     details.layout = layout;

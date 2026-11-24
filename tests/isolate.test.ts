@@ -109,6 +109,16 @@ describe('runInWorker', () => {
     expect(error).toBeInstanceOf(ReadError);
   });
 
+  it('rejects with a ReadError when the worker cannot even be created', async () => {
+    // new Worker throws synchronously for these, before any event can fire, so
+    // the start itself has to be caught: data that cannot be cloned into the
+    // worker, and a path Node will not resolve (neither absolute nor ./).
+    await expect(runInWorker(script('echo'), { reader: () => 1 })).rejects.toThrow(
+      /could not start its isolated reader/,
+    );
+    await expect(runInWorker('not-a-relative-path.js', {})).rejects.toBeInstanceOf(ReadError);
+  });
+
   it('rejects, with the worker error, when the worker throws', async () => {
     const error = await runInWorker(script('throws'), {}).catch((e: unknown) => e);
 

@@ -123,13 +123,17 @@ describe('findFfmpeg', () => {
   });
 
   it('ignores an empty or whitespace setting', async () => {
-    expect(await findFfmpeg('   ', 'linux', { PATH: '' })).toBeUndefined();
+    // win32 with no environment, because its only candidate is then the bare
+    // name: on Linux the fixed install paths (/usr/bin/ffmpeg, ...) are probed
+    // too, so the test would pass only on a machine without ffmpeg.
+    expect(await findFfmpeg('   ', 'win32', { PATH: '' })).toBeUndefined();
   });
 
   it('reports nothing rather than a name it never found', async () => {
     // Returning a bare `ffmpeg` unprobed would make every machine look equipped
     // and turn "not installed" into a spawn failure at the worst moment.
-    expect(await findFfmpeg('', 'linux', { PATH: '/does/not/exist' })).toBeUndefined();
+    // win32 for the reason in the test above.
+    expect(await findFfmpeg('', 'win32', { PATH: '/does/not/exist' })).toBeUndefined();
   });
 });
 

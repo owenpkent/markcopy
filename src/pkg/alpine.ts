@@ -19,6 +19,7 @@ import {
 } from './model';
 import { signatureSection } from './signature';
 import { readTar, tarData, TAR_MAX_ENTRIES, type TarResult } from './tar';
+import { own } from '../binary/own';
 
 // The signature and control streams are a few kilobytes to a few hundred, and
 // they come first. Four MiB of the file is more than enough to hold both.
@@ -235,9 +236,10 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
   const control = tar.entries.slice(tar.entries.indexOf(entry));
   const firstData = control.findIndex((e) => !e.name.startsWith('.'));
   const dotfiles = (firstData < 0 ? control : control.slice(0, firstData)).map((e) => e.name);
-  const scripts = dotfiles
-    .filter((n) => n in SCRIPTS)
-    .map((n): [string, string] => [n, SCRIPTS[n]]);
+  const scripts = dotfiles.flatMap((n): [string, string][] => {
+    const meaning = own(SCRIPTS, n);
+    return meaning === undefined ? [] : [[n, meaning]];
+  });
   const triggers = info.get('triggers')?.join(' ');
   sections.push(
     ...propertySection(
