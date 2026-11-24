@@ -4,6 +4,13 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Planned
+
+- PlantUML support.
+- An email-safe export profile (table-based layout, fully inlined).
+
+## [1.9.0] - 2026-11-24
+
 ### Added
 
 - **Executable info preview.** A `.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl` or `.efi` file (either case) now opens in a read-only preview of its metadata instead of VS Code's "file is binary" notice. Opening the file shows only its name, its size and a **Read this file** button; nothing inside it is read until the button is pressed or **MarkCopy: Read This File** (`markcopy.fileInfo.read`) is run, once per open page. Reading it shows the file's own icon, then a Version table (the block Explorer's Details tab reads: description, product, company, file and product versions, copyright, original file name and the other strings, plus the numeric versions, build flags and language), a File table (type, architecture including "Any CPU" for .NET, PE32 or PE32+, subsystem, size, SHA-256, build time or "not recorded" for a reproducible build, minimum Windows version, .NET runtime, linker version, image base, entry point, header checksum, appended data such as an installer payload), a Signature section, a Permissions and protections table (the manifest's execution level, UI access and DPI awareness, and ASLR, DEP, Control Flow Guard and the other loader mitigations), the PDB path, and the sections, imports and exports (a count plus the first 100 names). The signature section reports the embedded Authenticode signature's signer, issuer and validity dates and verifies nothing, and the page says so; catalog-signed files show as having no embedded signature. The file is only read as bytes, in bounded ranges: it is never run, and **Open in Default App** is removed from this preview's menu and ignored by the host, because for an executable the default app is the file itself. Hashing stops at 256 MB, and a file not on a local disk is read whole up to 64 MB. The reading is isolated: it runs in a worker thread (`dist/fileInfoWorker.js`, a second bundle) with a 256 MB heap limit and a 15 second time limit, and a file that exceeds either ends the worker and shows a notice while the extension host carries on. That does not bound memory allocated outside the JavaScript heap (typed arrays, WebAssembly), which the readers' own caps bound, and a worker is a thread in the same process, not a sandbox. It is built on the shared shell, so Copy as Rich Text and Markdown, a table's CSV and TSV, Save as PDF, Word and PowerPoint, themes and Search work as in the Word preview. It adds one setting, `markcopy.fileInfo.confirm` (default on), which turns the confirmation off so the file is read as soon as it is opened. Not read: 16-bit and DOS executables, ELF and Mach-O files, the full list of imported function names, resources other than the version block and manifest, signature verification, and .NET metadata beyond the runtime version and flags. Checked so far only by running the parser over `notepad.exe`, `kernel32.dll`, VS Code's `Code.exe`, .NET Framework `System.dll` and a 32-bit `cmd.exe`, and the worker by script in plain Node (`notepad.exe` read in 33 ms through it; a worker written to allocate without bound was ended at a 64 MB limit in 98 ms, and one that loops was ended at its time limit); whether worker threads behave the same inside VS Code's extension host is checked by the integration tests, which had not run for this change when this was written, so it is not yet shown to work in the editor.
@@ -30,10 +37,9 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 - **Workspace Trust.** MarkCopy declares limited support in Restricted Mode: documents still preview, while LaTeX compiling, ffmpeg and the Chromium PDF renderer need a trusted workspace. The settings that name programs or control compiling and remote images are listed as restricted.
 - **Comment files are never overwritten after a partial load.** If a `.mccomments.json` file has an entry MarkCopy cannot load, the valid entries are shown, a warning explains that comment saving is off for that document, and the file is left untouched. A comment save that fails validation now shows a warning instead of being dropped, and the note editor limits note length and count.
 
-### Planned
+### Maintenance
 
-- PlantUML support.
-- An email-safe export profile (table-based layout, fully inlined).
+- Seven new Jazzer.js fuzz targets in the nightly matrix: `pe`, `pkg` (with one variant per package format, such as `pkg-msi`), `file-source`, `glb`, `obj`, `step` and `audio-probe`. A page oracle and a model oracle check what each reader produces, and the fuzz build now compiles the `src/` files the targets import, found from their imports rather than a hand-kept list. The approach and measured runs are in [FUZZING-STRATEGY](docs/FUZZING-STRATEGY.md).
 
 ## [1.8.0] - 2026-11-21
 
@@ -714,7 +720,8 @@ Initial release.
 - GitHub and VS Code style profiles (`markcopy.styleProfile`) and a scroll-sync toggle (`markcopy.syncScroll`).
 - Mermaid diagrams and highlight.js syntax highlighting.
 
-[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/owenpkent/markcopy/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/owenpkent/markcopy/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/owenpkent/markcopy/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/owenpkent/markcopy/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/owenpkent/markcopy/compare/v1.6.0...v1.6.1
