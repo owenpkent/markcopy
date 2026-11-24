@@ -45,7 +45,6 @@ vi.mock('vscode', () => {
     FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
     commands: { executeCommand },
     env: { openExternal: vi.fn() },
-    commands: { executeCommand },
     workspace: {
       getConfiguration: vi.fn(() => ({
         get: (_key: string, fallback: unknown) => fallback,
