@@ -13,8 +13,24 @@ interface Call {
   env: NodeJS.ProcessEnv | undefined;
 }
 
+/** Paths run.js tried to delete, create or copy into; none of them reach the disk. */
+let writes: string[] = [];
+
 function runWith(argv: string[]): Call[] {
   const cp = nodeRequire('node:child_process');
+  const fs = nodeRequire('node:fs');
+  // run.js clears fuzz/.corpus-min/<target>/ before a merge and seeds
+  // fuzz/.corpus/ before a run, in the real checkout. Stub every write so a
+  // test never deletes a minimized corpus someone kept.
+  writes = [];
+  for (const name of ['rmSync', 'mkdirSync', 'cpSync']) {
+    vi.spyOn(fs, name).mockImplementation(((target: string, dest?: unknown) => {
+      writes.push(typeof dest === 'string' ? dest : target);
+    }) as never);
+  }
+  const readdirSync = fs.readdirSync;
+  vi.spyOn(fs, 'readdirSync').mockImplementation(((dir: string, ...rest: unknown[]) =>
+    String(dir).includes('.corpus-min') ? ['kept'] : readdirSync(dir, ...rest)) as never);
   const calls: Call[] = [];
   vi.spyOn(cp, 'spawnSync').mockImplementation(((_cmd: string, args: string[], opts: any) => {
     calls.push({ args, env: opts?.env });
@@ -45,6 +61,7 @@ describe('fuzz/run.js', () => {
     const calls = runWith(['merge', 'pkg-msi']);
     const merge = calls.find((c) => c.args.includes('-merge=1'));
     expect(merge?.env?.FUZZ_PKG_FORMAT).toBe('msi');
+    expect(writes.some((p) => p.replace(/\\/g, '/').endsWith('fuzz/.corpus-min/pkg'))).toBe(true);
   });
 
   it('leaves the format variable unset for the catch-all merge', () => {
