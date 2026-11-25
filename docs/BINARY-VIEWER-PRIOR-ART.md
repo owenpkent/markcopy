@@ -17,7 +17,7 @@ For a PE file (`.exe`, `.dll` and the like):
 
 For a package, it shows each format's metadata, dependencies, which maintainer scripts exist, the file list, signer names, and a File section with the SHA-256. An Android package's signature section names each recognized signing scheme (v1, v2, v3 and v3.1, for example "APK Signature Scheme v2").
 
-Everything is read as bytes in bounded ranges. The metadata reader fetches at most 256 distinct 64 KiB pages (16 MiB) per file, and the SHA-256 pass reads the whole file only up to 256 MiB. A large installer can therefore be previewed without most of its bytes being read. Nothing is run, installed or verified.
+Everything is read as bytes in bounded ranges. The metadata reader fetches at most a set number of distinct 64 KiB pages per file: 256 pages (16 MiB) for an executable, and 512 pages (32 MiB) for a package, whose reader also caps any single request at 16 MiB. The SHA-256 pass reads the whole file only up to 256 MiB. A large installer can therefore be previewed without most of its bytes being read. Nothing is run, installed or verified.
 
 ## The tools
 
