@@ -45,6 +45,7 @@ const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
 
 const SHT_NULL = 0;
+const SHT_STRTAB = 3;
 const SHT_NOTE = 7;
 const SHT_NOBITS = 8;
 
@@ -376,7 +377,9 @@ async function readSections(
     }
   }
   if (total === 0) {
-    return { sections: [], total: 0, counted: true };
+    // The table is there (e_shoff is set) but its extended count in section
+    // zero is 0: inconsistent, so how long it is is not known.
+    return { sections: [], total: 0, counted: false };
   }
   const count = Math.min(total, MAX_SECTIONS);
   if (total > count) {
@@ -397,12 +400,20 @@ async function readSections(
       warnings.push('The section name table could not be read.');
     }
   }
-  if (str) {
-    if (str.type !== SHT_NOBITS && str.offset < reader.size) {
+  // Names come only from a string table: any other section's bytes would be
+  // read as names. Whatever goes wrong here costs the names, not the sections.
+  if (str && str.type !== SHT_STRTAB) {
+    warnings.push(
+      'The section the header names as the section name table is not a string table, so section names are not shown.',
+    );
+  } else if (str && str.offset < reader.size) {
+    try {
       const names = await reader.upTo(str.offset, Math.min(str.size, MAX_STRTAB));
       for (const s of sections) {
         s.name = stringAt(names, s.nameOffset, 128);
       }
+    } catch {
+      warnings.push('The section names could not be read.');
     }
   }
   return { sections, total, counted: true };

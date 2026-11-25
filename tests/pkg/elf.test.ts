@@ -457,10 +457,10 @@ describe('readElf: rejection and damage', () => {
     expect(b.warnings.join(' ')).toContain('it is not the reserved empty entry');
   });
 
-  it('names sections from an extended name-table index past the enumerated entries', async () => {
-    // Rebuild the section table at the end of the file with 0xff10 entries and
-    // the name table's header at 0xff05, where SHN_XINDEX is required: past
-    // the 4,096 entries the reader enumerates.
+  // A file whose section table is rebuilt at its end with 0xff10 entries and
+  // the name table's header at 0xff05, where SHN_XINDEX is required: past the
+  // 4,096 entries the reader enumerates.
+  const farNames = () => {
     const base = rich();
     const oldOff = sectionZero(base);
     const oldCount = u16(base, FIELDS.wide.shnum);
@@ -478,10 +478,52 @@ describe('readElf: rejection and damage', () => {
     poke(bytes, FIELDS.wide.shstrndx, 2, 0xffff);
     poke(bytes, tableAt + 32, 8, total); // section 0 sh_size
     poke(bytes, tableAt + 40, 4, nameIndex); // section 0 sh_link
+    return { bytes, tableAt, namesAt: tableAt + nameIndex * 64 };
+  };
 
-    const info = await read(bytes);
+  it('names sections from an extended name-table index past the enumerated entries', async () => {
+    const info = await read(farNames().bytes);
     expect(tableOf(info, 'Sections').map((row) => row[0])).toContain('.comment');
     expect(rowsOf(info, 'Binary')['Compiler']).toContain('GCC');
+  });
+
+  it('takes no names from a distant name-table header that is not a string table', async () => {
+    const { bytes, namesAt } = farNames();
+    poke(bytes, namesAt + 4, 4, 1); // sh_type SHT_PROGBITS
+    const info = await read(bytes);
+    const rows = tableOf(info, 'Sections');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map((row) => row[0])).not.toContain('.comment');
+    expect(info.warnings.join(' ')).toContain('is not a string table');
+  });
+
+  it('keeps the sections when the distant name table’s bytes cannot be read', async () => {
+    const { bytes, tableAt, namesAt } = farNames();
+    // Point the name table at a page nothing else reads, and fail that read.
+    const away = tableAt + 0x200000;
+    poke(bytes, namesAt + 24, 8, away); // sh_offset
+    const source = {
+      size: bytes.length,
+      read: async (offset: number, length: number): Promise<Uint8Array> => {
+        if (offset <= away && away < offset + length) {
+          throw new Error('the disk could not be read');
+        }
+        return bytes.subarray(offset, offset + length);
+      },
+    };
+    const info = await readElf(new RangeReader(source));
+    expect(tableOf(info, 'Sections').length).toBeGreaterThan(0);
+    expect(info.warnings).toContain('The section names could not be read.');
+    expect(info.warnings.join(' ')).not.toContain('section headers could not be read');
+  });
+
+  it('cannot locate an AppImage payload when an extended section count is zero', async () => {
+    const plain = buildElf({ appImage: 2, interp: LD, payload: 'hsqs-image' });
+    poke(plain, segmentAt(plain, 1) + 32, 8, sectionZero(plain)); // PT_LOAD stops at the table
+    poke(plain, FIELDS.wide.shnum, 2, 0); // section 0's sh_size is 0
+    const info = await read(plain);
+    expect(section(info, 'AppImage')).toBeUndefined();
+    expect(info.warnings).toContain('The AppImage payload could not be located.');
   });
 
   it('counts an extended section table when finding where an AppImage payload starts', async () => {
