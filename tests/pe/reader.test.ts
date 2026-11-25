@@ -1604,3 +1604,107 @@ describe('Rich header', () => {
     });
   });
 });
+
+describe('readPe: load configuration and CET', () => {
+  it('reads each PE32 field from its offset', async () => {
+    const info = await read({
+      loadConfig: {
+        cookie: 0x403000n,
+        seHandlerTable: 0x405000,
+        seHandlerCount: 7,
+        cfCount: 42n,
+        guardFlags: 0x100 | 0x400000,
+      },
+    });
+    expect(info.loadConfig).toEqual({
+      securityCookie: true,
+      safeSeh: { handlers: 7 },
+      guardFlags: 0x400100,
+      cfFunctionCount: 42,
+    });
+  });
+
+  it('reads each PE32+ field from its offset', async () => {
+    const info = await read({
+      plus: true,
+      loadConfig: { cookie: 0x140003000n, cfCount: 99n, guardFlags: 0x100 | 0x800 },
+    });
+    expect(info.loadConfig).toEqual({
+      securityCookie: true,
+      guardFlags: 0x900,
+      cfFunctionCount: 99,
+    });
+  });
+
+  it('tells a zero cookie from an absent one, and checks both halves of a 64-bit cookie', async () => {
+    expect((await read({ loadConfig: {} })).loadConfig?.securityCookie).toBe(false);
+    // Only the high half is set.
+    const high = await read({ plus: true, loadConfig: { cookie: 1n << 40n } });
+    expect(high.loadConfig?.securityCookie).toBe(true);
+    // Size 0x3C ends before the 32-bit cookie.
+    const short = await read({ loadConfig: { size: 0x3c, cookie: 5n } });
+    expect(short.loadConfig?.securityCookie).toBeUndefined();
+  });
+
+  it('trusts the structure size over the directory size, and leaves out fields past it', async () => {
+    // Guard flags sit at 0x58 in PE32 and 0x90 in PE32+. The size ends just before.
+    const narrow = await read({ loadConfig: { size: 0x58, cookie: 1n, guardFlags: 0x100 } });
+    expect(narrow.loadConfig?.guardFlags).toBeUndefined();
+    expect(narrow.loadConfig?.cfFunctionCount).toBe(0);
+    const wide = await read({
+      plus: true,
+      loadConfig: { size: 0x90, cookie: 1n, guardFlags: 0x100 },
+    });
+    expect(wide.loadConfig?.guardFlags).toBeUndefined();
+    expect(wide.loadConfig?.securityCookie).toBe(true);
+    // A size of zero leaves a structure with nothing in it, not an error.
+    const none = await read({ loadConfig: { size: 0 } });
+    expect(none.loadConfig).toEqual({});
+    expect(none.warnings).toEqual([]);
+  });
+
+  it('shows a very large 64-bit function count as a very large number', async () => {
+    const info = await read({ plus: true, loadConfig: { cfCount: (1n << 33n) + 5n } });
+    expect(info.loadConfig?.cfFunctionCount).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('has no load configuration when the image has none', async () => {
+    expect((await read()).loadConfig).toBeUndefined();
+  });
+
+  it('warns, and does not throw, when the directory points outside every section', async () => {
+    const info = await read({
+      loadConfig: {},
+      directories: { 10: { address: NOWHERE, size: 0x5c } },
+    });
+    expect(info.loadConfig).toBeUndefined();
+    expect(info.warnings).toContain('The load configuration could not be read.');
+  });
+
+  it('reads the CET flag from the debug directory entry of type 20', async () => {
+    expect((await read({ exDllCharacteristics: 0x1 })).cetCompat).toBe(true);
+    expect((await read({ exDllCharacteristics: 0x2 })).cetCompat).toBe(false);
+    expect((await read()).cetCompat).toBe(false);
+    // Beside the other entries.
+    const both = await read({
+      exDllCharacteristics: 0x1,
+      repro: true,
+      debug: { guid: '00112233-4455-6677-8899-AABBCCDDEEFF', age: 1, pdbPath: 'a.pdb' },
+    });
+    expect(both.cetCompat).toBe(true);
+    expect(both.reproducible).toBe(true);
+    expect(both.debug?.age).toBe(1);
+  });
+
+  it('skips a CET entry whose record lies outside the file', async () => {
+    const bytes = patched(buildPe({ exDllCharacteristics: 1 }), (image) => {
+      // The entry's PointerToRawData is the last field of the 28-byte record.
+      image.view.setUint32(image.directory(6) + 24, 0x7ffffff0, true);
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.cetCompat).toBe(false);
+    expect(info.warnings).toContain(
+      '1 entry of the debug directory could not be read and is left out.',
+    );
+  });
+});

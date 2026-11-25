@@ -112,6 +112,23 @@ export interface PeSignature {
   signer?: Signer;
 }
 
+/**
+ * What the load configuration directory says about the image's hardening. Each
+ * field is present only when the structure was long enough to hold it: older
+ * linkers wrote a shorter structure, so "absent" (not recorded) and zero (recorded
+ * as off) are different answers.
+ */
+export interface PeLoadConfig {
+  /** Whether the stack cookie's address is filled in, which is what /GS leaves behind. */
+  securityCookie?: boolean;
+  /** x86 only. Present when the image lists its safe exception handlers. */
+  safeSeh?: { handlers: number };
+  /** The IMAGE_GUARD_* flags. */
+  guardFlags?: number;
+  /** How many functions the Control Flow Guard table lists. */
+  cfFunctionCount?: number;
+}
+
 export interface PeInfo {
   fileSize: number;
   format: 'PE32' | 'PE32+';
@@ -136,6 +153,8 @@ export interface PeInfo {
   largeAddressAware: boolean;
   /** Loader-enforced mitigations, each as [label, enabled]. */
   mitigations: [string, boolean][];
+  /** The optional header's DllCharacteristics bits, as written. */
+  dllCharacteristics: number;
   /** Other DllCharacteristics bits that are set, in words. Empty when none is. */
   loaderFlags: string[];
   sections: PeSection[];
@@ -146,6 +165,10 @@ export interface PeInfo {
   imports: PeImport[];
   exports?: PeExports;
   debug?: PeDebug;
+  /** Hardening facts from the load configuration directory. Absent when it is missing or unreadable. */
+  loadConfig?: PeLoadConfig;
+  /** The debug directory says the image works with CET shadow stacks. False when it says nothing. */
+  cetCompat: boolean;
   /** The linker's record of the tools that built the image, when it has one. */
   rich?: PeRich;
   dotnet?: PeDotNet;
@@ -178,6 +201,9 @@ const MAX_LONG_NAME_BYTES = 256;
 // The most of the DOS header and stub read for the Rich header. A real stub
 // with its record is a few hundred bytes.
 const MAX_STUB_BYTES = 4096;
+// The load configuration structure has grown to about 400 bytes; every field
+// read here lies in the first 0x94.
+const MAX_LOAD_CONFIG_BYTES = 1024;
 const MAX_SIGNATURE_BYTES = 1024 * 1024;
 // A signed file has one entry, a dual-signed one two.
 const MAX_CERTIFICATES = 16;
@@ -226,6 +252,7 @@ const DIR_IMPORT = 1;
 const DIR_RESOURCE = 2;
 const DIR_SECURITY = 4;
 const DIR_DEBUG = 6;
+const DIR_LOAD_CONFIG = 10;
 const DIR_DELAY_IMPORT = 13;
 const DIR_CLR = 14;
 
@@ -271,6 +298,9 @@ const LOADER_FLAGS: [bit: number, label: string][] = [
 
 /** The label of the NX_COMPAT row in `PeInfo.mitigations`, which the page words specially. */
 export const NX_COMPAT_LABEL = 'DEP compatible (NX_COMPAT)';
+
+/** The label of the Control Flow Guard row, which the page words from the header bit and the load configuration together. */
+export const CFG_LABEL = 'Control Flow Guard';
 
 export async function readPe(source: ByteSource): Promise<PeInfo> {
   const reader = new Reader(source);
@@ -479,10 +509,12 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       // this bit's to say: 64-bit Windows enforces it for every native 64-bit
       // program whatever the flag holds. The page words the row accordingly.
       [NX_COMPAT_LABEL, (dllFlags & 0x100) !== 0],
-      ['Control Flow Guard', (dllFlags & 0x4000) !== 0],
+      [CFG_LABEL, (dllFlags & 0x4000) !== 0],
       ['Forced integrity checks', (dllFlags & 0x80) !== 0],
       ['AppContainer only', (dllFlags & 0x1000) !== 0],
     ],
+    dllCharacteristics: dllFlags,
+    cetCompat: false,
     loaderFlags: LOADER_FLAGS.filter(([bit]) => (dllFlags & bit) !== 0).map(([, label]) => label),
     sections,
     imports: [],
@@ -605,6 +637,52 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     });
   }
 
+  // The header bit only says the linker was asked for Control Flow Guard. The
+  // load configuration is where the guard tables and flags actually are, so
+  // this is what shows whether the protection is really in the image. The
+  // structure's own first field is its size, and it is trusted over the
+  // directory's: old linkers wrote the directory size wrong.
+  const loadConfig = directory(DIR_LOAD_CONFIG);
+  if (loadConfig) {
+    await attempt('load configuration', async () => {
+      const at = needRange(loadConfig.address);
+      if (at.length < 4) {
+        throw new PeError(TRUNCATED);
+      }
+      const declared = (await reader.view(at.offset, 4)).getUint32(0, true);
+      const length = Math.min(declared, at.length, MAX_LOAD_CONFIG_BYTES);
+      const view = await reader.view(at.offset, length);
+      const fits = (offset: number, width: number): boolean => offset + width <= length;
+      const config: PeLoadConfig = {};
+      if (fits(plus ? 0x58 : 0x3c, plus ? 8 : 4)) {
+        const cookie = plus
+          ? view.getBigUint64(0x58, true) !== 0n
+          : view.getUint32(0x3c, true) !== 0;
+        config.securityCookie = cookie;
+      }
+      // The handler table is a 32-bit idea: 64-bit images find their handlers
+      // through the exception directory instead.
+      if (!plus && fits(0x40, 8) && view.getUint32(0x40, true) !== 0) {
+        config.safeSeh = { handlers: view.getUint32(0x44, true) };
+      }
+      if (fits(plus ? 0x90 : 0x58, 4)) {
+        config.guardFlags = view.getUint32(plus ? 0x90 : 0x58, true);
+      }
+      if (fits(plus ? 0x88 : 0x54, plus ? 8 : 4)) {
+        if (plus) {
+          // A count too large for 32 bits is not a real table. It is shown as
+          // the largest safe number, which reads as "very many".
+          const high = view.getUint32(0x8c, true);
+          config.cfFunctionCount =
+            high === 0 ? view.getUint32(0x88, true) : Number.MAX_SAFE_INTEGER;
+        } else {
+          config.cfFunctionCount = view.getUint32(0x54, true);
+        }
+      }
+      info.loadConfig = config;
+    });
+  }
+
   const debug = directory(DIR_DEBUG);
   if (debug) {
     await attempt('debug directory', async () => {
@@ -626,6 +704,15 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         const pointer = entries.getUint32(i * 28 + 24, true);
         if (type === 16) {
           info.reproducible = true;
+        } else if (type === 20 && size >= 4) {
+          // IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS: a second set of
+          // DllCharacteristics bits that does not fit in the header. Bit 0 says
+          // the image works with CET shadow stacks.
+          try {
+            info.cetCompat = ((await reader.view(pointer, 4)).getUint32(0, true) & 0x1) !== 0;
+          } catch {
+            skipped++;
+          }
         } else if (type === 2 && size >= 24 && !info.debug) {
           try {
             const head = await reader.view(pointer, 24);
