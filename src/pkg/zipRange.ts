@@ -59,12 +59,15 @@ export interface ZipEntry {
   name: string;
   compressedSize: number;
   uncompressedSize: number;
+  /** The compression method. For a WinZip AES entry this is the real one from the extra field, not the header's 99. */
   method: number;
   /** Relative to the start of the zip data; ZipArchive adds the base. */
   localHeaderOffset: number;
   crc: number;
   isDirectory: boolean;
   encrypted: boolean;
+  /** What protects an encrypted entry, in plain words, or undefined when it is not encrypted. */
+  encryption?: string;
   /**
    * True when `name` is the archive's name byte for byte: not cut, and nothing
    * removed by cleaning. Only such entries can be found by name, so a decoy whose
@@ -137,6 +140,75 @@ interface Located {
   directorySize: number;
   entryCount: number;
   base: number;
+}
+
+/**
+ * Say how an entry is encrypted, from its flags and its WinZip AES extra field.
+ *
+ * Only a label: nothing is decrypted and no password is asked for. The extra
+ * field is walked inside its own length and a malformed one is ignored, so a
+ * damaged entry gets a less specific label rather than failing the listing.
+ */
+function describeEncryption(
+  view: DataView,
+  flags: number,
+  headerMethod: number,
+  extraStart: number,
+  extraEnd: number,
+): { label: string; actualMethod?: number } | undefined {
+  if ((flags & 0x41) === 0) {
+    return undefined;
+  }
+  if ((flags & 0x1) !== 0) {
+    let at = extraStart;
+    while (at + 4 <= extraEnd) {
+      const id = view.getUint16(at, true);
+      const length = view.getUint16(at + 2, true);
+      const body = at + 4;
+      if (body + length > extraEnd) {
+        break;
+      }
+      // WinZip AES: vendor version, vendor id "AE", strength, real method.
+      if (id === 0x9901 && length >= 7 && view.getUint16(body + 2, true) === 0x4541) {
+        const version = view.getUint16(body, true);
+        const bits = [128, 192, 256][view.getUint8(body + 4) - 1];
+        const edition = version === 1 || version === 2 ? ` (WinZip AE-${version})` : ' (WinZip)';
+        return {
+          label: bits === undefined ? 'AES (WinZip, unknown key size)' : `AES-${bits}${edition}`,
+          actualMethod: view.getUint16(body + 5, true),
+        };
+      }
+      at = body + length;
+    }
+    // Method 99 is how WinZip AES marks an entry, so it is AES even when the field is damaged.
+    if (headerMethod === 99) {
+      return { label: 'AES (WinZip, unknown key size)' };
+    }
+  }
+  if ((flags & 0x40) !== 0) {
+    return { label: 'PKWARE strong encryption' };
+  }
+  return { label: 'ZipCrypto (legacy, easily broken)' };
+}
+
+/** "3 of 10 entries: AES-256 (WinZip AE-2) 2, ZipCrypto (legacy, easily broken) 1", or undefined when nothing is encrypted. */
+export function summariseEncryption(entries: ZipEntry[]): string | undefined {
+  const files = entries.filter((e) => !e.isDirectory);
+  const counts = new Map<string, number>();
+  for (const e of files) {
+    if (e.encrypted) {
+      const label = e.encryption ?? 'encrypted';
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  const total = [...counts.values()].reduce((a, b) => a + b, 0);
+  if (total === 0) {
+    return undefined;
+  }
+  const lead = `${total} of ${files.length} ${files.length === 1 ? 'entry' : 'entries'}: `;
+  return counts.size === 1
+    ? lead + [...counts.keys()][0]
+    : lead + [...counts].map(([label, n]) => `${label} ${n}`).join(', ');
 }
 
 async function locateDirectory(reader: RangeReader): Promise<Located> {
@@ -259,7 +331,7 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       break;
     }
     const flags = view.getUint16(pos + 8, true);
-    const method = view.getUint16(pos + 10, true);
+    let method = view.getUint16(pos + 10, true);
     const crc = view.getUint32(pos + 16, true);
     let compressedSize = view.getUint32(pos + 20, true);
     let uncompressedSize = view.getUint32(pos + 24, true);
@@ -310,6 +382,16 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
         extraPos = body + length;
       }
     }
+    const encryption = describeEncryption(
+      view,
+      flags,
+      method,
+      nameAt + nameLength,
+      nameAt + nameLength + extraLength,
+    );
+    if (encryption?.actualMethod !== undefined) {
+      method = encryption.actualMethod;
+    }
     const raw = directory.subarray(nameAt, nameAt + nameLength);
     pos = next;
     if (
@@ -338,6 +420,7 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       isDirectory: raw.length > 0 && raw[raw.length - 1] === 0x2f,
       // Bit 0 is traditional or AES encryption, bit 6 strong encryption.
       encrypted: (flags & 0x41) !== 0,
+      encryption: encryption?.label,
       exact,
     });
     totalUncompressed += uncompressedSize;
@@ -374,7 +457,9 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
 
   async function read(entry: ZipEntry, maxBytes: number, head: boolean): Promise<Uint8Array> {
     if (entry.encrypted) {
-      throw new PackageError(`the entry "${entry.name}" is encrypted.`);
+      throw new PackageError(
+        `the entry "${entry.name}" is encrypted (${entry.encryption ?? 'unknown method'}) and MarkCopy does not ask for passwords.`,
+      );
     }
     if (entry.method !== 0 && entry.method !== 8) {
       throw new PackageError(`the entry "${entry.name}" uses a compression method not supported.`);

@@ -13,7 +13,7 @@ import { tableSection, type PackageInfo } from './model';
 import { readNupkg } from './nupkg';
 import { readVsix } from './vsix';
 import { readWheel } from './wheel';
-import { openZip, type ZipArchive, type ZipFlavour } from './zipRange';
+import { openZip, summariseEncryption, type ZipArchive, type ZipFlavour } from './zipRange';
 import type { RangeReader } from '../binary/reader';
 
 const CONTENT_ROWS = 200;
@@ -79,11 +79,14 @@ export async function readZipPackage(reader: RangeReader, fileName: string): Pro
   if (!zip.complete) {
     warnings.push('The archive directory is damaged or very large, so the file list is partial.');
   }
+  // Only a label: MarkCopy never asks for a password or decrypts an entry.
+  const encryption = summariseEncryption(zip.entries);
   return {
     format: kind.format,
     title: kind.title,
     summary: kind.summary,
     sections: [...kind.before, ...contents(zip), ...kind.after],
+    fileRows: encryption === undefined ? undefined : [['Encryption', encryption]],
     warnings,
   };
 }

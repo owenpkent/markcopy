@@ -274,6 +274,7 @@ Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden)
 Open [sample.docx](../sample.docx) (repo root), then a real document of your own from Word that has headings, nested lists, tables with merged cells, images, tracked changes, and links.
 
 - [ ] The document opens in the preview, not as binary or in a "cannot open" error. A `.docm` and an uppercase `.DOCX` do too.
+- [ ] A `.docx` saved with **Encrypt with Password** shows the password-protected notice with its method, never a password prompt. The same for a `.xlsx` and a `.pptx`.
 - [ ] The sample shows a title and headings at distinct sizes, a nested bullet list, a numbered list with a lettered sub-item, and a footnote with a back arrow at the end.
 - [ ] Tracked changes read as the final text: in the sample, "is approved" shows and "was drafted" does not. Turn tracking on in a real document, delete and insert some text, and check the same.
 - [ ] A table with a vertically merged cell and a spanning cell draws the merge, and the header row is marked. In a real document, a nested table renders inside its cell.
@@ -329,6 +330,7 @@ Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the read
 - ELF: three real shared libraries (x86-64 and AArch64) and one statically linked Go executable compared with `file` and an independent header reader. No real kernel module or AppImage was checked.
 - macOS installer: two real signed packages (one product archive, one flat component package), file lists and signer names compared with an independent read of the table of contents.
 - Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
+- Encryption labels: zips made with 7-Zip `-mem=AES128`, `-mem=AES256` and `-mem=ZipCrypto` (and an AES-256 copy named .jar) compared with `7z l -slt`; the labels matched its Method column. A .xlsx and a .docx encrypted with msoffcrypto-tool (Agile, AES-256, SHA512) gave the password-protected notice with that method. Not checked: Standard (2007) or Extensible encryption from a real Office, PKWARE strong encryption, a mixed zip from a real tool, a real `.pptx`, and the notice on screen in the Extension Development Host.
 - Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
 
 Memory audit, 2026-11-23: an adversarial pass over the readers, with generated files run one at a time in a separate process under a 4 GB heap limit, found six that aborted the process and several that held it for seconds. The same files were run again after the fixes, each in its own process under a 1 GB limit:
@@ -401,6 +403,7 @@ Windows Installer (`.msi`):
 macOS (`.dmg`, `.pkg`):
 
 - [ ] A disk image shows its size, compression, checksum type and partitions, says whether it is encrypted and signed, and does not show the app's name or version, which it cannot read.
+- [ ] A zip made with a password (7-Zip AES-256, and ZipCrypto) shows an **Encryption** row in the File section naming the method and how many entries use it, and never asks for a password.
 - [ ] An installer package shows its title, identifiers, versions, install location, components, which components run scripts, the file list and the signing certificate names.
 
 Linux binaries (`.so`, `*.so.*`, `.elf`, `.ko`, `.AppImage`):
