@@ -42,6 +42,9 @@ The lessons worth taking are:
    - Mach-O and fat headers
    - the PE Rich header and load config
 3. **A few ELF and PE edge cases** that MarkCopy does not handle yet.
+4. **Cryptography.** Ghidra decrypts but verifies no signatures. MarkCopy should only
+   detect and label encryption, show more certificate detail, and later check stored
+   digests. It should not prompt for passwords, decrypt, or claim a signature is valid.
 
 ## Portable Executable (PE)
 
@@ -401,6 +404,108 @@ would run over one shared head read, each inside a try/catch.
   larger ones to disk, obfuscated so virus scanners leave them alone. MarkCopy writes
   nothing to disk and should keep it that way.
 
+## Cryptography: encryption, passwords and signatures
+
+### What Ghidra does
+
+Ghidra decrypts, because it is a reverse-engineering tool. It verifies no signatures.
+
+- **Passwords.** `Base/formats/gfilesystem/crypto/`:
+  - `CryptoProviders` creates one `CryptoSession` per open operation. Nested
+    containers share it, so a password that opened one container is tried on the next.
+  - There are three password providers: an in-memory cache, a text file passed on the
+    command line (`-Dfilesystem.passwords`), and a dialog.
+  - The cache indexes each password by FSRL, file name and the file's MD5
+    (`CachedPasswordProvider.java:50-63`). A password is therefore offered to any file
+    with the same name or content.
+  - Passwords are held in a `char[]` wrapper that is zero-filled on close
+    (`Framework/Generic/.../auth/Password.java:73`), and are never written to disk.
+- **Decryption.**
+  - Encrypted zip entries go through zip4j. `SevenZipFileSystem` tries each password
+    in the session against the archive.
+  - iOS firmware (img3, img4) is decrypted with AES. The key and IV come from XML key
+    files the user supplies (`FF/../crypto/CryptoKeyFactory.java`). These are plain
+    files, not a keystore.
+- **Signatures.**
+  - PE: `pe/SecurityCertificate.java` reads the WIN_CERTIFICATE header and type and
+    keeps the PKCS #7 blob as raw bytes. It does not decode the blob, name the signer
+    or verify anything.
+  - Mach-O: `macho/commands/codesignature/` lays out the SuperBlob and CodeDirectory
+    structures for display. It computes no hashes and does not read the CMS signature.
+  - APK: the APK opens as a plain zip, with no signature handling _(inferred)_.
+- **Crypto detection.** There is no FindCrypt-style analyzer for crypto constants in
+  the tree. MD5 is used only as a cache key and content id.
+
+### What MarkCopy does
+
+MarkCopy already reads more signature detail than Ghidra:
+
+- **PE Authenticode.** [signer.ts](../src/pe/signer.ts) walks the PKCS #7. It finds
+  the certificate the SignerInfo names and shows the subject, organization, issuer and
+  validity dates.
+- **Other signed formats.** The same reader names signers for MSI, NuGet, JAR, APK
+  v1 and macOS `.pkg` (xar).
+- **RPM.** Shows the OpenPGP key ID and algorithm.
+- **Status wording.** Every signature status reads "present, not verified by
+  MarkCopy" ([render.ts:206](../src/pe/render.ts#L206),
+  [signature.ts:33](../src/pkg/signature.ts#L33)).
+- **Encrypted DMG** (`encrcdsa`, `cdsaencr`) is detected and labelled
+  ([dmg.ts:74-77](../src/pkg/dmg.ts#L74-L77)).
+- **Encrypted zip entries** are flagged (general-purpose flag bits 0 and 6,
+  [zipRange.ts:340](../src/pkg/zipRange.ts#L340)).
+
+Gaps:
+
+- **Zip encryption strength.** The WinZip AES extra field (0x9901) is not read, so
+  AES-128, AES-192 or AES-256 and the AE-1 or AE-2 version are never shown, and
+  legacy ZipCrypto looks the same as AES.
+- **Password-protected Office files.** An encrypted Office file is an OLE file with
+  `EncryptionInfo` and `EncryptedPackage` streams. These are not detected, so such a
+  file fails to parse instead of being labelled "password protected".
+- **APK v2 and v3 signers.** These signatures are detected by block ID only. Their
+  certificate is not parsed ([androidApk.ts:223](../src/pkg/androidApk.ts#L223)).
+- **Signature details.** No digest algorithm is shown, so a SHA-1 or MD5 signature
+  is not marked weak. There is no certificate thumbprint either.
+- **Stored digests.** RPM header digests (SHA-256 and SHA3) and Alpine's data hash
+  are shown as text, but MarkCopy does not check them.
+
+### What to add, in order
+
+1. **Detect and label encryption.** This is cheap, and it changes no trust claims.
+   - Read the 0x9901 field. Show "AES-256 (AE-2)", or "ZipCrypto (legacy)" when
+     bit 0 is set and the method is not 99.
+   - Detect the OLE encryption streams.
+   - Add a summary row, "Encrypted: N of M entries".
+   - Never fail the whole preview because some entries are encrypted.
+2. **More certificate detail.** This is cheap, because the DER walker exists.
+   - Show the digest algorithm, and mark MD5 and SHA-1 as weak.
+   - Show the serial number, a SHA-256 thumbprint of the certificate, and the
+     signing time from the timestamp countersignature.
+   - Parse the APK v2 and v3 signer certificate, again without verifying it.
+3. **Integrity checks with exact wording.** These cost more.
+   - The RPM header SHA-256 and the Authenticode image hash can be recomputed with
+     `node:crypto` inside the worker. The image hash skips the checksum field, the
+     certificate-table directory entry and the certificate table, and the reader
+     already has those offsets.
+   - Report "matches the digest in the signature" or "does not match: the file
+     changed after signing".
+   - A match says only that the bytes are the ones the signature names. It says
+     nothing about who signed them or whether to trust them.
+
+### What not to do
+
+- **Do not call a signature "valid" or "trusted".** No green tick either.
+  - A self-made certificate can carry any name and still verify mathematically.
+  - A trust verdict would also need the chain, revocation, expiry and timestamp
+    handling.
+  - Keep "not verified" next to any integrity result.
+- **Do not prompt for passwords or cache them.** Ghidra's cache shows the cost: it
+  creates a store of secrets that then has to be protected.
+- **Do not decrypt, and do not load key files.**
+- **Do not look up certificate stores, OCSP, CRLs or timestamp servers.** That means
+  network access and writes, which MarkCopy's model rules out: a read-only worker with
+  a memory cap and a timeout, reading untrusted files and writing nothing to disk.
+
 ## Testing
 
 Ghidra tests its reader primitives with JUnit over in-memory bytes:
@@ -450,5 +555,8 @@ Robustness first, then the additions users would notice most:
    told apart from Java class files.
 7. PE load config and GuardFlags. GNU property bits (CET, BTI).
 8. A cpio listing for RPM payloads. A DEX summary for APKs.
-9. Table-driven detection with conflict warnings, if polyglot files become a
-   real complaint.
+9. Encryption labels (zip AES strength, password-protected Office files), then
+   certificate detail and the APK v2/v3 signer, then digest checks (see
+   [Cryptography](#cryptography-encryption-passwords-and-signatures)).
+10. Table-driven detection with conflict warnings, if polyglot files become a
+    real complaint.
