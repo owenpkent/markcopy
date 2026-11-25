@@ -10,11 +10,14 @@ import * as vscode from 'vscode';
 
 const EXT_ID = 'OwenPKent.markcopy';
 const TEX_VIEW = 'markcopy.texPreview';
+// Must match the value in fixture/.vscode/settings.json.
+const PROBE_ROOT = 'trust-probe/root.tex';
 const UNTRUSTED_TEXT = 'LaTeX compilation requires a trusted VS Code workspace.';
 
 interface TexStatus {
   state: string;
   text?: string;
+  seq: number;
 }
 
 const allTabs = (): readonly vscode.Tab[] =>
@@ -96,8 +99,15 @@ suite('MarkCopy in Restricted Mode', () => {
     const cfg = vscode.workspace.getConfiguration('markcopy', fixtureFile('sample.tex'));
     // The fixture's .vscode/settings.json sets both. The unrestricted one
     // applies, which shows the file was read; the restricted one must not.
+    // rootFile has no machine scope, so a workspace may set it: the trusted
+    // control (test-integration/trusted) proves the same value applies there.
     assert.strictEqual(cfg.get('theme'), 'dark', 'workspace settings were not read at all');
-    assert.notStrictEqual(cfg.get('tex.compile'), 'auto', 'a restricted workspace setting applied');
+    assert.notStrictEqual(
+      cfg.get('tex.rootFile'),
+      PROBE_ROOT,
+      'a restricted workspace setting applied',
+    );
+    assert.strictEqual(cfg.get('tex.rootFile'), '');
   });
 
   test('the LaTeX preview does not compile and says why', async () => {
@@ -117,14 +127,25 @@ suite('MarkCopy in Restricted Mode', () => {
     assert.strictEqual(status.state, 'unavailable');
     assert.strictEqual(status.text, UNTRUSTED_TEXT);
 
-    // A manual Compile press is refused the same way, never started.
-    await vscode.commands.executeCommand('markcopy.recompileTex');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const after = await vscode.commands.executeCommand<TexStatus | undefined>(
-      'markcopy.tex.status',
-      uri,
+    // A manual Compile press is refused the same way, never started. The
+    // cached status above already says so, so require a newer post: only a run
+    // that reached the compile session can produce one. recompileTex acts on the
+    // focused LaTeX preview, so check that is the one in front.
+    const front = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    assert.ok(
+      front instanceof vscode.TabInputCustom && front.viewType === TEX_VIEW,
+      'the LaTeX preview is not the active editor',
     );
-    assert.strictEqual(after?.state, 'unavailable');
-    assert.strictEqual(after?.text, UNTRUSTED_TEXT);
+    const before = status.seq;
+    await vscode.commands.executeCommand('markcopy.recompileTex');
+    const after = await waitFor(async () => {
+      const next = await vscode.commands.executeCommand<TexStatus | undefined>(
+        'markcopy.tex.status',
+        uri,
+      );
+      return next && next.seq > before ? next : undefined;
+    });
+    assert.strictEqual(after.state, 'unavailable');
+    assert.strictEqual(after.text, UNTRUSTED_TEXT);
   });
 });

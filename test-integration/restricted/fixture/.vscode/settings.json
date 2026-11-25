@@ -1,4 +1,4 @@
 {
-  "markcopy.tex.compile": "auto",
-  "markcopy.theme": "dark"
+  "markcopy.theme": "dark",
+  "markcopy.tex.rootFile": "trust-probe/root.tex"
 }

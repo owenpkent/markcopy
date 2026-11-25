@@ -221,6 +221,8 @@ export function texPanelFor(uri: vscode.Uri): vscode.WebviewPanel | undefined {
 export interface TexStatus {
   state: 'compiling' | 'failed' | 'unavailable' | 'ok';
   text?: string;
+  /** Counts the posts of one preview, starting at 1, so a test can tell a new one from a cached one. */
+  seq: number;
 }
 
 /**
@@ -286,6 +288,7 @@ class CompileSession {
   private readonly snapshot = new PdfSnapshot();
   /** The last state posted to the webview. Read only, for `texStatusFor`. */
   lastStatus: TexStatus | undefined;
+  private statusSeq = 0;
 
   constructor(
     private readonly document: vscode.TextDocument,
@@ -531,7 +534,7 @@ class CompileSession {
     detail?: string;
     action?: string;
   }): void {
-    this.lastStatus = { state: msg.state, text: msg.text };
+    this.lastStatus = { state: msg.state, text: msg.text, seq: ++this.statusSeq };
     void this.webview.postMessage({ type: 'texState', ...msg });
   }
 }
