@@ -12,6 +12,7 @@ All notable changes to MarkCopy are documented here. The format follows [Keep a 
 
 ### Fixed
 
+- **ELF files with very large header tables are read correctly.** When a file has 65,535 or more program headers, the 16-bit count holds the marker `PN_XNUM` and the real count is kept in the first section header. That marker is now followed; before, it was read as a count of 65,535, so 256 headers that were not program headers were read. The first section header is trusted for this, and for the extended section count and name-table index, only when it is the reserved empty (`SHT_NULL`) entry; otherwise the page warns and uses neither. An AppImage's payload offset now counts the full length of an extended section table. Prompted by a review of Ghidra's ELF reader. Covered by unit tests that patch built files; no real file this large was checked.
 - **The LaTeX preview's Compile and Recompile buttons respond to a click.** In the default hand mode, pressing the button started a pan, which captured the pointer and moved the click off the button, so only the right-click Recompile worked. Found in a manual check of the trusted-workspace compile.
 - **LaTeX settings that do not affect the build no longer restart it.** Only `compile`, `engine`, `enginePath` and `rootFile` cancel and rerun a build.
 - **The remote image notice appears only for HTTPS images.** The setting does not allow `http:` images, so the prompt no longer offers it for them.

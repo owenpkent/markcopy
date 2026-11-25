@@ -398,6 +398,82 @@ describe('readElf: rejection and damage', () => {
     expect(info.warnings).toEqual([]);
   });
 
+  // The first section header of a 64-bit little-endian file, where the
+  // extended counts live: sh_type +4, sh_size +32, sh_link +40, sh_info +44.
+  const sectionZero = (bytes: Uint8Array): number =>
+    Number(new DataView(bytes.buffer).getBigUint64(FIELDS.wide.shoff, true));
+  const u16 = (bytes: Uint8Array, at: number): number =>
+    new DataView(bytes.buffer).getUint16(at, true);
+
+  it('takes the program header count from the first section header under PN_XNUM', async () => {
+    const bytes = rich();
+    const real = u16(bytes, FIELDS.wide.phnum);
+    poke(bytes, FIELDS.wide.phnum, 2, 0xffff);
+    poke(bytes, sectionZero(bytes) + 44, 4, real);
+    const info = await read(bytes);
+    expect(rowsOf(info, 'Binary')['Interpreter']).toBe(LD);
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('reads no program headers under PN_XNUM when the first section header holds no count', async () => {
+    const bytes = rich();
+    poke(bytes, FIELDS.wide.phnum, 2, 0xffff);
+    const info = await read(bytes);
+    expect(rowsOf(info, 'Binary')['Interpreter']).toBeUndefined();
+    expect(info.warnings.join(' ')).toContain('The program header count is too large');
+  });
+
+  it('takes the section count and name table index from a reserved first entry', async () => {
+    const bytes = rich();
+    const zero = sectionZero(bytes);
+    const total = u16(bytes, FIELDS.wide.shnum);
+    const names = u16(bytes, FIELDS.wide.shstrndx);
+    poke(bytes, FIELDS.wide.shnum, 2, 0);
+    poke(bytes, FIELDS.wide.shstrndx, 2, 0xffff);
+    poke(bytes, zero + 32, 8, total);
+    poke(bytes, zero + 40, 4, names);
+    const info = await read(bytes);
+    expect(tableOf(info, 'Sections').map((row) => row[0])).toEqual(
+      tableOf(await read(rich()), 'Sections').map((row) => row[0]),
+    );
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('does not take extended counts from a first section header that is not SHT_NULL', async () => {
+    const counted = rich();
+    poke(counted, FIELDS.wide.shnum, 2, 0);
+    poke(counted, sectionZero(counted) + 4, 4, 1); // SHT_PROGBITS
+    poke(counted, sectionZero(counted) + 32, 8, u16(rich(), FIELDS.wide.shnum));
+    const a = await read(counted);
+    expect(section(a, 'Sections')).toBeUndefined();
+    expect(a.warnings.join(' ')).toContain('it is not the reserved empty entry');
+
+    const named = rich();
+    poke(named, FIELDS.wide.shstrndx, 2, 0xffff);
+    poke(named, sectionZero(named) + 4, 4, 1);
+    poke(named, sectionZero(named) + 40, 4, u16(rich(), FIELDS.wide.shstrndx));
+    const b = await read(named);
+    expect(tableOf(b, 'Sections').some((row) => row[0] === '.comment')).toBe(false);
+    expect(b.warnings.join(' ')).toContain('it is not the reserved empty entry');
+  });
+
+  it('counts an extended section table when finding where an AppImage payload starts', async () => {
+    const payload = new Uint8Array(500);
+    payload.set(new TextEncoder().encode('hsqs'), 0);
+    const plain = buildElf({ appImage: 2, interp: LD, payload });
+    // The loadable segment stops short of the section table, so only the
+    // table's own length says where the ELF ends.
+    const shoff = sectionZero(plain);
+    poke(plain, segmentAt(plain, 1) + 32, 8, shoff); // PT_LOAD p_filesz
+    const expected = rowsOf(await read(plain), 'AppImage')['Payload offset'];
+    expect(expected).toBe((plain.length - 500).toLocaleString('en-US'));
+
+    const extended = plain.slice();
+    poke(extended, sectionZero(extended) + 32, 8, u16(extended, FIELDS.wide.shnum));
+    poke(extended, FIELDS.wide.shnum, 2, 0);
+    expect(rowsOf(await read(extended), 'AppImage')['Payload offset']).toBe(expected);
+  });
+
   it('never throws anything but PackageError when truncated', async () => {
     const variants = [
       buildElf({ ...library, interp: LD }),
