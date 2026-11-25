@@ -29,6 +29,14 @@ const MAX_STRING = 512;
 const MAX_NOTE_BYTES = 64 * 1024;
 const MAX_NOTES = 64;
 const MAX_NOTE_SEGMENTS = 16;
+// A property note lists a handful of properties (x86 has about five).
+const MAX_PROPERTIES = 64;
+const NT_GNU_PROPERTY_TYPE_0 = 5;
+const GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xc0000000;
+const GNU_PROPERTY_X86_FEATURE_1_AND = 0xc0000002;
+const EM_386 = 3;
+const EM_X86_64 = 62;
+const EM_AARCH64 = 183;
 const MAX_COMMENT_BYTES = 8 * 1024;
 const MAX_COMMENTS = 8;
 // Kernel modules store one key=value per NUL; alias lists can be long.
@@ -528,6 +536,41 @@ async function readDynamic(
   return out;
 }
 
+/**
+ * The hardening bits of a GNU property note (NT_GNU_PROPERTY_TYPE_0). Its
+ * descriptor is a list of properties: a type, a size, that many bytes of data,
+ * then padding to 8 bytes in a 64-bit file or 4 in a 32-bit one. The linker
+ * ANDs each feature word across every input, so a bit is set only when every
+ * object had it. Anything that does not fit the descriptor ends the walk.
+ */
+function readFeatureBits(
+  desc: Uint8Array,
+  le: boolean,
+  wide: boolean,
+  into: Map<number, number>,
+): void {
+  const v = new DataView(desc.buffer, desc.byteOffset, desc.byteLength);
+  const pad = wide ? 8 : 4;
+  let at = 0;
+  for (let i = 0; i < MAX_PROPERTIES && at + 8 <= desc.length; i++) {
+    const type = v.getUint32(at, le);
+    const size = v.getUint32(at + 4, le);
+    const dataStart = at + 8;
+    if (size > desc.length - dataStart) {
+      break;
+    }
+    if (
+      (type === GNU_PROPERTY_X86_FEATURE_1_AND || type === GNU_PROPERTY_AARCH64_FEATURE_1_AND) &&
+      size >= 4
+    ) {
+      if (!into.has(type)) {
+        into.set(type, v.getUint32(dataStart, le));
+      }
+    }
+    at = Math.ceil((dataStart + size) / pad) * pad;
+  }
+}
+
 function parseNotes(buf: Uint8Array, le: boolean, align: number): Note[] {
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const up = (n: number): number => Math.ceil(n / align) * align;
@@ -571,7 +614,9 @@ async function readNotes(
   } else {
     // Without program headers (an object file) the notes live in sections.
     for (const s of sections.filter((x) => x.type === SHT_NOTE).slice(0, MAX_NOTE_SEGMENTS)) {
-      places.push({ offset: s.offset, size: s.size, align: 4 });
+      // The property note is 8-aligned in a 64-bit file; other notes are 4.
+      const eight = h.wide && s.name === '.note.gnu.property';
+      places.push({ offset: s.offset, size: s.size, align: eight ? 8 : 4 });
     }
   }
   for (const p of places) {
@@ -675,8 +720,11 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   let buildId: string | undefined;
   let goBuildId: string | undefined;
   let minKernel: string | undefined;
+  const features = new Map<number, number>();
   for (const n of notes) {
-    if (n.name === 'GNU' && n.type === 3 && !buildId) {
+    if (n.name === 'GNU' && n.type === NT_GNU_PROPERTY_TYPE_0) {
+      readFeatureBits(n.desc, h.le, h.wide, features);
+    } else if (n.name === 'GNU' && n.type === 3 && !buildId) {
       buildId = hex(n.desc.subarray(0, 64));
     } else if (n.name === 'GNU' && n.type === 1 && n.desc.length >= 16 && !minKernel) {
       const d = new DataView(n.desc.buffer, n.desc.byteOffset, n.desc.byteLength);
@@ -828,6 +876,23 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     protections.push(['RELRO', hasRelro ? (dyn.bindNow ? 'Full' : 'Partial') : 'None']);
   }
   protections.push(['RPATH', dyn.rpath], ['RUNPATH', dyn.runpath]);
+  if (segments.length > 0 && h.type !== 1) {
+    // A missing note or bit reads as No: the linker drops a bit unless every
+    // input object had it.
+    const yes = (type: number, bit: number): string =>
+      ((features.get(type) ?? 0) & bit) !== 0 ? 'Yes' : 'No';
+    if (h.machine === EM_386 || h.machine === EM_X86_64) {
+      protections.push(
+        ['Indirect branch tracking (CET IBT)', yes(GNU_PROPERTY_X86_FEATURE_1_AND, 1)],
+        ['Shadow stack (CET SHSTK)', yes(GNU_PROPERTY_X86_FEATURE_1_AND, 2)],
+      );
+    } else if (h.machine === EM_AARCH64) {
+      protections.push(
+        ['Branch target identification (BTI)', yes(GNU_PROPERTY_AARCH64_FEATURE_1_AND, 1)],
+        ['Pointer authentication (PAC)', yes(GNU_PROPERTY_AARCH64_FEATURE_1_AND, 2)],
+      );
+    }
+  }
 
   const sectionRows = sections
     .slice(1)

@@ -48,6 +48,8 @@ export interface ElfSpec {
   /** [os, major, minor, patch] of the GNU ABI tag note. */
   abiTag?: [number, number, number, number];
   goBuildId?: string;
+  /** Properties of a GNU property note; `size` overrides the declared data size. */
+  properties?: { type: number; data: number[]; size?: number }[];
   sections?: SectionSpec[];
   /** Leave out program headers (an object file, a kernel module). */
   noProgramHeaders?: boolean;
@@ -154,6 +156,21 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
   }
   if (spec.goBuildId) {
     note('Go', 4, utf8(spec.goBuildId));
+  }
+  if (spec.properties) {
+    // NT_GNU_PROPERTY_TYPE_0: each property is a type, a size, the data, then
+    // padding to 8 bytes in a 64-bit file or 4 in a 32-bit one. The note
+    // starts on that same boundary.
+    const pad = wide ? 8 : 4;
+    const d = new Writer(le, wide);
+    for (const p of spec.properties) {
+      d.u32(p.type)
+        .u32(p.size ?? p.data.length)
+        .raw(p.data)
+        .pad(pad);
+    }
+    notes.pad(pad);
+    notes.u32(4).u32(d.length).u32(5).raw([0x47, 0x4e, 0x55, 0]).raw(d.out).pad(pad);
   }
 
   const segmentKinds: number[] = [];
@@ -308,7 +325,7 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
       case PT.NOTE:
         offset = noteOffset;
         size = notes.length;
-        align = 4;
+        align = spec.properties && wide ? 8 : 4;
         break;
       case PT.GNU_STACK:
         flags = spec.stack === 'exec' ? 7 : 6;
