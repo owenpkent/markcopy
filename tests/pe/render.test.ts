@@ -370,6 +370,16 @@ describe('renderPeHtml: caps the import rows it draws', () => {
   const many = (count: number) =>
     Array.from({ length: count }, (_, i) => ({ library: `lib${i}.dll`, functions: 1 }));
 
+  it('says a library’s functions were not counted rather than showing zero', async () => {
+    const info = await readPe(
+      bytesSource(buildPe({ delayImports: [{ library: 'WINHTTP.dll', functions: 2 }] })),
+    );
+    info.imports[0].functions = undefined;
+    const html = renderPeHtml(info, { fileName: 'tool.exe' });
+    expect(html).toContain('Not counted: the function list could not be read, loaded on first use');
+    expect(html).not.toContain('0 functions');
+  });
+
   it('draws every library of an ordinary program, with no note', async () => {
     const html = await render({ imports: many(40) });
     expect(html).toContain('<td>lib39.dll</td>');

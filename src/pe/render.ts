@@ -314,7 +314,11 @@ function importsSection(info: PeInfo): string {
     ['Library', 'Functions'],
     shown.map((entry) => [
       entry.library.slice(0, MAX_NAME_CHARS),
-      `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}${entry.delayLoaded ? ', loaded on first use' : ''}`,
+      `${
+        entry.functions === undefined
+          ? 'Not counted: the function list could not be read'
+          : `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}`
+      }${entry.delayLoaded ? ', loaded on first use' : ''}`,
     ]),
   );
   return info.imports.length > shown.length
