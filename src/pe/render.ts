@@ -348,14 +348,21 @@ function exportsSection(info: PeInfo): string {
     }
   }
   let html = `<p>${lead}</p>`;
+  const unread = exported.unreadNames ?? 0;
   if (exported.names.length > 0) {
     html += grid(
       ['Exported name'],
       exported.names.map((name) => [name.slice(0, MAX_NAME_CHARS)]),
     );
     if (exported.named > exported.names.length) {
-      html += `<p class="mc-exe-note">Showing the first ${number(exported.names.length)} of ${number(exported.named)} names.</p>`;
+      // With names skipped the list is not the table's first entries, so it
+      // does not say "the first".
+      const which = unread > 0 ? '' : 'the first ';
+      const why = unread > 0 ? ` ${number(unread)} could not be read.` : '';
+      html += `<p class="mc-exe-note">Showing ${which}${number(exported.names.length)} of ${number(exported.named)} names.${why}</p>`;
     }
+  } else if (unread > 0) {
+    html += `<p class="mc-exe-note">The exported names could not be read.</p>`;
   }
   return html;
 }
