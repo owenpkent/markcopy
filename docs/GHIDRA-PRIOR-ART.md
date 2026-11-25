@@ -72,9 +72,11 @@ In a few places MarkCopy does better:
 - **Export count.** Ghidra matches export names to functions with a nested loop
   (`ExportDataDirectory.java`), so the work is quadratic in the number of exports.
   MarkCopy counts in one pass.
-- **Resources.** Ghidra stops resource loops with a _static_ set of visited directory
-  offsets (`pe/resource/ResourceDirectory.java:64-68`). The set is not reset for each
-  file _(inferred)_, and there is no depth cap. MarkCopy walks a fixed three levels.
+- **Resources.** Ghidra stops resource loops with a set of visited directory offsets
+  (`pe/resource/ResourceDirectory.java:64-68`). The set is a static field, but the
+  `ResourceDataDirectory` constructor replaces it with a new one before each walk
+  (`pe/ResourceDataDirectory.java:175`), so files do not share it. There is no depth
+  cap. MarkCopy walks a fixed three levels.
 - **Strings.** Ghidra reads ASCII strings with no length cap. MarkCopy caps them.
 
 ### Defensive patterns worth copying
@@ -219,8 +221,12 @@ All in `elf/ElfHeader.java`:
   (`elf/info/GnuDebugAltLink.java`, `GnuDebugLink.java`). Both are cheap.
 - **Symbol versioning** (`GnuVerneed`, `GnuVerdef`) would show the minimum glibc
   version. It costs a section walk. Defer it.
-- **Rust.** Ghidra has no Rust detection. A `rustc` string in `.comment` is a cheap
-  signal MarkCopy could add on its own.
+- **Rust.** Ghidra detects Rust in ELF files
+  (`Ghidra/Features/Rust/.../sourcelanguage/ElfRustSourceLanguage.java`, `existsIn`).
+  It first looks for a `rustc version` string in `.comment`, and only then falls back
+  to searching `.rodata`. The first check is the cheap one MarkCopy could copy: it
+  already reads `.comment` for the Compiler row. The `.rodata` search costs more and
+  is not needed for a preview.
 
 ## Mach-O and universal (fat) binaries
 
@@ -276,8 +282,17 @@ Fat binaries and Java class files share the magic `0xCAFEBABE`, which
 
 ## Containers and installers
 
-Ghidra does not parse ar, deb, RPM, Alpine, OLE/CFB or MSI, so there is nothing to
+Ghidra does not parse deb, RPM, Alpine, OLE/CFB or MSI, so there is nothing to
 compare there.
+
+It does read ar archives, but only as COFF archives (static libraries).
+`Base/app/util/bin/format/coff/archive/CoffArchiveHeader.java` checks the `!<arch>`
+header and walks the member headers, including the long-name table, and
+`FF/coff/CoffArchiveFileSystem.java` lists only the members that are COFF objects.
+That is narrower than what [ar.ts](../src/pkg/ar.ts) does for a Debian package, which
+needs `debian-binary`, `control.tar.*` and `data.tar.*`. The header walk itself is
+the same, though, and the long-name table is something MarkCopy's reader does not need
+for a `.deb`, whose member names are short.
 
 For the formats it does open, it hands the work to a library or a subprocess:
 
@@ -319,12 +334,20 @@ Against that:
 
 ### Formats Ghidra reads and MarkCopy might add
 
-- **cpio (newc), inside RPM payloads.** MarkCopy shows the RPM headers but not the
-  file list.
+- **cpio (newc), inside RPM payloads.** MarkCopy already lists an RPM's files: the
+  Contents table is built from the header's directory and file-name tags
+  ([rpm.ts:764-825](../src/pkg/rpm.ts#L764-L825)), with no decompression. Reading the
+  payload would add something different: the members that are actually in the archive,
+  and whether they match what the header claims. Do that only if a mismatch check is
+  wanted.
   - A newc header is 110 ASCII bytes. MarkCopy already decompresses gzip, xz and zstd.
   - Take two choices from Ghidra: the 64 KiB symlink cap, and keeping a partial listing
     when the archive is truncated.
-  - Add the hard entry cap that Ghidra lacks.
+  - Ghidra's cpio reader is bounded by the shared 500,000-entry cap: each member goes
+    through `fsIndex.storeFile` or `storeSymlink` (`FF/cpio/CpioFileSystem.java:63-67`),
+    and the index throws past `MAX_FILEENTRY_COUNT`
+    (`Base/formats/gfilesystem/FileSystemIndexHelper.java:470`). MarkCopy would set a
+    much lower cap, in line with the 200,000 files `rpm.ts` already allows.
 - **Android DEX header summary**: format version, class and method counts, and
   multidex. A cheap addition to the APK preview.
 - **cab file listing.** The CFHEADER, CFFOLDER and CFFILE records need no LZX
@@ -472,8 +495,13 @@ Gaps:
 ### What to add, in order
 
 1. **Detect and label encryption.** This is cheap, and it changes no trust claims.
-   - Read the 0x9901 field. Show "AES-256 (AE-2)", or "ZipCrypto (legacy)" when
-     bit 0 is set and the method is not 99.
+   - Read the 0x9901 field. With it (method 99), show "AES-256 (AE-2)" and so on.
+   - Flag bit 6 means PKWARE Strong Encryption, which also sets bit 0 and can keep an
+     ordinary compression method (APPNOTE section 4.4.4). Its algorithm is in the
+     0x0017 extra field and the decryption header, so show it from there, or say
+     "encrypted, scheme undetermined" when that metadata is missing.
+   - Show "ZipCrypto (legacy)" only when bit 0 is set, bit 6 is clear and there is
+     no 0x9901 field.
    - Detect the OLE encryption streams.
    - Add a summary row, "Encrypted: N of M entries".
    - Never fail the whole preview because some entries are encrypted.
@@ -487,9 +515,13 @@ Gaps:
      `node:crypto` inside the worker. The image hash skips the checksum field, the
      certificate-table directory entry and the certificate table, and the reader
      already has those offsets.
-   - Report "matches the digest in the signature" or "does not match: the file
-     changed after signing".
-   - A match says only that the bytes are the ones the signature names. It says
+   - Name the algorithm and report "the computed SHA-256 matches the stored digest"
+     or "the computed SHA-256 differs from the stored digest". Do not give a cause
+     for a difference. A changed file is one cause, but a signature record written
+     with the wrong digest from the start is another, and with the signature itself
+     unverified MarkCopy cannot tell them apart. The same applies to RPM header
+     digests.
+   - A match says only that the bytes are the ones the stored digest names. It says
      nothing about who signed them or whether to trust them.
 
 ### What not to do
@@ -554,7 +586,8 @@ Robustness first, then the additions users would notice most:
 6. A Mach-O and fat header reader, with the caps and checks above. Decide how it is
    told apart from Java class files.
 7. PE load config and GuardFlags. GNU property bits (CET, BTI).
-8. A cpio listing for RPM payloads. A DEX summary for APKs.
+8. A DEX summary for APKs. A check of an RPM's payload members against its header's
+   file list, if that comparison is wanted (the header list is already shown).
 9. Encryption labels (zip AES strength, password-protected Office files), then
    certificate detail and the APK v2/v3 signer, then digest checks (see
    [Cryptography](#cryptography-encryption-passwords-and-signatures)).
