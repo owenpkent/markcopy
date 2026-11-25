@@ -46,7 +46,7 @@ Then open a Markdown or CSV file: its tab shows the rendered preview, and **Show
 
 Opening a file never runs it. Previews of other people's files (Word, PowerPoint, Excel, PDF, executables, packages) are read-only and need no Office install. An executable or a package is only read as bytes, never run or installed, and only when you ask: opening one shows its name and size and a **Read this file** button (the `markcopy.fileInfo.confirm` setting turns that off), and the reading happens in a worker with a memory and a time limit rather than in the extension host.
 
-Previews work in VS Code's Restricted Mode. Compiling LaTeX and the external media and PDF tools (ffmpeg, a Chromium browser) need a trusted workspace. Remote images are off by default, including in PDF exports, and the LaTeX preview asks before running your installed TeX engine in each new preview. See [Settings](docs/guide/settings.md#settings) and [SECURITY](.github/SECURITY.md).
+Previews work in VS Code's Restricted Mode. Compiling LaTeX and the external media and PDF tools (ffmpeg, a Chromium browser) need a trusted workspace. Remote images are off by default, including in PDF exports. By default the LaTeX preview asks before running your installed TeX engine in each new preview; setting `markcopy.tex.compile` to `auto` compiles without asking, and `off` never compiles. See [Settings](docs/guide/settings.md#settings) and [SECURITY](.github/SECURITY.md).
 
 ## Why rich copy matters
 
