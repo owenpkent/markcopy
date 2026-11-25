@@ -388,16 +388,23 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         const offset = s.raw + (rva - s.start);
         const end = s.raw + s.backed;
         return offset < reader.size
-          ? { offset, length: Math.min(end, reader.size) - offset, cut: end > reader.size }
+          ? {
+              offset,
+              length: Math.min(end, reader.size) - offset,
+              cut: end > reader.size,
+              zeroFill: s.extent - s.backed,
+            }
           : undefined;
       }
     }
-    // The headers are mapped at the image base, one to one.
+    // The headers are mapped at the image base, one to one. What the loader
+    // maps after them is not counted on here as zeros.
     return rva < sizeOfHeaders && rva < reader.size
       ? {
           offset: rva,
           length: Math.min(sizeOfHeaders, reader.size) - rva,
           cut: sizeOfHeaders > reader.size,
+          zeroFill: 0,
         }
       : undefined;
   };
@@ -753,20 +760,26 @@ async function findResource(
 }
 
 /** The file bytes behind an RVA, up to where the section's file data or the file ends. */
-interface Mapped {
+export interface Mapped {
   offset: number;
   length: number;
   /** The file ends before the section's file data does: the bytes past `length` are missing. */
   cut: boolean;
+  /** Bytes of the section after its file data that the loader fills with zeros. */
+  zeroFill: number;
 }
 
 /**
  * Count a NUL-terminated array of import thunks, 4 bytes each in PE32 and 8
- * in PE32+, within the bytes mapped at its start. Past the section's file data
- * the loader reads zeros, which end the array; past the end of a cut-off file
- * nothing is known, so the count is too.
+ * in PE32+, within the bytes mapped at its start. An array that runs to the end
+ * of those bytes ends there only when a whole zero entry is known to follow:
+ * the leftover file bytes are zero and the section's zero-filled tail makes up
+ * the rest. Otherwise (the file is cut off, or the section's data runs right
+ * up to its mapped end, where the next address may be another section's) the
+ * count is not known. Every entry looked at is charged to `budget`, including
+ * on the way out of a read error.
  */
-async function countThunks(
+export async function countThunks(
   reader: Reader,
   start: Mapped,
   plus: boolean,
@@ -777,29 +790,40 @@ async function countThunks(
   const most = Math.min(MAX_THUNKS, budget.left);
   const limit = Math.floor(start.length / width);
   let count = 0;
-  while (count < most) {
-    if (count >= limit) {
-      budget.left -= count;
-      return start.cut ? undefined : count;
-    }
-    const entries = Math.min(chunk, limit - count);
-    const view = await reader.view(start.offset + count * width, entries * width);
-    for (let i = 0; i < entries; i++) {
-      const zero = plus
-        ? view.getBigUint64(i * width, true) === 0n
-        : view.getUint32(i * width, true) === 0;
-      if (zero) {
-        budget.left -= count;
+  try {
+    while (count < most) {
+      if (count >= limit) {
+        if (start.cut) {
+          return undefined;
+        }
+        const tail = start.length - limit * width;
+        if (tail + start.zeroFill < width) {
+          return undefined;
+        }
+        if (tail > 0) {
+          const rest = await reader.bytes(start.offset + limit * width, tail);
+          if (rest.some((b) => b !== 0)) {
+            return undefined;
+          }
+        }
         return count;
       }
-      count++;
-      if (count >= most) {
-        break;
+      const entries = Math.min(chunk, limit - count, most - count);
+      const view = await reader.view(start.offset + count * width, entries * width);
+      for (let i = 0; i < entries; i++) {
+        const zero = plus
+          ? view.getBigUint64(i * width, true) === 0n
+          : view.getUint32(i * width, true) === 0;
+        if (zero) {
+          return count;
+        }
+        count++;
       }
     }
+    return count;
+  } finally {
+    budget.left -= count;
   }
-  budget.left -= count;
-  return count;
 }
 
 // One bad entry costs that entry, not the table: a library whose name points

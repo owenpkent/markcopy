@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../../src/pe';
 import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
+import { countThunks } from '../../src/pe/read';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
 
@@ -1072,6 +1073,58 @@ describe('readPe: damaged images', () => {
     expect(renderPeHtml(info, { fileName: 'core.dll' })).toContain(
       'The exported names could not be read.',
     );
+  });
+
+  it('counts a function list that ends at its section’s data only when zero fill follows', async () => {
+    // The second library's lookup table is pointed at .text: 0x200 bytes of
+    // code with no zero entry, then (at the default 0x1000 alignment) zero
+    // fill, which is the terminator the loader sees.
+    const retarget = (image: ReturnType<typeof layout>): void => {
+      const text = image.view.getUint32(image.header('.text') + 12, true);
+      image.view.setUint32(image.directory(1) + 20, text, true); // OriginalFirstThunk
+    };
+    const filled = await readPe(bytesSource(patched(buildPe(threeLibraries), retarget)));
+    expect(filled.imports[1]).toMatchObject({ library: 'USER32.dll', functions: 0x200 / 4 });
+
+    // With the section alignment brought down to the file alignment, .text's
+    // data runs right up to its mapped end and no zero entry is known to follow.
+    const flush = await readPe(
+      bytesSource(
+        patched(buildPe(threeLibraries), (image) => {
+          retarget(image);
+          image.view.setUint32(image.optional + 32, 0x200, true); // SectionAlignment
+        }),
+      ),
+    );
+    expect(flush.imports.map((i) => [i.library, i.functions])).toEqual([
+      ['KERNEL32.dll', 3],
+      ['USER32.dll', undefined],
+      ['ADVAPI32.dll', 1],
+    ]);
+  });
+
+  it('charges the thunk budget for entries read before a read error', async () => {
+    let calls = 0;
+    const failing = {
+      view: async (_offset: number, length: number): Promise<DataView> => {
+        calls++;
+        if (calls > 1) {
+          throw new Error('the disk could not be read');
+        }
+        return new DataView(new Uint8Array(length).fill(1).buffer);
+      },
+      bytes: async (): Promise<Uint8Array> => new Uint8Array(0),
+    };
+    const budget = { left: 10000 };
+    await expect(
+      countThunks(
+        failing as unknown as Parameters<typeof countThunks>[0],
+        { offset: 0, length: 4 * 2000, cut: false, zeroFill: 0x1000 },
+        false,
+        budget,
+      ),
+    ).rejects.toThrow('the disk could not be read');
+    expect(budget.left).toBe(10000 - 512);
   });
 
   it('stops the import walk where its section’s file data ends, without reading on', async () => {
