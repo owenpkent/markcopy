@@ -52,6 +52,7 @@ import { sweepProxyDir } from './videoProxy';
 import {
   disposeTexPreviews,
   TexEditorProvider,
+  texStatusFor,
   recompileActiveTex,
   texPanelFor,
 } from './texEditor';
@@ -394,6 +395,12 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
     }),
+
+    // What the LaTeX preview for a file last reported, for the integration
+    // tests. Read only and not contributed, so it is not in the palette.
+    vscode.commands.registerCommand('markcopy.tex.status', (uri?: vscode.Uri) =>
+      uri ? texStatusFor(uri) : undefined,
+    ),
 
     // Open the MarkCopy settings (also reachable from the preview's title-bar gear
     // and the in-preview right-click menu).
