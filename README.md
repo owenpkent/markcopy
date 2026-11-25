@@ -65,6 +65,7 @@ MarkCopy requires a trusted VS Code workspace. Remote images are off by default,
 
 - PlantUML support.
 - An "email-safe" export profile (table-based layout, fully inlined).
+- More static detail in the executable and package previews: entropy per section, import hash, Rich header, signature timestamps and warnings for odd layouts. See [the binary viewer prior art](docs/BINARY-VIEWER-PRIOR-ART.md).
 
 ## License
 
