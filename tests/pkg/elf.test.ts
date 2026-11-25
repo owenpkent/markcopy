@@ -457,6 +457,33 @@ describe('readElf: rejection and damage', () => {
     expect(b.warnings.join(' ')).toContain('it is not the reserved empty entry');
   });
 
+  it('names sections from an extended name-table index past the enumerated entries', async () => {
+    // Rebuild the section table at the end of the file with 0xff10 entries and
+    // the name table's header at 0xff05, where SHN_XINDEX is required: past
+    // the 4,096 entries the reader enumerates.
+    const base = rich();
+    const oldOff = sectionZero(base);
+    const oldCount = u16(base, FIELDS.wide.shnum);
+    const oldNames = u16(base, FIELDS.wide.shstrndx);
+    const total = 0xff10;
+    const nameIndex = 0xff05;
+    const tableAt = Math.ceil(base.length / 8) * 8;
+    const bytes = new Uint8Array(tableAt + total * 64);
+    bytes.set(base);
+    bytes.set(base.subarray(oldOff, oldOff + oldCount * 64), tableAt);
+    const namesHeader = oldOff + oldNames * 64;
+    bytes.set(base.subarray(namesHeader, namesHeader + 64), tableAt + nameIndex * 64);
+    poke(bytes, FIELDS.wide.shoff, 8, tableAt);
+    poke(bytes, FIELDS.wide.shnum, 2, 0);
+    poke(bytes, FIELDS.wide.shstrndx, 2, 0xffff);
+    poke(bytes, tableAt + 32, 8, total); // section 0 sh_size
+    poke(bytes, tableAt + 40, 4, nameIndex); // section 0 sh_link
+
+    const info = await read(bytes);
+    expect(tableOf(info, 'Sections').map((row) => row[0])).toContain('.comment');
+    expect(rowsOf(info, 'Binary')['Compiler']).toContain('GCC');
+  });
+
   it('counts an extended section table when finding where an AppImage payload starts', async () => {
     const payload = new Uint8Array(500);
     payload.set(new TextEncoder().encode('hsqs'), 0);
@@ -472,6 +499,16 @@ describe('readElf: rejection and damage', () => {
     poke(extended, sectionZero(extended) + 32, 8, u16(extended, FIELDS.wide.shnum));
     poke(extended, FIELDS.wide.shnum, 2, 0);
     expect(rowsOf(await read(extended), 'AppImage')['Payload offset']).toBe(expected);
+  });
+
+  it('does not take the headers of an AppImage cut off in its section table for a payload', async () => {
+    const plain = buildElf({ appImage: 2, interp: LD, payload: 'hsqs-image' });
+    const shoff = sectionZero(plain);
+    poke(plain, segmentAt(plain, 1) + 32, 8, shoff); // PT_LOAD p_filesz stops at the table
+    const cut = plain.slice(0, shoff + 64 + 10); // one entry and part of the next
+    const info = await read(cut);
+    expect(section(info, 'AppImage')).toBeUndefined();
+    expect(info.warnings).toContain('The AppImage payload could not be located.');
   });
 
   it('never throws anything but PackageError when truncated', async () => {

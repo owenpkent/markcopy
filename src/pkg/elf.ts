@@ -338,6 +338,8 @@ interface SectionTable {
   sections: Section[];
   /** Entries in the table, including the unused first one. */
   total: number;
+  /** Whether `total` is known: false when the table could not be read, or its extended count was not trusted. */
+  counted: boolean;
 }
 
 async function readSections(
@@ -346,7 +348,7 @@ async function readSections(
   warnings: string[],
 ): Promise<SectionTable> {
   if (h.shoff === 0) {
-    return { sections: [], total: 0 };
+    return { sections: [], total: 0, counted: true };
   }
   const entry = (i: number) => sectionHeader(reader, h, i);
   let total = h.shnum;
@@ -361,7 +363,7 @@ async function readSections(
         'The section headers point to the first one for their count or name table, but it is not the reserved empty entry, so neither was taken from it.',
       );
       if (total === 0) {
-        return { sections: [], total: 0 };
+        return { sections: [], total: 0, counted: false };
       }
       strIndex = 0;
     } else {
@@ -374,7 +376,7 @@ async function readSections(
     }
   }
   if (total === 0) {
-    return { sections: [], total: 0 };
+    return { sections: [], total: 0, counted: true };
   }
   const count = Math.min(total, MAX_SECTIONS);
   if (total > count) {
@@ -384,8 +386,18 @@ async function readSections(
   for (let i = 0; i < count; i++) {
     sections.push(await entry(i));
   }
-  if (strIndex > 0 && strIndex < sections.length) {
-    const str = sections[strIndex];
+  // The name table's header may lie past the entries enumerated above: an
+  // extended index is 0xff00 or more by definition, so that one header is
+  // fetched on its own rather than raising the enumeration cap.
+  let str: Section | undefined;
+  if (strIndex > 0 && strIndex < total) {
+    try {
+      str = strIndex < sections.length ? sections[strIndex] : await entry(strIndex);
+    } catch {
+      warnings.push('The section name table could not be read.');
+    }
+  }
+  if (str) {
     if (str.type !== SHT_NOBITS && str.offset < reader.size) {
       const names = await reader.upTo(str.offset, Math.min(str.size, MAX_STRTAB));
       for (const s of sections) {
@@ -393,7 +405,7 @@ async function readSections(
       }
     }
   }
-  return { sections, total };
+  return { sections, total, counted: true };
 }
 
 /** The file offset a virtual address maps to, through the loadable segments. */
@@ -620,6 +632,7 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   const table = await attempt('The section headers', () => readSections(reader, h, warnings), {
     sections: [],
     total: 0,
+    counted: false,
   } as SectionTable);
   const sections = table.sections;
   const dyn = await attempt(
@@ -732,10 +745,21 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     head[8] === 0x41 && head[9] === 0x49 && (head[10] === 1 || head[10] === 2) ? head[10] : 0;
   let appImage: InfoSection[] = [];
   if (appImageType) {
+    // The section header table ends the ELF part when it comes last. An
+    // ordinary count is in the file header and holds whether or not the table
+    // itself could be read, so a file cut off inside the table still shows as
+    // cut off. An extended count is known only from a first section header
+    // that was read and checked; without one the boundary is unknown.
     let end = 0;
-    // The table's real length, which an extended count keeps outside e_shnum.
-    if (h.shoff > 0 && table.total > 0) {
-      end = h.shoff + table.total * h.shentsize;
+    let bounded = true;
+    if (h.shoff > 0) {
+      if (h.shnum > 0) {
+        end = h.shoff + h.shnum * h.shentsize;
+      } else if (table.counted) {
+        end = h.shoff + table.total * h.shentsize;
+      } else {
+        bounded = false;
+      }
     }
     for (const s of segments) {
       end = Math.max(end, s.offset + s.filesz);
@@ -745,7 +769,7 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
         end = Math.max(end, s.offset + s.size);
       }
     }
-    if (Number.isSafeInteger(end) && end > 0 && end <= reader.size) {
+    if (bounded && Number.isSafeInteger(end) && end > 0 && end <= reader.size) {
       const payload = reader.size - end;
       const magic = payload >= 4 ? decode(await reader.bytes(end, 4)) : '';
       appImage = propertySection('AppImage', [
