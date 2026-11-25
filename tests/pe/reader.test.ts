@@ -3,7 +3,16 @@ import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../
 import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
 import { countThunks } from '../../src/pe/read';
 import { readVersionResource } from '../../src/pe/version';
-import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
+import { readRich, richTool, richToolset } from '../../src/pe/rich';
+import {
+  buildPe,
+  buildRichStub,
+  buildSignedData,
+  iconBitmap,
+  pngStub,
+  type PeSpec,
+  type RichSpec,
+} from './fixture';
 
 const read = (spec: PeSpec = {}, patch: (bytes: Uint8Array) => Uint8Array = (b) => b) =>
   readPe(bytesSource(patch(buildPe(spec))));
@@ -1386,5 +1395,212 @@ describe('readPe: reading is ranged and budgeted', () => {
       (err: unknown) => err,
     );
     expect(failure === undefined || failure instanceof PeError).toBe(true);
+  });
+});
+
+describe('long section names', () => {
+  // The table's first string sits at offset 4.
+  const names = ['.debug_info_long', '.eh_frame_hdr'];
+  const symbols = { count: 3, strings: names };
+  const sectionNames = ['/4', '/21'];
+  const nameAt = (text: string) => `/${4 + new TextEncoder().encode(text).length + 1}`;
+
+  it('resolves "/N" through the COFF string table', async () => {
+    const info = await read({ symbols, sectionNames: ['/4', nameAt(names[0])] });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual(names);
+  });
+
+  it('keeps "/N" when the offset is outside the table', async () => {
+    const info = await read({ symbols, sectionNames: ['/4', '/9999'] });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual([names[0], '/9999']);
+  });
+
+  it('keeps "/N" when the offset is inside the size field', async () => {
+    const info = await read({ symbols, sectionNames: ['/0', '/3'] });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual(['/0', '/3']);
+  });
+
+  it('keeps "/N" when the table says it ends before the offset', async () => {
+    const info = await read({ symbols: { ...symbols, tableSize: 4 }, sectionNames });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual(['/4', '/21']);
+  });
+
+  it('keeps "/N" when the string table lies beyond the end of the file', async () => {
+    const info = await read({ symbols: { ...symbols, pointer: 0x7fffff00 }, sectionNames });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual(['/4', '/21']);
+  });
+
+  it('leaves ordinary names and names that merely start with a slash alone', async () => {
+    const info = await read({ symbols, sectionNames: ['.text', '/abc'] });
+    expect(info.sections.slice(0, 2).map((s) => s.name)).toEqual(['.text', '/abc']);
+  });
+
+  it('cuts a name at the end of the table when it has no end of its own', async () => {
+    const info = await read({
+      symbols: { count: 0, strings: ['abcdef'], tableSize: 4 + 3 },
+      sectionNames: ['/4'],
+    });
+    expect(info.sections[0].name).toBe('abc');
+  });
+});
+
+describe('other loader flags', () => {
+  const flags: [bit: number, text: string][] = [
+    [0x0200, 'Ignores side-by-side manifests (NO_ISOLATION)'],
+    [0x0400, 'No structured exception handlers (NO_SEH)'],
+    [0x0800, 'Never bound (NO_BIND)'],
+    [0x2000, 'WDM driver (WDM_DRIVER)'],
+    [0x8000, 'Terminal Server aware (TERMINAL_SERVER_AWARE)'],
+  ];
+
+  it('lists none when no such bit is set', async () => {
+    expect((await read({ dllCharacteristics: 0x4160 })).loaderFlags).toEqual([]);
+  });
+
+  for (const [bit, text] of flags) {
+    it(`reports ${text} only when its bit is set`, async () => {
+      expect((await read({ dllCharacteristics: 0x140 | bit })).loaderFlags).toEqual([text]);
+      expect((await read({ dllCharacteristics: 0x140 })).loaderFlags).not.toContain(text);
+    });
+  }
+
+  it('lists several in a fixed order', async () => {
+    const info = await read({ dllCharacteristics: 0xa400 });
+    expect(info.loaderFlags).toEqual([flags[1][1], flags[3][1], flags[4][1]]);
+  });
+});
+
+describe('Rich header', () => {
+  const entries = [
+    { productId: 0x0102, build: 33808, count: 3 }, // VS 2022 linker
+    { productId: 0x0105, build: 29913, count: 41 }, // VS 2019 C++ compiler
+    { productId: 0x0091, build: 30729, count: 1 }, // VS 2008 linker
+    { productId: 0x0001, build: 0, count: 120 }, // imported symbols
+    { productId: 0x7777, build: 5, count: 2 }, // not a known id
+  ];
+  const stubOf = (spec: Partial<RichSpec> = {}) => buildRichStub({ entries, ...spec });
+  // A bare image prefix: the DOS header (zeros but for "MZ") then the stub.
+  const prefixed = (stub: Uint8Array) => {
+    const bytes = new Uint8Array(0x40 + stub.length);
+    bytes.set(stub, 0x40);
+    bytes[0] = 0x4d;
+    bytes[1] = 0x5a;
+    return bytes;
+  };
+
+  it('reads the tool, toolset, build and count of each entry', async () => {
+    const rich = (await read({ dosStub: stubOf() })).rich;
+    expect(rich?.checksumValid).toBe(true);
+    expect(rich?.entries).toEqual([
+      {
+        productId: 0x0102,
+        build: 33808,
+        count: 3,
+        tool: 'Linker',
+        toolset: 'Visual Studio 2022 or later',
+      },
+      {
+        productId: 0x0105,
+        build: 29913,
+        count: 41,
+        tool: 'C++ compiler',
+        toolset: 'Visual Studio 2019',
+      },
+      {
+        productId: 0x0091,
+        build: 30729,
+        count: 1,
+        tool: 'Linker',
+        toolset: 'Visual Studio 2008',
+      },
+      { productId: 1, build: 0, count: 120, tool: 'Imported symbols', toolset: '' },
+      { productId: 0x7777, build: 5, count: 2, tool: 'Unknown tool (0x7777)', toolset: '' },
+    ]);
+  });
+
+  it('still reads the rest of an image whose PE header was moved by the record', async () => {
+    const info = await read({ dosStub: stubOf() });
+    expect(info.sections.map((s) => s.name)).toEqual(['.text', '.rdata']);
+  });
+
+  it('reports a changed stub byte as a checksum mismatch', async () => {
+    const rich = (
+      await read({ dosStub: stubOf() }, (bytes) => {
+        bytes[0x50] ^= 0xff;
+        return bytes;
+      })
+    ).rich;
+    expect(rich?.checksumValid).toBe(false);
+    expect(rich?.entries).toHaveLength(5);
+  });
+
+  it('does not count e_lfanew in the checksum', () => {
+    const bytes = prefixed(stubOf());
+    bytes[0x3c] = 0xf0;
+    expect(readRich(bytes)?.checksumValid).toBe(true);
+  });
+
+  it('is absent from an image without one', async () => {
+    expect((await read()).rich).toBeUndefined();
+  });
+
+  it('is absent when there is no "DanS" start marker', async () => {
+    expect((await read({ dosStub: stubOf({ omitDans: true }) })).rich).toBeUndefined();
+  });
+
+  it('is absent when the entries are not whole pairs', async () => {
+    expect((await read({ dosStub: stubOf({ strayDword: true }) })).rich).toBeUndefined();
+  });
+
+  it('never throws on short or empty input', () => {
+    expect(readRich(new Uint8Array(0))).toBeUndefined();
+    expect(readRich(new Uint8Array(0x84))).toBeUndefined();
+    expect(readRich(Uint8Array.of(1, 2, 3))).toBeUndefined();
+  });
+
+  it('finds a long record, keeps 256 entries and checks the sum over all of them', () => {
+    const make = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ productId: 0x00dd, build: i, count: i }));
+    // 300 entries put "DanS" 600 dwords back from "Rich".
+    const rich = readRich(prefixed(buildRichStub({ entries: make(300) })));
+    expect(rich?.entries).toHaveLength(256);
+    expect(rich?.checksumValid).toBe(true);
+  });
+
+  it('is absent when the record lists no tools', () => {
+    expect(readRich(prefixed(buildRichStub({ entries: [] })))).toBeUndefined();
+  });
+
+  describe('naming', () => {
+    it('names the 18 tools of a block by position, and the toolset by block', () => {
+      expect(richTool(0x00b5)).toBe('Alias object');
+      expect(richToolset(0x00b5, 1)).toBe('Visual Studio 2010');
+      expect(richTool(0x00c7 + 8)).toBe('C++ compiler');
+      expect(richToolset(0x00c7 + 8, 1)).toBe('Visual Studio 2012');
+      expect(richToolset(0x00d9, 1)).toBe('Visual Studio 2013');
+      expect(richToolset(0x00eb, 1)).toBe('Visual Studio 2013');
+      expect(richTool(0x010e)).toBe('C++ compiler (profile-guided, optimised)');
+    });
+
+    it("takes the newest block's toolset from the build number", () => {
+      expect(richToolset(0x00fd, 24999)).toBe('Visual Studio 2015');
+      expect(richToolset(0x00fd, 25000)).toBe('Visual Studio 2017');
+      expect(richToolset(0x00fd, 27499)).toBe('Visual Studio 2017');
+      expect(richToolset(0x00fd, 27500)).toBe('Visual Studio 2019');
+      expect(richToolset(0x00fd, 30699)).toBe('Visual Studio 2019');
+      expect(richToolset(0x00fd, 30700)).toBe('Visual Studio 2022 or later');
+    });
+
+    it('names the older ids and falls back for the rest', () => {
+      expect(richTool(0x009d)).toBe('Linker');
+      expect(richToolset(0x009d, 0)).toBe('Visual Studio 2010');
+      expect(richToolset(0x006d, 0)).toBe('Visual Studio 2005');
+      expect(richToolset(0x000f, 0)).toBe('Visual Studio .NET 2003');
+      expect(richTool(0x0050)).toBe('Unknown tool (0x0050)');
+      expect(richToolset(0x0050, 0)).toBe('Older Visual Studio');
+      expect(richTool(0x010f)).toBe('Unknown tool (0x010F)');
+      expect(richToolset(0x010f, 0)).toBe('');
+      expect(richTool(0)).toBe('Unmarked objects');
+    });
   });
 });

@@ -13,8 +13,8 @@
 
 const SECTION_ALIGN = 0x1000;
 const FILE_ALIGN = 0x200;
-const HEADERS = 0x200;
-const PE_OFFSET = 0x80;
+const MIN_HEADERS = 0x200;
+const MIN_PE_OFFSET = 0x80;
 
 const alignTo = (n: number, to: number): number => Math.ceil(n / to) * to;
 
@@ -609,6 +609,20 @@ export interface PeSpec {
   overlay?: Uint8Array | number;
   /** Overrides the NumberOfSections field without adding sections. */
   declaredSections?: number;
+  /**
+   * Bytes placed at offset 0x40, between the DOS header and the PE header, such
+   * as a Rich header. The PE header moves to the next 8-byte boundary after them.
+   */
+  dosStub?: Uint8Array;
+  /** Replaces the names of the first sections, in order. A name over 8 bytes is cut to 8. */
+  sectionNames?: string[];
+  /**
+   * A COFF symbol table of `count` empty 18-byte records, followed by a string
+   * table holding `strings` one after another (the first at offset 4), placed
+   * after everything else in the file. `pointer` and `tableSize` override what
+   * the header and the table say, to point them wrong on purpose.
+   */
+  symbols?: { count?: number; strings: string[]; pointer?: number; tableSize?: number };
   /** Rewrites data directory entries after the image is built, to point where the test wants. */
   directories?: Record<number, { address: number; size: number }>;
 }
@@ -620,6 +634,12 @@ interface Piece {
 
 export function buildPe(spec: PeSpec = {}): Uint8Array {
   const plus = spec.plus ?? false;
+  const PE_OFFSET = Math.max(MIN_PE_OFFSET, alignTo(0x40 + (spec.dosStub?.length ?? 0), 8));
+  // Room for the PE header, the optional header and up to four section headers.
+  const HEADERS = Math.max(
+    MIN_HEADERS,
+    alignTo(PE_OFFSET + 24 + (plus ? 112 : 96) + 16 * 8 + 4 * 40, FILE_ALIGN),
+  );
   const dirs: Piece[] = Array.from({ length: 16 }, () => ({ rva: 0, size: 0 }));
 
   // .text
@@ -863,6 +883,20 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     dirs[Number(index)] = { rva: dir.address, size: dir.size };
   }
 
+  let symbolBytes = new Uint8Array(0);
+  let symbolAt = 0;
+  if (spec.symbols) {
+    symbolAt = alignTo(certAt + certBytes.length, 4);
+    const strings = new Bytes();
+    for (const text of spec.symbols.strings) {
+      strings.cstr(text);
+    }
+    symbolBytes = new Bytes()
+      .zeros((spec.symbols.count ?? 0) * 18)
+      .u32(spec.symbols.tableSize ?? 4 + strings.length)
+      .raw(strings.bytes())
+      .bytes();
+  }
   // Headers.
   const sections: {
     name: string;
@@ -941,6 +975,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
 
   const head = new Bytes();
   head.raw(ascii('MZ')).zeros(0x3a).u32(PE_OFFSET); // e_lfanew at 0x3C
+  head.raw(spec.dosStub ?? []);
   head.zeros(PE_OFFSET - head.length);
   head.raw(ascii('PE')).u16(0);
   let characteristics = 0x0002 | (plus ? 0 : 0x0100); // EXECUTABLE_IMAGE, 32BIT_MACHINE
@@ -954,14 +989,14 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     .u16(spec.machine ?? (plus ? 0x8664 : 0x014c))
     .u16(spec.declaredSections ?? sections.length)
     .u32(spec.timestamp ?? 1700000000)
-    .u32(0) // PointerToSymbolTable
-    .u32(0) // NumberOfSymbols
+    .u32(spec.symbols ? (spec.symbols.pointer ?? symbolAt) : 0) // PointerToSymbolTable
+    .u32(spec.symbols?.count ?? 0) // NumberOfSymbols
     .u16(optionalSize)
     .u16(characteristics);
   head.raw(new Uint8Array(opt.buffer));
-  for (const s of sections) {
+  for (const [index, s] of sections.entries()) {
     const nameBytes = new Uint8Array(8);
-    nameBytes.set(ascii(s.name));
+    nameBytes.set(ascii(spec.sectionNames?.[index] ?? s.name).subarray(0, 8));
     head
       .raw(nameBytes)
       .u32(s.vsize)
@@ -976,7 +1011,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   }
   head.zeros(HEADERS - head.length);
 
-  const total = certAt + certBytes.length;
+  const total = symbolAt + symbolBytes.length || certAt + certBytes.length;
   const file = new Uint8Array(total);
   file.set(head.bytes(), 0);
   file.set(text, TEXT_RAW);
@@ -984,5 +1019,58 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   file.set(rsrcBytes, RSRC_RAW);
   file.set(overlay, sectionsEnd);
   file.set(certBytes, certAt);
+  file.set(symbolBytes, symbolAt);
   return file;
+}
+
+// ---- Rich header -----------------------------------------------------------
+
+export interface RichSpec {
+  entries: { productId: number; build: number; count: number }[];
+  /** Leave out the "DanS" start marker, so the record cannot be found. */
+  omitDans?: boolean;
+  /** An extra dword before the entries, so they are not a whole number of pairs. */
+  strayDword?: boolean;
+}
+
+const rol32 = (value: number, bits: number): number =>
+  ((value << bits) | (value >>> (32 - bits))) >>> 0;
+
+/**
+ * What goes at offset 0x40 to give an image a Rich header with a correct
+ * checksum: 0x40 bytes of filler (the rest of the DOS stub), then the record
+ * from 0x80, XOR-encoded with the checksum as the linker does. Written from the
+ * published description of the format, not from src/pe/rich.ts.
+ */
+export function buildRichStub(spec: RichSpec): Uint8Array {
+  const dansAt = 0x80;
+  // Bytes 0..0x3F of the image are "MZ" and zeros; e_lfanew (0x3C) is not summed.
+  const prefix = new Uint8Array(dansAt);
+  prefix[0] = 0x4d;
+  prefix[1] = 0x5a;
+  for (let i = 0x40; i < dansAt; i++) {
+    prefix[i] = (i * 7 + 3) & 0xff;
+  }
+  let key = dansAt;
+  for (let i = 0; i < dansAt; i++) {
+    if (i < 0x3c || i > 0x3f) {
+      key = (key + rol32(prefix[i], i % 32)) >>> 0;
+    }
+  }
+  const compIds = spec.entries.map((e) => ((e.productId << 16) | e.build) >>> 0);
+  spec.entries.forEach((e, i) => {
+    key = (key + rol32(compIds[i], e.count % 32)) >>> 0;
+  });
+  const out = new Bytes().raw(prefix.subarray(0x40));
+  const encode = (value: number): Bytes => out.u32((value ^ key) >>> 0);
+  encode(spec.omitDans ? 0x11111111 : 0x536e6144); // "DanS"
+  encode(0).u32(key).u32(key); // the padding, as the linker writes it: all three are zero before XOR
+  if (spec.strayDword) {
+    encode(0x12345678);
+  }
+  spec.entries.forEach((e, i) => {
+    encode(compIds[i]);
+    encode(e.count);
+  });
+  return out.u32(0x68636952).u32(key).bytes(); // "Rich", then the key
 }
