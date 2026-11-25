@@ -14,6 +14,7 @@ import { readAlpineApk } from './alpine';
 import { readDeb } from './deb';
 import { looksLikeDmg, readDmg } from './dmg';
 import { readElf } from './elf';
+import { looksLikeMachO, readMachO } from './macho';
 import type { InfoSection, PackageInfo } from './model';
 import { readMsi } from './msi';
 import { readRpm } from './rpm';
@@ -137,6 +138,11 @@ async function identify(source: ByteSource, fileName: string): Promise<PackageIn
 
   if (bytes(0x7f, 0x45, 0x4c, 0x46)) {
     return readElf(reader);
+  }
+  // 0xcafebabe starts a universal binary and a Java class file alike, so a
+  // fat header is believed only when its table holds up.
+  if (await looksLikeMachO(reader)) {
+    return readMachO(reader);
   }
   if (bytes(0xed, 0xab, 0xee, 0xdb)) {
     return readRpm(reader);

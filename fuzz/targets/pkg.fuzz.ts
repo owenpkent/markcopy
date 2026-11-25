@@ -42,6 +42,7 @@ export const SHAPES: Shape[] = [
   { name: 'fuzz.jar', format: 'zip', magic: [0x50, 0x4b, 0x05, 0x06] },
   // Alpine packages are gzip, which the dispatcher only trusts by name.
   { name: 'fuzz.apk', format: 'alpine', magic: [0x1f, 0x8b, 0x08] },
+  { name: 'fuzz.dylib', format: 'macho', magic: [0xcf, 0xfa, 0xed, 0xfe] },
   { name: 'fuzz.dmg', format: 'dmg', trailer: true },
 ];
 

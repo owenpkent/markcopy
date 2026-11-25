@@ -463,6 +463,12 @@
             "filenamePattern": "*.KO"
           },
           {
+            "filenamePattern": "*.dylib"
+          },
+          {
+            "filenamePattern": "*.DYLIB"
+          },
+          {
             "filenamePattern": "*.so.*"
           },
           {
