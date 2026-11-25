@@ -1,7 +1,7 @@
 {
   "name": "markcopy",
   "displayName": "MarkCopy: Rich Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, Video, GIF & Image Preview",
-  "description": "One-stop Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, STL, video, GIF, and image (PNG, JPEG, WebP, SVG) preview with in-place editing and right-click copy: rich text, per-element, Markdown, CSV/TSV, PNG.",
+  "description": "Open any file in VS Code as the real thing: Markdown, CSV, Excel, Word, PowerPoint, PDF, LaTeX, image, GIF, video, audio and 3D previews, plus read-only info pages for executables and installers that never run them. Edit in place, add review notes, and right-click copy as rich text, Markdown, CSV/TSV or PNG.",
   "version": "1.8.0",
   "publisher": "OwenPKent",
   "license": "MIT",
@@ -94,7 +94,13 @@
     "rich text",
     "clipboard",
     "html",
-    "mermaid"
+    "mermaid",
+    "file viewer",
+    "audio player",
+    "exe viewer",
+    "installer",
+    "deb",
+    "msi"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
