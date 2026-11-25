@@ -174,7 +174,7 @@ Needs the [one-time setup](#one-time-setup-automated-release-github-actions) don
    gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy
    ```
 3. Run the packaged-extension smoke check from [step 7](#manual-fallback) on that file: install it into a throwaway profile, open a Markdown file, a CSV, and a PDF with the same flags, and confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. If anything is wrong, do not approve: reject the deployment and fix forward with a new version.
-4. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; if one fails, see [One registry failed](#one-registry-failed).
+4. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; if one fails, see [A registry publish failed](#a-registry-publish-failed).
 5. Verify both registries:
    ```bash
    npx vsce show OwenPKent.markcopy
@@ -183,20 +183,21 @@ Needs the [one-time setup](#one-time-setup-automated-release-github-actions) don
    Registry lag and a flapping version are normal for a few minutes; see [Troubleshooting Phase 2](#troubleshooting-phase-2).
 6. Step 13 below (the security advisory) still applies after both registries show the version.
 
-#### One registry failed
+#### A registry publish failed
 
-If one registry accepted the version and the other did not, do not use the manual fallback's packaging step: it rebuilds a different file and publishes again to the registry that already succeeded.
+This covers one registry failing or both. What decides the path is whether the GitHub Release already holds the attested `.vsix`. If it does, publish that file and nothing else. Never package again for a version whose release already exists: a local build is different bytes from the attested ones, even at the same commit.
 
-1. On the workflow run page, click **Re-run failed jobs**. It reuses the same artifact, so the same bytes go out.
-2. If that cannot work (for example the trusted publisher was refused again), download the file from the existing GitHub Release into a clean directory and verify it as in step 2 above (`sha256sum --check` and `gh attestation verify`).
-3. Publish those exact bytes only to the registry that failed. For the Marketplace: `npx vsce publish --packagePath markcopy-<version>.vsix -p <PAT>`. For Open VSX: `npx ovsx publish markcopy-<version>.vsix -p <token>`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route.
-4. Verify both registries as in step 5 above.
+1. On the workflow run page, click **Re-run failed jobs**. It reuses the same artifact, so the same bytes go out, and it re-runs only the registries that failed.
+2. If that cannot work (for example the trusted publisher was refused again), download the file from the existing GitHub Release once, into a clean directory, and verify it as in step 2 above (`sha256sum --check` and `gh attestation verify`).
+3. Load the tokens as in [Publishing secrets](#publishing-secrets-env), so neither command carries a credential on its command line or in shell history. Both CLIs read them from the environment (`VSCE_PAT`, `OVSX_PAT`).
+4. Publish that verified file to each registry still missing the version, and only those. For the Marketplace: `npx vsce publish --packagePath markcopy-<version>.vsix`. For Open VSX: `npx ovsx publish markcopy-<version>.vsix`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route.
+5. Verify both registries as in step 5 above.
 
-The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists. Use [One registry failed](#one-registry-failed) to publish that same `.vsix` by hand.
+The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists, so follow [A registry publish failed](#a-registry-publish-failed) to publish that same `.vsix` by hand.
 
 #### Manual fallback
 
-These are the steps used up to 1.8.0 and the fallback if the workflow publish fails. Skip step 11 if the workflow already made the GitHub Release.
+These are the steps used up to 1.8.0. Use them only for a release that has no built artifact, for example if the workflow's build job itself failed. If the GitHub Release exists, use [A registry publish failed](#a-registry-publish-failed) instead.
 
 7. Package and smoke-test:
 
