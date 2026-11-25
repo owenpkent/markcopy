@@ -3,7 +3,7 @@ import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../
 import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
-import { inlineBlock, pointerBlock, SAMPLE_LINES } from '../binary/goFixture';
+import { concat, inlineBlock, MAGIC, pointerBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 const read = (spec: PeSpec = {}, patch: (bytes: Uint8Array) => Uint8Array = (b) => b) =>
   readPe(bytesSource(patch(buildPe(spec))));
@@ -1077,6 +1077,46 @@ describe('readPe: Go build information', () => {
     });
     expect(moved.go).toBeUndefined();
     expect(moved.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  it('finds the data section by its characteristics when it is not named .data', async () => {
+    const data = inlineBlock({ info: SAMPLE_LINES });
+    // Initialized data, read, write; the alignment bits do not matter.
+    for (const dataFlags of [0xc0000040, 0xc0600040]) {
+      const info = await read({ plus: true, data, dataName: '.mydata', dataFlags });
+      expect(info.warnings).toEqual([]);
+      expect(info.go?.goVersion).toBe('go1.22.1');
+    }
+    // Read-only data, or writable data that is not initialized, is not Go's data section.
+    for (const dataFlags of [0x40000040, 0xc0000080, 0xc0000060]) {
+      const info = await read({ plus: true, data, dataName: '.mydata', dataFlags });
+      expect(info.go).toBeUndefined();
+    }
+  });
+
+  it('aligns the search by virtual address, so an image base off a boundary shifts it', async () => {
+    const data = concat(new Uint8Array(8).fill(7), inlineBlock());
+    const shifted = await read({ plus: true, imageBase: 0x140000008n, data });
+    expect(shifted.go?.goVersion).toBe('go1.22.1');
+    expect((await read({ plus: true, data })).go).toBeUndefined();
+  });
+
+  it('refuses a string header that starts at the end of the section and ends in the overlay', async () => {
+    const data = (rva: number): Uint8Array => {
+      const out = new Uint8Array(512);
+      const view = new DataView(out.buffer);
+      out.set(MAGIC, 0);
+      out[14] = 8;
+      view.setBigUint64(16, BigInt(BASE_64 + rva + 504), true);
+      view.setBigUint64(504, BigInt(BASE_64 + rva + 100), true);
+      out.set(new TextEncoder().encode('go1.16.5'), 100);
+      return out;
+    };
+    // Bytes after the last section: the length the header would read.
+    const overlay = Uint8Array.from([8, 0, 0, 0, 0, 0, 0, 0]);
+    const info = await read({ plus: true, data, overlay });
+    expect(info.go).toBeUndefined();
+    expect(info.warnings).toEqual(['The Go build information could not be read.']);
   });
 
   it('is absent from an image with no .data section or no header in it', async () => {

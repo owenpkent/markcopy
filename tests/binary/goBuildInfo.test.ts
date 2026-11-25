@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   findHeader,
+  goUnquote,
   GO_MODULE_ROWS,
+  type MappedAddress,
   goModuleRows,
   goProperties,
   parseModinfo,
@@ -28,8 +30,10 @@ const reader = (bytes: Uint8Array): RangeReader => new RangeReader(bytesSource(b
 /** Addresses are file offsets plus 0x1000, and only the first `size` bytes are mapped. */
 const mapper =
   (size: number) =>
-  (address: bigint): number | undefined =>
-    address >= 0x1000n && address < BigInt(0x1000 + size) ? Number(address - 0x1000n) : undefined;
+  (address: bigint): MappedAddress | undefined =>
+    address >= 0x1000n && address < BigInt(0x1000 + size)
+      ? { offset: Number(address - 0x1000n), available: size - Number(address - 0x1000n) }
+      : undefined;
 const bytesOf = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 describe('uvarint', () => {
@@ -178,6 +182,20 @@ describe('findHeader', () => {
     expect(findHeader(at(40))).toBeUndefined();
     expect(findHeader(new Uint8Array(10))).toBeUndefined();
   });
+
+  it('aligns by virtual address, not by offset in the region', () => {
+    const at = (offset: number): Uint8Array => {
+      const bytes = new Uint8Array(128);
+      bytes.set(MAGIC, offset);
+      return bytes;
+    };
+    // A region that starts 8 bytes past a 16-byte boundary: offset 8 is aligned.
+    expect(findHeader(at(8), 0x1008)).toBe(8);
+    expect(findHeader(at(8), 0x1008n)).toBe(8);
+    expect(findHeader(at(16), 0x1008)).toBeUndefined();
+    expect(findHeader(at(24), 0x1008)).toBe(24);
+    expect(findHeader(at(8), 0)).toBeUndefined();
+  });
 });
 
 describe('readGoBuildInfo: inline strings', () => {
@@ -310,5 +328,172 @@ describe('rows', () => {
       ['golang.org/x/sys', 'v0.15.0, replaced by example.com/fork-sys v0.15.1'],
     ]);
     expect(GO_MODULE_ROWS).toBe(200);
+  });
+});
+
+describe('readGoBuildInfo: the region bounds an inline read', () => {
+  const block = inlineBlock({ info: SAMPLE_LINES });
+  /** The block, then 4 KiB of other data that looks like more of it. */
+  const file = concat(block, new Uint8Array(4096).fill(0x41));
+  const read = (size: number) =>
+    readGoBuildInfo(reader(file), { offset: 0, size }, mapper(file.length));
+  const versionEnd = 32 + 1 + 'go1.22.1'.length;
+
+  it('reads a region that holds the whole block', async () => {
+    expect((await read(block.length))?.depTotal).toBe(2);
+  });
+
+  it('refuses a header, length prefix, version or module text that crosses the end', async () => {
+    // Inside the header, the version prefix, the version, the module prefix and the module text.
+    for (const size of [31, 32, 33, versionEnd - 1, versionEnd + 1, block.length - 1]) {
+      await expect(read(size)).rejects.toThrow();
+    }
+  });
+
+  it('still accepts a region that ends right after the version', async () => {
+    const info = await read(versionEnd);
+    expect(info?.goVersion).toBe('go1.22.1');
+    expect(info?.deps).toEqual([]);
+  });
+});
+
+describe('readGoBuildInfo: the search is aligned by virtual address', () => {
+  it('finds a block 8 bytes into a region whose address is 8 past a boundary', async () => {
+    const bytes = concat(new Uint8Array(8).fill(7), inlineBlock());
+    const region = { offset: 0, size: bytes.length, vaddr: 0x1008 };
+    expect((await readGoBuildInfo(reader(bytes), region, mapper(bytes.length)))?.goVersion).toBe(
+      'go1.22.1',
+    );
+    const aligned = { ...region, vaddr: 0x1000 };
+    expect(await readGoBuildInfo(reader(bytes), aligned, mapper(bytes.length))).toBeUndefined();
+  });
+});
+
+describe('readGoBuildInfo: pointers stay inside the segment they start in', () => {
+  // Segment A: file bytes 0..100 at 0x1000. Segment B: file bytes 100..300 at 0x9000.
+  // They are physically adjacent but their addresses are not.
+  const segments = [
+    { vaddr: 0x1000, offset: 0, size: 100 },
+    { vaddr: 0x9000, offset: 100, size: 200 },
+  ];
+  const map = (address: bigint): MappedAddress | undefined => {
+    for (const s of segments) {
+      const at = Number(address) - s.vaddr;
+      if (address >= BigInt(s.vaddr) && at < s.size) {
+        return { offset: s.offset + at, available: s.size - at };
+      }
+    }
+    return undefined;
+  };
+  const build = (headerAt: number, dataAddress: number): Uint8Array => {
+    const bytes = new Uint8Array(300);
+    const view = new DataView(bytes.buffer);
+    bytes.set(MAGIC, 0);
+    bytes[14] = 8;
+    view.setBigUint64(16, BigInt(0x1000 + headerAt), true);
+    view.setBigUint64(headerAt, BigInt(dataAddress), true);
+    view.setBigUint64(headerAt + 8, 8n, true);
+    bytes.set(
+      bytesOf('go1.16.5'),
+      dataAddress >= 0x9000 ? 100 + dataAddress - 0x9000 : dataAddress - 0x1000,
+    );
+    return bytes;
+  };
+  const read = (bytes: Uint8Array) =>
+    readGoBuildInfo(reader(bytes), { offset: 0, size: 100, vaddr: 0x1000 }, map);
+
+  it('reads strings that lie wholly inside a segment', async () => {
+    expect((await read(build(48, 0x9000 + 10)))?.goVersion).toBe('go1.16.5');
+  });
+
+  it('refuses a string header that starts near the end of a segment', async () => {
+    // 8 bytes left in segment A, 16 needed: the rest would be read from the next segment's bytes.
+    const bytes = build(92, 0x9000 + 10);
+    await expect(read(bytes)).rejects.toThrow();
+  });
+
+  it('refuses a payload that runs off the end of its segment', async () => {
+    await expect(read(build(48, 0x1000 + 96))).rejects.toThrow();
+  });
+});
+
+describe('goUnquote', () => {
+  it('reads the escapes strconv.Unquote reads', () => {
+    expect(goUnquote('"a\\tb"')).toBe('a\tb');
+    expect(goUnquote('"\\a\\b\\f\\n\\r\\v\\\\\\""')).toBe('\x07\b\f\n\r\v\\"');
+    expect(goUnquote('"\\x41\\101\\u00e9\\U0001F600"')).toBe('AA\u00e9\u{1F600}');
+    expect(goUnquote('"\\xc3\\xa9"')).toBe('\u00e9');
+    expect(goUnquote('`raw\\n`')).toBe('raw\\n');
+  });
+
+  it('refuses what Go refuses', () => {
+    for (const bad of [
+      '"\\q"',
+      '"\\\'"',
+      '"\\x4"',
+      '"\\400"',
+      '"\\u12"',
+      '"\\ud800"',
+      '"\\U00110000"',
+      '"a"b"',
+      '"a',
+      'a',
+      '"a\nb"',
+    ]) {
+      expect(goUnquote(bad)).toBeUndefined();
+    }
+  });
+});
+
+describe('parseModinfo: quoted build settings', () => {
+  const settings = (...lines: string[]) =>
+    parseModinfo(modinfo(lines.map((l) => `build\t${l}`))).settings;
+
+  it('unquotes an escaped tab, and keeps an escaped backslash', () => {
+    // The tab is shown as a space, so the two flags it separates stay apart.
+    expect(settings('-ldflags="-s\\t-w"')).toEqual([['-ldflags', '-s -w']]);
+    expect(settings('-ldflags="a\\nb"')).toEqual([['-ldflags', 'a b']]);
+    expect(settings('-ldflags="C:\\\\dir\\\\x"')).toEqual([['-ldflags', 'C:\\dir\\x']]);
+    expect(settings('k="\\x41\\u00e9"')).toEqual([['k', 'A\u00e9']]);
+  });
+
+  it('unquotes keys and back-quoted values the way Go does', () => {
+    expect(settings('"k\\x41y"=v')).toEqual([['kAy', 'v']]);
+    expect(settings('`odd key`=`raw\\n`')).toEqual([['odd key', 'raw\\n']]);
+  });
+
+  it('keeps a value that does not unquote as written, and skips lines Go rejects', () => {
+    expect(settings('k="bad\\q"')).toEqual([['k', '"bad\\q"']]);
+    expect(settings('=v', '"k"v', '"k')).toEqual([]);
+    expect(settings('k=')).toEqual([['k', '']]);
+  });
+});
+
+describe('readGoBuildInfo: module text framing', () => {
+  const read = (info: Uint8Array) => {
+    const bytes = inlineBlock({ info });
+    return readGoBuildInfo(reader(bytes), { offset: 0, size: bytes.length }, mapper(bytes.length));
+  };
+  const DAMAGED = "The Go module list's framing is damaged, so it is not shown.";
+
+  it('drops module text that lacks the sentinel framing and warns', async () => {
+    // Too short, then long enough but with no newline before the end sentinel.
+    for (const info of [bytesOf('mod\tx\tv1\n'), bytesOf('mod\tx\tv1\n'.repeat(10))]) {
+      const out = await read(info);
+      expect(out?.goVersion).toBe('go1.22.1');
+      expect(out?.module).toBeUndefined();
+      expect(out?.warnings).toEqual([DAMAGED]);
+    }
+    const noNewline = bytesOf('x'.repeat(40));
+    expect((await read(noNewline))?.warnings).toEqual([DAMAGED]);
+  });
+
+  it('shows framed text, and an empty module string, without a warning', async () => {
+    const framed = await read(modinfo(['mod\tx\tv1']));
+    expect(framed?.module?.path).toBe('x');
+    expect(framed?.warnings).toEqual([]);
+    const empty = await read(new Uint8Array(0));
+    expect(empty?.goVersion).toBe('go1.22.1');
+    expect(empty?.warnings).toEqual([]);
   });
 });

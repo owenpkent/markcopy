@@ -58,6 +58,17 @@ export interface ElfSpec {
   noProgramHeaders?: boolean;
   /** Leave out the section header table. */
   noSections?: boolean;
+  /**
+   * More PT_LOAD segments, their bytes appended after everything else with no
+   * padding, so they follow the first segment physically. Each is mapped at its
+   * own virtual address, which need not continue the first segment's.
+   */
+  extraLoads?: {
+    data: Uint8Array | ((vaddr: number) => Uint8Array);
+    vaddr: number;
+    /** p_flags: 6 (read, write) unless given. */
+    flags?: number;
+  }[];
   /** AppImage type byte (1 or 2) and the bytes appended after the ELF. */
   appImage?: number;
   payload?: Uint8Array | string;
@@ -109,6 +120,7 @@ const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 const asBytes = (data: Uint8Array | string | undefined): Uint8Array =>
   typeof data === 'string' ? utf8(data) : (data ?? new Uint8Array(0));
 
+const PT_EXTRA = -1;
 const PT = {
   LOAD: 1,
   DYNAMIC: 2,
@@ -164,6 +176,9 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
   const segmentKinds: number[] = [];
   if (!spec.noProgramHeaders) {
     segmentKinds.push(PT.LOAD);
+    for (const _ of spec.extraLoads ?? []) {
+      segmentKinds.push(PT_EXTRA);
+    }
     if (spec.interp !== undefined) {
       segmentKinds.push(PT.INTERP);
     }
@@ -279,10 +294,12 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
     shstrndx = all.length;
     const header = (nameOff: number, kind: number, offset: number, size: number): void => {
       table.u32(nameOff).u32(kind);
+      // The address is where the single PT_LOAD maps the section; the null entry has none.
+      const addr = kind === 0 ? 0 : BASE + offset;
       if (wide) {
-        table.u64(0).u64(0).u64(offset).u64(size).u32(0).u32(0).u64(1).u64(0);
+        table.u64(0).u64(addr).u64(offset).u64(size).u32(0).u32(0).u64(1).u64(0);
       } else {
-        table.u32(0).u32(0).u32(offset).u32(size).u32(0).u32(0).u32(1).u32(0);
+        table.u32(0).u32(addr).u32(offset).u32(size).u32(0).u32(0).u32(1).u32(0);
       }
     };
     header(0, 0, 0, 0);
@@ -291,6 +308,11 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
 
   const fileSize = bodyStart + body.length + table.length;
   const phdrs = new Writer(le, wide);
+  const extraBytes = (spec.extraLoads ?? []).map((e) =>
+    typeof e.data === 'function' ? e.data(e.vaddr) : e.data,
+  );
+  let extraOffset = fileSize;
+  let extraIndex = 0;
   for (const kind of segmentKinds) {
     let flags = 4;
     let offset = 0;
@@ -303,6 +325,16 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
         size = fileSize;
         align = 0x1000;
         break;
+      case PT_EXTRA: {
+        const extra = (spec.extraLoads ?? [])[extraIndex];
+        flags = extra.flags ?? 6;
+        offset = extraOffset;
+        size = extraBytes[extraIndex].length;
+        extraOffset += size;
+        extraIndex++;
+        align = 1;
+        break;
+      }
       case PT.INTERP:
         offset = interpOffset;
         size = interpLength;
@@ -328,11 +360,32 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
         align = 1;
         break;
     }
-    const vaddr = kind === PT.GNU_STACK ? 0 : BASE + offset;
+    const vaddr =
+      kind === PT.GNU_STACK
+        ? 0
+        : kind === PT_EXTRA
+          ? (spec.extraLoads ?? [])[extraIndex - 1].vaddr
+          : BASE + offset;
     if (wide) {
-      phdrs.u32(kind).u32(flags).u64(offset).u64(vaddr).u64(vaddr).u64(size).u64(size).u64(align);
+      phdrs
+        .u32(kind === PT_EXTRA ? PT.LOAD : kind)
+        .u32(flags)
+        .u64(offset)
+        .u64(vaddr)
+        .u64(vaddr)
+        .u64(size)
+        .u64(size)
+        .u64(align);
     } else {
-      phdrs.u32(kind).u32(offset).u32(vaddr).u32(vaddr).u32(size).u32(size).u32(flags).u32(align);
+      phdrs
+        .u32(kind === PT_EXTRA ? PT.LOAD : kind)
+        .u32(offset)
+        .u32(vaddr)
+        .u32(vaddr)
+        .u32(size)
+        .u32(size)
+        .u32(flags)
+        .u32(align);
     }
   }
 
@@ -361,6 +414,9 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
 
   const out = new Writer(le, wide);
   out.raw(head.out).raw(phdrs.out).raw(body.out).raw(table.out);
+  for (const bytes of extraBytes) {
+    out.raw(bytes);
+  }
   if (spec.appImage) {
     out.raw(asBytes(spec.payload ?? 'hsqs-image'));
   }

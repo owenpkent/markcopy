@@ -37,6 +37,8 @@ export interface PeSection {
   virtualSize: number;
   rawOffset: number;
   rawSize: number;
+  /** The raw characteristics flags. */
+  characteristics: number;
   /** Readable, writable, executable, in that order, as the loader will map it. */
   read: boolean;
   write: boolean;
@@ -152,6 +154,9 @@ export interface PeInfo {
 }
 
 const MAX_SECTIONS = 96;
+// Go's own test for its data section: initialized data, readable, writable, less the alignment bits.
+const GO_DATA_FLAGS = 0xc0000040;
+const GO_ALIGN_BITS = 0x600000;
 const MAX_IMPORTS = 1024;
 const MAX_THUNKS = 16384;
 // Across every imported library together. The per-library and per-table caps
@@ -340,6 +345,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       virtualAddress: table.getUint32(at + 12, true),
       rawSize: table.getUint32(at + 16, true),
       rawOffset: table.getUint32(at + 20, true),
+      characteristics: flags,
       read: (flags & 0x40000000) !== 0,
       write: (flags & 0x80000000) !== 0,
       execute: (flags & 0x20000000) !== 0,
@@ -348,16 +354,24 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   }
 
   /** Where in the file a relative virtual address lives, if it is backed by file data at all. */
-  const toOffset = (rva: number): number | undefined => {
+  const rangeOf = (rva: number): { offset: number; available: number } | undefined => {
     for (const s of sections) {
       if (rva >= s.virtualAddress && rva - s.virtualAddress < s.rawSize) {
         const offset = s.rawOffset + (rva - s.virtualAddress);
-        return offset < reader.size ? offset : undefined;
+        return offset < reader.size
+          ? {
+              offset,
+              available: Math.min(s.rawSize - (rva - s.virtualAddress), reader.size - offset),
+            }
+          : undefined;
       }
     }
     // The headers are mapped at the image base, one to one.
-    return rva < sizeOfHeaders && rva < reader.size ? rva : undefined;
+    return rva < sizeOfHeaders && rva < reader.size
+      ? { offset: rva, available: Math.min(sizeOfHeaders, reader.size) - rva }
+      : undefined;
   };
+  const toOffset = (rva: number): number | undefined => rangeOf(rva)?.offset;
   const need = (rva: number): number => {
     const offset = toOffset(rva);
     if (offset === undefined) {
@@ -594,15 +608,29 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
 
   // The Go linker puts its build information in the data section. The old
   // layout names it by address, which is the image base plus an RVA.
-  const data = sections.find((s) => s.name === '.data');
-  if (data && data.rawSize > 0 && data.rawOffset < reader.size) {
+  // Go finds it in the first section that is initialized, readable and writable data
+  // (ignoring the alignment bits), so a section renamed by a packer is still found.
+  const usable = (s: PeSection): boolean => s.rawSize > 0 && s.rawOffset < reader.size;
+  const data =
+    sections.find((s) => s.name === '.data' && usable(s)) ??
+    sections.find(
+      (s) =>
+        usable(s) &&
+        s.virtualAddress !== 0 &&
+        (s.characteristics & ~GO_ALIGN_BITS) >>> 0 === GO_DATA_FLAGS,
+    );
+  if (data) {
     await attempt('Go build information', async () => {
       const go = await readGoBuildInfo(
         reader,
-        { offset: data.rawOffset, size: data.rawSize },
+        {
+          offset: data.rawOffset,
+          size: data.rawSize,
+          vaddr: imageBase + BigInt(data.virtualAddress),
+        },
         (address) => {
           const rva = address - imageBase;
-          return rva >= 0n && rva <= 0xffffffffn ? toOffset(Number(rva)) : undefined;
+          return rva >= 0n && rva <= 0xffffffffn ? rangeOf(Number(rva)) : undefined;
         },
       );
       if (go) {

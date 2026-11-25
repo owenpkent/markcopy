@@ -21,6 +21,9 @@ import type { RangeReader } from '../binary/reader';
 // Real binaries have 5 to 20 program headers. 256 leaves room for odd linker
 // scripts while keeping the table walk tiny.
 const MAX_SEGMENTS = 256;
+// Go build information: how far into one segment, and across all of them, to search.
+const GO_SEARCH_BYTES = 64 * 1024;
+const GO_SEARCH_TOTAL = 256 * 1024;
 // A relocatable object built with -ffunction-sections has one section per
 // function, so thousands are legitimate. Beyond this the names are not read.
 const MAX_SECTIONS = 4096;
@@ -162,6 +165,7 @@ interface Section {
   name: string;
   nameOffset: number;
   type: number;
+  addr: number;
   offset: number;
   size: number;
 }
@@ -315,6 +319,7 @@ async function readSections(
           name: '',
           nameOffset: v.getUint32(0, h.le),
           type: v.getUint32(4, h.le),
+          addr: word(v, 16, true, h.le),
           offset: word(v, 24, true, h.le),
           size: word(v, 32, true, h.le),
           link: v.getUint32(40, h.le),
@@ -323,6 +328,7 @@ async function readSections(
           name: '',
           nameOffset: v.getUint32(0, h.le),
           type: v.getUint32(4, h.le),
+          addr: v.getUint32(12, h.le),
           offset: v.getUint32(16, h.le),
           size: v.getUint32(20, h.le),
           link: v.getUint32(24, h.le),
@@ -367,9 +373,17 @@ async function readSections(
 
 /** The file offset a virtual address maps to, through the loadable segments. */
 function offsetOf(segments: Segment[], vaddr: number): number | undefined {
+  return mapAddress(segments, vaddr)?.offset;
+}
+
+/** The file offset a virtual address maps to, and the file bytes left from it to the end of its segment. */
+function mapAddress(
+  segments: Segment[],
+  vaddr: number,
+): { offset: number; available: number } | undefined {
   for (const s of segments) {
     if (s.type === PT_LOAD && vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz) {
-      return s.offset + (vaddr - s.vaddr);
+      return { offset: s.offset + (vaddr - s.vaddr), available: s.filesz - (vaddr - s.vaddr) };
     }
   }
   return undefined;
@@ -660,24 +674,49 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   }
 
   // Go build information: the `.go.buildinfo` section when the file has one
-  // that holds data, else the first writable loadable segment, which is where
-  // the linker puts it in a file with its section headers stripped.
+  // that holds data, else the writable loadable segments in order, which is
+  // where the linker puts it in a file with its section headers stripped. The
+  // segment search is bounded in total, and stops at the first header found.
   let go: GoBuildInfo | undefined;
   const goSection = named('.go.buildinfo');
-  const goSegment = segments.find(
-    (s) => s.type === PT_LOAD && (s.flags & PF_W) !== 0 && s.filesz > 0 && s.offset < reader.size,
-  );
-  const goRegion =
-    goSection && goSection.type !== SHT_NOBITS
-      ? { offset: goSection.offset, size: goSection.size }
-      : goSegment && { offset: goSegment.offset, size: goSegment.filesz };
-  if (goRegion) {
+  const goRegions: { offset: number; size: number; vaddr: number; search: number }[] = [];
+  if (goSection && goSection.type !== SHT_NOBITS) {
+    goRegions.push({
+      offset: goSection.offset,
+      size: goSection.size,
+      vaddr: goSection.addr,
+      search: GO_SEARCH_BYTES,
+    });
+  } else {
+    let budget = GO_SEARCH_TOTAL;
+    for (const s of segments) {
+      if (
+        budget > 0 &&
+        s.type === PT_LOAD &&
+        (s.flags & PF_W) !== 0 &&
+        s.filesz > 0 &&
+        s.offset < reader.size
+      ) {
+        const search = Math.min(GO_SEARCH_BYTES, budget, s.filesz);
+        budget -= search;
+        goRegions.push({ offset: s.offset, size: s.filesz, vaddr: s.vaddr, search });
+      }
+    }
+  }
+  if (goRegions.length > 0) {
     go = await attempt(
       'The Go build information',
-      () =>
-        readGoBuildInfo(reader, goRegion, (va) =>
-          va <= BigInt(Number.MAX_SAFE_INTEGER) ? offsetOf(segments, Number(va)) : undefined,
-        ),
+      async () => {
+        for (const region of goRegions) {
+          const found = await readGoBuildInfo(reader, region, (va) =>
+            va <= BigInt(Number.MAX_SAFE_INTEGER) ? mapAddress(segments, Number(va)) : undefined,
+          );
+          if (found) {
+            return found;
+          }
+        }
+        return undefined;
+      },
       undefined,
     );
     warnings.push(...(go?.warnings ?? []));

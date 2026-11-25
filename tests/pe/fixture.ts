@@ -610,6 +610,10 @@ export interface PeSpec {
    * RVA for contents that hold addresses within it.
    */
   data?: Uint8Array | ((rva: number) => Uint8Array);
+  /** The name of that section: `.data` unless given. */
+  dataName?: string;
+  /** Its characteristics: 0xc0000040 (initialized data, read, write) unless given. */
+  dataFlags?: number;
   /** Bytes after the last section: given directly, or as a length of 0x5A fill. */
   overlay?: Uint8Array | number;
   /** Overrides the NumberOfSections field without adding sections. */
@@ -919,12 +923,12 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   }
   if (dataBytes.length > 0) {
     sections.push({
-      name: '.data',
+      name: spec.dataName ?? '.data',
       vsize: dataBytes.length,
       va: DATA_RVA,
       raw: DATA_RAW,
       rawSize: dataBytes.length,
-      flags: 0xc0000040,
+      flags: spec.dataFlags ?? 0xc0000040,
     });
   }
   const last = sections[sections.length - 1];
