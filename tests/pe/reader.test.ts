@@ -1094,6 +1094,37 @@ describe('readPe: Go build information', () => {
     }
   });
 
+  it('reads the writable data section even when a read-only one is named .data', async () => {
+    // The fixture's read-only .rdata is renamed .data, and the record sits in a
+    // writable section named .rwdata: Go reads it from there, by its flags.
+    const renameRdata = (bytes: Uint8Array): Uint8Array => {
+      const out = bytes.slice();
+      const view = new DataView(out.buffer);
+      const pe = view.getUint32(0x3c, true);
+      const table = pe + 24 + view.getUint16(pe + 20, true);
+      for (let i = 0; i < view.getUint16(pe + 6, true); i++) {
+        const at = table + i * 40;
+        if (new TextDecoder().decode(out.subarray(at, at + 6)) === '.rdata') {
+          out.set(new TextEncoder().encode('.data\0\0\0'), at);
+          return out;
+        }
+      }
+      throw new Error('the fixture has no .rdata section');
+    };
+    const info = await read(
+      {
+        plus: true,
+        data: inlineBlock({ info: SAMPLE_LINES }),
+        dataName: '.rwdata',
+        dataFlags: 0xc0000040,
+      },
+      renameRdata,
+    );
+    expect(info.sections.map((s) => s.name)).toEqual(expect.arrayContaining(['.data', '.rwdata']));
+    expect(info.warnings).toEqual([]);
+    expect(info.go?.goVersion).toBe('go1.22.1');
+  });
+
   it('aligns the search by virtual address, so an image base off a boundary shifts it', async () => {
     const data = concat(new Uint8Array(8).fill(7), inlineBlock());
     const shifted = await read({ plus: true, imageBase: 0x140000008n, data });

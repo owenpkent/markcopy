@@ -608,34 +608,42 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
 
   // The Go linker puts its build information in the data section. The old
   // layout names it by address, which is the image base plus an RVA.
-  // Go finds it in the first section that is initialized, readable and writable data
-  // (ignoring the alignment bits), so a section renamed by a packer is still found.
+  // Go looks in the first section that is initialized, readable and writable
+  // data (ignoring the alignment bits), whatever it is named, so that comes
+  // first; a section named .data is tried after it, in case the flags are odd.
+  // A name alone is not enough: a read-only section can be called .data while
+  // the record sits in another.
   const usable = (s: PeSection): boolean => s.rawSize > 0 && s.rawOffset < reader.size;
-  const data =
-    sections.find((s) => s.name === '.data' && usable(s)) ??
-    sections.find(
-      (s) =>
-        usable(s) &&
-        s.virtualAddress !== 0 &&
-        (s.characteristics & ~GO_ALIGN_BITS) >>> 0 === GO_DATA_FLAGS,
-    );
-  if (data) {
+  const byFlags = sections.find(
+    (s) =>
+      usable(s) &&
+      s.virtualAddress !== 0 &&
+      (s.characteristics & ~GO_ALIGN_BITS) >>> 0 === GO_DATA_FLAGS,
+  );
+  const byName = sections.find((s) => s.name === '.data' && usable(s));
+  const candidates = [byFlags, byName].filter(
+    (s, i, all): s is PeSection => s !== undefined && all.indexOf(s) === i,
+  );
+  if (candidates.length > 0) {
     await attempt('Go build information', async () => {
-      const go = await readGoBuildInfo(
-        reader,
-        {
-          offset: data.rawOffset,
-          size: data.rawSize,
-          vaddr: imageBase + BigInt(data.virtualAddress),
-        },
-        (address) => {
-          const rva = address - imageBase;
-          return rva >= 0n && rva <= 0xffffffffn ? rangeOf(Number(rva)) : undefined;
-        },
-      );
-      if (go) {
-        info.go = go;
-        info.warnings.push(...go.warnings);
+      for (const data of candidates) {
+        const go = await readGoBuildInfo(
+          reader,
+          {
+            offset: data.rawOffset,
+            size: data.rawSize,
+            vaddr: imageBase + BigInt(data.virtualAddress),
+          },
+          (address) => {
+            const rva = address - imageBase;
+            return rva >= 0n && rva <= 0xffffffffn ? rangeOf(Number(rva)) : undefined;
+          },
+        );
+        if (go) {
+          info.go = go;
+          info.warnings.push(...go.warnings);
+          return;
+        }
       }
     });
   }
