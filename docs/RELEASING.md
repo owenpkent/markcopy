@@ -32,7 +32,7 @@ How to cut a release and publish to both the VS Code Marketplace and Open VSX. T
 ### d. Open VSX trusted publisher
 
 1. Sign in at <https://open-vsx.org>, avatar → **Settings** → **Trusted Publishers** (you must own the namespace; the Publisher Agreement stays signed as before).
-2. Register a trusted publisher. Open VSX scopes it to one extension, so the form asks for the namespace `OwenPKent` and the extension `markcopy`, plus the GitHub fields: owner `owenpkent`, repository `markcopy`, workflow `release.yml`, environment `release`.
+2. Register a trusted publisher. Open VSX scopes it to one extension, so the form needs **Publisher** GitHub, **Namespace** `OwenPKent` and **Extension** `markcopy`, then the GitHub fields: owner `owenpkent`, repository `markcopy`, workflow file `release.yml` (the file name only), environment `release`. Field labels are from the [form's source](https://github.com/eclipse-openvsx/openvsx/blob/main/webui/src/pages/user/trusted-publishing/register-trusted-publisher-dialog.tsx) on 2026-11-24.
 3. Save. The publish step runs `npx ovsx publish <file> --trusted-publishing` and exchanges the job's OIDC token for a 15-minute publishing token. Open VSX matches on the workflow file with the ref stripped, so the environment is what ties it to an approved run.
 
 ## Manual fallback: tokens
