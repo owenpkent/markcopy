@@ -107,9 +107,8 @@ describe('readMachO: identity', () => {
     expect(binary['Install name']).toBe('@rpath/libdemo.dylib');
     expect(binary['Current version']).toBe('2.3.4');
     expect(binary['Compatibility version']).toBe('1.0.0');
-    expect(binary['Code signature']).toBe(
-      'Present, not verified by MarkCopy (4.00 KB (4,096 bytes))',
-    );
+    // The range 0x8000 + 4096 lies past the end of this short file.
+    expect(binary['Code signature']).toBe('Declared, but its data lies outside the file');
     expect(binary['Encrypted']).toBeUndefined();
     expect(binary['Entry point']).toBeUndefined();
   });
@@ -199,19 +198,32 @@ describe('readMachO: load commands', () => {
     expect(rowsOf(unknown, 'Binary')['Build tools']).toBe('tool 9 1.0.0');
   });
 
-  it('reads the older minimum-version commands', async () => {
-    const cases: [number, string][] = [
-      [LC.VERSION_MIN_MACOSX, 'macOS'],
-      [LC.VERSION_MIN_IPHONEOS, 'iOS'],
-      [LC.VERSION_MIN_TVOS, 'tvOS'],
-      [LC.VERSION_MIN_WATCHOS, 'watchOS'],
+  it('reads the older minimum-version commands, telling simulators apart by CPU as dyld does', async () => {
+    // [command, cputype, platform]
+    const cases: [number, number, string][] = [
+      [LC.VERSION_MIN_MACOSX, CPU.X86_64, 'macOS'],
+      [LC.VERSION_MIN_MACOSX, CPU.ARM64, 'macOS'],
+      [LC.VERSION_MIN_IPHONEOS, CPU.X86_64, 'iOS Simulator'],
+      [LC.VERSION_MIN_IPHONEOS, CPU.X86, 'iOS Simulator'],
+      [LC.VERSION_MIN_IPHONEOS, CPU.ARM64, 'iOS'],
+      [LC.VERSION_MIN_IPHONEOS, CPU.ARM, 'iOS'],
+      [LC.VERSION_MIN_TVOS, CPU.X86_64, 'tvOS Simulator'],
+      [LC.VERSION_MIN_TVOS, CPU.ARM64, 'tvOS'],
+      [LC.VERSION_MIN_WATCHOS, CPU.X86, 'watchOS Simulator'],
+      [LC.VERSION_MIN_WATCHOS, CPU.X86_64, 'watchOS Simulator'],
+      [LC.VERSION_MIN_WATCHOS, CPU.ARM, 'watchOS'],
+      [LC.VERSION_MIN_WATCHOS, CPU.ARM64_32, 'watchOS'],
     ];
-    for (const [kind, platform] of cases) {
-      const info = await read({ commands: [versionMin(kind, ver(10, 13), ver(10, 15, 1))] });
+    for (const [kind, cputype, platform] of cases) {
+      const info = await read({
+        cputype,
+        commands: [versionMin(kind, ver(10, 13), ver(10, 15, 1))],
+      });
       const binary = rowsOf(info, 'Binary');
-      expect(binary['Platform']).toBe(platform);
-      expect(binary['Minimum OS']).toBe('10.13.0');
-      expect(binary['SDK']).toBe('10.15.1');
+      const label = `${kind.toString(16)} on ${cputype.toString(16)}`;
+      expect(binary['Platform'], label).toBe(platform);
+      expect(binary['Minimum OS'], label).toBe('10.13.0');
+      expect(binary['SDK'], label).toBe('10.15.1');
     }
     // An unknown SDK is stored as zero and not shown.
     const none = await read({ commands: [versionMin(LC.VERSION_MIN_MACOSX, ver(10, 9), 0)] });
@@ -226,6 +238,31 @@ describe('readMachO: load commands', () => {
     expect(rowsOf(both, 'Binary')['Minimum OS']).toBe('10.9.0');
   });
 
+  it('shows every platform a library declares, not only the first', async () => {
+    const dual: MachoSpec = {
+      filetype: 6,
+      commands: [
+        buildVersion(1, ver(11), ver(12), [[3, ver(1)]]),
+        buildVersion(6, ver(14), ver(15), [[1, ver(2)]]),
+        // The same platform twice is shown once.
+        buildVersion(1, ver(11), ver(12)),
+      ],
+    };
+    const binary = rowsOf(await read(dual), 'Binary');
+    expect(binary['Platform']).toBe('macOS, Mac Catalyst');
+    expect(binary['Minimum OS']).toBe('macOS 11.0.0, Mac Catalyst 14.0.0');
+    expect(binary['SDK']).toBe('macOS 12.0.0, Mac Catalyst 15.0.0');
+    expect(binary['Build tools']).toBe('ld 1.0.0');
+    const slice = buildMacho({ ...dual, cputype: CPU.ARM64 });
+    const info = await read(buildFat([{ bytes: slice, cputype: CPU.ARM64 }]));
+    expect(tableOf(info, 'Architectures')[0][2]).toBe('macOS 11.0.0, Mac Catalyst 14.0.0');
+    // At most four platforms are kept.
+    const many = await read({
+      commands: [1, 2, 3, 4, 5, 6].map((p) => buildVersion(p, ver(p), ver(p))),
+    });
+    expect(rowsOf(many, 'Binary')['Platform']).toBe('macOS, iOS, tvOS, watchOS');
+  });
+
   it('reads the dynamic linker, entry point and encryption', async () => {
     const info = await read({
       commands: [dylinker(), main(0x4a20), encryption(LC.ENCRYPTION_INFO_64, 1)],
@@ -237,6 +274,57 @@ describe('readMachO: load commands', () => {
     const plain = await read({ wide: false, commands: [encryption(LC.ENCRYPTION_INFO, 0)] });
     expect(rowsOf(plain, 'Binary')['Encrypted']).toBe('No');
     expect(rowsOf(await read({}), 'Binary')['Code signature']).toBe('None');
+  });
+
+  it('judges a code signature by its declared range, without reading it', async () => {
+    const tail = new Array(0x400).fill(0xab);
+    const sign = (offset: number, size: number): MachoSpec => ({
+      filetype: 6,
+      commands: [linkedit(LC.CODE_SIGNATURE, offset, size)],
+      tail,
+    });
+    const shown = async (offset: number, size: number): Promise<string[]> => {
+      const info = await read(sign(offset, size));
+      return [
+        rowsOf(info, 'Binary')['Code signature'],
+        rowsOf(info, 'Protections')['Code signature'],
+      ];
+    };
+    expect(await shown(0x100, 0x100)).toEqual([
+      'Present, not verified by MarkCopy (256 bytes)',
+      'Present',
+    ]);
+    expect(await shown(0x100, 0)).toEqual(['Declared, but empty', 'Declared, but empty']);
+    expect(await shown(0x100, 0x10000)).toEqual([
+      'Declared, but its data lies outside the file',
+      'Declared, data missing',
+    ]);
+    expect(await shown(0x7fffffff, 0x7fffffff)).toEqual([
+      'Declared, but its data lies outside the file',
+      'Declared, data missing',
+    ]);
+    // The range may end exactly at the end of the slice, and not a byte past it.
+    const size = buildMacho(sign(0, 1)).length;
+    expect((await shown(size - 100, 100))[1]).toBe('Present');
+    expect((await shown(size - 100, 101))[1]).toBe('Declared, data missing');
+  });
+
+  it('checks a signature range against its own slice of a universal file', async () => {
+    const slice = buildMacho({
+      filetype: 6,
+      cputype: CPU.ARM64,
+      commands: [linkedit(LC.CODE_SIGNATURE, 0x100, 0x100)],
+    });
+    // The range lies inside the whole file but past the end of the slice.
+    const info = await read(
+      buildFat([
+        { bytes: slice, cputype: CPU.ARM64 },
+        { bytes: new Uint8Array(0x4000).fill(1), cputype: CPU.X86_64 },
+      ]),
+    );
+    expect(rowsOf(info, 'Binary')['Code signature']).toBe(
+      'Declared, but its data lies outside the file',
+    );
   });
 
   it('lists dependencies with their kind and versions', async () => {
@@ -266,13 +354,14 @@ describe('readMachO: load commands', () => {
   it('shows protections for an executable only', async () => {
     const hardened = await read({
       flags: MH_PIE | MH_NO_HEAP_EXECUTION,
-      commands: [segment('__TEXT'), linkedit(LC.CODE_SIGNATURE, 0x8000, 100)],
+      commands: [segment('__TEXT'), linkedit(LC.CODE_SIGNATURE, 0x100, 100)],
+      tail: new Array(0x200).fill(1),
     });
     expect(rowsOf(hardened, 'Protections')).toEqual({
       'Position-independent (PIE)': 'Yes',
       'Executable stack allowed': 'No',
       'No heap execution': 'Yes',
-      '__RESTRICT segment': 'No',
+      '__RESTRICT,__restrict section': 'No',
       'Code signature': 'Present',
     });
     const loose = await read({
@@ -283,7 +372,8 @@ describe('readMachO: load commands', () => {
     expect(p['Position-independent (PIE)']).toBe('No (fixed load address)');
     expect(p['Executable stack allowed']).toBe('Yes (MH_ALLOW_STACK_EXECUTION)');
     expect(p['No heap execution']).toBe('No');
-    expect(p['__RESTRICT segment']).toMatch(/^Present/);
+    // A segment named __RESTRICT with no __restrict section is not the marker.
+    expect(p['__RESTRICT,__restrict section']).toBe('No');
     expect(p['Code signature']).toBe('None');
     // A library has no PIE or stack flags to show, but is still signed or not.
     expect(rowsOf(await read({ filetype: 6, flags: MH_PIE }), 'Protections')).toEqual({
@@ -291,6 +381,34 @@ describe('readMachO: load commands', () => {
     });
     // An object file has none of these.
     expect(section(await read({ filetype: 1 }), 'Protections')).toBeUndefined();
+  });
+
+  it('shows the __RESTRICT,__restrict section only when the section exists', async () => {
+    for (const wide of [true, false]) {
+      for (const big of [true, false]) {
+        const label = `${wide ? 64 : 32}-bit ${big ? 'big' : 'little'}`;
+        const restrictRow = async (commands: Cmd[]): Promise<string> =>
+          rowsOf(await read({ wide, big, commands }), 'Protections')[
+            '__RESTRICT,__restrict section'
+          ];
+        expect(
+          await restrictRow([segment('__RESTRICT', { sections: ['__restrict'] })]),
+          label,
+        ).toBe('Present');
+        expect(
+          await restrictRow([segment('__RESTRICT', { sections: ['__other', '__restrict'] })]),
+          label,
+        ).toBe('Present');
+        expect(await restrictRow([segment('__RESTRICT', { sections: ['__other'] })]), label).toBe(
+          'No',
+        );
+        expect(await restrictRow([segment('__TEXT', { sections: ['__restrict'] })]), label).toBe(
+          'No',
+        );
+        // A section count the command is too small to hold is not believed.
+        expect(await restrictRow([segment('__RESTRICT', { nsects: 5 })]), label).toBe('No');
+      }
+    }
   });
 
   it('skips a command smaller than its type needs, with a warning', async () => {
@@ -408,6 +526,44 @@ describe('readMachO: universal binaries', () => {
     expect(info.warnings).toEqual([`The x86_64 slice: ${DAMAGED}`]);
   });
 
+  it('keeps the other slices when the source fails inside one slice', async () => {
+    // A sparse file: the slices sit at 0x1000 and 0x20000, and the reader works in
+    // 64 KiB pages, so the second slice is in a page the first and the table never touch.
+    const first = 0x1000;
+    const second = 0x20000;
+    const file = new Uint8Array(second + intel.length);
+    const view = new DataView(file.buffer);
+    view.setUint32(0, 0xcafebabe, false);
+    view.setUint32(4, 2, false);
+    file.set(arm, first);
+    file.set(intel, second);
+    [
+      [CPU.ARM64, first, arm.length],
+      [CPU.X86_64, second, intel.length],
+    ].forEach(([cputype, offset, size], i) => {
+      const entry = 8 + i * 20;
+      view.setUint32(entry, cputype, false);
+      view.setUint32(entry + 8, offset, false);
+      view.setUint32(entry + 12, size, false);
+      view.setUint32(entry + 16, 12, false);
+    });
+    const failing = new RangeReader({
+      size: file.length,
+      read: async (start, length) => {
+        if (start + length > second) {
+          throw new Error('device unplugged');
+        }
+        return file.slice(start, start + length);
+      },
+    });
+    const info = await readMachO(failing);
+    expect(info.warnings).toEqual(['The x86_64 slice could not be read.']);
+    expect(tableOf(info, 'Architectures').map((r) => r[0])).toEqual(['arm64', 'x86_64']);
+    expect(tableOf(info, 'Architectures')[0][3]).toBe(UUID_TEXT);
+    expect(tableOf(info, 'Architectures')[1].slice(1, 4)).toEqual(['', '', '']);
+    expect(rowsOf(info, 'Binary')['Install name']).toBe('@rpath/libfat.dylib');
+  });
+
   it('does not let a slice read past its own end', async () => {
     // The slice is cut to its header; its load commands lie in the next slice.
     const claims = buildMacho({
@@ -478,6 +634,14 @@ describe('readMachO: files that are not Mach-O', () => {
 
 describe('readMachO: caps and damaged commands', () => {
   const ok = uuid(UUID_BYTES);
+  const UNKNOWN = 'Unknown (the load commands were not all read)';
+  // An executable's rows say "none" or "no" only when every command was read.
+  const expectUnknown = (info: PackageInfo): void => {
+    expect(rowsOf(info, 'Binary')['Code signature']).toBe(UNKNOWN);
+    expect(rowsOf(info, 'Binary')['Encrypted']).toBe(UNKNOWN);
+    expect(rowsOf(info, 'Protections')['Code signature']).toBe(UNKNOWN);
+    expect(rowsOf(info, 'Protections')['__RESTRICT,__restrict section']).toBe(UNKNOWN);
+  };
   const withBad = (bad: Cmd, extra: Partial<MachoSpec> = {}): MachoSpec => ({
     commands: [ok, bad, dylinker()],
     ...extra,
@@ -489,7 +653,24 @@ describe('readMachO: caps and damaged commands', () => {
       expect(info.warnings, String(cmdsize)).toEqual([DAMAGED]);
       expect(rowsOf(info, 'Binary')['UUID'], String(cmdsize)).toBe(UUID_TEXT);
       expect(rowsOf(info, 'Binary')['Dynamic linker'], String(cmdsize)).toBeUndefined();
+      expectUnknown(info);
     }
+  });
+
+  it('reports what a partial scan did find, and None only after a complete one', async () => {
+    const signed = await read({
+      commands: [ok, linkedit(LC.CODE_SIGNATURE, 0, 0), rawCommand(LC.RPATH, 6)],
+    });
+    expect(rowsOf(signed, 'Binary')['Code signature']).toBe('Declared, but empty');
+    expect(rowsOf(signed, 'Binary')['Encrypted']).toBe(UNKNOWN);
+    const encrypted = await read({
+      commands: [ok, encryption(LC.ENCRYPTION_INFO_64, 1), rawCommand(LC.RPATH, 6)],
+    });
+    expect(rowsOf(encrypted, 'Binary')['Encrypted']).toBe('Yes');
+    const complete = await read({ commands: [ok] });
+    expect(rowsOf(complete, 'Binary')['Code signature']).toBe('None');
+    expect(rowsOf(complete, 'Protections')['__RESTRICT,__restrict section']).toBe('No');
+    expect(rowsOf(complete, 'Binary')['Encrypted']).toBeUndefined();
   });
 
   it('stops at a cmdsize past sizeofcmds even when the file holds the bytes', async () => {
@@ -508,11 +689,13 @@ describe('readMachO: caps and damaged commands', () => {
     const info = await read({ commands: [ok], sizeofcmds: 0x10000, ncmds: 3 });
     expect(info.warnings).toEqual([ENDS]);
     expect(rowsOf(info, 'Binary')['UUID']).toBe(UUID_TEXT);
+    expectUnknown(info);
   });
 
   it('stops when ncmds is more than the commands that exist', async () => {
     const info = await read({ commands: [ok], ncmds: 5 });
     expect(info.warnings).toEqual([DAMAGED]);
+    expectUnknown(info);
   });
 
   it('reads at most 32,768 commands', async () => {
@@ -523,6 +706,7 @@ describe('readMachO: caps and damaged commands', () => {
     });
     expect(info.warnings).toEqual(['Only the first 32,768 of 40,001 load commands were read.']);
     expect(rowsOf(info, 'Binary')['UUID']).toBe(UUID_TEXT);
+    expectUnknown(info);
   });
 
   it('reads at most 1 MiB of load commands', async () => {
@@ -536,6 +720,7 @@ describe('readMachO: caps and damaged commands', () => {
       'The load commands are larger than MarkCopy reads (1 MiB); the ones before that are shown.',
     ]);
     expect(rowsOf(info, 'Binary')['UUID']).toBe(UUID_TEXT);
+    expectUnknown(info);
   });
 
   it('shows 200 dependencies, counts all of them, and says so', async () => {

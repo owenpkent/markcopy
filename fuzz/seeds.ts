@@ -220,7 +220,7 @@ const machoLibrary = buildMacho({
 });
 pkg('fuzz.dylib', 'macho', 'default', machoLibrary);
 pkg(
-  'fuzz.dylib',
+  'fuzz.universal',
   'macho',
   'universal',
   buildFat(
@@ -228,7 +228,8 @@ pkg(
       { bytes: machoLibrary, cputype: CPU.X86_64 },
       { bytes: buildMacho({ wide: false, big: true, cputype: CPU.PPC }), cputype: CPU.PPC },
     ],
-    { align: 0x1000 },
+    // Small enough for emit's 8 KiB limit, and still a power of two.
+    { align: 0x400 },
   ),
 );
 

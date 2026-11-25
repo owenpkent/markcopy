@@ -172,7 +172,16 @@ class Slice {
     ) {
       throw new PackageError('the file ends before the data its headers point to.');
     }
-    return this.reader.bytes(this.base + offset, length);
+    try {
+      return await this.reader.bytes(this.base + offset, length);
+    } catch (e) {
+      // A failure of the source under this slice belongs to this slice: the
+      // caller keeps the other slices instead of failing the whole page.
+      if (e instanceof PackageError) {
+        throw e;
+      }
+      throw new PackageError('the file could not be read here.');
+    }
   }
 }
 
@@ -190,6 +199,16 @@ interface Segment {
   sections: number;
 }
 
+interface Build {
+  platform: string;
+  minOs: string;
+  sdk?: string;
+}
+
+// A binary declares one or two platforms; more than this is not a real file.
+const MAX_BUILDS = 4;
+const SECTION_NAME = 16;
+
 interface Thin {
   wide: boolean;
   le: boolean;
@@ -198,9 +217,8 @@ interface Thin {
   arch: string;
   filetype: number;
   flags: number;
-  platform?: string;
-  minOs?: string;
-  sdk?: string;
+  /** One record per platform: a library can declare macOS and Mac Catalyst. */
+  builds: Build[];
   tools: string[];
   uuid?: string;
   sourceVersion?: string;
@@ -209,8 +227,12 @@ interface Thin {
   compatVersion?: string;
   dylinker?: string;
   entry?: string;
-  codeSignature?: number;
+  /** The slice's size, which a declared signature range must lie inside. */
+  sliceSize: number;
+  codeSignature?: { offset: number; size: number };
   encrypted?: boolean;
+  /** False when a cap, a damaged command or the end of the file stopped the walk early. */
+  complete: boolean;
   dependencies: Dependency[];
   dependencyTotal: number;
   rpaths: string[];
@@ -281,6 +303,9 @@ async function readThin(slice: Slice): Promise<Thin> {
     arch: archName(cputype, cpusubtype),
     filetype: v.getUint32(12, le),
     flags: v.getUint32(24, le),
+    builds: [],
+    sliceSize: slice.size,
+    complete: true,
     tools: [],
     dependencies: [],
     dependencyTotal: 0,
@@ -296,6 +321,7 @@ async function readThin(slice: Slice): Promise<Thin> {
 
   const count = Math.min(ncmds, MAX_COMMANDS);
   if (ncmds > count) {
+    out.complete = false;
     out.warnings.push(
       `Only the first ${count.toLocaleString('en-US')} of ${ncmds.toLocaleString('en-US')} load commands were read.`,
     );
@@ -309,6 +335,7 @@ async function readThin(slice: Slice): Promise<Thin> {
   // A walk that runs out of bytes says why: MarkCopy's cap, the end of the
   // file, or a command whose size does not fit.
   const stopped = (): void => {
+    out.complete = false;
     out.warnings.push(
       capped
         ? 'The load commands are larger than MarkCopy reads (1 MiB); the ones before that are shown.'
@@ -320,6 +347,9 @@ async function readThin(slice: Slice): Promise<Thin> {
 
   let at = 0;
   let small = false;
+  // Whether the legacy minimum-version commands (true) or LC_BUILD_VERSION
+  // (false) supplied the platform; the first kind seen wins.
+  let legacy: boolean | undefined;
   for (let i = 0; i < count; i++) {
     if (at + 8 > buf.length) {
       stopped();
@@ -382,11 +412,21 @@ async function readThin(slice: Slice): Promise<Thin> {
       case LC_SEGMENT_64: {
         out.segmentTotal++;
         const name = fixedStr(body.subarray(8, 24));
-        if (name === '__RESTRICT') {
-          out.hasRestrict = true;
+        const w = cmd === LC_SEGMENT_64;
+        if (name === '__RESTRICT' && !out.hasRestrict) {
+          // Only a __restrict section inside the segment is what dyld looks for.
+          const first = w ? 72 : 56;
+          const entry = w ? 80 : 68;
+          const nsects = c.getUint32(w ? 64 : 48, le);
+          for (let s = 0; s < nsects && first + (s + 1) * entry <= cmdsize; s++) {
+            const at = first + s * entry;
+            if (fixedStr(body.subarray(at, at + SECTION_NAME)) === '__restrict') {
+              out.hasRestrict = true;
+              break;
+            }
+          }
         }
         if (out.segments.length < MAX_SEGMENTS) {
-          const w = cmd === LC_SEGMENT_64;
           const num = (n: number): number => (w ? u64(c, n, le) : c.getUint32(n, le));
           const maxprot = c.getUint32(w ? 56 : 40, le);
           const initprot = c.getUint32(w ? 60 : 44, le);
@@ -464,26 +504,35 @@ async function readThin(slice: Slice): Promise<Thin> {
         }
         break;
       case LC_CODE_SIGNATURE:
-        out.codeSignature ??= c.getUint32(12, le);
+        out.codeSignature ??= { offset: c.getUint32(8, le), size: c.getUint32(12, le) };
         break;
       case LC_ENCRYPTION_INFO:
       case LC_ENCRYPTION_INFO_64:
         out.encrypted ??= c.getUint32(16, le) !== 0;
         break;
       case LC_BUILD_VERSION: {
-        if (out.platform !== undefined) {
+        if (legacy === true) {
           break;
         }
+        const first = legacy === undefined;
+        legacy = false;
         const platform = c.getUint32(8, le);
-        out.platform = PLATFORMS[platform] ?? `Platform ${platform}`;
-        out.minOs = version3(c.getUint32(12, le));
-        out.sdk = version3(c.getUint32(16, le));
-        const ntools = c.getUint32(20, le);
-        for (let t = 0; t < ntools && t < MAX_TOOLS && 24 + t * 8 + 8 <= cmdsize; t++) {
-          const tool = c.getUint32(24 + t * 8, le);
-          out.tools.push(
-            `${TOOLS[tool] ?? `tool ${tool}`} ${version3(c.getUint32(28 + t * 8, le))}`,
-          );
+        const name = PLATFORMS[platform] ?? `Platform ${platform}`;
+        if (out.builds.length < MAX_BUILDS && !out.builds.some((b) => b.platform === name)) {
+          out.builds.push({
+            platform: name,
+            minOs: version3(c.getUint32(12, le)),
+            sdk: version3(c.getUint32(16, le)),
+          });
+        }
+        if (first) {
+          const ntools = c.getUint32(20, le);
+          for (let t = 0; t < ntools && t < MAX_TOOLS && 24 + t * 8 + 8 <= cmdsize; t++) {
+            const tool = c.getUint32(24 + t * 8, le);
+            out.tools.push(
+              `${TOOLS[tool] ?? `tool ${tool}`} ${version3(c.getUint32(28 + t * 8, le))}`,
+            );
+          }
         }
         break;
       }
@@ -491,25 +540,38 @@ async function readThin(slice: Slice): Promise<Thin> {
       case LC_VERSION_MIN_IPHONEOS:
       case LC_VERSION_MIN_TVOS:
       case LC_VERSION_MIN_WATCHOS: {
-        if (out.platform !== undefined) {
+        if (legacy !== undefined) {
           break;
         }
-        out.platform =
-          cmd === LC_VERSION_MIN_MACOSX
-            ? 'macOS'
-            : cmd === LC_VERSION_MIN_IPHONEOS
-              ? 'iOS'
-              : cmd === LC_VERSION_MIN_TVOS
-                ? 'tvOS'
-                : 'watchOS';
-        out.minOs = version3(c.getUint32(8, le));
+        legacy = true;
+        // The legacy commands name no simulator: dyld tells one apart by the
+        // CPU (an Intel slice of an iOS, tvOS or watchOS binary is a simulator one).
+        const intel = out.cputype === CPU_X86 || out.cputype === CPU_X86_64;
         const sdk = c.getUint32(12, le);
-        out.sdk = sdk === 0 ? undefined : version3(sdk);
+        out.builds.push({
+          platform:
+            cmd === LC_VERSION_MIN_MACOSX
+              ? 'macOS'
+              : cmd === LC_VERSION_MIN_IPHONEOS
+                ? intel
+                  ? 'iOS Simulator'
+                  : 'iOS'
+                : cmd === LC_VERSION_MIN_TVOS
+                  ? intel
+                    ? 'tvOS Simulator'
+                    : 'tvOS'
+                  : intel
+                    ? 'watchOS Simulator'
+                    : 'watchOS',
+          minOs: version3(c.getUint32(8, le)),
+          sdk: sdk === 0 ? undefined : version3(sdk),
+        });
         break;
       }
     }
   }
   if (small) {
+    out.complete = false;
     out.warnings.push('A load command is smaller than its type needs and was skipped.');
   }
   return out;
@@ -591,8 +653,39 @@ export async function looksLikeMachO(reader: RangeReader): Promise<boolean> {
   return (await readFatTable(reader)) !== undefined;
 }
 
+/** "macOS 11.0.0", or "macOS 11.0.0, Mac Catalyst 14.0.0" for a slice built for two platforms. */
 function minimumOs(t: Thin): string | undefined {
-  return t.minOs === undefined ? undefined : `${t.platform ?? 'OS'} ${t.minOs}`;
+  return t.builds.length === 0
+    ? undefined
+    : t.builds.map((b) => `${b.platform} ${b.minOs}`).join(', ');
+}
+
+/** A per-platform value: bare for one platform, prefixed by the platform name for several. */
+function perPlatform(t: Thin, pick: (b: Build) => string | undefined): string | undefined {
+  if (t.builds.length === 1) {
+    return pick(t.builds[0]);
+  }
+  const parts = t.builds.flatMap((b) => {
+    const value = pick(b);
+    return value === undefined ? [] : [`${b.platform} ${value}`];
+  });
+  return parts.length === 0 ? undefined : parts.join(', ');
+}
+
+const UNKNOWN = 'Unknown (the load commands were not all read)';
+
+type SignatureState = 'none' | 'unknown' | 'present' | 'empty' | 'outside';
+
+/** What the declared signature range says. The payload is never read. */
+function signatureState(t: Thin): SignatureState {
+  const s = t.codeSignature;
+  if (s === undefined) {
+    return t.complete ? 'none' : 'unknown';
+  }
+  if (s.size === 0) {
+    return 'empty';
+  }
+  return s.offset + s.size <= t.sliceSize ? 'present' : 'outside';
 }
 
 function sectionsOf(t: Thin, note?: string): InfoSection[] {
@@ -608,11 +701,21 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
         t.flags & MH_ALLOW_STACK_EXECUTION ? 'Yes (MH_ALLOW_STACK_EXECUTION)' : 'No',
       ],
       ['No heap execution', t.flags & MH_NO_HEAP_EXECUTION ? 'Yes' : 'No'],
-      ['__RESTRICT segment', t.hasRestrict ? 'Present (library injection restricted)' : 'No'],
+      ['__RESTRICT,__restrict section', t.hasRestrict ? 'Present' : t.complete ? 'No' : UNKNOWN],
     );
   }
+  const signature = signatureState(t);
   if (!isObject) {
-    protections.push(['Code signature', t.codeSignature !== undefined ? 'Present' : 'None']);
+    protections.push([
+      'Code signature',
+      {
+        none: 'None',
+        unknown: UNKNOWN,
+        present: 'Present',
+        empty: 'Declared, but empty',
+        outside: 'Declared, data missing',
+      }[signature],
+    ]);
   }
   return [
     ...propertySection(
@@ -620,9 +723,9 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
       [
         ['Type', type.label],
         ['Architecture', t.arch],
-        ['Platform', t.platform],
-        ['Minimum OS', t.minOs],
-        ['SDK', t.sdk],
+        ['Platform', t.builds.map((b) => b.platform).join(', ') || undefined],
+        ['Minimum OS', perPlatform(t, (b) => b.minOs)],
+        ['SDK', perPlatform(t, (b) => b.sdk)],
         ['Build tools', t.tools.join(', ')],
         ['UUID', t.uuid],
         ['Source version', t.sourceVersion],
@@ -633,11 +736,24 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
         ['Entry point', t.entry],
         [
           'Code signature',
-          t.codeSignature !== undefined
-            ? `Present, not verified by MarkCopy (${formatBytes(t.codeSignature)})`
-            : 'None',
+          {
+            none: 'None',
+            unknown: UNKNOWN,
+            present: `Present, not verified by MarkCopy (${formatBytes(t.codeSignature?.size ?? 0)})`,
+            empty: 'Declared, but empty',
+            outside: 'Declared, but its data lies outside the file',
+          }[signature],
         ],
-        ['Encrypted', t.encrypted === undefined ? undefined : t.encrypted ? 'Yes' : 'No'],
+        [
+          'Encrypted',
+          t.encrypted === undefined
+            ? t.complete
+              ? undefined
+              : UNKNOWN
+            : t.encrypted
+              ? 'Yes'
+              : 'No',
+        ],
       ],
       note,
     ),

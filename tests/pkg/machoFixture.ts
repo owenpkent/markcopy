@@ -198,7 +198,10 @@ export interface SegmentSpec {
   filesize?: number;
   maxprot?: number;
   initprot?: number;
+  /** Header count; section records are written for `sections` and this defaults to their number. */
   nsects?: number;
+  /** Names of section records to write after the segment command. */
+  sections?: string[];
 }
 
 /** LC_SEGMENT or LC_SEGMENT_64 by the file's word size, with no section records. */
@@ -228,8 +231,20 @@ export const segment =
     fields
       .u32(s.maxprot ?? 5)
       .u32(s.initprot ?? 5)
-      .u32(s.nsects ?? 0)
+      .u32(s.nsects ?? s.sections?.length ?? 0)
       .u32(0);
+    // section_64 is 80 bytes and section is 68: sectname, segname, then the rest zero.
+    for (const section of s.sections ?? []) {
+      const sectname = utf8(section).slice(0, 16);
+      while (sectname.length < 16) {
+        sectname.push(0);
+      }
+      const record = new Writer(le).raw(sectname).raw(nameBytes);
+      while (record.length < (wide ? 80 : 68)) {
+        record.u8(0);
+      }
+      fields.raw(record.out);
+    }
     w.u32(wide ? LC.SEGMENT_64 : LC.SEGMENT)
       .u32(8 + fields.length)
       .raw(fields.out);
