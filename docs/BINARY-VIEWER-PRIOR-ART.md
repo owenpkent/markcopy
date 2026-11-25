@@ -11,11 +11,13 @@ For a PE file (`.exe`, `.dll` and the like):
 - the loader mitigations (ASLR, DEP, Control Flow Guard and the rest)
 - the PDB path
 - each section with its read, write and execute flags
-- imports and exports
+- imported DLLs, each with a count of its functions and whether it is delay-loaded (the function names are counted, not decoded), and exports
 - the size of any data appended after the image
 - the embedded Authenticode signature's signer, issuer and validity dates, which are not verified
 
-For a package, it shows each format's metadata, dependencies, which maintainer scripts exist, the file list, signer names, and a File section with the SHA-256. Everything is read as bytes in bounded ranges. Nothing is run, installed or verified.
+For a package, it shows each format's metadata, dependencies, which maintainer scripts exist, the file list, signer names, and a File section with the SHA-256. An Android package's signature section names each recognized signing scheme (v1, v2, v3 and v3.1, for example "APK Signature Scheme v2").
+
+Everything is read as bytes in bounded ranges. The metadata reader fetches at most 256 distinct 64 KiB pages (16 MiB) per file, and the SHA-256 pass reads the whole file only up to 256 MiB. A large installer can therefore be previewed without most of its bytes being read. Nothing is run, installed or verified.
 
 ## The tools
 
@@ -43,20 +45,20 @@ For a package, it shows each format's metadata, dependencies, which maintainer s
 
 ## Candidate additions
 
-These are all static reads of bytes the previews already fetch, so they fit the current design: bounded, read-only, and nothing verified.
+These are all static reads that fit the current design: bounded, read-only, and nothing verified. Some reuse bytes the previews already fetch. Others need more reads, and the read limits above apply to them, so each one notes its cost.
 
 **Executable preview:**
 
-1. **Entropy per section and for the whole file.** Detect It Easy and sigcheck both show it. It is the most useful of these additions: a section near 8 bits per byte is packed or encrypted. Show the number and say what high means, without calling the file packed.
-2. **Import hash (imphash).** The MD5 of the ordered import names, a standard way to group related builds. The imports are already parsed.
+1. **Entropy per section and for the whole file.** Detect It Easy and sigcheck both show it, and it is the most useful of these additions. Entropy measures how evenly the bytes are spread. A section near 8 bits per byte is consistent with packed or encrypted data, but an ordinary lookup table holding every byte value equally often also scores exactly 8. So show the number with that explanation, and never call the file packed or encrypted. Cost: the whole-file figure needs every byte, so share the existing SHA-256 pass where it runs, and above the 256 MiB hash limit either leave it out or label it clearly as a sample. Per-section figures need each section's bytes, which the 16 MiB metadata budget may not cover for a large image. Cap them the same way.
+2. **Import hash (imphash).** The MD5 of the ordered, normalized import names, a standard way to group related builds ([Mandiant's definition](https://cloud.google.com/blog/topics/threat-intelligence/tracking-malware-import-hashing/)). The current reader does not keep the names: it records each DLL, a count of its functions, and whether it is delay-loaded. So this needs bounded decoding of the normal (not delay-loaded) imports in order, with names lowercased and imports by ordinal written the way the definition does it. Two files with the same DLLs and counts can import different functions, so a hash built from counts would be wrong. Check the result against `pefile`'s `get_imphash()` on real files before shipping it.
 3. **Rich header.** The undocumented block between the DOS stub and the PE header that records the compiler and linker build IDs, plus its hash. Microsoft's [PE format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format) page does not document it, so cite a community reference for the layout.
 4. **Signature details.** Add the timestamp countersignature, the certificate thumbprint and the digest algorithm to the signer, issuer and dates already shown. Keep saying "not verified": checking the chain and revocation needs a trust store.
 5. **Warnings for odd layouts.** Examples: a section that is both writable and executable, an entry point outside every section, a raw size far from the virtual size, a header checksum that does not match, TLS callbacks, and an original file name that differs from the name on disk. Each is a fact about the bytes, stated as such.
-6. **The type of appended data.** Identify what follows the image (ZIP, CAB, MSI, another PE, the end of a certificate table) by its first bytes, and give its entropy, instead of only its size.
+6. **The type of appended data.** Identify what follows the image (ZIP, CAB, MSI, another PE, the end of a certificate table) by its first bytes, instead of only its size. Its entropy has the same cost and caveats as item 1.
 
 **Package preview:**
 
-1. The signing certificate's subject and the signature scheme version for APK and JAR files, and counts of signed and unsigned JAR entries.
+1. The signing certificate's subject read from an APK's v2 or later signing block (the scheme names are already shown), and counts of signed and unsigned entries in a JAR.
 2. Executables embedded in a package: how many there are, and the largest files.
 3. Compression ratio, as a rough hint at packing.
 
