@@ -208,6 +208,8 @@ describe('readMachO: load commands', () => {
       [LC.VERSION_MIN_IPHONEOS, CPU.ARM64, 'iOS'],
       [LC.VERSION_MIN_IPHONEOS, CPU.ARM, 'iOS'],
       [LC.VERSION_MIN_TVOS, CPU.X86_64, 'tvOS Simulator'],
+      // dyld's tvOS rule names only x86_64 a simulator.
+      [LC.VERSION_MIN_TVOS, CPU.X86, 'tvOS (32-bit Intel, not a recognised target)'],
       [LC.VERSION_MIN_TVOS, CPU.ARM64, 'tvOS'],
       [LC.VERSION_MIN_WATCHOS, CPU.X86, 'watchOS Simulator'],
       [LC.VERSION_MIN_WATCHOS, CPU.X86_64, 'watchOS Simulator'],
@@ -228,14 +230,45 @@ describe('readMachO: load commands', () => {
     // An unknown SDK is stored as zero and not shown.
     const none = await read({ commands: [versionMin(LC.VERSION_MIN_MACOSX, ver(10, 9), 0)] });
     expect(rowsOf(none, 'Binary')['SDK']).toBeUndefined();
-    // LC_BUILD_VERSION wins over a minimum-version command.
+    // The same platform in both formats is one record: the first is kept.
     const both = await read({
       commands: [
         versionMin(LC.VERSION_MIN_MACOSX, ver(10, 9), 0),
         buildVersion(1, ver(12), ver(13)),
       ],
     });
+    expect(rowsOf(both, 'Binary')['Platform']).toBe('macOS');
     expect(rowsOf(both, 'Binary')['Minimum OS']).toBe('10.9.0');
+  });
+
+  it('keeps distinct platforms declared in different command formats, in either order', async () => {
+    // What Clang writes for an x86_64 object targeting macOS 10.13 and Mac Catalyst 13.1.
+    const legacyFirst = await read({
+      commands: [
+        versionMin(LC.VERSION_MIN_MACOSX, ver(10, 13), ver(10, 15)),
+        buildVersion(6, ver(13, 1), ver(13, 2)),
+      ],
+    });
+    const a = rowsOf(legacyFirst, 'Binary');
+    expect(a['Platform']).toBe('macOS, Mac Catalyst');
+    expect(a['Minimum OS']).toBe('macOS 10.13.0, Mac Catalyst 13.1.0');
+    const buildFirst = await read({
+      commands: [
+        buildVersion(6, ver(13, 1), ver(13, 2)),
+        versionMin(LC.VERSION_MIN_MACOSX, ver(10, 13), ver(10, 15)),
+      ],
+    });
+    const b = rowsOf(buildFirst, 'Binary');
+    expect(b['Platform']).toBe('Mac Catalyst, macOS');
+    expect(b['Minimum OS']).toBe('Mac Catalyst 13.1.0, macOS 10.13.0');
+  });
+
+  it('shows no SDK when LC_BUILD_VERSION records none', async () => {
+    // A compiler given no SDK writes 0, which otool shows as "n/a".
+    const info = await read({ commands: [buildVersion(1, ver(11), 0)] });
+    const binary = rowsOf(info, 'Binary');
+    expect(binary['Minimum OS']).toBe('11.0.0');
+    expect(binary['SDK']).toBeUndefined();
   });
 
   it('shows every platform a library declares, not only the first', async () => {
@@ -405,8 +438,15 @@ describe('readMachO: load commands', () => {
         expect(await restrictRow([segment('__TEXT', { sections: ['__restrict'] })]), label).toBe(
           'No',
         );
-        // A section count the command is too small to hold is not believed.
-        expect(await restrictRow([segment('__RESTRICT', { nsects: 5 })]), label).toBe('No');
+        // Sections declared but not held may include the marker: not known.
+        expect(await restrictRow([segment('__RESTRICT', { nsects: 5 })]), label).toBe(
+          'Unknown (the __RESTRICT segment declares more sections than it holds)',
+        );
+        // A marker found among the sections that are held still counts.
+        expect(
+          await restrictRow([segment('__RESTRICT', { sections: ['__restrict'], nsects: 5 })]),
+          label,
+        ).toBe('Present');
       }
     }
   });

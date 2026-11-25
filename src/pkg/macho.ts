@@ -207,6 +207,27 @@ interface Build {
 
 // A binary declares one or two platforms; more than this is not a real file.
 const MAX_BUILDS = 4;
+
+/**
+ * The platform a legacy minimum-version command means. Those commands name no
+ * simulator, so dyld tells one apart by the CPU: an Intel iOS or watchOS slice
+ * (i386 or x86_64) is a simulator one, but for tvOS only x86_64 is, so a
+ * 32-bit Intel tvOS slice is no target dyld recognises.
+ */
+function legacyPlatform(cmd: number, cputype: number): string {
+  const x86 = cputype === CPU_X86;
+  const x64 = cputype === CPU_X86_64;
+  switch (cmd) {
+    case LC_VERSION_MIN_MACOSX:
+      return 'macOS';
+    case LC_VERSION_MIN_IPHONEOS:
+      return x86 || x64 ? 'iOS Simulator' : 'iOS';
+    case LC_VERSION_MIN_TVOS:
+      return x64 ? 'tvOS Simulator' : x86 ? 'tvOS (32-bit Intel, not a recognised target)' : 'tvOS';
+    default:
+      return x86 || x64 ? 'watchOS Simulator' : 'watchOS';
+  }
+}
 const SECTION_NAME = 16;
 
 interface Thin {
@@ -240,6 +261,8 @@ interface Thin {
   segments: Segment[];
   segmentTotal: number;
   hasRestrict: boolean;
+  /** A __RESTRICT segment declared sections its command does not hold, so the marker may be among them. */
+  restrictUnread: boolean;
   warnings: string[];
 }
 
@@ -314,6 +337,7 @@ async function readThin(slice: Slice): Promise<Thin> {
     segments: [],
     segmentTotal: 0,
     hasRestrict: false,
+    restrictUnread: false,
     warnings: [],
   };
   const ncmds = v.getUint32(16, le);
@@ -347,9 +371,16 @@ async function readThin(slice: Slice): Promise<Thin> {
 
   let at = 0;
   let small = false;
-  // Whether the legacy minimum-version commands (true) or LC_BUILD_VERSION
-  // (false) supplied the platform; the first kind seen wins.
-  let legacy: boolean | undefined;
+  // One record per platform, whichever command format declares it: Apple's
+  // linker picks the format per target, so a macOS LC_VERSION_MIN_MACOSX can
+  // sit beside a Mac Catalyst LC_BUILD_VERSION. A second record for the same
+  // platform is a duplicate, and the first is kept.
+  const addBuild = (build: Build): void => {
+    if (out.builds.length < MAX_BUILDS && !out.builds.some((b) => b.platform === build.platform)) {
+      out.builds.push(build);
+    }
+  };
+  let toolsRead = false;
   for (let i = 0; i < count; i++) {
     if (at + 8 > buf.length) {
       stopped();
@@ -418,12 +449,21 @@ async function readThin(slice: Slice): Promise<Thin> {
           const first = w ? 72 : 56;
           const entry = w ? 80 : 68;
           const nsects = c.getUint32(w ? 64 : 48, le);
-          for (let s = 0; s < nsects && first + (s + 1) * entry <= cmdsize; s++) {
+          const fit = Math.max(0, Math.floor((cmdsize - first) / entry));
+          for (let s = 0; s < Math.min(nsects, fit); s++) {
             const at = first + s * entry;
             if (fixedStr(body.subarray(at, at + SECTION_NAME)) === '__restrict') {
               out.hasRestrict = true;
               break;
             }
+          }
+          // Sections it declares but its command does not hold may include the
+          // marker, so its absence is not established.
+          if (!out.hasRestrict && nsects > fit) {
+            out.restrictUnread = true;
+            out.warnings.push(
+              `The __RESTRICT segment declares ${nsects.toLocaleString('en-US')} sections, but its command holds ${fit.toLocaleString('en-US')}.`,
+            );
           }
         }
         if (out.segments.length < MAX_SEGMENTS) {
@@ -511,21 +551,16 @@ async function readThin(slice: Slice): Promise<Thin> {
         out.encrypted ??= c.getUint32(16, le) !== 0;
         break;
       case LC_BUILD_VERSION: {
-        if (legacy === true) {
-          break;
-        }
-        const first = legacy === undefined;
-        legacy = false;
         const platform = c.getUint32(8, le);
-        const name = PLATFORMS[platform] ?? `Platform ${platform}`;
-        if (out.builds.length < MAX_BUILDS && !out.builds.some((b) => b.platform === name)) {
-          out.builds.push({
-            platform: name,
-            minOs: version3(c.getUint32(12, le)),
-            sdk: version3(c.getUint32(16, le)),
-          });
-        }
-        if (first) {
+        const sdk = c.getUint32(16, le);
+        addBuild({
+          platform: PLATFORMS[platform] ?? `Platform ${platform}`,
+          minOs: version3(c.getUint32(12, le)),
+          // 0 is what a compiler writes when it was given no SDK.
+          sdk: sdk === 0 ? undefined : version3(sdk),
+        });
+        if (!toolsRead) {
+          toolsRead = true;
           const ntools = c.getUint32(20, le);
           for (let t = 0; t < ntools && t < MAX_TOOLS && 24 + t * 8 + 8 <= cmdsize; t++) {
             const tool = c.getUint32(24 + t * 8, le);
@@ -540,29 +575,9 @@ async function readThin(slice: Slice): Promise<Thin> {
       case LC_VERSION_MIN_IPHONEOS:
       case LC_VERSION_MIN_TVOS:
       case LC_VERSION_MIN_WATCHOS: {
-        if (legacy !== undefined) {
-          break;
-        }
-        legacy = true;
-        // The legacy commands name no simulator: dyld tells one apart by the
-        // CPU (an Intel slice of an iOS, tvOS or watchOS binary is a simulator one).
-        const intel = out.cputype === CPU_X86 || out.cputype === CPU_X86_64;
         const sdk = c.getUint32(12, le);
-        out.builds.push({
-          platform:
-            cmd === LC_VERSION_MIN_MACOSX
-              ? 'macOS'
-              : cmd === LC_VERSION_MIN_IPHONEOS
-                ? intel
-                  ? 'iOS Simulator'
-                  : 'iOS'
-                : cmd === LC_VERSION_MIN_TVOS
-                  ? intel
-                    ? 'tvOS Simulator'
-                    : 'tvOS'
-                  : intel
-                    ? 'watchOS Simulator'
-                    : 'watchOS',
+        addBuild({
+          platform: legacyPlatform(cmd, out.cputype),
           minOs: version3(c.getUint32(8, le)),
           sdk: sdk === 0 ? undefined : version3(sdk),
         });
@@ -701,7 +716,16 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
         t.flags & MH_ALLOW_STACK_EXECUTION ? 'Yes (MH_ALLOW_STACK_EXECUTION)' : 'No',
       ],
       ['No heap execution', t.flags & MH_NO_HEAP_EXECUTION ? 'Yes' : 'No'],
-      ['__RESTRICT,__restrict section', t.hasRestrict ? 'Present' : t.complete ? 'No' : UNKNOWN],
+      [
+        '__RESTRICT,__restrict section',
+        t.hasRestrict
+          ? 'Present'
+          : t.restrictUnread
+            ? 'Unknown (the __RESTRICT segment declares more sections than it holds)'
+            : t.complete
+              ? 'No'
+              : UNKNOWN,
+      ],
     );
   }
   const signature = signatureState(t);
