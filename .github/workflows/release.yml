@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -43,6 +44,19 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           if [ "${TAG#v}" != "$version" ]; then
             echo "Tag $TAG does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      # A tag can be pushed on an unmerged branch. Only release commits that
+      # reached protected main.
+      - name: Check the tagged commit is on main
+        env:
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
+            echo "Tag $TAG points at $SHA, which is not on origin/main. Merge the release pull request first, then tag the merge commit." >&2
             exit 1
           fi
 

@@ -31,8 +31,8 @@ How to cut a release and publish to both the VS Code Marketplace and Open VSX. T
 
 ### d. Open VSX trusted publisher
 
-1. Sign in at <https://open-vsx.org>, avatar → **Settings** → the `OwenPKent` namespace (you must be its owner; the Publisher Agreement stays signed as before).
-2. Add a **trusted publisher**: provider **GitHub**, owner `owenpkent`, repository `markcopy`, workflow file `release.yml`, environment `release`.
+1. Sign in at <https://open-vsx.org>, avatar → **Settings** → **Trusted Publishers** (you must own the namespace; the Publisher Agreement stays signed as before).
+2. Register a trusted publisher. Open VSX scopes it to one extension, so the form asks for the namespace `OwenPKent` and the extension `markcopy`, plus the GitHub fields: owner `owenpkent`, repository `markcopy`, workflow `release.yml`, environment `release`.
 3. Save. The publish step runs `npx ovsx publish <file> --trusted-publishing` and exchanges the job's OIDC token for a 15-minute publishing token. Open VSX matches on the workflow file with the ref stripped, so the environment is what ties it to an approved run.
 
 ## Manual fallback: tokens
@@ -165,19 +165,34 @@ curl -s https://open-vsx.org/api/OwenPKent/markcopy    # Open VSX (see .version)
 
 Needs the [one-time setup](#one-time-setup-automated-release-github-actions) done.
 
-1. Pushing the tag (step 6) starts **Release** in the repository's Actions tab. The `build` job fails if the tag differs from `package.json`'s version, packages the `.vsix` with `vsce package`, writes `markcopy-<version>.vsix.sha256`, and attests the file. `github-release` then creates the GitHub Release with both files and that version's CHANGELOG section as its notes.
-2. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; re-run just the failed job from the run page.
-3. Verify the artifact and both registries:
+1. Pushing the tag (step 6) starts **Release** in the repository's Actions tab. The `build` job fails if the tag differs from `package.json`'s version or the tagged commit is not on `main`, packages the `.vsix` with `vsce package`, writes `markcopy-<version>.vsix.sha256`, and attests the file. `github-release` then creates the GitHub Release with both files and that version's CHANGELOG section as its notes.
+2. Wait for the GitHub Release to appear. The registry jobs sit at **Waiting**; do not approve them yet. Smoke-test the exact file they will publish. Download it into a clean directory and verify it:
    ```bash
-   gh release download v<version> -p '*.vsix' -R owenpkent/markcopy
+   mkdir release-check && cd release-check
+   gh release download v<version> -R owenpkent/markcopy
+   sha256sum --check markcopy-<version>.vsix.sha256
    gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy
+   ```
+3. Run the packaged-extension smoke check from [step 7](#manual-fallback) on that file: install it into a throwaway profile, open a Markdown file, a CSV, and a PDF with the same flags, and confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. If anything is wrong, do not approve: reject the deployment and fix forward with a new version.
+4. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; if one fails, see [One registry failed](#one-registry-failed).
+5. Verify both registries:
+   ```bash
    npx vsce show OwenPKent.markcopy
    curl -s https://open-vsx.org/api/OwenPKent/markcopy
    ```
    Registry lag and a flapping version are normal for a few minutes; see [Troubleshooting Phase 2](#troubleshooting-phase-2).
-4. Step 13 below (the security advisory) still applies after both registries show the version.
+6. Step 13 below (the security advisory) still applies after both registries show the version.
 
-The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists, so publish by hand with the manual steps below, using the `.vsix` it attached.
+#### One registry failed
+
+If one registry accepted the version and the other did not, do not use the manual fallback's packaging step: it rebuilds a different file and publishes again to the registry that already succeeded.
+
+1. On the workflow run page, click **Re-run failed jobs**. It reuses the same artifact, so the same bytes go out.
+2. If that cannot work (for example the trusted publisher was refused again), download the file from the existing GitHub Release into a clean directory and verify it as in step 2 above (`sha256sum --check` and `gh attestation verify`).
+3. Publish those exact bytes only to the registry that failed. For the Marketplace: `npx vsce publish --packagePath markcopy-<version>.vsix -p <PAT>`. For Open VSX: `npx ovsx publish markcopy-<version>.vsix -p <token>`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route.
+4. Verify both registries as in step 5 above.
+
+The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists. Use [One registry failed](#one-registry-failed) to publish that same `.vsix` by hand.
 
 #### Manual fallback
 
