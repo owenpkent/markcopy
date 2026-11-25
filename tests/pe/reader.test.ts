@@ -3,6 +3,7 @@ import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../
 import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
+import { inlineBlock, pointerBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 const read = (spec: PeSpec = {}, patch: (bytes: Uint8Array) => Uint8Array = (b) => b) =>
   readPe(bytesSource(patch(buildPe(spec))));
@@ -1034,5 +1035,78 @@ describe('readPe: reading is ranged and budgeted', () => {
       (err: unknown) => err,
     );
     expect(failure === undefined || failure instanceof PeError).toBe(true);
+  });
+});
+
+describe('readPe: Go build information', () => {
+  const BASE_32 = 0x400000;
+  const BASE_64 = 0x140000000;
+
+  it('reads inline strings from the .data section', async () => {
+    const info = await read({ plus: true, data: inlineBlock({ info: SAMPLE_LINES }) });
+    expect(info.warnings).toEqual([]);
+    expect(info.go?.goVersion).toBe('go1.22.1');
+    expect(info.go?.path).toBe('example.com/app/cmd/app');
+    expect(info.go?.module).toEqual({ path: 'example.com/app', version: 'v1.4.0' });
+    expect(info.go?.depTotal).toBe(2);
+    expect(info.go?.deps[1].replacedBy).toEqual({
+      path: 'example.com/fork-sys',
+      version: 'v0.15.1',
+    });
+    expect(info.go?.settings).toContainEqual(['GOOS', 'linux']);
+  });
+
+  it('follows pointers, mapping a virtual address through the image base', async () => {
+    const wide = await read({
+      plus: true,
+      data: (rva) => pointerBlock({ info: SAMPLE_LINES })(BASE_64 + rva),
+    });
+    expect(wide.warnings).toEqual([]);
+    expect(wide.go?.goVersion).toBe('go1.16.5');
+    expect(wide.go?.depTotal).toBe(2);
+    const narrow = await read({
+      data: (rva) => pointerBlock({ pointerSize: 4, info: SAMPLE_LINES })(BASE_32 + rva),
+    });
+    expect(narrow.go?.goVersion).toBe('go1.16.5');
+    expect(narrow.go?.settings).toHaveLength(6);
+    // A relocated image: the image base in the header is not the one the pointers assume.
+    const moved = await read({
+      plus: true,
+      imageBase: 0x180000000n,
+      data: (rva) => pointerBlock({ info: SAMPLE_LINES })(BASE_64 + rva),
+    });
+    expect(moved.go).toBeUndefined();
+    expect(moved.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  it('is absent from an image with no .data section or no header in it', async () => {
+    expect((await read({ plus: true })).go).toBeUndefined();
+    const plain = await read({ plus: true, data: new Uint8Array(512).fill(3) });
+    expect(plain.go).toBeUndefined();
+    expect(plain.warnings).toEqual([]);
+  });
+
+  it('warns about a damaged block and still reads the rest', async () => {
+    for (const block of [
+      inlineBlock({ pointerSize: 5 }),
+      inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 99999 }),
+    ]) {
+      const info = await read({ plus: true, version: { fileVersion: [1, 2, 3, 4] }, data: block });
+      expect(info.go).toBeUndefined();
+      expect(info.warnings).toEqual(['The Go build information could not be read.']);
+      expect(info.version?.fileVersion).toBe('1.2.3.4');
+    }
+  });
+
+  it('keeps only the version when the module text is too long, with a warning', async () => {
+    const info = await read({
+      plus: true,
+      data: inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 300 * 1024 }),
+    });
+    expect(info.go?.goVersion).toBe('go1.22.1');
+    expect(info.go?.deps).toEqual([]);
+    expect(info.warnings).toEqual([
+      'The Go module list is too long to read, so only the Go version is shown.',
+    ]);
   });
 });

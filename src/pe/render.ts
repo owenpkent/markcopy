@@ -19,6 +19,7 @@ import {
 } from '../binary/html';
 import { printable } from '../binary/text';
 import { own } from '../binary/own';
+import { GO_MODULE_ROWS, goModuleRows, goProperties } from '../binary/goBuildInfo';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -322,6 +323,28 @@ function importsSection(info: PeInfo): string {
     : html;
 }
 
+// The Go blocks: the program's identity, its build settings and the modules it
+// was built from, as the ELF page shows them.
+function goBlocks(info: PeInfo): string[] {
+  const go = info.go;
+  if (!go) {
+    return [];
+  }
+  const parts = [block('Go', properties(goProperties(go)))];
+  if (go.settings.length > 0) {
+    parts.push(block('Go build settings', grid(['Setting', 'Value'], go.settings)));
+  }
+  const modules = goModuleRows(go).slice(0, GO_MODULE_ROWS);
+  if (modules.length > 0) {
+    const note =
+      go.depTotal > modules.length
+        ? `<p class="mc-exe-note">Showing the first ${number(modules.length)} of ${number(go.depTotal)} modules.</p>`
+        : '';
+    parts.push(block('Go modules', grid(['Module', 'Version'], modules) + note, true));
+  }
+  return parts;
+}
+
 function exportsSection(info: PeInfo): string {
   const exported = info.exports;
   if (!exported) {
@@ -384,6 +407,7 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   parts.push(block('File', fileSection(info, options)));
   parts.push(block('Signature', signatureSection(info)));
   parts.push(block('Permissions and protections', protectionSection(info)));
+  parts.push(...goBlocks(info));
   if (info.debug?.pdbPath || info.debug?.guid) {
     const rows: Row[] = [];
     if (info.debug.pdbPath) {

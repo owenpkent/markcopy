@@ -7,6 +7,13 @@
 // offset, size and count is checked before use and every loop has a cap.
 import { printable } from '../binary/text';
 import { formatBytes } from '../binary/html';
+import {
+  GO_MODULE_ROWS,
+  goModuleRows,
+  goProperties,
+  readGoBuildInfo,
+  type GoBuildInfo,
+} from '../binary/goBuildInfo';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import type { PackageInfo } from './model';
 import type { RangeReader } from '../binary/reader';
@@ -41,6 +48,7 @@ const PT_LOAD = 1;
 const PT_DYNAMIC = 2;
 const PT_INTERP = 3;
 const PT_NOTE = 4;
+const PF_W = 2;
 const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
 
@@ -651,6 +659,30 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     );
   }
 
+  // Go build information: the `.go.buildinfo` section when the file has one
+  // that holds data, else the first writable loadable segment, which is where
+  // the linker puts it in a file with its section headers stripped.
+  let go: GoBuildInfo | undefined;
+  const goSection = named('.go.buildinfo');
+  const goSegment = segments.find(
+    (s) => s.type === PT_LOAD && (s.flags & PF_W) !== 0 && s.filesz > 0 && s.offset < reader.size,
+  );
+  const goRegion =
+    goSection && goSection.type !== SHT_NOBITS
+      ? { offset: goSection.offset, size: goSection.size }
+      : goSegment && { offset: goSegment.offset, size: goSegment.filesz };
+  if (goRegion) {
+    go = await attempt(
+      'The Go build information',
+      () =>
+        readGoBuildInfo(reader, goRegion, (va) =>
+          va <= BigInt(Number.MAX_SAFE_INTEGER) ? offsetOf(segments, Number(va)) : undefined,
+        ),
+      undefined,
+    );
+    warnings.push(...(go?.warnings ?? []));
+  }
+
   const modinfo = new Map<string, string[]>();
   let modinfoKeys = 0;
   if (modinfoSection && isModule) {
@@ -789,6 +821,8 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
       ['Separate debug file', debugFile],
       ['Compiler', compilers.join('; ')],
     ]),
+    ...propertySection('Go', go ? goProperties(go) : []),
+    ...tableSection('Go build settings', ['Setting', 'Value'], go?.settings ?? []),
     ...appImage,
     ...propertySection('Protections', protections),
     ...propertySection('Kernel module', modRows),
@@ -798,6 +832,11 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
       dyn.needed.map((n) => [n]),
       { total: dyn.neededTotal, noun: 'libraries' },
     ),
+    ...tableSection('Go modules', ['Module', 'Version'], go ? goModuleRows(go) : [], {
+      limit: GO_MODULE_ROWS,
+      total: go?.depTotal,
+      noun: 'modules',
+    }),
     ...tableSection('Sections', ['Name', 'Size', 'Type'], sectionRows, {
       limit: SECTION_ROWS,
       total: Math.max(table.total - 1, sectionRows.length),

@@ -15,7 +15,10 @@ export interface SectionSpec {
   name: string;
   /** SHT_* value; 1 (PROGBITS) by default. */
   type?: number;
-  data?: Uint8Array | string;
+  /** The contents, or a function of the section's virtual address for contents that point into the file. */
+  data?: Uint8Array | string | ((vaddr: number) => Uint8Array);
+  /** Place the section at a file offset that is a multiple of this. */
+  align?: number;
   /** Size to declare when it should differ from the data (NOBITS sections). */
   size?: number;
 }
@@ -49,6 +52,8 @@ export interface ElfSpec {
   abiTag?: [number, number, number, number];
   goBuildId?: string;
   sections?: SectionSpec[];
+  /** p_flags of the PT_LOAD segment: 5 (read, execute) unless given; 6 is writable. */
+  loadFlags?: number;
   /** Leave out program headers (an object file, a kernel module). */
   noProgramHeaders?: boolean;
   /** Leave out the section header table. */
@@ -240,8 +245,11 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
     placed.push({ name: '.note.gnu.build-id', type: 7, offset: noteOffset, size: notes.length });
   }
   for (const s of userSections) {
-    const data = asBytes(s.data);
+    while (s.align && at() % s.align !== 0) {
+      body.u8(0);
+    }
     const offset = at();
+    const data = typeof s.data === 'function' ? s.data(BASE + offset) : asBytes(s.data);
     if (s.type !== 8) {
       body.raw(data).pad(4);
     }
@@ -290,7 +298,7 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
     let align = 8;
     switch (kind) {
       case PT.LOAD:
-        flags = 5;
+        flags = spec.loadFlags ?? 5;
         offset = 0;
         size = fileSize;
         align = 0x1000;

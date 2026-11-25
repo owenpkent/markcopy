@@ -23,6 +23,7 @@ import {
   type ByteSource,
 } from '../binary/reader';
 import { printable } from '../binary/text';
+import { readGoBuildInfo, type GoBuildInfo } from '../binary/goBuildInfo';
 import { readVersionResource, type VersionInfo } from './version';
 
 // The shared reader's error under this feature's name, so a file the ranged
@@ -142,6 +143,8 @@ export interface PeInfo {
   debug?: PeDebug;
   dotnet?: PeDotNet;
   signature?: PeSignature;
+  /** What `go version -m` would print, for a program built by the Go toolchain. */
+  go?: GoBuildInfo;
   /** Bytes after the last section that no header accounts for, as an installer's payload is. */
   overlay?: { offset: number; size: number };
   /** Parts of the file that were present but could not be read. */
@@ -585,6 +588,26 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         // mask works on 32-bit signed values, and turned a length near the
         // top of the range into a step backwards.
         at += Math.ceil(length / 8) * 8;
+      }
+    });
+  }
+
+  // The Go linker puts its build information in the data section. The old
+  // layout names it by address, which is the image base plus an RVA.
+  const data = sections.find((s) => s.name === '.data');
+  if (data && data.rawSize > 0 && data.rawOffset < reader.size) {
+    await attempt('Go build information', async () => {
+      const go = await readGoBuildInfo(
+        reader,
+        { offset: data.rawOffset, size: data.rawSize },
+        (address) => {
+          const rva = address - imageBase;
+          return rva >= 0n && rva <= 0xffffffffn ? toOffset(Number(rva)) : undefined;
+        },
+      );
+      if (go) {
+        info.go = go;
+        info.warnings.push(...go.warnings);
       }
     });
   }
