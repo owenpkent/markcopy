@@ -285,14 +285,20 @@ Fat binaries and Java class files share the magic `0xCAFEBABE`, which
 Ghidra does not parse deb, RPM, Alpine, OLE/CFB or MSI, so there is nothing to
 compare there.
 
-It does read ar archives, but only as COFF archives (static libraries).
+It does read ar archives, as COFF archives (static libraries).
 `Base/app/util/bin/format/coff/archive/CoffArchiveHeader.java` checks the `!<arch>`
-header and walks the member headers, including the long-name table, and
-`FF/coff/CoffArchiveFileSystem.java` lists only the members that are COFF objects.
-That is narrower than what [ar.ts](../src/pkg/ar.ts) does for a Debian package, which
-needs `debian-binary`, `control.tar.*` and `data.tar.*`. The header walk itself is
-the same, though, and the long-name table is something MarkCopy's reader does not need
-for a `.deb`, whose member names are short.
+header and walks the member headers, including the long-name table.
+`FF/coff/CoffArchiveFileSystem.java` then lists the members, leaving out only the two
+special entries named `/` and `//` (`CoffArchiveMemberHeader.isCOFF`, :290-293).
+Despite its name, that check looks at the member's name, not at whether its contents
+are a COFF object, so any member is listed, including a Debian package's
+`debian-binary`.
+
+So both projects list ar members generically. What Ghidra lacks is what
+[ar.ts](../src/pkg/ar.ts) and [deb.ts](../src/pkg/deb.ts) add for a Debian package:
+requiring `debian-binary` first, then unpacking `control.tar.*` and reading its fields.
+The long-name table is something MarkCopy's reader does not need for a `.deb`, whose
+member names are short.
 
 For the formats it does open, it hands the work to a library or a subprocess:
 
@@ -500,8 +506,11 @@ Gaps:
      ordinary compression method (APPNOTE section 4.4.4). Its algorithm is in the
      0x0017 extra field and the decryption header, so show it from there, or say
      "encrypted, scheme undetermined" when that metadata is missing.
-   - Show "ZipCrypto (legacy)" only when bit 0 is set, bit 6 is clear and there is
-     no 0x9901 field.
+   - Method 99 is itself the WinZip AES marker. An entry with method 99 but no 0x9901
+     field is inconsistent: label it "encrypted, AES metadata incomplete", since
+     without the field neither the key strength nor the AE version is known.
+   - Show "ZipCrypto (legacy)" only when bit 0 is set, bit 6 is clear, the method is
+     not 99 and there is no 0x9901 field.
    - Detect the OLE encryption streams.
    - Add a summary row, "Encrypted: N of M entries".
    - Never fail the whole preview because some entries are encrypted.
