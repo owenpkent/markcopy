@@ -188,9 +188,14 @@ Needs the [one-time setup](#one-time-setup-automated-release-github-actions) don
 This covers one registry failing or both. What decides the path is whether the GitHub Release already holds the attested `.vsix`. If it does, publish that file and nothing else. Never package again for a version whose release already exists: a local build is different bytes from the attested ones, even at the same commit.
 
 1. On the workflow run page, click **Re-run failed jobs**. It reuses the same artifact, so the same bytes go out, and it re-runs only the registries that failed.
-2. If that cannot work (for example the trusted publisher was refused again), download the file from the existing GitHub Release once, into a clean directory, and verify it as in step 2 above (`sha256sum --check` and `gh attestation verify`).
-3. Load the tokens as in [Publishing secrets](#publishing-secrets-env), so neither command carries a credential on its command line or in shell history. Both CLIs read them from the environment (`VSCE_PAT`, `OVSX_PAT`).
-4. Publish that verified file to each registry still missing the version, and only those. For the Marketplace: `npx vsce publish --packagePath markcopy-<version>.vsix`. For Open VSX: `npx ovsx publish markcopy-<version>.vsix`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route.
+2. If that cannot work (for example the trusted publisher was refused again), work from the repository root, where `.env` lives, and stay there. First load the tokens as in [Publishing secrets](#publishing-secrets-env), so no command carries a credential on its command line or in shell history. Both CLIs read them from the environment (`VSCE_PAT`, `OVSX_PAT`).
+3. Download the file from the existing GitHub Release once, into a clean directory, without changing into it, and verify it:
+   ```bash
+   gh release download v<version> -R owenpkent/markcopy -D release-recovery
+   (cd release-recovery && sha256sum --check markcopy-<version>.vsix.sha256)
+   gh attestation verify release-recovery/markcopy-<version>.vsix -R owenpkent/markcopy
+   ```
+4. Publish that verified file to each registry still missing the version, and only those. For the Marketplace: `npx vsce publish --packagePath release-recovery/markcopy-<version>.vsix`. For Open VSX: `npx ovsx publish release-recovery/markcopy-<version>.vsix`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route. Delete `release-recovery` afterwards.
 5. Verify both registries as in step 5 above.
 
 The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists, so follow [A registry publish failed](#a-registry-publish-failed) to publish that same `.vsix` by hand.
