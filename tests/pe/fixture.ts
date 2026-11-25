@@ -146,12 +146,55 @@ const SHA256_WITH_RSA = tlv(
   tlv(0x05),
 );
 
+/** The content bytes of an OBJECT IDENTIFIER written as dotted arcs. */
+export const oidBytes = (dotted: string): number[] => {
+  const arcs = dotted.split('.').map(Number);
+  const out = [arcs[0] * 40 + arcs[1]];
+  for (const arc of arcs.slice(2)) {
+    const group = [arc & 0x7f];
+    for (let n = arc >>> 7; n > 0; n >>>= 7) {
+      group.unshift((n & 0x7f) | 0x80);
+    }
+    out.push(...group);
+  }
+  return out;
+};
+
+/** A SubjectPublicKeyInfo: `algorithm` is the OID bytes, `parameters` an optional element, `key` the BIT STRING contents after the unused-bits byte. */
+export function spki(
+  algorithm: number[],
+  key: Uint8Array,
+  parameters: Uint8Array = tlv(0x05),
+): Uint8Array {
+  return tlv(
+    SEQUENCE,
+    tlv(SEQUENCE, oid(...algorithm), parameters),
+    tlv(0x03, Uint8Array.of(0), key),
+  );
+}
+
+/** An RSA SubjectPublicKeyInfo whose modulus is `bits` long (top bit set), written with the leading zero DER needs. */
+export function rsaSpki(bits: number): Uint8Array {
+  const modulus = new Uint8Array(Math.ceil(bits / 8));
+  modulus.fill(0xab);
+  modulus[0] = 1 << (((bits - 1) % 8) + 0);
+  const padded = Uint8Array.from([0, ...modulus]);
+  const key = tlv(SEQUENCE, tlv(INTEGER, padded), tlv(INTEGER, Uint8Array.of(1, 0, 1)));
+  return spki([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01], key);
+}
+
+/** An EC SubjectPublicKeyInfo naming a curve by its OID bytes. */
+export function ecSpki(curve: number[]): Uint8Array {
+  return spki([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], Uint8Array.of(4, 1, 2, 3), oid(...curve));
+}
+
 function certificate(
   serial: number,
   issuer: Uint8Array,
   subject: Uint8Array,
   notBefore: string,
   notAfter: string,
+  key?: Uint8Array,
 ): Uint8Array {
   const tbs = tlv(
     SEQUENCE,
@@ -161,12 +204,13 @@ function certificate(
     issuer,
     tlv(SEQUENCE, tlv(UTC_TIME, ascii(notBefore)), tlv(UTC_TIME, ascii(notAfter))),
     subject,
-    // SubjectPublicKeyInfo with a placeholder key: nothing reads it.
-    tlv(
-      SEQUENCE,
-      tlv(SEQUENCE, oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01), tlv(0x05)),
-      tlv(0x03, Uint8Array.from([0, 1, 2, 3, 4])),
-    ),
+    // SubjectPublicKeyInfo: a placeholder key unless the test gives one.
+    key ??
+      tlv(
+        SEQUENCE,
+        tlv(SEQUENCE, oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01), tlv(0x05)),
+        tlv(0x03, Uint8Array.from([0, 1, 2, 3, 4])),
+      ),
   );
   return tlv(SEQUENCE, tbs, SHA256_WITH_RSA, tlv(0x03, Uint8Array.from([0, 9, 9, 9])));
 }
@@ -180,6 +224,23 @@ export interface SignerSpec {
   notAfter?: string;
   /** DER tag for the name strings; PrintableString (0x13) is what older CAs wrote. */
   stringTag?: number;
+  /** The SignerInfo's digestAlgorithm OID bytes (SHA-256 when absent). */
+  digestOid?: number[];
+  /** The signer certificate's SubjectPublicKeyInfo. */
+  key?: Uint8Array;
+}
+
+/** The signer certificate buildSignedData embeds for this spec, as a bare X.509 DER. */
+export function buildLeafCertificate(spec: SignerSpec): Uint8Array {
+  const tag = spec.stringTag ?? UTF8_STRING;
+  return certificate(
+    0x2a,
+    name(spec.issuer, tag),
+    name(spec.subject, tag),
+    spec.notBefore ?? '230615000000Z',
+    spec.notAfter ?? '260615235959Z',
+    spec.key,
+  );
 }
 
 /**
@@ -205,10 +266,11 @@ export function buildSignedData(spec: SignerSpec): Uint8Array {
     subject,
     spec.notBefore ?? '230615000000Z',
     spec.notAfter ?? '260615235959Z',
+    spec.key,
   );
   const sha256 = tlv(
     SEQUENCE,
-    oid(0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01),
+    oid(...(spec.digestOid ?? [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01])),
     tlv(0x05),
   );
   const signerInfo = tlv(

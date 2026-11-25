@@ -7,6 +7,7 @@
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
 import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
+import { detailRows } from './signer';
 import {
   block,
   formatBytes,
@@ -216,6 +217,11 @@ function signatureSection(info: PeInfo): string {
   }
   if (signer?.notBefore && signer.notAfter) {
     rows.push(['Certificate valid', `${signer.notBefore} to ${signer.notAfter}`]);
+  }
+  for (const [label, value] of detailRows(signer)) {
+    if (value) {
+      rows.push([label, value]);
+    }
   }
   rows.push(['Signature size', formatBytes(signature.size)]);
   return (

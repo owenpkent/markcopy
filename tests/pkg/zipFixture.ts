@@ -40,6 +40,8 @@ export interface ZipOptions {
   zip64?: boolean;
   /** Pair IDs for an APK Signing Block placed ahead of the central directory. */
   signingBlockIds?: number[];
+  /** Pairs with real values, for a Signing Block that carries signature data; used instead of signingBlockIds. */
+  signingBlockPairs?: { id: number; value: Uint8Array }[];
   /** Override the entry count the end record declares. */
   declaredCount?: number;
 }
@@ -162,13 +164,19 @@ export function buildZip(entries: FixtureEntry[], options: ZipOptions = {}): Uin
     }
   }
 
-  if (options.signingBlockIds) {
+  if (options.signingBlockIds || options.signingBlockPairs) {
     const pairs = new Out();
-    for (const id of options.signingBlockIds) {
+    for (const id of options.signingBlockIds ?? []) {
       pairs
         .u64(4 + 4)
         .u32(id)
         .u32(0);
+    }
+    for (const { id, value } of options.signingBlockPairs ?? []) {
+      pairs
+        .u64(4 + value.length)
+        .u32(id)
+        .bytes(value);
     }
     const size = pairs.length + 8 + 16;
     body.u64(size).bytes(pairs.parts).u64(size).bytes(utf8('APK Sig Block 42'));
