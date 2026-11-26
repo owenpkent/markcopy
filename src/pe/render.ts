@@ -264,7 +264,9 @@ function guardRow(info: PeInfo, headerBit: boolean): string {
   const instrumented = ((config?.guardFlags ?? 0) & GUARD_CF_INSTRUMENTED) !== 0;
   if (headerBit && instrumented) {
     const count = config?.cfFunctionCount;
-    return count !== undefined && count > 0 ? `Yes, ${number(count)} protected functions` : 'Yes';
+    return count !== undefined && count > 0
+      ? `Yes, ${number(count)} CFG target-table entries`
+      : 'Yes';
   }
   if (headerBit) {
     return 'Flag set, but the image has no guard data';

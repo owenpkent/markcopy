@@ -504,10 +504,10 @@ describe('renderPeHtml: Control Flow Guard and the other hardening rows', () => 
   it('says Yes, with a count, when the header bit and the guard data agree', async () => {
     const loadConfig = { guardFlags: 0x100, cfCount: 1234n };
     expect(await cfg({ dllCharacteristics: base | CF, loadConfig })).toBe(
-      'Yes, 1,234 protected functions',
+      'Yes, 1,234 CFG target-table entries',
     );
     expect(await cfg({ plus: true, dllCharacteristics: base | CF, loadConfig })).toBe(
-      'Yes, 1,234 protected functions',
+      'Yes, 1,234 CFG target-table entries',
     );
     expect(await cfg({ dllCharacteristics: base | CF, loadConfig: { guardFlags: 0x100 } })).toBe(
       'Yes',
