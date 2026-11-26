@@ -174,13 +174,17 @@ export function spki(
 }
 
 /** An RSA SubjectPublicKeyInfo whose modulus is `bits` long (top bit set), written with the leading zero DER needs. */
-export function rsaSpki(bits: number): Uint8Array {
+export function rsaSpki(
+  bits: number,
+  algorithm: number[] = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+  parameters?: Uint8Array,
+): Uint8Array {
   const modulus = new Uint8Array(Math.ceil(bits / 8));
   modulus.fill(0xab);
   modulus[0] = 1 << (((bits - 1) % 8) + 0);
   const padded = Uint8Array.from([0, ...modulus]);
   const key = tlv(SEQUENCE, tlv(INTEGER, padded), tlv(INTEGER, Uint8Array.of(1, 0, 1)));
-  return spki([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01], key);
+  return spki(algorithm, key, parameters);
 }
 
 /** An EC SubjectPublicKeyInfo naming a curve by its OID bytes. */

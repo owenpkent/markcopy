@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readApkSigner } from '../../src/pkg/apkSigner';
 import { buildLeafCertificate, rsaSpki } from '../pe/fixture';
@@ -56,9 +55,9 @@ describe('readApkSigner', () => {
     expect(result.signer?.subject).toBe('Acme v2');
     expect(result.signer?.publicKey).toBe('RSA, 2048 bits');
     expect(result.signer?.signatureAlgorithm).toBe('RSA PKCS #1 v1.5 with SHA-256');
-    expect(result.signer?.thumbprint).toBe(
-      createHash('sha1').update(c).digest('hex').toUpperCase(),
-    );
+    // Precomputed once with `openssl dgst -sha1` over the fixture's DER bytes
+    // (certificate for subject "Acme v2", 2048-bit key), so no test calls SHA-1.
+    expect(result.signer?.thumbprint).toBe('9D92773E3C18E75C0C8396B75A15CF9C9FCE8344');
   });
 
   it('reads a v3 signer, which has an SDK range before the signatures', () => {
@@ -144,6 +143,24 @@ describe('APK page signer from the signing block', () => {
     expect(value(await read(pairs), 'Signature', 'Signer')).toBe('from v3.1');
     expect(value(await read(pairs.slice(0, 2)), 'Signature', 'Signer')).toBe('from v3');
     expect(value(await read(pairs.slice(0, 1)), 'Signature', 'Signer')).toBe('from v2');
+  });
+
+  it('says which scheme the certificate comes from when several are listed', async () => {
+    const pairs = [
+      { id: V3, value: block(signer(true, cert('original key'))) },
+      { id: V31, value: block(signer(true, cert('rotated key'))) },
+    ];
+    const both = await read(pairs);
+    expect(value(both, 'Signature', 'Signer')).toBe('rotated key');
+    expect(value(both, 'Signature', 'Certificate from')).toBe('APK Signature Scheme v3.1');
+    const older = await read(pairs.slice(0, 1));
+    expect(value(older, 'Signature', 'Certificate from')).toBeUndefined();
+    const fallback = await read([
+      { id: V31, value: Uint8Array.of(255, 255, 255, 255) },
+      { id: V2, value: block(signer(false, cert('from v2'))) },
+    ]);
+    expect(value(fallback, 'Signature', 'Signer')).toBe('from v2');
+    expect(value(fallback, 'Signature', 'Certificate from')).toBe('APK Signature Scheme v2');
   });
 
   it('falls back to an older scheme when the newest cannot be read', async () => {

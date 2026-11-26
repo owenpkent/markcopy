@@ -301,12 +301,15 @@ function keyName(der: Uint8Array, spki: Tlv | undefined): string | undefined {
     return undefined;
   }
   switch (dotted) {
-    case '1.2.840.113549.1.1.1': {
+    case '1.2.840.113549.1.1.1':
+    case '1.2.840.113549.1.1.10': {
+      // id-RSASSA-PSS (a key restricted to PSS) holds the same RSAPublicKey.
+      const name = dotted === '1.2.840.113549.1.1.10' ? 'RSA-PSS' : 'RSA';
       // The BIT STRING (first byte: unused bits) holds SEQUENCE { modulus, exponent }.
       const key = tlvAt(der, bits.start + 1, bits.end);
       const modulus = key?.tag === 0x30 ? children(der, key, 1)[0] : undefined;
       if (modulus?.tag !== 0x02) {
-        return 'RSA';
+        return name;
       }
       // A leading zero byte only keeps the INTEGER positive; it is not key size.
       let at = modulus.start;
@@ -314,9 +317,9 @@ function keyName(der: Uint8Array, spki: Tlv | undefined): string | undefined {
         at++;
       }
       if (at >= modulus.end || der[at] === 0) {
-        return 'RSA';
+        return name;
       }
-      return `RSA, ${(modulus.end - at - 1) * 8 + (32 - Math.clz32(der[at]))} bits`;
+      return `${name}, ${(modulus.end - at - 1) * 8 + (32 - Math.clz32(der[at]))} bits`;
     }
     case '1.2.840.10045.2.1': {
       const curve = oidText(der, parameters);
@@ -372,7 +375,7 @@ export function digestLabel(digest: string): string {
 
 /** The "weak" wording for a key description: RSA under 2048 bits. */
 export function keyLabel(key: string): string {
-  const bits = /^RSA, (\d+) bits$/.exec(key);
+  const bits = /^RSA(?:-PSS)?, (\d+) bits$/.exec(key);
   return bits && Number(bits[1]) < 2048 ? `${key} (weak)` : key;
 }
 

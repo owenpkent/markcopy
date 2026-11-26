@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { bytesSource, readPe, renderPeHtml } from '../../src/pe';
 import {
@@ -64,6 +63,17 @@ describe('signer public key', () => {
     expect(readSigner(der)?.publicKey).toBe(label);
   });
 
+  it('decodes the key size of an RSA-PSS key (parameters absent) and marks a short one weak', () => {
+    const pss = oidBytes('1.2.840.113549.1.1.10');
+    const read = (bits: number): string | undefined =>
+      readSigner(buildSignedData({ ...names, key: rsaSpki(bits, pss, new Uint8Array(0)) }))
+        ?.publicKey;
+    expect(read(1024)).toBe('RSA-PSS, 1024 bits');
+    expect(read(2048)).toBe('RSA-PSS, 2048 bits');
+    expect(keyLabel('RSA-PSS, 1024 bits')).toBe('RSA-PSS, 1024 bits (weak)');
+    expect(keyLabel('RSA-PSS, 2048 bits')).toBe('RSA-PSS, 2048 bits');
+  });
+
   it('names Ed25519, DSA and an unknown algorithm', () => {
     const key = Uint8Array.of(1, 2, 3);
     const read = (dotted: string): string | undefined =>
@@ -79,7 +89,9 @@ describe('signer thumbprint', () => {
   it('is the SHA-1 of the whole certificate, in uppercase hex', () => {
     const spec = { ...names, key: rsaSpki(2048) };
     const leaf = buildLeafCertificate(spec);
-    const expected = createHash('sha1').update(leaf).digest('hex').toUpperCase();
+    // Precomputed once with `openssl dgst -sha1` over the fixture's DER bytes
+    // (certificate for subject "Contoso", 2048-bit key), so no test calls SHA-1.
+    const expected = 'CD877D6AB776F586F1BD244DEBDB48F74E514054';
     expect(readSigner(buildSignedData(spec))?.thumbprint).toBe(expected);
     expect(readCertificate(leaf)?.thumbprint).toBe(expected);
   });

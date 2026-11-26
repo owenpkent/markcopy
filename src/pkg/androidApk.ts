@@ -248,6 +248,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
   ];
   if (schemes.length > 0) {
     let block: ApkSigner | undefined;
+    let blockScheme = '';
     for (const scheme of APK_SCHEME_IDS) {
       if (!ids?.includes(scheme.id)) {
         continue;
@@ -269,6 +270,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
       const read = readApkSigner(value, scheme.hasSdkRange);
       if (read.signer) {
         block = read;
+        blockScheme = scheme.name;
         break;
       }
     }
@@ -279,6 +281,14 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
     );
     if (block && block.count > 1) {
       section.rows.push(['Signers', `${block.count} signers`]);
+    }
+    // The schemes can hold different certificates (a v3.1 rotation), so with
+    // more than one listed, say which one the details above describe.
+    if (schemes.length > 1 && (block?.signer || signer)) {
+      section.rows.push([
+        'Certificate from',
+        block?.signer ? `APK Signature Scheme ${blockScheme}` : 'JAR signature (v1)',
+      ]);
     }
     if (!block?.signer && !signer) {
       section.rows.push([
