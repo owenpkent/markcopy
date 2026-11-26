@@ -704,7 +704,9 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   // end of that header to the end of the file. PAYLOADDIGESTALT (5097) is of the unpacked
   // payload instead, so it is left alone.
   const payloadDigest = text(main, 5092);
-  const payloadId = number(main, 5093);
+  // Version 6 (RPMTAG_RPMFORMAT 5114 is 6) leaves out the obsolete algorithm tag 5093 because
+  // 5092 is defined as SHA-256 there; for older packages a missing 5093 names nothing.
+  const payloadId = number(main, 5093) ?? (number(main, 5114) === 6 ? 8 : undefined);
   const payloadAlgorithm = payloadId === undefined ? undefined : PAYLOAD_ALGORITHMS.get(payloadId);
   const payloadRows: [string, string | undefined][] = [];
   if (payloadDigest !== undefined) {
