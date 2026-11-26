@@ -229,7 +229,7 @@ const PROBES: Probe[] = [
   },
   {
     name: 'PDF document',
-    fact: 'it has a PDF header in its first 1,024 bytes, and the last startxref in its last 64 KiB gives the offset of a cross-reference table or object',
+    fact: 'it has a PDF header in its first 1,024 bytes, and the last complete trailer record in its last 64 KiB gives the offset of a cross-reference table or object',
     matches: ({ head, reader }) => looksLikePdf(reader, head),
   },
 ];

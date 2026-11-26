@@ -122,6 +122,18 @@ describe('a file that is two formats', () => {
     expect(page(info)).not.toContain('Both readings');
   });
 
+  it('still names that PDF when a later file name contains "startxref"', async () => {
+    // The second name is also in the central directory, after the PDF's trailer.
+    // It is not a complete trailer record, so it does not replace the real one.
+    const info = await read(
+      buildZip([
+        { name: 'a.pdf', data: pdf().bytes },
+        { name: 'startxref-notes.txt', data: 'ordinary notes' },
+      ]),
+    );
+    expect(info.also?.matches.map((m) => m.format)).toEqual(['PDF document']);
+  });
+
   it('finds both structures in a PDF with a zip appended', async () => {
     const both = zip(pdf().bytes);
     expect(await looksLikePdf(reader(both), both)).toBe(true);

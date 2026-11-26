@@ -121,12 +121,21 @@ export function hasPdfHeader(head: Uint8Array): boolean {
 
 const latin1 = (b: Uint8Array): string => String.fromCharCode(...b);
 
+// PDF whitespace: NUL, tab, line feed, form feed, carriage return and space.
+const isPdfSpace = (b: number): boolean =>
+  b === 0 || b === 9 || b === 10 || b === 12 || b === 13 || b === 32;
+
+// A trailer record after the keyword: an offset, then "%%EOF", separated by whitespace.
+const TRAILER_RECORD = /^[\0\t\n\f\r ]+(\d{1,15})[\0\t\n\f\r ]+%%EOF/;
+
 /**
- * A PDF header, and in the last 64 KiB a "startxref" (the last one counts, as
- * PDF readers take it) followed by an offset and "%%EOF", where that offset
- * (counted from the header) holds a cross-reference table ("xref") or an
- * indirect object (a cross-reference stream). The markers alone, as in a file
- * name or a zip comment, do not count. One 64-byte read past the tail.
+ * A PDF header, and in the last 64 KiB a trailer record: a standalone
+ * "startxref", an offset and "%%EOF". The last complete record counts, as PDF
+ * readers take it, and its offset (counted from the header) must hold a
+ * cross-reference table ("xref") or an indirect object (a cross-reference
+ * stream). A "startxref" that is not a complete record, such as part of a file
+ * name, is passed over; the markers alone, as in a zip comment, do not count.
+ * One 64-byte read past the tail.
  */
 export async function looksLikePdf(reader: RangeReader, head: Uint8Array): Promise<boolean> {
   const header = pdfHeaderAt(head);
@@ -135,23 +144,24 @@ export async function looksLikePdf(reader: RangeReader, head: Uint8Array): Promi
   }
   const start = Math.max(0, reader.size - PDF_TAIL_WINDOW);
   const tail = await reader.upTo(start, reader.size - start);
-  let xref = -1;
+  let stated: string | undefined;
   for (
     let at = indexOfText(tail, 'startxref');
     at >= 0;
     at = indexOfText(tail, 'startxref', at + 1)
   ) {
-    xref = at;
+    if (at > 0 && !isPdfSpace(tail[at - 1])) {
+      continue;
+    }
+    const record = TRAILER_RECORD.exec(latin1(tail.subarray(at + 9, at + 9 + 64)));
+    if (record) {
+      stated = record[1];
+    }
   }
-  if (xref < 0) {
+  if (stated === undefined) {
     return false;
   }
-  const after = latin1(tail.subarray(xref + 9, xref + 9 + 64));
-  const stated = /^\s*(\d{1,15})\s/.exec(after);
-  if (!stated || indexOfText(tail, '%%EOF', xref) < 0) {
-    return false;
-  }
-  const at = header + Number(stated[1]);
+  const at = header + Number(stated);
   if (at >= reader.size) {
     return false;
   }
