@@ -715,7 +715,10 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
         'Executable stack allowed',
         t.flags & MH_ALLOW_STACK_EXECUTION ? 'Yes (MH_ALLOW_STACK_EXECUTION)' : 'No',
       ],
-      ['No heap execution', t.flags & MH_NO_HEAP_EXECUTION ? 'Yes' : 'No'],
+      [
+        'Force non-executable heap (MH_NO_HEAP_EXECUTION)',
+        t.flags & MH_NO_HEAP_EXECUTION ? 'Flag set' : 'Flag clear (platform default applies)',
+      ],
       [
         '__RESTRICT,__restrict section',
         t.hasRestrict

@@ -393,7 +393,7 @@ describe('readMachO: load commands', () => {
     expect(rowsOf(hardened, 'Protections')).toEqual({
       'Position-independent (PIE)': 'Yes',
       'Executable stack allowed': 'No',
-      'No heap execution': 'Yes',
+      'Force non-executable heap (MH_NO_HEAP_EXECUTION)': 'Flag set',
       '__RESTRICT,__restrict section': 'No',
       'Code signature': 'Present',
     });
@@ -404,7 +404,9 @@ describe('readMachO: load commands', () => {
     const p = rowsOf(loose, 'Protections');
     expect(p['Position-independent (PIE)']).toBe('No (fixed load address)');
     expect(p['Executable stack allowed']).toBe('Yes (MH_ALLOW_STACK_EXECUTION)');
-    expect(p['No heap execution']).toBe('No');
+    expect(p['Force non-executable heap (MH_NO_HEAP_EXECUTION)']).toBe(
+      'Flag clear (platform default applies)',
+    );
     // A segment named __RESTRICT with no __restrict section is not the marker.
     expect(p['__RESTRICT,__restrict section']).toBe('No');
     expect(p['Code signature']).toBe('None');

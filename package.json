@@ -186,6 +186,11 @@
         "enablement": "activeCustomEditorId == markcopy.exePreview || activeCustomEditorId == markcopy.packagePreview"
       },
       {
+        "command": "markcopy.fileInfo.openAsPackage",
+        "title": "MarkCopy: Open as Package Info",
+        "category": "MarkCopy"
+      },
+      {
         "command": "markcopy.openSettings",
         "title": "MarkCopy: Settings",
         "category": "MarkCopy",
@@ -809,6 +814,17 @@
           "command": "markcopy.openPreview",
           "when": "resourceLangId == markdown || resourceLangId == csv || resourceLangId == tsv || resourceLangId == latex",
           "group": "navigation"
+        },
+        {
+          "command": "markcopy.fileInfo.openAsPackage",
+          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "markcopy.fileInfo.openAsPackage",
+          "when": "resourceScheme == file"
         }
       ]
     },
