@@ -157,10 +157,17 @@ interface InflateState {
  * Inflate gzip (all members, concatenated) and hand each piece to `onChunk`,
  * stopping when it returns true. Throws when more than `max` bytes come out.
  *
+ * `onMember` is told where each member starts (an offset into `data`) before its output.
+ *
  * Each member's header is parsed here and only its raw deflate data goes to
  * fflate's Inflate, so no header is ever accumulated or rescanned by the decoder.
  */
-export function gunzipUntil(data: Uint8Array, max: number, onChunk: ChunkHandler): void {
+export function gunzipUntil(
+  data: Uint8Array,
+  max: number,
+  onChunk: ChunkHandler,
+  onMember?: (start: number) => void,
+): void {
   if (data.length === 0) {
     throw new PackageError(DAMAGED);
   }
@@ -172,6 +179,7 @@ export function gunzipUntil(data: Uint8Array, max: number, onChunk: ChunkHandler
         throw new PackageError(TOO_MANY);
       }
       let fed = gzipHeaderEnd(data, pos);
+      onMember?.(pos);
       const inflate = new Inflate((chunk) => {
         total += chunk.length;
         if (total > max) {

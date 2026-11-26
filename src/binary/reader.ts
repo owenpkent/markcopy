@@ -36,6 +36,7 @@ export function bytesSource(bytes: Uint8Array): ByteSource {
 }
 
 const PAGE = 0x10000;
+const SCAN_CHUNK = 1024 * 1024;
 
 export interface ReaderLimits {
   /** Distinct 64 KiB pages that may be read before the reader refuses to go on. */
@@ -108,6 +109,32 @@ export class RangeReader {
       done += take;
     }
     return out;
+  }
+
+  /**
+   * Hand `length` bytes at `offset` to `onChunk` a megabyte at a time, for work that
+   * must see a whole range (a hash) rather than keep it. It reads past the page cache
+   * and its budget, so a large range costs time and not memory; a range the file does
+   * not hold is a ReadError before the first byte is read.
+   */
+  async scan(offset: number, length: number, onChunk: (chunk: Uint8Array) => void): Promise<void> {
+    if (
+      !Number.isSafeInteger(offset) ||
+      !Number.isSafeInteger(length) ||
+      offset < 0 ||
+      length < 0 ||
+      offset + length > this.size
+    ) {
+      throw new ReadError(TRUNCATED);
+    }
+    for (let done = 0; done < length; done += SCAN_CHUNK) {
+      const want = Math.min(SCAN_CHUNK, length - done);
+      const chunk = await this.source.read(offset + done, want);
+      if (chunk.length !== want) {
+        throw new ReadError(TRUNCATED);
+      }
+      onChunk(chunk);
+    }
   }
 
   async view(offset: number, length: number): Promise<DataView> {
