@@ -102,29 +102,59 @@ const indexOfText = (bytes: Uint8Array, text: string, from = 0): number => {
   return -1;
 };
 
-/** "%PDF-" and a 1.x or 2.x version in the first 1,024 bytes, given the head of the file. */
-export function hasPdfHeader(head: Uint8Array): boolean {
+/** Where "%PDF-" and a 1.x or 2.x version start in the first 1,024 bytes of `head`, or -1. */
+function pdfHeaderAt(head: Uint8Array): number {
   const window = head.subarray(0, PDF_HEADER_WINDOW);
   for (let at = indexOfText(window, '%PDF-'); at >= 0; at = indexOfText(window, '%PDF-', at + 1)) {
     const v = head.subarray(at + 5, at + 8);
     if ((v[0] === 0x31 || v[0] === 0x32) && v[1] === 0x2e && v[2] >= 0x30 && v[2] <= 0x39) {
-      return true;
+      return at;
     }
   }
-  return false;
+  return -1;
 }
 
+/** "%PDF-" and a 1.x or 2.x version in the first 1,024 bytes, given the head of the file. */
+export function hasPdfHeader(head: Uint8Array): boolean {
+  return pdfHeaderAt(head) >= 0;
+}
+
+const latin1 = (b: Uint8Array): string => String.fromCharCode(...b);
+
 /**
- * A PDF header, and "startxref" followed by "%%EOF" in the last 64 KiB, which
- * is where PDF readers look. The marker alone, as in a file name or ordinary
- * text, does not count.
+ * A PDF header, and in the last 64 KiB a "startxref" (the last one counts, as
+ * PDF readers take it) followed by an offset and "%%EOF", where that offset
+ * (counted from the header) holds a cross-reference table ("xref") or an
+ * indirect object (a cross-reference stream). The markers alone, as in a file
+ * name or a zip comment, do not count. One 64-byte read past the tail.
  */
 export async function looksLikePdf(reader: RangeReader, head: Uint8Array): Promise<boolean> {
-  if (!hasPdfHeader(head)) {
+  const header = pdfHeaderAt(head);
+  if (header < 0) {
     return false;
   }
   const start = Math.max(0, reader.size - PDF_TAIL_WINDOW);
   const tail = await reader.upTo(start, reader.size - start);
-  const xref = indexOfText(tail, 'startxref');
-  return xref >= 0 && indexOfText(tail, '%%EOF', xref) >= 0;
+  let xref = -1;
+  for (
+    let at = indexOfText(tail, 'startxref');
+    at >= 0;
+    at = indexOfText(tail, 'startxref', at + 1)
+  ) {
+    xref = at;
+  }
+  if (xref < 0) {
+    return false;
+  }
+  const after = latin1(tail.subarray(xref + 9, xref + 9 + 64));
+  const stated = /^\s*(\d{1,15})\s/.exec(after);
+  if (!stated || indexOfText(tail, '%%EOF', xref) < 0) {
+    return false;
+  }
+  const at = header + Number(stated[1]);
+  if (at >= reader.size) {
+    return false;
+  }
+  const first = latin1(await reader.upTo(at, Math.min(64, reader.size - at)));
+  return /^\s*xref\b/.test(first) || /^\s*\d+\s+\d+\s+obj\b/.test(first);
 }

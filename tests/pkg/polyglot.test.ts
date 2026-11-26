@@ -26,6 +26,24 @@ const join = (...parts: Uint8Array[]): Uint8Array => {
   }
   return out;
 };
+const enc = new TextEncoder();
+/** A minimal PDF with a classic cross-reference table at exact byte offsets. */
+const pdf = (): { bytes: Uint8Array; xref: number } => {
+  const bodies = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [] /Count 0 >>'];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  bodies.forEach((b, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${b}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += 'xref\n0 3\n0000000000 65535 f \n';
+  for (const o of offsets) {
+    out += `${String(o).padStart(10, '0')} 00000 n \n`;
+  }
+  out += `trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return { bytes: enc.encode(out), xref };
+};
 const page = (info: PackageInfo): string =>
   renderPackageHtml(info, { fileName: 'file.bin', fileSize: 1 });
 const KOLY = 'koly' + 'x'.repeat(508);
@@ -86,14 +104,28 @@ describe('a file that is two formats', () => {
     expect(page(info)).not.toContain('PDF document');
   });
 
-  it('names a PDF header and trailer in a zip, which has no reader to show', async () => {
+  it('does not call PDF header and trailer markers in a zip the structure of a PDF', async () => {
     const info = await read(
       buildZip([{ name: 'x%PDF-1.4', data: 'hello' }], { comment: '\nstartxref\n0\n%%EOF\n' }),
     );
+    expect(info.also).toBeUndefined();
+    expect(page(info)).not.toContain('PDF document');
+  });
+
+  it('names a real PDF held in a zip, which has no reader to show', async () => {
+    // The PDF is a stored entry, so its header sits inside the first 1,024
+    // bytes and both its trailer and the zip end record are in the last 64 KiB.
+    const info = await read(buildZip([{ name: 'a.pdf', data: pdf().bytes }]));
     expect(info.also?.matches.map((m) => m.format)).toEqual(['PDF document']);
     expect(info.also?.info).toBeUndefined();
     expect(page(info)).toContain('structure of two formats: zip archive and PDF document.');
     expect(page(info)).not.toContain('Both readings');
+  });
+
+  it('finds both structures in a PDF with a zip appended', async () => {
+    const both = zip(pdf().bytes);
+    expect(await looksLikePdf(reader(both), both)).toBe(true);
+    expect(await findZipEnd(reader(both))).toBeDefined();
   });
 
   it('reads one extra format only when three match, and says so', async () => {
@@ -149,19 +181,27 @@ describe('the structure tests', () => {
     expect(hasPdfHeader(new TextEncoder().encode('%PDF-x.4'))).toBe(false);
   });
 
-  it('needs startxref then %%EOF in the last 64 KiB for a PDF', async () => {
-    const text = (t: string): Uint8Array => new TextEncoder().encode(t);
-    const head = text('%PDF-1.4\n');
-    const whole = (tail: string, pad = 0): Uint8Array =>
-      join(head, new Uint8Array(pad), text(tail));
-    const ok = whole('startxref\n9\n%%EOF');
-    expect(await looksLikePdf(reader(ok), ok)).toBe(true);
-    const noEof = whole('startxref\n9\n');
-    expect(await looksLikePdf(reader(noEof), noEof)).toBe(false);
-    const far = whole('startxref\n9\n%%EOF', 70000);
-    expect(await looksLikePdf(reader(far), far)).toBe(true);
-    const out = join(head, text('startxref\n9\n%%EOF'), new Uint8Array(70000));
-    expect(await looksLikePdf(reader(out), out)).toBe(false);
+  it('confirms a PDF by what the last startxref points at', async () => {
+    const text = (t: string): Uint8Array => enc.encode(t);
+    const check = (b: Uint8Array): Promise<boolean> => looksLikePdf(reader(b), b);
+    const { bytes } = pdf();
+    expect(await check(bytes)).toBe(true);
+    // Offsets count from the header, so bytes in front do not matter.
+    expect(await check(join(text('junk\n'), bytes))).toBe(true);
+    // A cross-reference stream is an indirect object.
+    const stream = text('%PDF-1.5\n7 0 obj\n<< /Type /XRef >>\nstartxref\n9\n%%EOF\n');
+    expect(await check(stream)).toBe(true);
+    // The last startxref is the one that counts.
+    expect(await check(join(bytes, text('startxref\n3\n%%EOF\n')))).toBe(false);
+    const update = join(bytes, text('xref\n0 1\n0000000000 65535 f \ntrailer\n<<>>\n'));
+    const tailed = join(update, text(`startxref\n${bytes.length}\n%%EOF\n`));
+    expect(await check(tailed)).toBe(true);
+    // Markers with nothing at the offset, no %%EOF, or an offset past the end.
+    expect(await check(text('%PDF-1.4\nstartxref\n0\n%%EOF'))).toBe(false);
+    expect(await check(text('%PDF-1.4\nxref\nstartxref\n9\n'))).toBe(false);
+    expect(await check(text('%PDF-1.4\nstartxref\n99999\n%%EOF'))).toBe(false);
+    // The tail is the last 64 KiB: a trailer further back is not seen.
+    expect(await check(join(bytes, new Uint8Array(70000)))).toBe(false);
   });
 
   it('puts the central directory inside the data it is asked about', async () => {
