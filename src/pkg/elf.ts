@@ -604,18 +604,24 @@ async function readNotes(
   h: Header,
   segments: Segment[],
   sections: Section[],
+  warnings: string[],
 ): Promise<Note[]> {
   const out: Note[] = [];
   const seen = new Set<string>();
-  const walk = async (places: { offset: number; size: number; align: number }[]) => {
+  const walk = async (places: { what: string; offset: number; size: number; align: number }[]) => {
     for (const p of places) {
       const key = `${p.offset}:${p.size}`;
       if (out.length >= MAX_NOTES || seen.has(key)) {
         continue;
       }
       seen.add(key);
-      const buf = await reader.bytes(p.offset, Math.min(p.size, MAX_NOTE_BYTES));
-      out.push(...parseNotes(buf, h.le, p.align));
+      // A damaged range is skipped with a warning; the notes already read stay.
+      try {
+        const buf = await reader.bytes(p.offset, Math.min(p.size, MAX_NOTE_BYTES));
+        out.push(...parseNotes(buf, h.le, p.align));
+      } catch {
+        warnings.push(`The notes in ${p.what} could not be read.`);
+      }
     }
   };
   const isProperty = (n: Note): boolean => n.name === 'GNU' && n.type === NT_GNU_PROPERTY_TYPE_0;
@@ -624,7 +630,12 @@ async function readNotes(
     segments
       .filter((s) => s.type === PT_NOTE || s.type === PT_GNU_PROPERTY)
       .slice(0, MAX_NOTE_SEGMENTS)
-      .map((s) => ({ offset: s.offset, size: s.filesz, align: s.align === 8 ? 8 : 4 })),
+      .map((s) => ({
+        what: `the note segment at offset ${s.offset}`,
+        offset: s.offset,
+        size: s.filesz,
+        align: s.align === 8 ? 8 : 4,
+      })),
   );
   if (!out.some(isProperty)) {
     // Without program headers (an object file), or when no segment carried the
@@ -634,6 +645,7 @@ async function readNotes(
         .filter((x) => x.type === SHT_NOTE)
         .slice(0, MAX_NOTE_SEGMENTS)
         .map((s) => ({
+          what: `section ${s.name || 'at offset ' + s.offset}`,
           offset: s.offset,
           size: s.size,
           // The property note is 8-aligned in a 64-bit file; other notes are 4.
@@ -711,7 +723,11 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     () => readDynamic(reader, h, segments, sections),
     { needed: [], neededTotal: 0, bindNow: false, pie: false } as Dynamic,
   );
-  const notes = await attempt('The notes', () => readNotes(reader, h, segments, sections), []);
+  const notes = await attempt(
+    'The notes',
+    () => readNotes(reader, h, segments, sections, warnings),
+    [],
+  );
 
   const named = (n: string): Section | undefined => sections.find((s) => s.name === n);
   const hasSymtab = named('.symtab') !== undefined;

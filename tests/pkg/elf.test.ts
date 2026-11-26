@@ -693,6 +693,16 @@ describe('readElf: control-flow hardening notes', () => {
     expect([p[BTI], p[PAC]]).toEqual(['Yes', 'Yes']);
   });
 
+  it('keeps the notes it read when a later note range is damaged', async () => {
+    const info = await read({
+      buildId: [1, 2, 3],
+      sections: [{ name: '.note.bad', type: 7, size: 65536 }],
+    });
+    expect(rowsOf(info, 'Binary')['Build ID']).toBe('010203');
+    expect(info.warnings).toHaveLength(1);
+    expect(info.warnings[0]).toContain('.note.bad');
+  });
+
   it('ignores a feature word that belongs to another architecture', async () => {
     const p = await prot({ machine: 183, properties: [feature(X86, 3)] });
     expect([p[BTI], p[PAC]]).toEqual(['No', 'No']);
