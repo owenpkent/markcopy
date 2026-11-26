@@ -617,7 +617,7 @@ As of 2026-11-26. "Open" means a pull request exists and has not been merged yet
 | 6. Mach-O and fat reader            | #267                                             | Open        |
 | 7. Load config and GuardFlags       | #269 (on #268)                                   | Open        |
 | 7. GNU property bits (CET, BTI)     | #270 (on #264)                                   | Open        |
-| 8. DEX summary, RPM payload members | None                                             | Not started |
+| 8. DEX summary, RPM payload members | #277 (DEX), #278 (RPM payload)                   | Open        |
 | 9. Encryption labels                | #271                                             | Open        |
 | 9. Certificate detail, APK signer   | #272                                             | Open        |
 | 9. Digest checks                    | #275 (RPM, Alpine), #276 (Authenticode, on #275) | Open        |
