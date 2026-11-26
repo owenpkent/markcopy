@@ -39,7 +39,7 @@ How to cut a release and publish to both the VS Code Marketplace and Open VSX. T
 
 Everything below this point is the manual token path. It remains the fallback if a workflow publish fails, and it is how every release went out before this workflow existed.
 
-> ⚠️ **The Marketplace PAT path ends on 2026-12-01.** Microsoft retires global Azure DevOps PATs that day, and the Marketplace token has to be global (**All accessible organizations**; an org-scoped token fails with a 401, as noted below). After that date the manual Marketplace path stops working. Trusted publishing is then the only route unless the publisher moves to an organizational Entra tenant. Open VSX tokens are unaffected.
+> ⚠️ **The Marketplace PAT path ends on 2027-01-27.** Microsoft retires global Azure DevOps PATs that day ([announcement](https://devblogs.microsoft.com/devops/retirement-of-global-personal-access-tokens-in-azure-devops/); on 2026-10-23 it was postponed from 2026-12-01, which some Microsoft pages still show), and the Marketplace token has to be global (**All accessible organizations**; an org-scoped token fails with a 401, as noted below). After that date the manual Marketplace path stops working. Trusted publishing is then the only route unless the publisher moves to an organizational Entra tenant. Open VSX tokens are unaffected.
 
 ### VS Code Marketplace (publisher `OwenPKent`)
 
@@ -195,7 +195,7 @@ This covers one registry failing or both. What decides the path is whether the G
    (cd release-recovery && sha256sum --check markcopy-<version>.vsix.sha256)
    gh attestation verify release-recovery/markcopy-<version>.vsix -R owenpkent/markcopy
    ```
-4. Publish that verified file to each registry still missing the version, and only those. For the Marketplace: `npx vsce publish --packagePath release-recovery/markcopy-<version>.vsix`. For Open VSX: `npx ovsx publish release-recovery/markcopy-<version>.vsix`. Mind the [2026-12-01 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route. Delete `release-recovery` afterwards.
+4. Publish that verified file to each registry still missing the version, and only those. For the Marketplace: `npx vsce publish --packagePath release-recovery/markcopy-<version>.vsix`. For Open VSX: `npx ovsx publish release-recovery/markcopy-<version>.vsix`. Mind the [2027-01-27 Marketplace token retirement](#manual-fallback-tokens) above: after that date the Marketplace has no token route. Delete `release-recovery` afterwards.
 5. Verify both registries as in step 5 above.
 
 The first tagged release is also the first test of the Marketplace policy (see the warning in [section c](#c-marketplace-trusted-publishing-policy)). If it fails, the GitHub Release already exists, so follow [A registry publish failed](#a-registry-publish-failed) to publish that same `.vsix` by hand.
