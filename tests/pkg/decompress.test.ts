@@ -8,7 +8,9 @@ import {
   gunzipUntil,
   readCompressed,
   unxzBounded,
+  unxzUntil,
   unzstdBounded,
+  unzstdUntil,
 } from '../../src/pkg/decompress';
 import { PackageError } from '../../src/pkg/model';
 import {
@@ -352,5 +354,29 @@ describe('Zstandard frame header guards', () => {
     const input = frame(0x00, 0x68, 0x83, 0x3e, 0x00, 0x41);
     expect(() => unzstdBounded(input, 1000)).toThrow('more data than MarkCopy will unpack');
     expect(unzstdBounded(input, MIB).length).toBe(2000);
+  });
+});
+
+describe('unzstdUntil and unxzUntil', () => {
+  it('stop at the first piece when the handler says so, and otherwise match the bounded readers', async () => {
+    let zstd = 0;
+    unzstdUntil(b64(VECTOR_ZST), MIB, (chunk) => {
+      zstd += chunk.length;
+      return true;
+    });
+    expect(zstd).toBeGreaterThan(0);
+    expect(zstd).toBeLessThanOrEqual(unzstdBounded(b64(VECTOR_ZST), MIB).length);
+    let xz = 0;
+    await unxzUntil(b64(VECTOR_XZ), MIB, (chunk) => {
+      xz += chunk.length;
+      return true;
+    });
+    expect(xz).toBeGreaterThan(0);
+    expect(xz).toBeLessThanOrEqual((await unxzBounded(b64(VECTOR_XZ), MIB)).length);
+  });
+
+  it('refuse past the cap', async () => {
+    expect(() => unzstdUntil(b64(VECTOR_ZST_ZEROS), 1024, () => false)).toThrow(PackageError);
+    await expect(unxzUntil(b64(VECTOR_XZ_ZEROS), 1024, () => false)).rejects.toThrow(PackageError);
   });
 });

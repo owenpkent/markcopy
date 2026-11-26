@@ -318,7 +318,8 @@ function zstdFrames(data: Uint8Array, max: number): ZstdFrame[] {
   return frames;
 }
 
-export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
+/** Zstandard, frame by frame, handing each piece to `onChunk`, which may return true to stop. */
+export function unzstdUntil(data: Uint8Array, max: number, onChunk: ChunkHandler): void {
   if (data.length === 0) {
     throw new PackageError(DAMAGED);
   }
@@ -326,7 +327,6 @@ export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
   if (frames.length === 0) {
     throw new PackageError(DAMAGED);
   }
-  const sink = new ByteSink();
   let total = 0;
   try {
     // One decoder per validated frame, so its window is the one that was checked.
@@ -336,7 +336,9 @@ export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
         if (total > max) {
           throw new PackageError(TOO_BIG);
         }
-        sink.append(chunk);
+        if (onChunk(chunk) === true) {
+          throw new Stop();
+        }
       });
       for (let i = frame.start; i < frame.end; i += ZSTD_SLICE) {
         const end = Math.min(i + ZSTD_SLICE, frame.end);
@@ -344,12 +346,27 @@ export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
       }
     }
   } catch (error) {
+    if (error instanceof Stop) {
+      return;
+    }
     contain(error);
   }
+}
+
+export function unzstdBounded(data: Uint8Array, max: number): Uint8Array {
+  const sink = new ByteSink();
+  unzstdUntil(data, max, (chunk) => {
+    sink.append(chunk);
+  });
   return sink.bytes();
 }
 
-export async function unxzBounded(data: Uint8Array, max: number): Promise<Uint8Array> {
+/** xz, handing each piece to `onChunk`, which may return true to stop. */
+export async function unxzUntil(
+  data: Uint8Array,
+  max: number,
+  onChunk: ChunkHandler,
+): Promise<void> {
   let offset = 0;
   let exhausted = false;
   const source = new ReadableStream<Uint8Array>({
@@ -363,8 +380,8 @@ export async function unxzBounded(data: Uint8Array, max: number): Promise<Uint8A
       offset += XZ_SLICE;
     },
   });
-  const sink = new ByteSink();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let total = 0;
   try {
     reader = new XzReadableStream(source).getReader();
     let idle = 0;
@@ -373,10 +390,14 @@ export async function unxzBounded(data: Uint8Array, max: number): Promise<Uint8A
       if (done) {
         break;
       }
-      if (sink.length + value.length > max) {
+      total += value.length;
+      if (total > max) {
         throw new PackageError(TOO_BIG);
       }
-      sink.append(value);
+      if (onChunk(value) === true) {
+        await reader.cancel().catch(() => undefined);
+        return;
+      }
       idle = value.length === 0 && exhausted ? idle + 1 : 0;
       if (idle > XZ_MAX_IDLE_PULLS) {
         throw new PackageError(DAMAGED);
@@ -387,5 +408,12 @@ export async function unxzBounded(data: Uint8Array, max: number): Promise<Uint8A
     await reader?.cancel().catch(() => undefined);
     contain(error);
   }
+}
+
+export async function unxzBounded(data: Uint8Array, max: number): Promise<Uint8Array> {
+  const sink = new ByteSink();
+  await unxzUntil(data, max, (chunk) => {
+    sink.append(chunk);
+  });
   return sink.bytes();
 }

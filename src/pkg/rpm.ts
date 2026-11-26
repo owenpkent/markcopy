@@ -1,7 +1,7 @@
 // RPM packages (.rpm): a 96-byte lead, a signature header, the main header and
 // then the compressed payload. Everything worth showing is in the two headers,
-// which are tables of tagged values; the payload (the files themselves) is
-// never opened. A header's store holds every string of the file list, so a
+// which are tables of tagged values; the payload (the files themselves) is only
+// walked for its member names (src/pkg/rpmPayload.ts). A header's store holds every string of the file list, so a
 // package with many files is megabytes and is read in pieces.
 import { formatBytes, formatNumber } from '../binary/html';
 import type { RangeReader } from '../binary/reader';
@@ -13,6 +13,13 @@ import {
   type InfoSection,
   type PackageInfo,
 } from './model';
+import {
+  normalizePath,
+  NotChecked,
+  payloadSections,
+  readPayloadNames,
+  type Listed,
+} from './rpmPayload';
 import { signatureSection } from './signature';
 
 const LEAD_LENGTH = 96;
@@ -745,6 +752,7 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   );
 
   sections.push(...contents(main, warnings));
+  sections.push(...(await payloadContents(reader, main, payloadAt)));
   if (main.limited) {
     warnings.push(
       'Some tables in the package are larger than MarkCopy will read, so they are cut short.',
@@ -823,6 +831,65 @@ function contents(main: Header, warnings: string[]): InfoSection[] {
     noun: 'files',
     lead,
   });
+}
+
+// RPMFILE_GHOST in tag 1037 (FILEFLAGS): listed in the header, not in the payload.
+const FILE_GHOST = 0x40;
+
+/** The header's file list as paths, split into those a payload should hold and %ghost entries. */
+function listedPaths(main: Header): Listed | NotChecked | undefined {
+  const base = strings(main, 1117, MAX_FILES);
+  if (!base || base.count === 0) {
+    return undefined;
+  }
+  const dirs = strings(main, 1118, MAX_FILES);
+  const indexes = numbers(main, 1116, MAX_FILES) ?? [];
+  const flags = numbers(main, 1037, MAX_FILES) ?? [];
+  if (base.truncated || main.limited) {
+    return new NotChecked('the header lists more files than MarkCopy reads');
+  }
+  if (indexes.length !== base.count) {
+    return new NotChecked('the header file list could not be read');
+  }
+  const expected = new Set<string>();
+  const ghosts = new Set<string>();
+  for (let i = 0; i < base.count; i++) {
+    const dir = dirs?.at(indexes[i], MAX_PATH_PART) ?? '';
+    const file = base.at(i, MAX_PATH_PART) ?? '';
+    if (dir.length >= MAX_PATH_PART || file.length >= MAX_PATH_PART) {
+      return new NotChecked('a listed path is longer than MarkCopy reads');
+    }
+    const path = normalizePath(`${dir}${file}`);
+    ((flags[i] ?? 0) & FILE_GHOST ? ghosts : expected).add(path);
+  }
+  return { expected, ghosts };
+}
+
+/** Compare the payload's member names with the header's file list. */
+async function payloadContents(
+  reader: RangeReader,
+  main: Header,
+  payloadAt: number,
+): Promise<InfoSection[]> {
+  const listed = listedPaths(main);
+  if (!listed) {
+    return [];
+  }
+  if (listed instanceof NotChecked) {
+    return payloadSections({ expected: new Set(), ghosts: new Set() }, listed);
+  }
+  try {
+    const names = await readPayloadNames(reader, payloadAt, text(main, 1125), text(main, 1124));
+    return payloadSections(listed, names);
+  } catch (error) {
+    if (error instanceof NotChecked) {
+      return payloadSections(listed, error);
+    }
+    if (error instanceof PackageError) {
+      return payloadSections(listed, new NotChecked('the payload could not be read'));
+    }
+    throw error;
+  }
 }
 
 // RPM v6 keeps its OpenPGP signatures as base64 strings in tag 278 (RPMTAG_OPENPGP),
