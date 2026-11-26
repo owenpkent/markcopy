@@ -53,6 +53,13 @@ const locked = (info: Uint8Array): Uint8Array =>
   });
 
 describe('describeEncryptionInfo', () => {
+  it('reads single-quoted attributes and whitespace around the equals sign', () => {
+    const xml =
+      "<?xml version='1.0'?><encryption xmlns='x'><keyData saltSize = '16' cipherAlgorithm = 'AES'\n keyBits\t=\t'256' hashAlgorithm = 'SHA512'/></encryption>";
+    const info = Uint8Array.from([...agile().subarray(0, 8), ...new TextEncoder().encode(xml)]);
+    expect(describeEncryptionInfo(info)).toBe('Agile encryption, AES-256, SHA512');
+  });
+
   it('reads Agile encryption from its XML', () => {
     expect(describeEncryptionInfo(agile())).toBe('Agile encryption, AES-256, SHA512');
     expect(describeEncryptionInfo(agile('AES', '128', 'SHA1'))).toBe(

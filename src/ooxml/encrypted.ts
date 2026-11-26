@@ -55,7 +55,11 @@ export function describeEncryptionInfo(info: Uint8Array): string | undefined {
     const xml = new TextDecoder('utf-8').decode(info.subarray(8, 8 + MAX_INFO_BYTES));
     const tag = /<(?:\w+:)?keyData\b[^>]*>/.exec(xml)?.[0] ?? '';
     const attribute = (name: string): string | undefined =>
-      new RegExp(`\\b${name}="([^"]{1,32})"`).exec(tag)?.[1];
+      // Either quote, and XML whitespace around the equals sign.
+      new RegExp(`\\b${name}[ \\t\\r\\n]*=[ \\t\\r\\n]*(?:"([^"]{1,32})"|'([^']{1,32})')`)
+        .exec(tag)
+        ?.slice(1)
+        .find(Boolean);
     const cipher = attribute('cipherAlgorithm');
     const bits = attribute('keyBits');
     const hash = attribute('hashAlgorithm');

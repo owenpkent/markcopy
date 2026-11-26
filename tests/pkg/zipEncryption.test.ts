@@ -107,6 +107,14 @@ describe('zip encryption labels', () => {
     expect(summariseEncryption(none.entries)).toBeUndefined();
   });
 
+  it('counts the entries read when the directory was read only in part', async () => {
+    const partial = await open(buildZip([aes(2, 3)], { declaredCount: 2 }));
+    expect(partial.complete).toBe(false);
+    expect(summariseEncryption(partial.entries, partial.complete)).toBe(
+      '1 of the 1 entry read: AES-256 (WinZip AE-2)',
+    );
+  });
+
   it('shows an Encryption row in the File section of the page', async () => {
     const bytes = buildZip([aes(2, 3), { name: 'p', data: 'x' }]);
     const info = await readZipPackage(new RangeReader(bytesSource(bytes)), 'a.zip');

@@ -191,8 +191,12 @@ function describeEncryption(
   return { label: 'ZipCrypto (legacy, easily broken)' };
 }
 
-/** "3 of 10 entries: AES-256 (WinZip AE-2) 2, ZipCrypto (legacy, easily broken) 1", or undefined when nothing is encrypted. */
-export function summariseEncryption(entries: ZipEntry[]): string | undefined {
+/**
+ * "3 of 10 entries: AES-256 (WinZip AE-2) 2, ZipCrypto (legacy, easily broken) 1", or undefined
+ * when nothing is encrypted. When the directory was read only in part, the count is of the
+ * entries read: "3 of the 10 entries read: ...".
+ */
+export function summariseEncryption(entries: ZipEntry[], complete = true): string | undefined {
   const files = entries.filter((e) => !e.isDirectory);
   const counts = new Map<string, number>();
   for (const e of files) {
@@ -205,7 +209,10 @@ export function summariseEncryption(entries: ZipEntry[]): string | undefined {
   if (total === 0) {
     return undefined;
   }
-  const lead = `${total} of ${files.length} ${files.length === 1 ? 'entry' : 'entries'}: `;
+  const noun = files.length === 1 ? 'entry' : 'entries';
+  const lead = complete
+    ? `${total} of ${files.length} ${noun}: `
+    : `${total} of the ${files.length} ${noun} read: `;
   return counts.size === 1
     ? lead + [...counts.keys()][0]
     : lead + [...counts].map(([label, n]) => `${label} ${n}`).join(', ');

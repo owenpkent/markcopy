@@ -80,7 +80,7 @@ export async function readZipPackage(reader: RangeReader, fileName: string): Pro
     warnings.push('The archive directory is damaged or very large, so the file list is partial.');
   }
   // Only a label: MarkCopy never asks for a password or decrypts an entry.
-  const encryption = summariseEncryption(zip.entries);
+  const encryption = summariseEncryption(zip.entries, zip.complete);
   return {
     format: kind.format,
     title: kind.title,
