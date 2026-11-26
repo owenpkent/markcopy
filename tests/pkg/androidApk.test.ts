@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSignedData } from '../pe/fixture';
 import { embedSignatureFile } from './pkcsFixture';
+import { buildDex } from './dexFixture';
 import { buildAxml, type AxmlAttr, type AxmlElement } from './axmlFixture';
 import {
   buildZip,
@@ -506,5 +507,84 @@ describe('readZipPackage: APK v1 rules follow apksig', () => {
     const info = await readZip(apk(undefined, entries));
     expect(value(info, 'Signature', 'Status')).toContain('not known');
     expect(info.warnings).toContain('More signature blocks than MarkCopy reads were skipped.');
+  });
+});
+
+describe('readZipPackage: DEX files in an Android package', () => {
+  const entries = (...files: [string, Uint8Array][]): FixtureEntry[] =>
+    files.map(([name, data]) => ({ name, data }));
+  const withDex = (...files: [string, Uint8Array][]): Uint8Array =>
+    buildZip([{ name: 'AndroidManifest.xml', data: buildAxml(manifest()) }, ...entries(...files)]);
+
+  it('sums the header counts and recomputes the stored digests', async () => {
+    const info = await readZip(
+      withDex(
+        ['classes.dex', buildDex({ classes: 10, methods: 65536, strings: 7, version: '035' })],
+        ['classes2.dex', buildDex({ classes: 5, methods: 100, strings: 3, version: '039' })],
+      ),
+    );
+    expect(value(info, 'DEX files', 'DEX files')).toBe('2 (multidex)');
+    expect(value(info, 'DEX files', 'DEX format version')).toBe('035, 039');
+    expect(value(info, 'DEX files', 'Classes defined')).toBe('15');
+    expect(value(info, 'DEX files', 'Method references')).toBe('65,636');
+    expect(value(info, 'DEX files', 'Strings')).toBe('10');
+    expect((section(info, 'DEX files') as { note?: string }).note).toContain('65,536');
+    expect(value(info, 'DEX files', 'classes.dex checksum')).toBe(
+      'The computed Adler-32 matches the stored checksum.',
+    );
+    expect(value(info, 'DEX files', 'classes.dex signature')).toBe(
+      'The computed SHA-1 matches the stored digest.',
+    );
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('reports digests that differ without naming a cause', async () => {
+    const info = await readZip(
+      withDex(['classes.dex', buildDex({ badChecksum: true, badSignature: true })]),
+    );
+    expect(value(info, 'DEX files', 'DEX files')).toBe('1');
+    expect(value(info, 'DEX files', 'classes.dex checksum')).toBe(
+      'The computed Adler-32 differs from the stored checksum.',
+    );
+    expect(value(info, 'DEX files', 'classes.dex signature')).toBe(
+      'The computed SHA-1 differs from the stored digest.',
+    );
+  });
+
+  it('warns when the stated size or endian tag does not fit', async () => {
+    const info = await readZip(
+      withDex(
+        ['classes.dex', buildDex({ declaredSize: 999 })],
+        ['classes2.dex', buildDex({ endian: 0x78563412, classes: 50 })],
+      ),
+    );
+    expect(info.warnings).toContain(
+      'classes.dex states a file size of 999 bytes, but the entry holds 256.',
+    );
+    expect(info.warnings.some((w) => w.startsWith('classes2.dex has endian tag 0x78563412'))).toBe(
+      true,
+    );
+    expect(value(info, 'DEX files', 'Classes defined')).toBe('0');
+    expect(value(info, 'DEX files', 'classes.dex checksum')).toMatch(/^Not checked: /);
+  });
+
+  it('warns about a file that is not a DEX file and shows no section when none reads', async () => {
+    const info = await readZip(withDex(['classes.dex', dex(500)]));
+    expect(info.warnings).toContain(
+      'classes.dex does not start with a DEX header MarkCopy can read.',
+    );
+    expect(info.sections.some((s) => s.heading === 'DEX files')).toBe(false);
+  });
+
+  it('does not inflate a first DEX file past the cap', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: 'AndroidManifest.xml', data: buildAxml(manifest()) },
+        { name: 'classes.dex', data: buildDex(), declaredSize: 33 * 1024 * 1024 },
+      ]),
+    );
+    expect(value(info, 'DEX files', 'classes.dex checksum')).toMatch(
+      /^Not checked: the file is larger/,
+    );
   });
 });
