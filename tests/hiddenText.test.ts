@@ -372,3 +372,38 @@ describe('fingerprint', () => {
     expect(scanHiddenText('plain').fingerprint).toBe('');
   });
 });
+
+describe('long payloads beside emoji', () => {
+  for (const n of [31, 32, 33, 500, 100000]) {
+    it(`keeps a heart's VS16 before ${n} tag characters`, () => {
+      const text = cp(0x2764, 0xfe0f) + tagsOf('a').repeat(n);
+      expect(stripHiddenText(text)).toBe(cp(0x2764, 0xfe0f));
+      const scan = scanHiddenText(text);
+      expect(scan.totalRuns).toBe(1);
+      expect(scan.totalChars).toBe(n);
+      expect(scan.runs[0].column).toBe(3);
+    });
+  }
+
+  for (const n of [24, 27, 60]) {
+    it(`keeps a Scotland flag before ${n} tag characters`, () => {
+      const flag = cp(0x1f3f4, 0xe0067, 0xe0062, 0xe0073, 0xe0063, 0xe0074, 0xe007f);
+      const text = flag + tagsOf('b'.repeat(n));
+      expect(stripHiddenText(text)).toBe(flag);
+      expect(scanHiddenText(text).runs[0].decoded).toBe('b'.repeat(n));
+    });
+  }
+
+  it('flags a dangling ZWJ after VS16 and keeps the VS16', () => {
+    const text = cp(0x2764, 0xfe0f, 0x200d);
+    const scan = scanHiddenText(text);
+    expect(scan.totalRuns).toBe(1);
+    expect(scan.runs[0].column).toBe(3);
+    expect(scan.runs[0].codePoints).toEqual(['U+200D']);
+    expect(stripHiddenText(text)).toBe(cp(0x2764, 0xfe0f));
+  });
+
+  it('does not treat a selector inside a run as a letter for a joiner', () => {
+    expect(scanHiddenText(`${cp(0x0628)} ${cp(0xfe0f, 0x200d)} x`).totalRuns).toBe(1);
+  });
+});

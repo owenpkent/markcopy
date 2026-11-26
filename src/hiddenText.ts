@@ -52,11 +52,10 @@ export interface HiddenScan {
 export const MAX_RUNS = 200;
 export const MAX_DECODED = 200;
 const MAX_LABELS = 8;
-// Runs longer than this are flagged whole without judging each character. The
-// longest legitimate combination is a subdivision flag (seven tag letters and
-// the cancel tag) beside a direction mark or a joiner, well under it.
-const MAX_JUDGED = 32;
 const MIN_ENCODED = 4;
+// Rounds of re-judging in `settled`. Benign spans sit only at a run's edges or
+// are lone direction marks, so it settles in three; the cap is a backstop.
+const MAX_ROUNDS = 8;
 
 function kindOf(cp: number): HiddenKind | undefined {
   if (cp === 0xe0001 || (cp >= 0xe0020 && cp <= 0xe007f)) {
@@ -131,9 +130,15 @@ function test(re: RegExp, cp: number | undefined): boolean {
   return cp !== undefined && re.test(String.fromCodePoint(cp));
 }
 
+// A visible letter or mark. Variation selectors are nonspacing marks by
+// category, so an invisible neighbour inside a run must not count as one.
+function letter(cp: number | undefined): boolean {
+  return cp !== undefined && kindOf(cp) === undefined && test(LETTER_OR_MARK, cp);
+}
+
 // A letter or mark of a script that shapes with joiners: anything but Latin.
 function shapingLetter(cp: number | undefined): boolean {
-  return test(LETTER_OR_MARK, cp) && !test(LATIN, cp);
+  return letter(cp) && !test(LATIN, cp);
 }
 
 function isDirectionMark(cp: number | undefined): boolean {
@@ -189,8 +194,8 @@ function explained(cps: number[], prev: number | undefined, next: number | undef
       // word's edge (a legacy Malayalam chillu ends in ZWJ before a space).
       // Neighbours inside the run are invisible, so they count as no letter.
       ok[i] =
-        (shapingLetter(left) && (shapingLetter(right) || !test(LETTER_OR_MARK, right))) ||
-        (!test(LETTER_OR_MARK, left) && shapingLetter(right));
+        (shapingLetter(left) && (shapingLetter(right) || !letter(right))) ||
+        (!letter(left) && shapingLetter(right));
     } else if (cp === 0x180e) {
       // The Mongolian vowel separator, before a final A or E.
       ok[i] = test(MONGOLIAN, left) && (right === 0x1820 || right === 0x1821);
@@ -206,7 +211,11 @@ function explained(cps: number[], prev: number | undefined, next: number | undef
 // makes a strip final: stripping its output again changes nothing.
 function settled(cps: number[], prev: number | undefined, next: number | undefined): boolean[] {
   const ok = explained(cps, prev, next);
-  for (;;) {
+  for (let round = 0; ; round++) {
+    if (round === MAX_ROUNDS) {
+      // Not expected to happen; flag everything rather than keep an unsettled set.
+      return cps.map(() => false);
+    }
     const kept: number[] = [];
     for (let k = 0; k < cps.length; k++) {
       if (ok[k]) {
@@ -262,7 +271,6 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     // The maximal run of invisible code points starting here.
     const start = i;
     let end = i;
-    let count = 0;
     const cps: number[] = [];
     const at: number[] = [];
     while (end < n) {
@@ -270,11 +278,8 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
       if (kindOf(c) === undefined) {
         break;
       }
-      if (count <= MAX_JUDGED) {
-        cps.push(c);
-        at.push(end);
-      }
-      count++;
+      cps.push(c);
+      at.push(end);
       end += c > 0xffff ? 2 : 1;
     }
     const report = (from: number, to: number, points: number): void =>
@@ -282,21 +287,19 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     // A byte order mark leads the file; what follows it is judged on its own.
     const skip = start === 0 && cps[0] === 0xfeff ? 1 : 0;
     const next = end < n ? text.codePointAt(end) : undefined;
-    if (count > MAX_JUDGED) {
-      report(start + skip, end, count - skip);
-    } else {
-      const ok = settled(cps.slice(skip), skip ? undefined : prev, next);
-      // Each stretch of unexplained code points is a flagged run of its own.
-      let from = -1;
-      for (let k = 0; k <= ok.length; k++) {
-        if (k < ok.length && !ok[k]) {
-          if (from < 0) {
-            from = k;
-          }
-        } else if (from >= 0) {
-          report(at[skip + from], k < ok.length ? at[skip + k] : end, k - from);
-          from = -1;
+    // Every code point is judged, however long the run, so a payload's length
+    // never decides whether the emoji or flag in front of it keeps its form.
+    const ok = settled(cps.slice(skip), skip ? undefined : prev, next);
+    // Each stretch of unexplained code points is a flagged run of its own.
+    let from = -1;
+    for (let k = 0; k <= ok.length; k++) {
+      if (k < ok.length && !ok[k]) {
+        if (from < 0) {
+          from = k;
         }
+      } else if (from >= 0) {
+        report(at[skip + from], k < ok.length ? at[skip + k] : end, k - from);
+        from = -1;
       }
     }
     // The next code point is visible, so it sets prev before anything reads it.
