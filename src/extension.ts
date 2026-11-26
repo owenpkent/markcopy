@@ -31,6 +31,7 @@ import {
   renderCsvHtml,
   sniffDelimiter,
 } from './csv';
+import { scanHiddenText, stripHiddenText, type HiddenScan } from './hiddenText';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseMarkdownMessage, type MarkdownMessage } from './messages/markdown';
 import { ALLOW_REMOTE_IMAGES, allowRemoteImages, htmlShell } from './previewShell';
@@ -940,6 +941,12 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         case 'revealLine':
           revealEditorLine(state.docUri, msg.line);
           break;
+        case 'revealHidden':
+          void revealHiddenRun(state.docUri, msg.line, msg.column);
+          break;
+        case 'copyCleanSource':
+          void copyCleanSource(state);
+          break;
         case 'toast':
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
           break;
@@ -1093,6 +1100,61 @@ function update(state: PreviewState, ackEdit?: number): void {
     math,
     footnotes,
     wrapCode: cfg.get<boolean>('wrapCode', true),
+    // Computed from the document, never from the rendered HTML: the scan is of
+    // what a copy of the source would carry. Omitted when off or when clean.
+    hidden: hiddenFor(doc.uri, source),
+  });
+}
+
+// The hidden-character scan to send with a render, or undefined when the setting
+// is off or nothing is flagged.
+function hiddenFor(uri: vscode.Uri, source: string): HiddenScan | undefined {
+  const warn = vscode.workspace
+    .getConfiguration('markcopy', uri)
+    .get<boolean>('hiddenText.warn', true);
+  if (!warn) {
+    return undefined;
+  }
+  const scan = scanHiddenText(source);
+  return scan.totalRuns > 0 ? scan : undefined;
+}
+
+// Put the cursor on a run the hidden-character notice lists. Line and column
+// are 1-based, as the scan reports them; an edit since the render can move the
+// run, so both are clamped.
+async function revealHiddenRun(docUri: vscode.Uri, line: number, column: number): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === docUri.toString());
+  if (!doc) {
+    return;
+  }
+  const row = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);
+  const col = Math.min(Math.max(column - 1, 0), doc.lineAt(row).text.length);
+  const at = new vscode.Position(row, col);
+  const visible = vscode.window.visibleTextEditors.find(
+    (e) => e.document.uri.toString() === docUri.toString(),
+  );
+  const range = new vscode.Range(at, at);
+  if (visible) {
+    visible.selection = new vscode.Selection(at, at);
+    visible.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return;
+  }
+  await vscode.window.showTextDocument(doc, { selection: range, preserveFocus: false });
+}
+
+// Copy the document's text, as it is now, without the characters the notice
+// flags. Plain text: the source, not the rendered preview.
+async function copyCleanSource(state: PreviewState): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc) {
+    return;
+  }
+  await vscode.env.clipboard.writeText(stripHiddenText(doc.getText()));
+  void state.panel.webview.postMessage({
+    type: 'notice',
+    text: 'Copied without hidden characters',
   });
 }
 

@@ -21,6 +21,7 @@ import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 import { fromHost } from './fromHost';
 import { diagramHtml } from './diagramHtml';
+import { createHiddenNotice } from './hiddenNotice';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
 // no host code follows it into the webview bundle.
@@ -69,6 +70,10 @@ document.addEventListener('securitypolicyviolation', (event) => {
   ) {
     remoteImageNotice.hidden = false;
   }
+});
+
+const hiddenNotice = createHiddenNotice(content, {
+  post: (message) => vscode.postMessage(message),
 });
 
 let sourceLines: string[] = [];
@@ -177,6 +182,7 @@ function applyRenderMessage(msg: Record<string, any>): void {
   }
   // Display only, so it is a class on the body rather than part of the render:
   // the HTML is the same either way. An older host sends no value: wrap.
+  hiddenNotice.update(msg.hidden, (msg.docKey as string) ?? '');
   currentWrapCode = msg.wrapCode === undefined ? true : Boolean(msg.wrapCode);
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in

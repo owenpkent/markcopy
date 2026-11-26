@@ -17,6 +17,10 @@ export type MarkdownMessage =
   | { type: 'revealInOS' }
   | { type: 'openExternal' }
   | { type: 'revealLine'; line: number }
+  // From the hidden-character notice: put the cursor on a flagged run (1-based).
+  | { type: 'revealHidden'; line: number; column: number }
+  // Copy the document's text without the characters the notice flags.
+  | { type: 'copyCleanSource' }
   | ToastMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
@@ -60,12 +64,20 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     case 'revealInOS':
     case 'openExternal':
     case 'openSettings':
+    case 'copyCleanSource':
       return { type: msg.type };
     case 'revealLine':
       // revealEditorLine ignores anything that is not a finite number.
       return typeof msg.line === 'number' && Number.isFinite(msg.line)
         ? { type: 'revealLine', line: msg.line }
         : undefined;
+    case 'revealHidden': {
+      const line = numberField(msg.line);
+      const column = numberField(msg.column);
+      return Number.isSafeInteger(line) && Number.isSafeInteger(column) && line >= 1 && column >= 1
+        ? { type: 'revealHidden', line, column }
+        : undefined;
+    }
     case 'toast':
       return toastMessage(msg);
     case 'updateSetting':

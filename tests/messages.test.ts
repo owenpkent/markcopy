@@ -69,6 +69,33 @@ describe('parseMarkdownMessage', () => {
     }
   });
 
+  it('accepts copyCleanSource without a payload and drops any it was given', () => {
+    expect(parseMarkdownMessage({ type: 'copyCleanSource' })).toEqual({ type: 'copyCleanSource' });
+    expect(parseMarkdownMessage({ type: 'copyCleanSource', text: 'x' })).toEqual({
+      type: 'copyCleanSource',
+    });
+  });
+
+  it('accepts revealHidden with 1-based integer positions only', () => {
+    expect(parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4 })).toEqual({
+      type: 'revealHidden',
+      line: 12,
+      column: 4,
+    });
+    for (const [line, column] of [
+      [0, 1],
+      [1, 0],
+      [-1, 3],
+      [1.5, 1],
+      [1, NaN],
+      [Infinity, 1],
+      ['1', 1],
+      [1, null],
+      [undefined, 1],
+    ]) {
+      expect(parseMarkdownMessage({ type: 'revealHidden', line, column })).toBeUndefined();
+    }
+  });
   it('accepts toast, updateSetting and openLink with their string fields', () => {
     expect(parseMarkdownMessage({ type: 'toast', text: 'Copied' })).toEqual({
       type: 'toast',

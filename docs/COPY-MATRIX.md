@@ -166,6 +166,18 @@ All four are also available without the preview focused, via the Command Palette
 
 **Save as PowerPoint writes a `.pptx` in memory and needs nothing installed either.** Like Save as Word, it ships structure rather than a picture: headings become slide titles (a thematic break, `---`, also starts a new slide), lists are real bulleted paragraphs at their indent level, a table's header row is marked, images carry their alt text as the shape description, and links stay clickable. It differs from the docx export in one respect a page never has to worry about: a slide is a fixed canvas, not a flowing page, so content that overflows one is left overflowing rather than silently repaginated into a second slide, which would scramble a deliberate build. The export reports missing alt text the same way Save as Word does, plus images it could not embed and slides that likely ran past the bottom edge. See [Save as PowerPoint](guide/export.md#save-as-powerpoint).
 
+### Hidden characters notice (Markdown and CSV)
+
+When the file holds invisible Unicode characters that nothing legitimate explains (tag characters, variation selectors, zero-width and bidirectional controls, Hangul fillers), a notice sits above the preview. It is outside the rendered content, so no copy action below includes it.
+
+| Action                         | Output                                                                  | Goes to                                              |
+| ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| Copy without hidden characters | `text/plain`: the document's source text, with those characters removed | Any plain-text target: a chat, an editor, a terminal |
+
+- It copies the **source** (Markdown or CSV text as it is in the editor right now), not the rendered preview, and it is plain text only. It is written by the host with `vscode.env.clipboard.writeText`.
+- Only the characters the notice flags are removed. Ordinary emoji sequences, a byte order mark at the start, joiners in Persian, Arabic and Indic text, and direction marks in right-to-left prose stay.
+- Every other copy action is unchanged and still carries whatever invisible characters the file holds.
+
 ## Notes
 
 - **Rich text always includes a plain-text fallback.** Every `text/html` write also sets `text/plain`, so a target that cannot take HTML still gets readable content.

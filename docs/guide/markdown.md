@@ -56,6 +56,14 @@ Flip the lock/pencil pill in the top-right corner of a Markdown preview to edit 
 
 ![The same edit mode in a dark VS Code theme](../media/edit-mode-dark.png)
 
+## Hidden characters
+
+Some files carry text that no editor or preview draws: Unicode tag characters and variation selectors that spell out words, zero-width characters, bidirectional controls and Hangul fillers. They are used to hide instructions in READMEs and agent rules files, and every copy carries them to wherever you paste, an AI chat included.
+
+When a Markdown or CSV file holds any, a notice appears above the preview, for example "This file has 3 runs of invisible characters (412 characters). 1 spells out hidden text. Copies include them." Open **Show the runs** to see each one with its line and column, what it is made of, and the text it spells when it decodes. Click a line and column to put the editor's cursor there. **Copy without hidden characters** puts the file's text on the clipboard with those characters removed, as plain text. **Dismiss** hides the notice until the set of hidden characters changes.
+
+Ordinary uses are not flagged: emoji sequences, a byte order mark at the start of the file, joiners inside Persian, Arabic and Indic words, direction marks in right-to-left text. Turn the notice off with `markcopy.hiddenText.warn`.
+
 ## Search Google for a selection
 
 Select some text and right-click for **Search Google for "…"**, which opens the search in your browser.

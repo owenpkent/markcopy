@@ -889,6 +889,12 @@
           "default": true,
           "markdownDescription": "Wrap long lines in fenced code blocks to the preview's width instead of scrolling the block sideways. Display only: copying a code block, and its line breaks, are unchanged. Also toggled from the preview's right-click **Preferences** menu."
         },
+        "markcopy.hiddenText.warn": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Show a notice above a Markdown or CSV preview when the file contains invisible Unicode characters (tag characters, variation selectors, zero-width and bidirectional controls, Hangul fillers) that spell hidden text or would travel with a copy. The notice offers to copy the source without them. Ordinary emoji sequences and right-to-left text are not flagged."
+        },
         "markcopy.csv.delimiter": {
           "type": "string",
           "enum": [
