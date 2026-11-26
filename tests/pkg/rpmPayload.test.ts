@@ -125,6 +125,18 @@ describe('readRpm: payload against the file list', () => {
     expect(names(info, 'In the payload but not listed')).toEqual([]);
   });
 
+  it('compares names as stored, so a control character neither hides nor invents a difference', async () => {
+    const files: RpmFile[] = [{ dir: '/usr/bin/', name: 'tool	name', size: 1 }];
+    const same = await read(rpm(gz(['./usr/bin/tool	name']), [GZIP], files));
+    expect(row(same)).toBe('The payload holds the same 1 entries the header lists.');
+    const other = await read(rpm(gz(['./usr/bin/toolname']), [GZIP], files));
+    expect(row(other)).toContain(
+      '1 listed are not in the payload, 1 in the payload are not listed',
+    );
+    expect(names(other, 'Listed but not in the payload')).toEqual(['usr/bin/toolname']);
+    expect(names(other, 'In the payload but not listed')).toEqual(['usr/bin/toolname']);
+  });
+
   it('lists the names that differ in both directions, at most ten of each', async () => {
     const extra = Array.from({ length: 13 }, (_, i) => `./opt/extra${String(i).padStart(2, '0')}`);
     const info = await read(rpm(gz([...PATHS.slice(0, 2), ...extra]), [GZIP, GHOST]));

@@ -2,6 +2,7 @@
 // with the file list in the header. Only the names are read; each member's data
 // is skipped as it streams past, and decoding stops at the archive's trailer.
 import { formatBytes, formatNumber } from '../binary/html';
+import { printable } from '../binary/text';
 import type { RangeReader } from '../binary/reader';
 import {
   DAMAGED,
@@ -268,13 +269,13 @@ export function payloadSections(listed: Listed, payload: string[] | NotChecked):
     ...tableSection(
       'Listed but not in the payload',
       ['Path'],
-      missing.map((p) => [p]),
+      missing.map((p) => [printable(p)]),
       { limit: MAX_NAMES_SHOWN, noun: 'paths' },
     ),
     ...tableSection(
       'In the payload but not listed',
       ['Path'],
-      extra.map((p) => [p]),
+      extra.map((p) => [printable(p)]),
       { limit: MAX_NAMES_SHOWN, noun: 'paths' },
     ),
   ];

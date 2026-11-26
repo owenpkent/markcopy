@@ -137,6 +137,12 @@ class Strings {
 
   /** The string at `index`, at most `max` characters, cleaned; undefined past the end. */
   at(index: number, max: number, keepLineBreaks = false): string | undefined {
+    const decoded = this.raw(index, max);
+    return decoded === undefined ? undefined : printable(decoded, keepLineBreaks);
+  }
+
+  /** The string at `index` as decoded, control characters kept, for comparing; undefined past the end. */
+  raw(index: number, max: number): string | undefined {
     const start = this.starts[index];
     if (start === undefined) {
       return undefined;
@@ -144,8 +150,7 @@ class Strings {
     // A character is at most 4 bytes, so looking further for the terminator is wasted work.
     const window = this.store.subarray(start, Math.min(this.store.length, start + max * 4));
     const end = window.indexOf(0);
-    const decoded = new TextDecoder().decode(end < 0 ? window : window.subarray(0, end));
-    return printable(decoded.slice(0, max), keepLineBreaks);
+    return new TextDecoder().decode(end < 0 ? window : window.subarray(0, end)).slice(0, max);
   }
 }
 
@@ -854,8 +859,9 @@ function listedPaths(main: Header): Listed | NotChecked | undefined {
   const expected = new Set<string>();
   const ghosts = new Set<string>();
   for (let i = 0; i < base.count; i++) {
-    const dir = dirs?.at(indexes[i], MAX_PATH_PART) ?? '';
-    const file = base.at(i, MAX_PATH_PART) ?? '';
+    // Raw, not cleaned: the payload's names are compared as they are, and only shown cleaned.
+    const dir = dirs?.raw(indexes[i], MAX_PATH_PART) ?? '';
+    const file = base.raw(i, MAX_PATH_PART) ?? '';
     if (dir.length >= MAX_PATH_PART || file.length >= MAX_PATH_PART) {
       return new NotChecked('a listed path is longer than MarkCopy reads');
     }
