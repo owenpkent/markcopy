@@ -218,6 +218,16 @@ function signatureSection(info: PeInfo): string {
     rows.push(['Certificate valid', `${signer.notBefore} to ${signer.notAfter}`]);
   }
   rows.push(['Signature size', formatBytes(signature.size)]);
+  const imageHash = signature.imageHash;
+  if (imageHash?.stored) {
+    rows.push([
+      `Image digest (${imageHash.algorithm ?? `OID ${imageHash.oid}`})`,
+      imageHash.stored,
+    ]);
+  }
+  if (imageHash) {
+    rows.push(['Image hash check', imageHash.check]);
+  }
   return (
     properties(rows) +
     '<p class="mc-exe-note">These names are what the file claims. MarkCopy does not check the ' +
