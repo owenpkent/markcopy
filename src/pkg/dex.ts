@@ -98,7 +98,8 @@ export async function dexSections(
   let methods = 0;
   let strings = 0;
   let atLimit = 0;
-  let first: { entry: ZipEntry; header: DexHeader } | undefined;
+  // The digests of the first numbered file are checked, whether or not its header reads.
+  let firstHeader: DexHeader | undefined;
   for (const entry of files) {
     let header: DexHeader | undefined;
     try {
@@ -134,7 +135,9 @@ export async function dexSections(
     if (header.methods >= METHOD_LIMIT) {
       atLimit++;
     }
-    first ??= { entry, header };
+    if (entry === files[0]) {
+      firstHeader = header;
+    }
   }
   if (read === 0) {
     return [];
@@ -151,8 +154,8 @@ export async function dexSections(
       ? `${formatNumber(atLimit)} of the DEX files list ${formatNumber(METHOD_LIMIT)} or more method references, the most a 16-bit method index addresses in one file.`
       : undefined;
   const out = propertySection('DEX files', rows, note);
-  if (first && out[0]) {
-    out[0].rows.push(...(await digestRows(zip, first.entry, first.header, warnings)));
+  if (out[0]) {
+    out[0].rows.push(...(await digestRows(zip, files[0], firstHeader, warnings)));
   }
   return out;
 }
@@ -160,7 +163,7 @@ export async function dexSections(
 async function digestRows(
   zip: ZipArchive,
   entry: ZipEntry,
-  header: DexHeader,
+  header: DexHeader | undefined,
   warnings: string[],
 ): Promise<[string, string][]> {
   const skipped = (why: string): [string, string][] => [
@@ -169,6 +172,9 @@ async function digestRows(
   ];
   if (entry.encrypted) {
     return skipped('the entry is encrypted');
+  }
+  if (!header) {
+    return skipped('its DEX header could not be used');
   }
   if (entry.uncompressedSize > MAX_DEX_DIGEST_BYTES) {
     return skipped(

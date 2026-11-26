@@ -576,6 +576,25 @@ describe('readZipPackage: DEX files in an Android package', () => {
     expect(info.sections.some((s) => s.heading === 'DEX files')).toBe(false);
   });
 
+  it('checks the first DEX file only, and says so when it is encrypted', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: 'AndroidManifest.xml', data: buildAxml(manifest()) },
+        { name: 'classes.dex', data: buildDex(), encrypted: true },
+        { name: 'classes2.dex', data: buildDex({ classes: 5 }) },
+      ]),
+    );
+    expect(value(info, 'DEX files', 'DEX files')).toBe('1');
+    expect(value(info, 'DEX files', 'Classes defined')).toBe('5');
+    expect(value(info, 'DEX files', 'classes.dex Adler-32 check')).toBe(
+      'Not checked: the entry is encrypted.',
+    );
+    expect(value(info, 'DEX files', 'classes.dex SHA-1 check')).toBe(
+      'Not checked: the entry is encrypted.',
+    );
+    expect(value(info, 'DEX files', 'classes2.dex Adler-32 check')).toBeUndefined();
+  });
+
   it('does not inflate a first DEX file past the cap', async () => {
     const info = await readZip(
       buildZip([
