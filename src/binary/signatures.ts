@@ -90,14 +90,41 @@ export async function looksLikePe(reader: RangeReader): Promise<boolean> {
   }
 }
 
-/** "%PDF-" within the first 1,024 bytes, given the head of the file. */
+const PDF_TAIL_WINDOW = 64 * 1024;
+
+const indexOfText = (bytes: Uint8Array, text: string, from = 0): number => {
+  const want = [...text].map((c) => c.charCodeAt(0));
+  for (let i = from; i + want.length <= bytes.length; i++) {
+    if (want.every((b, k) => bytes[i + k] === b)) {
+      return i;
+    }
+  }
+  return -1;
+};
+
+/** "%PDF-" and a 1.x or 2.x version in the first 1,024 bytes, given the head of the file. */
 export function hasPdfHeader(head: Uint8Array): boolean {
   const window = head.subarray(0, PDF_HEADER_WINDOW);
-  const want = [0x25, 0x50, 0x44, 0x46, 0x2d];
-  for (let i = 0; i + want.length <= window.length; i++) {
-    if (want.every((b, k) => window[i + k] === b)) {
+  for (let at = indexOfText(window, '%PDF-'); at >= 0; at = indexOfText(window, '%PDF-', at + 1)) {
+    const v = head.subarray(at + 5, at + 8);
+    if ((v[0] === 0x31 || v[0] === 0x32) && v[1] === 0x2e && v[2] >= 0x30 && v[2] <= 0x39) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * A PDF header, and "startxref" followed by "%%EOF" in the last 64 KiB, which
+ * is where PDF readers look. The marker alone, as in a file name or ordinary
+ * text, does not count.
+ */
+export async function looksLikePdf(reader: RangeReader, head: Uint8Array): Promise<boolean> {
+  if (!hasPdfHeader(head)) {
+    return false;
+  }
+  const start = Math.max(0, reader.size - PDF_TAIL_WINDOW);
+  const tail = await reader.upTo(start, reader.size - start);
+  const xref = indexOfText(tail, 'startxref');
+  return xref >= 0 && indexOfText(tail, '%%EOF', xref) >= 0;
 }

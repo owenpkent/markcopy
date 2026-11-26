@@ -5,7 +5,7 @@
 // that has a reader is read too, under its own heading.
 import { describe, expect, it } from 'vitest';
 import { bytesSource, RangeReader } from '../../src/binary/reader';
-import { findZipEnd, hasPdfHeader, looksLikePe } from '../../src/binary/signatures';
+import { findZipEnd, hasPdfHeader, looksLikePdf, looksLikePe } from '../../src/binary/signatures';
 import { readPackage, renderPackageHtml, type PackageInfo } from '../../src/pkg';
 import { buildPe } from '../pe/fixture';
 import { buildElf } from './elfFixture';
@@ -80,8 +80,16 @@ describe('a file that is two formats', () => {
     expect(page(info)).toContain('Also read as: disk image');
   });
 
-  it('names a PDF header in a zip, which has no reader to show', async () => {
+  it('does not call a bare PDF marker the structure of a PDF', async () => {
     const info = await read(buildZip([{ name: 'x%PDF-1.4', data: 'hello' }]));
+    expect(info.also).toBeUndefined();
+    expect(page(info)).not.toContain('PDF document');
+  });
+
+  it('names a PDF header and trailer in a zip, which has no reader to show', async () => {
+    const info = await read(
+      buildZip([{ name: 'x%PDF-1.4', data: 'hello' }], { comment: '\nstartxref\n0\n%%EOF\n' }),
+    );
     expect(info.also?.matches.map((m) => m.format)).toEqual(['PDF document']);
     expect(info.also?.info).toBeUndefined();
     expect(page(info)).toContain('structure of two formats: zip archive and PDF document.');
@@ -129,14 +137,31 @@ describe('the structure tests', () => {
     expect(await looksLikePe(reader(Uint8Array.of(0x4d, 0x5a)))).toBe(false);
   });
 
-  it('finds a PDF header up to byte 1,024 and not beyond', () => {
+  it('finds a PDF header and version up to byte 1,024 and not beyond', () => {
     const at = (n: number): Uint8Array => {
       const b = new Uint8Array(2048);
-      b.set(new TextEncoder().encode('%PDF-'), n);
+      b.set(new TextEncoder().encode('%PDF-1.7'), n);
       return b;
     };
     expect(hasPdfHeader(at(1019))).toBe(true);
     expect(hasPdfHeader(at(1020))).toBe(false);
+    expect(hasPdfHeader(new TextEncoder().encode('%PDF-'))).toBe(false);
+    expect(hasPdfHeader(new TextEncoder().encode('%PDF-x.4'))).toBe(false);
+  });
+
+  it('needs startxref then %%EOF in the last 64 KiB for a PDF', async () => {
+    const text = (t: string): Uint8Array => new TextEncoder().encode(t);
+    const head = text('%PDF-1.4\n');
+    const whole = (tail: string, pad = 0): Uint8Array =>
+      join(head, new Uint8Array(pad), text(tail));
+    const ok = whole('startxref\n9\n%%EOF');
+    expect(await looksLikePdf(reader(ok), ok)).toBe(true);
+    const noEof = whole('startxref\n9\n');
+    expect(await looksLikePdf(reader(noEof), noEof)).toBe(false);
+    const far = whole('startxref\n9\n%%EOF', 70000);
+    expect(await looksLikePdf(reader(far), far)).toBe(true);
+    const out = join(head, text('startxref\n9\n%%EOF'), new Uint8Array(70000));
+    expect(await looksLikePdf(reader(out), out)).toBe(false);
   });
 
   it('puts the central directory inside the data it is asked about', async () => {

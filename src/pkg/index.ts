@@ -9,7 +9,7 @@
 // Free of the `vscode` module, like src/pe, so every reader unit-tests and
 // fuzzes directly.
 import { RangeReader, ReadError, type ByteSource } from '../binary/reader';
-import { findZipEnd, hasPdfHeader, looksLikePe } from '../binary/signatures';
+import { findZipEnd, looksLikePdf, looksLikePe } from '../binary/signatures';
 import { clip } from '../binary/text';
 import { readAlpineApk } from './alpine';
 import { readDeb } from './deb';
@@ -229,8 +229,8 @@ const PROBES: Probe[] = [
   },
   {
     name: 'PDF document',
-    fact: 'it has a PDF header in its first 1,024 bytes',
-    matches: ({ head }) => hasPdfHeader(head),
+    fact: 'it has a PDF header in its first 1,024 bytes and startxref and %%EOF in its last 64 KiB',
+    matches: ({ head, reader }) => looksLikePdf(reader, head),
   },
 ];
 
