@@ -217,7 +217,7 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Open **Show the runs**: each run lists its line and column, its kind and code points, and the decoded text in a monospace block. A payload such as `<img src=x onerror=alert(1)>` shows as literal text. Click a line and column: the source editor's cursor lands there.
 - [ ] Click **Copy without hidden characters** and paste into a plain-text target (a new untitled editor, a chat box): the visible text arrives and the hidden characters are gone (paste into an editor with "Render Control Characters" on, or check the length). A toast says "Copied without hidden characters".
 - [ ] Ordinary **Copy Whole Document** still carries the hidden characters (it is unchanged).
-- [ ] **Dismiss** hides the notice; adding or removing a hidden character brings it back. A file with only emoji, a leading BOM and Persian or Hindi joiners shows no notice.
+- [ ] **Dismiss** hides the notice; adding or removing a hidden character brings it back. A file with only emoji, a leading BOM, Persian or Hindi joiners and a heart emoji followed by a right-to-left mark shows no notice.
 - [ ] Set `markcopy.hiddenText.warn` to false: no notice. Repeat with a CSV file: the notice appears above the grid and the grid still fills the rest of the window.
 
 ### Settings, themes, and sync

@@ -26,6 +26,21 @@ describe('benign uses stay quiet', () => {
     'a byte order mark at the start': `${cp(0xfeff)}# Title`,
     'a right-to-left mark in Hebrew': `${cp(0x05e9, 0x05dc, 0x05d5, 0x05dd, 0x200f, 0x05e2)}`,
     'a keycap': `1${FE0F}${cp(0x20e3)}`,
+    'a Mongolian word with a vowel separator': cp(0x182c, 0x1820, 0x1828, 0x180e, 0x1820),
+    'a legacy Malayalam chillu before a space': `${cp(0x0d28, 0x0d4d)}${ZWJ} next`,
+    'a legacy Malayalam chillu at the end of the file': `${cp(0x0d28, 0x0d4d)}${ZWJ}`,
+    'an emoji presentation then a right-to-left mark': cp(0x2764, 0xfe0f, 0x200f, 0x05e9),
+    'a subdivision flag then a right-to-left mark': cp(
+      0x1f3f4,
+      0xe0067,
+      0xe0062,
+      0xe0073,
+      0xe0063,
+      0xe0074,
+      0xe007f,
+      0x200f,
+      0x05e9,
+    ),
     'a plain file': 'nothing to see\r\nhere\n',
   };
   for (const [name, text] of Object.entries(quiet)) {
@@ -235,6 +250,11 @@ describe('randomized', () => {
     cp(0x0645),
     cp(0x06cc),
     cp(0x5c0f),
+    cp(0x0d28),
+    cp(0x0d4d),
+    cp(0x05e9),
+    cp(0x182c),
+    cp(0x1820),
     cp(0x200b),
     cp(0x200c),
     cp(0x200d),
@@ -290,5 +310,65 @@ describe('randomized', () => {
       expect(scanHiddenText(once).totalRuns).toBe(0);
       expect(once.length).toBe(text.length - scan.runs.reduce((a, r) => a + r.length, 0));
     }
+  });
+});
+
+describe('the exemptions are narrow', () => {
+  it('flags a Mongolian vowel separator outside its context', () => {
+    expect(scanHiddenText(`ab${cp(0x180e)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(cp(0x182c, 0x1820, 0x180e, 0x0041)).totalRuns).toBe(1);
+  });
+
+  it('flags a row of direction marks, a binary channel', () => {
+    const scan = scanHiddenText(`${cp(0x05e9)}${cp(0x200e, 0x200f, 0x200e, 0x200f)} x`);
+    expect(scan.totalRuns).toBe(1);
+    expect(scan.totalChars).toBe(4);
+  });
+
+  it('flags a joiner after a Latin word', () => {
+    expect(scanHiddenText(`word${ZWJ} next`).totalRuns).toBe(1);
+  });
+
+  it('exempts only the edge joiner of a joiner row after a joining script', () => {
+    const text = `${cp(0x0628)}${ZWNJ}${ZWJ}${ZWNJ}${ZWJ} x`;
+    const scan = scanHiddenText(text);
+    expect(scan.totalRuns).toBe(1);
+    expect(scan.totalChars).toBe(3);
+    expect(stripHiddenText(text)).toBe(`${cp(0x0628)}${ZWNJ} x`);
+  });
+
+  it('keeps the benign part and flags the rest of a mixed run', () => {
+    const text = `${cp(0x2764, 0xfe0f)}${tagsOf('hi')}`;
+    const scan = scanHiddenText(text);
+    expect(scan.totalRuns).toBe(1);
+    expect(scan.runs[0].decoded).toBe('hi');
+    expect(stripHiddenText(text)).toBe(cp(0x2764, 0xfe0f));
+  });
+
+  it('decodes every byte of a selector payload on an emoji base', () => {
+    const scan = scanHiddenText(`${cp(0x1f600)}${selectorsOf('hello')}`);
+    expect(scan.runs[0].decoded).toBe('hello');
+    expect(scan.runs[0].count).toBe(5);
+  });
+});
+
+describe('fingerprint', () => {
+  it('differs for different payloads of the same size', () => {
+    const a = scanHiddenText(`a ${tagsOf('hello')}`);
+    const b = scanHiddenText(`a ${tagsOf('world')}`);
+    expect(a.totalChars).toBe(b.totalChars);
+    expect(a.fingerprint).not.toBe(b.fingerprint);
+  });
+
+  it('covers runs beyond the listed cap', () => {
+    const many = Array.from({ length: 205 }, () => `x${cp(0x200b)}`).join('');
+    const a = scanHiddenText(`${many}x${tagsOf('ab')}`);
+    const b = scanHiddenText(`${many}x${tagsOf('cd')}`);
+    expect(a.runs.length).toBe(200);
+    expect(a.fingerprint).not.toBe(b.fingerprint);
+  });
+
+  it('is empty for a clean file', () => {
+    expect(scanHiddenText('plain').fingerprint).toBe('');
   });
 });

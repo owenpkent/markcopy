@@ -42,14 +42,20 @@ export interface HiddenScan {
   totalChars: number;
   /** Any run that decodes, has four or more characters, or contains a bidi control. */
   encoded: boolean;
+  /**
+   * A hash of every flagged character, listed or not, in order. Two scans with
+   * the same counts but different hidden content have different fingerprints.
+   */
+  fingerprint: string;
 }
 
 export const MAX_RUNS = 200;
 export const MAX_DECODED = 200;
 const MAX_LABELS = 8;
-// The longest run that can be benign: a regional subdivision flag, black flag
-// plus up to seven tag letters and the cancel tag, without the flag itself.
-const MAX_BENIGN = 8;
+// Runs longer than this are flagged whole without judging each character. The
+// longest legitimate combination is a subdivision flag (seven tag letters and
+// the cancel tag) beside a direction mark or a joiner, well under it.
+const MAX_JUDGED = 32;
 const MIN_ENCODED = 4;
 
 function kindOf(cp: number): HiddenKind | undefined {
@@ -107,6 +113,7 @@ const WHITESPACE = /\s/u;
 const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
 const LATIN = /^\p{Script=Latin}$/u;
 const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
+const MONGOLIAN = /^\p{Script=Mongolian}$/u;
 
 function visibleBase(cp: number | undefined): boolean {
   return cp !== undefined && !WHITESPACE.test(String.fromCodePoint(cp));
@@ -116,57 +123,109 @@ function isSubdivisionTag(cp: number): boolean {
   return (cp >= 0xe0030 && cp <= 0xe0039) || (cp >= 0xe0061 && cp <= 0xe007a);
 }
 
-function isVariationSelector(cp: number): boolean {
-  return kindOf(cp) === 'selector';
+function isVariationSelector(cp: number | undefined): boolean {
+  return cp !== undefined && kindOf(cp) === 'selector';
 }
 
-function shapingContext(prev: number | undefined, next: number | undefined): boolean {
-  if (prev === undefined || next === undefined) {
-    return false;
-  }
-  const a = String.fromCodePoint(prev);
-  const b = String.fromCodePoint(next);
-  return LETTER_OR_MARK.test(a) && LETTER_OR_MARK.test(b) && !LATIN.test(a) && !LATIN.test(b);
+function test(re: RegExp, cp: number | undefined): boolean {
+  return cp !== undefined && re.test(String.fromCodePoint(cp));
 }
 
-// Whether a run is a use of these characters that text legitimately needs.
-function benign(cps: number[], prev: number | undefined, next: number | undefined): boolean {
-  const first = cps[0];
-  if (cps.length === 1) {
-    if (first === 0x200e || first === 0x200f || first === 0x061c) {
-      return true;
-    }
-    if (isVariationSelector(first) && visibleBase(prev)) {
-      return true;
-    }
-    if ((first === 0x200c || first === 0x200d) && shapingContext(prev, next)) {
-      return true;
-    }
-  }
-  // Emoji presentation, then optionally a join to the next emoji.
-  if (visibleBase(prev)) {
-    let at = 0;
-    if (cps[at] === 0xfe0e || cps[at] === 0xfe0f) {
-      at++;
-    }
-    let joins = false;
-    if (cps[at] === 0x200d) {
-      joins = true;
-      at++;
-    }
-    if (
-      at === cps.length &&
-      at > 0 &&
-      (!joins || (next !== undefined && PICTOGRAPHIC.test(String.fromCodePoint(next))))
-    ) {
-      return true;
-    }
-  }
+// A letter or mark of a script that shapes with joiners: anything but Latin.
+function shapingLetter(cp: number | undefined): boolean {
+  return test(LETTER_OR_MARK, cp) && !test(LATIN, cp);
+}
+
+function isDirectionMark(cp: number | undefined): boolean {
+  return cp === 0x200e || cp === 0x200f || cp === 0x061c;
+}
+
+// Which code points of a run text legitimately needs, one flag per code point.
+// `prev` and `next` are the visible code points around the run. Each benign
+// pattern is matched where it stands, so a legitimate character beside a
+// suspicious one, or beside another legitimate one (an emoji's VS16 then a
+// right-to-left mark), keeps its exemption.
+function explained(cps: number[], prev: number | undefined, next: number | undefined): boolean[] {
+  const ok = cps.map(() => false);
+  const before = (k: number): number | undefined => (k === 0 ? prev : cps[k - 1]);
+  const after = (k: number): number | undefined => (k + 1 < cps.length ? cps[k + 1] : next);
+  let k = 0;
   // A subdivision flag such as Scotland: black flag, tag letters, cancel tag.
-  if (prev === 0x1f3f4 && cps.length >= 3 && cps.length <= 8 && cps[cps.length - 1] === 0xe007f) {
-    return cps.slice(0, -1).every(isSubdivisionTag);
+  if (prev === 0x1f3f4) {
+    let j = 0;
+    while (j < cps.length && j < 7 && isSubdivisionTag(cps[j])) {
+      j++;
+    }
+    if (j >= 2 && cps[j] === 0xe007f) {
+      for (let x = 0; x <= j; x++) {
+        ok[x] = true;
+      }
+      k = j + 1;
+    }
   }
-  return false;
+  // One variation selector on a visible base (emoji presentation, an
+  // ideographic variation sequence), then optionally a join to the next emoji.
+  // A second selector straight after it is a payload, not a variation, so the
+  // first is not exempted either: its byte belongs to what the run spells.
+  if (k === 0 && visibleBase(prev)) {
+    if (isVariationSelector(cps[0]) && !isVariationSelector(after(0))) {
+      ok[0] = true;
+      k = 1;
+    }
+    if (cps[k] === 0x200d && test(PICTOGRAPHIC, after(k))) {
+      ok[k] = true;
+      k++;
+    }
+  }
+  for (let i = k; i < cps.length; i++) {
+    const cp = cps[i];
+    const left = before(i);
+    const right = after(i);
+    if (isDirectionMark(cp)) {
+      // One mark sets direction; a row of them is a binary channel.
+      ok[i] = !isDirectionMark(left) && !isDirectionMark(right);
+    } else if (cp === 0x200c || cp === 0x200d) {
+      // Shaping control beside a letter of a joining script, mid-word or at a
+      // word's edge (a legacy Malayalam chillu ends in ZWJ before a space).
+      // Neighbours inside the run are invisible, so they count as no letter.
+      ok[i] =
+        (shapingLetter(left) && (shapingLetter(right) || !test(LETTER_OR_MARK, right))) ||
+        (!test(LETTER_OR_MARK, left) && shapingLetter(right));
+    } else if (cp === 0x180e) {
+      // The Mongolian vowel separator, before a final A or E.
+      ok[i] = test(MONGOLIAN, left) && (right === 0x1820 || right === 0x1821);
+    }
+  }
+  return ok;
+}
+
+// `explained`, judged again on what a strip keeps until nothing changes. Taking
+// a flagged character out can leave a kept one in a new context (two direction
+// marks that a payload separated end up side by side), so a kept character is
+// only benign if it is still benign once its flagged neighbours are gone. That
+// makes a strip final: stripping its output again changes nothing.
+function settled(cps: number[], prev: number | undefined, next: number | undefined): boolean[] {
+  const ok = explained(cps, prev, next);
+  for (;;) {
+    const kept: number[] = [];
+    for (let k = 0; k < cps.length; k++) {
+      if (ok[k]) {
+        kept.push(k);
+      }
+    }
+    if (kept.length === 0 || kept.length === cps.length) {
+      return ok;
+    }
+    const again = explained(
+      kept.map((k) => cps[k]),
+      prev,
+      next,
+    );
+    if (again.every(Boolean)) {
+      return ok;
+    }
+    kept.forEach((k, j) => (ok[k] = again[j]));
+  }
 }
 
 interface Found {
@@ -201,31 +260,44 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
       continue;
     }
     // The maximal run of invisible code points starting here.
-    let start = i;
+    const start = i;
     let end = i;
     let count = 0;
     const cps: number[] = [];
+    const at: number[] = [];
     while (end < n) {
       const c = text.codePointAt(end) as number;
       if (kindOf(c) === undefined) {
         break;
       }
-      if (count < MAX_BENIGN + 1) {
+      if (count <= MAX_JUDGED) {
         cps.push(c);
+        at.push(end);
       }
       count++;
       end += c > 0xffff ? 2 : 1;
     }
+    const report = (from: number, to: number, points: number): void =>
+      found({ start: from, end: to, line, column: from - lineStart + 1, count: points });
     // A byte order mark leads the file; what follows it is judged on its own.
-    const bom = start === 0 && cps[0] === 0xfeff;
-    if (bom) {
-      cps.shift();
-      count--;
-      start = 1;
-    }
+    const skip = start === 0 && cps[0] === 0xfeff ? 1 : 0;
     const next = end < n ? text.codePointAt(end) : undefined;
-    if (count > 0 && (count > MAX_BENIGN || !benign(cps, bom ? undefined : prev, next))) {
-      found({ start, end, line, column: start - lineStart + 1, count });
+    if (count > MAX_JUDGED) {
+      report(start + skip, end, count - skip);
+    } else {
+      const ok = settled(cps.slice(skip), skip ? undefined : prev, next);
+      // Each stretch of unexplained code points is a flagged run of its own.
+      let from = -1;
+      for (let k = 0; k <= ok.length; k++) {
+        if (k < ok.length && !ok[k]) {
+          if (from < 0) {
+            from = k;
+          }
+        } else if (from >= 0) {
+          report(at[skip + from], k < ok.length ? at[skip + k] : end, k - from);
+          from = -1;
+        }
+      }
     }
     // The next code point is visible, so it sets prev before anything reads it.
     prev = undefined;
@@ -288,10 +360,26 @@ function label(cp: number): string {
 
 /** Find the invisible characters in `text` that nothing legitimate explains. */
 export function scanHiddenText(text: string): HiddenScan {
-  const scan: HiddenScan = { runs: [], totalRuns: 0, totalChars: 0, encoded: false };
+  const scan: HiddenScan = {
+    runs: [],
+    totalRuns: 0,
+    totalChars: 0,
+    encoded: false,
+    fingerprint: '',
+  };
+  // FNV-1a over the flagged UTF-16 units, with a separator between runs.
+  let hash = 0x811c9dc5;
+  const mix = (unit: number): void => {
+    hash = Math.imul(hash ^ unit, 0x01000193) >>> 0;
+  };
   walk(text, true, (found) => {
     scan.totalRuns++;
     scan.totalChars += found.count;
+    for (let u = found.start; u < found.end; u++) {
+      mix(text.charCodeAt(u));
+    }
+    mix(0xffff);
+    scan.fingerprint = hash.toString(16).padStart(8, '0');
     const listed = scan.runs.length < MAX_RUNS;
     if (!listed && scan.encoded) {
       return;

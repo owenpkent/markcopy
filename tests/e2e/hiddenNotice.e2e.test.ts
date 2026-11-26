@@ -120,10 +120,38 @@ describe('the hidden characters notice', () => {
     expect(bar().hidden).toBe(false);
   });
 
+  it('shows again when the payload changes but its size does not', async () => {
+    await renderWith(h, scanHiddenText(`a ${tags('hello')}`));
+    const dismiss = [...bar().querySelectorAll('button')].find(
+      (b) => b.textContent === 'Dismiss',
+    ) as HTMLButtonElement;
+    dismiss.click();
+    expect(bar().hidden).toBe(true);
+    await renderWith(h, scanHiddenText(`a ${tags('world')}`));
+    expect(bar().hidden).toBe(false);
+  });
+
   it('hides again when the file is clean', async () => {
     await renderWith(h, scanHiddenText(`a ${tags('hello')}`));
     expect(bar().hidden).toBe(false);
     await renderWith(h, undefined);
     expect(bar().hidden).toBe(true);
+  });
+
+  // `calc(100vh - px)` is invalid CSS, so the grid height rule needs a unit
+  // whether the notice is shown, hidden, or dismissed.
+  it('publishes its height as a length with a unit', async () => {
+    const height = (): string => document.body.style.getPropertyValue('--mc-hidden-h');
+    expect(height()).toBe('0px');
+    await renderWith(h, scanHiddenText(`a ${tags('hello')}`));
+    expect(height()).toMatch(/^\d+px$/);
+    (bar().querySelector('details') as HTMLDetailsElement).open = true;
+    await renderWith(h, scanHiddenText(`a ${tags('hello')}`));
+    expect(height()).toMatch(/^\d+px$/);
+    const dismiss = [...bar().querySelectorAll('button')].find(
+      (b) => b.textContent === 'Dismiss',
+    ) as HTMLButtonElement;
+    dismiss.click();
+    expect(height()).toBe('0px');
   });
 });

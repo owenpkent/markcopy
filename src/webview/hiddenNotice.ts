@@ -78,8 +78,11 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
   bar.hidden = true;
   anchor.before(bar);
   // A CSV grid fills the window's height, so it needs to know what sits above it.
+  // Always a length with its unit: `calc(100vh - px)` would be invalid and the
+  // grid would lose its height, not fall back to the var() default.
   const publishHeight = (): void => {
-    document.body.style.setProperty('--mc-hidden-h', `px`);
+    const height = bar.hidden ? 0 : Math.ceil(bar.getBoundingClientRect().height);
+    document.body.style.setProperty('--mc-hidden-h', `${height}px`);
   };
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(publishHeight).observe(bar);
@@ -117,7 +120,10 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         publishHeight();
         return;
       }
-      const key = `${docKey}|${scan.totalRuns}|${scan.totalChars}`;
+      // The fingerprint covers every flagged character, listed or not, so a
+      // different payload of the same size still shows the bar again.
+      const fingerprint = typeof scan.fingerprint === 'string' ? scan.fingerprint : '';
+      const key = `${docKey}|${fingerprint}|${scan.totalRuns}|${scan.totalChars}`;
       if (dismissed === key) {
         bar.hidden = true;
         publishHeight();
