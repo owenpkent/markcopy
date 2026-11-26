@@ -529,10 +529,10 @@ describe('readZipPackage: DEX files in an Android package', () => {
     expect(value(info, 'DEX files', 'Method references')).toBe('65,636');
     expect(value(info, 'DEX files', 'Strings')).toBe('10');
     expect((section(info, 'DEX files') as { note?: string }).note).toContain('65,536');
-    expect(value(info, 'DEX files', 'classes.dex checksum')).toBe(
+    expect(value(info, 'DEX files', 'classes.dex Adler-32 check')).toBe(
       'The computed Adler-32 matches the stored checksum.',
     );
-    expect(value(info, 'DEX files', 'classes.dex signature')).toBe(
+    expect(value(info, 'DEX files', 'classes.dex SHA-1 check')).toBe(
       'The computed SHA-1 matches the stored digest.',
     );
     expect(info.warnings).toEqual([]);
@@ -543,10 +543,10 @@ describe('readZipPackage: DEX files in an Android package', () => {
       withDex(['classes.dex', buildDex({ badChecksum: true, badSignature: true })]),
     );
     expect(value(info, 'DEX files', 'DEX files')).toBe('1');
-    expect(value(info, 'DEX files', 'classes.dex checksum')).toBe(
+    expect(value(info, 'DEX files', 'classes.dex Adler-32 check')).toBe(
       'The computed Adler-32 differs from the stored checksum.',
     );
-    expect(value(info, 'DEX files', 'classes.dex signature')).toBe(
+    expect(value(info, 'DEX files', 'classes.dex SHA-1 check')).toBe(
       'The computed SHA-1 differs from the stored digest.',
     );
   });
@@ -565,7 +565,7 @@ describe('readZipPackage: DEX files in an Android package', () => {
       true,
     );
     expect(value(info, 'DEX files', 'Classes defined')).toBe('0');
-    expect(value(info, 'DEX files', 'classes.dex checksum')).toMatch(/^Not checked: /);
+    expect(value(info, 'DEX files', 'classes.dex Adler-32 check')).toMatch(/^Not checked: /);
   });
 
   it('warns about a file that is not a DEX file and shows no section when none reads', async () => {
@@ -583,7 +583,7 @@ describe('readZipPackage: DEX files in an Android package', () => {
         { name: 'classes.dex', data: buildDex(), declaredSize: 33 * 1024 * 1024 },
       ]),
     );
-    expect(value(info, 'DEX files', 'classes.dex checksum')).toMatch(
+    expect(value(info, 'DEX files', 'classes.dex Adler-32 check')).toMatch(
       /^Not checked: the file is larger/,
     );
   });

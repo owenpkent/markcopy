@@ -164,8 +164,8 @@ async function digestRows(
   warnings: string[],
 ): Promise<[string, string][]> {
   const skipped = (why: string): [string, string][] => [
-    [`${entry.name} checksum`, `Not checked: ${why}.`],
-    [`${entry.name} signature`, `Not checked: ${why}.`],
+    [`${entry.name} Adler-32 check`, `Not checked: ${why}.`],
+    [`${entry.name} SHA-1 check`, `Not checked: ${why}.`],
   ];
   if (entry.encrypted) {
     return skipped('the entry is encrypted');
@@ -194,13 +194,13 @@ async function digestRows(
   const signature = createHash('sha1').update(bytes.subarray(32)).digest();
   return [
     [
-      `${entry.name} checksum`,
+      `${entry.name} Adler-32 check`,
       checksum === header.checksum
         ? 'The computed Adler-32 matches the stored checksum.'
         : 'The computed Adler-32 differs from the stored checksum.',
     ],
     [
-      `${entry.name} signature`,
+      `${entry.name} SHA-1 check`,
       hex(signature) === hex(header.signature)
         ? 'The computed SHA-1 matches the stored digest.'
         : 'The computed SHA-1 differs from the stored digest.',
