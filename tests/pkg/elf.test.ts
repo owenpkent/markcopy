@@ -626,6 +626,7 @@ describe('readElf: control-flow hardening notes', () => {
   const SHSTK = 'Shadow stack (CET SHSTK)';
   const BTI = 'Branch target identification (BTI)';
   const PAC = 'Pointer authentication (PAC)';
+  const NOTE_MISSING = 'Unknown (no GNU property note)';
 
   it('reads IBT and shadow stack on x86-64', async () => {
     const both = await prot({ properties: [feature(X86, 3)] });
@@ -633,7 +634,7 @@ describe('readElf: control-flow hardening notes', () => {
     const ibt = await prot({ properties: [feature(X86, 1)] });
     expect([ibt[IBT], ibt[SHSTK]]).toEqual(['Yes', 'No']);
     const none = await prot({});
-    expect([none[IBT], none[SHSTK]]).toEqual(['No', 'No']);
+    expect([none[IBT], none[SHSTK]]).toEqual([NOTE_MISSING, NOTE_MISSING]);
     const zero = await prot({ properties: [feature(X86, 0)] });
     expect([zero[IBT], zero[SHSTK]]).toEqual(['No', 'No']);
   });
@@ -669,7 +670,27 @@ describe('readElf: control-flow hardening notes', () => {
     const bti = await prot({ machine: 183, properties: [feature(ARM, 1)] });
     expect([bti[BTI], bti[PAC]]).toEqual(['Yes', 'No']);
     const none = await prot({ machine: 183 });
-    expect([none[BTI], none[PAC]]).toEqual(['No', 'No']);
+    expect([none[BTI], none[PAC]]).toEqual([NOTE_MISSING, NOTE_MISSING]);
+  });
+
+  it('reads the property note from PT_GNU_PROPERTY as well as PT_NOTE', async () => {
+    const spec = { machine: 183, noSections: true, properties: [feature(ARM, 3)] };
+    const note = await prot(spec);
+    expect([note[BTI], note[PAC]]).toEqual(['Yes', 'Yes']);
+    const dedicated = await prot({ ...spec, propertySegment: true });
+    expect([dedicated[BTI], dedicated[PAC]]).toEqual(['Yes', 'Yes']);
+  });
+
+  it('falls back to the section when an unrelated PT_NOTE carries no property', async () => {
+    // namesz 4, descsz 16, type 5, "GNU ", then one 4-byte property padded to 8.
+    const prop = [4, 0, 0, 0, 16, 0, 0, 0, 5, 0, 0, 0, 0x47, 0x4e, 0x55, 0];
+    prop.push(...u32(ARM), 4, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0);
+    const p = await prot({
+      machine: 183,
+      buildId: [1, 2, 3],
+      sections: [{ name: '.note.gnu.property', type: 7, data: new Uint8Array(prop) }],
+    });
+    expect([p[BTI], p[PAC]]).toEqual(['Yes', 'Yes']);
   });
 
   it('ignores a feature word that belongs to another architecture', async () => {

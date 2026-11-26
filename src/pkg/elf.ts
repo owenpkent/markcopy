@@ -49,6 +49,7 @@ const PT_LOAD = 1;
 const PT_DYNAMIC = 2;
 const PT_INTERP = 3;
 const PT_NOTE = 4;
+const PT_GNU_PROPERTY = 0x6474e553;
 const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
 
@@ -605,26 +606,40 @@ async function readNotes(
   sections: Section[],
 ): Promise<Note[]> {
   const out: Note[] = [];
-  const places: { offset: number; size: number; align: number }[] = [];
-  const noteSegments = segments.filter((s) => s.type === PT_NOTE);
-  if (noteSegments.length > 0) {
-    for (const s of noteSegments.slice(0, MAX_NOTE_SEGMENTS)) {
-      places.push({ offset: s.offset, size: s.filesz, align: s.align === 8 ? 8 : 4 });
+  const seen = new Set<string>();
+  const walk = async (places: { offset: number; size: number; align: number }[]) => {
+    for (const p of places) {
+      const key = `${p.offset}:${p.size}`;
+      if (out.length >= MAX_NOTES || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const buf = await reader.bytes(p.offset, Math.min(p.size, MAX_NOTE_BYTES));
+      out.push(...parseNotes(buf, h.le, p.align));
     }
-  } else {
-    // Without program headers (an object file) the notes live in sections.
-    for (const s of sections.filter((x) => x.type === SHT_NOTE).slice(0, MAX_NOTE_SEGMENTS)) {
-      // The property note is 8-aligned in a 64-bit file; other notes are 4.
-      const eight = h.wide && s.name === '.note.gnu.property';
-      places.push({ offset: s.offset, size: s.size, align: eight ? 8 : 4 });
-    }
-  }
-  for (const p of places) {
-    if (out.length >= MAX_NOTES) {
-      break;
-    }
-    const buf = await reader.bytes(p.offset, Math.min(p.size, MAX_NOTE_BYTES));
-    out.push(...parseNotes(buf, h.le, p.align));
+  };
+  const isProperty = (n: Note): boolean => n.name === 'GNU' && n.type === NT_GNU_PROPERTY_TYPE_0;
+  // The property note can sit in PT_GNU_PROPERTY as well as PT_NOTE.
+  await walk(
+    segments
+      .filter((s) => s.type === PT_NOTE || s.type === PT_GNU_PROPERTY)
+      .slice(0, MAX_NOTE_SEGMENTS)
+      .map((s) => ({ offset: s.offset, size: s.filesz, align: s.align === 8 ? 8 : 4 })),
+  );
+  if (!out.some(isProperty)) {
+    // Without program headers (an object file), or when no segment carried the
+    // property note, the notes live in sections.
+    await walk(
+      sections
+        .filter((x) => x.type === SHT_NOTE)
+        .slice(0, MAX_NOTE_SEGMENTS)
+        .map((s) => ({
+          offset: s.offset,
+          size: s.size,
+          // The property note is 8-aligned in a 64-bit file; other notes are 4.
+          align: h.wide && s.name === '.note.gnu.property' ? 8 : 4,
+        })),
+    );
   }
   return out;
 }
@@ -721,8 +736,10 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   let goBuildId: string | undefined;
   let minKernel: string | undefined;
   const features = new Map<number, number>();
+  let propertyNote = false;
   for (const n of notes) {
     if (n.name === 'GNU' && n.type === NT_GNU_PROPERTY_TYPE_0) {
+      propertyNote = true;
       readFeatureBits(n.desc, h.le, h.wide, features);
     } else if (n.name === 'GNU' && n.type === 3 && !buildId) {
       buildId = hex(n.desc.subarray(0, 64));
@@ -877,10 +894,14 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   }
   protections.push(['RPATH', dyn.rpath], ['RUNPATH', dyn.runpath]);
   if (segments.length > 0 && h.type !== 1) {
-    // A missing note or bit reads as No: the linker drops a bit unless every
-    // input object had it.
+    // With a property note, a missing bit reads as No: the linker drops a bit
+    // unless every input object had it. Without one, nothing is established.
     const yes = (type: number, bit: number): string =>
-      ((features.get(type) ?? 0) & bit) !== 0 ? 'Yes' : 'No';
+      !propertyNote
+        ? 'Unknown (no GNU property note)'
+        : ((features.get(type) ?? 0) & bit) !== 0
+          ? 'Yes'
+          : 'No';
     if (h.machine === EM_386 || h.machine === EM_X86_64) {
       protections.push(
         ['Indirect branch tracking (CET IBT)', yes(GNU_PROPERTY_X86_FEATURE_1_AND, 1)],

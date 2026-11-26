@@ -44,6 +44,8 @@ export interface ElfSpec {
   /** PT_GNU_STACK: 'nx' (RW), 'exec' (RWX) or none. Defaults to 'nx'. */
   stack?: 'nx' | 'exec' | 'none';
   relro?: boolean;
+  /** Give the note segment the PT_GNU_PROPERTY type instead of PT_NOTE. */
+  propertySegment?: boolean;
   buildId?: number[];
   /** [os, major, minor, patch] of the GNU ABI tag note. */
   abiTag?: [number, number, number, number];
@@ -111,6 +113,7 @@ const PT = {
   DYNAMIC: 2,
   INTERP: 3,
   NOTE: 4,
+  GNU_PROPERTY: 0x6474e553,
   GNU_STACK: 0x6474e551,
   GNU_RELRO: 0x6474e552,
 };
@@ -183,7 +186,7 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
       segmentKinds.push(PT.DYNAMIC);
     }
     if (notes.length > 0) {
-      segmentKinds.push(PT.NOTE);
+      segmentKinds.push(spec.propertySegment ? PT.GNU_PROPERTY : PT.NOTE);
     }
     if ((spec.stack ?? 'nx') !== 'none') {
       segmentKinds.push(PT.GNU_STACK);
@@ -323,6 +326,7 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
         size = dynLength;
         break;
       case PT.NOTE:
+      case PT.GNU_PROPERTY:
         offset = noteOffset;
         size = notes.length;
         align = spec.properties && wide ? 8 : 4;
