@@ -13,6 +13,7 @@
 //
 // No `vscode` import: this module is pure so it can be unit-tested and fuzzed.
 import { parseXmlBounded } from '../binary/xml';
+import type { AlsoReading } from '../pkg/model';
 import { child, findAll } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
 import { isSignedData, readSigner, signerCount, type Signer } from './signer';
@@ -144,6 +145,8 @@ export interface PeInfo {
   signature?: PeSignature;
   /** Bytes after the last section that no header accounts for, as an installer's payload is. */
   overlay?: { offset: number; size: number };
+  /** What the appended data reads as, when it is a format the package reader knows. Set by the host task, not by readPe. */
+  appended?: AlsoReading;
   /** Parts of the file that were present but could not be read. */
   warnings: string[];
 }

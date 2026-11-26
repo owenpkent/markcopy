@@ -27,6 +27,10 @@ It is built on the same shared shell as the Word and Excel previews, so right-cl
 
 Not shown: 16-bit and DOS executables (the page says so), Mach-O files (ELF files open in the [package info page](#package-info-preview)), the full list of imported function names, resources other than the icon, version block and manifest, signature verification, countersignature and timestamp details, and .NET metadata beyond the runtime version and flags.
 
+## Files with the structure of two formats
+
+Some files are valid as two formats at once: a zip appended to a Windows Installer package or an RPM, a zip with a disk image trailer, a PDF header inside a zip, a Windows executable with a zip appended. Many are ordinary (self-extracting installers, JARs with a launcher stub). The package and executable pages then show a notice at the top that names both formats and says where the second structure sits, for example "its central directory ends at the end of the file". Below the usual page, a section headed **Also read as: zip archive** shows the second reading. Only one extra reading is shown; if three formats match, the notice names them and says which one is read. If the second reading fails, one line says why. The notice describes structure only. It does not say how the file came to be that way. Right-click **Copy as Markdown** and the exports include both readings.
+
 ## Package info preview
 
 MarkCopy registers as the editor for `.deb`, `.udeb`, `.rpm`, `.msi`, `.dmg`, `.pkg`, `.apk`, `.jar`, `.war`, `.ear`, `.vsix`, `.whl`, `.nupkg`, `.snupkg`, `.so`, `.elf`, `.ko` and `.AppImage` files (either case) and `*.so.*` shared libraries, so opening one shows a page about the file instead of VS Code's "file is binary" notice (after you press **Read this file**, as above). It is for answering "what is this, what version, who made it, and what does it need?" before you install it. The format is decided by what the file holds, not by its name, so a `.jar` that is an Android library or a `.apk` that is an Alpine package is read as what it is.

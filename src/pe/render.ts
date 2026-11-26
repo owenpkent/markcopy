@@ -19,6 +19,7 @@ import {
 } from '../binary/html';
 import { printable } from '../binary/text';
 import { own } from '../binary/own';
+import { renderAlsoAlert, renderAlsoReading } from '../pkg/render';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -173,7 +174,10 @@ function fileSection(info: PeInfo, options: RenderOptions): string {
   if (info.overlay) {
     rows.push([
       'Appended data',
-      `${formatBytes(info.overlay.size)} after the image, as an installer's payload is`,
+      `${formatBytes(info.overlay.size)} after the image, as an installer's payload is` +
+        (info.appended
+          ? `. It has the structure of a ${info.appended.matches[0].format}: ${info.appended.matches[0].fact}`
+          : ''),
     ]);
   }
   return properties(rows);
@@ -377,6 +381,9 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
       icon,
     ),
   ];
+  if (info.appended) {
+    parts.push(renderAlsoAlert(info.appended));
+  }
   for (const warning of info.warnings) {
     parts.push(`<p class="mc-exe-note">${escapeHtml(warning)}</p>`);
   }
@@ -409,6 +416,9 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   }
   if (info.exports) {
     parts.push(block('Exports', exportsSection(info), true));
+  }
+  if (info.appended) {
+    parts.push(renderAlsoReading(info.appended));
   }
   return `<div class="mc-exe">${parts.join('')}</div>`;
 }
