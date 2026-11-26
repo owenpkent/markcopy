@@ -100,6 +100,12 @@ describe('readRpm: stored digests', () => {
     );
   });
 
+  it('treats the payload digest of an RPM v6 package without tag 5093 as SHA-256', async () => {
+    const info = await readSpec({ digests: true, without: [5093], main: [int32(5114, 6)] });
+    const pkg = pkgRows(info);
+    expect(pkg.get('Payload SHA-256 check')).toBe(MATCH('SHA-256'));
+  });
+
   it('ignores the digest of the unpacked payload', async () => {
     const info = await readSpec({ main: [strings(5097, [hex('sha256', new Uint8Array(1))])] });
     expect(pkgRows(info).has('Payload digest')).toBe(false);
