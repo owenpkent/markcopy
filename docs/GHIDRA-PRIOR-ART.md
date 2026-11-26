@@ -462,8 +462,17 @@ Ghidra decrypts, because it is a reverse-engineering tool. It verifies no signat
   - Mach-O: `macho/commands/codesignature/` lays out the SuperBlob and CodeDirectory
     structures for display. It computes no hashes and does not read the CMS signature.
   - APK: the APK opens as a plain zip, with no signature handling _(inferred)_.
+- **Stored-digest checks.** The CaRT reader streams the decompressed payload through
+  MD5, SHA-1 and SHA-256 and compares each result with the value in the footer
+  (`cart/CartV1StreamHasher.java:119-154`, called from
+  `cart/CartV1PayloadExtractor.java:108-115`). A missing hash is a warning, and a
+  digest that differs throws, so extraction fails. This is an integrity check of
+  digests the file stores about itself, not signature verification. MarkCopy's digest
+  checks (step 3 below) do the same comparison but report a difference as a row and
+  keep the page.
 - **Crypto detection.** There is no FindCrypt-style analyzer for crypto constants in
-  the tree. MD5 is used only as a cache key and content id.
+  the tree. Apart from the CaRT checks above, MD5 is used as a cache key and content
+  id.
 
 ### What MarkCopy does
 
