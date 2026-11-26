@@ -585,6 +585,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
             signature.imageHash = await checkImageHash(reader, der, {
               checksumAt: optOffset + 64,
               directoryAt: optOffset + dirCountOffset + 4 + DIR_SECURITY * 8,
+              headersEnd: Math.max(sizeOfHeaders, optOffset + optionalSize + sectionCount * 40),
               table: security,
             });
           }

@@ -121,7 +121,7 @@ describe('Authenticode image hash', () => {
   it('differs when a byte in a hashed region changes', async () => {
     const file = signedImage({ overlay: 300 });
     const o = offsets(file);
-    for (const at of [0x10, o.checksum - 1, o.checksum + 4, o.directory - 1, 0x300, o.table - 1]) {
+    for (const at of [0x10, o.checksum - 4, o.checksum + 4, o.directory - 1, 0x300, o.table - 1]) {
       const flipped = file.slice();
       flipped[at] ^= 1;
       expect(await check(flipped), `byte ${at}`).toBe(DIFFER);
@@ -191,7 +191,11 @@ describe('Authenticode image hash', () => {
     const o = offsets(file);
     const der = file.subarray(o.table + 8, o.table + o.tableSize);
     const reader = new RangeReader(bytesSource(file));
-    const layout = { checksumAt: o.checksum, directoryAt: o.directory };
+    const layout = {
+      checksumAt: o.checksum,
+      directoryAt: o.directory,
+      headersEnd: o.directory + 8,
+    };
     expect(
       (await checkImageHash(reader, der, { ...layout, table: { address: o.checksum, size: 64 } }))
         .check,
@@ -204,6 +208,15 @@ describe('Authenticode image hash', () => {
         })
       ).check,
     ).toBe(MATCH);
+  });
+
+  it('says so when the certificate table starts inside the headers after the Security entry', async () => {
+    const file = signedImage();
+    const o = offsets(file);
+    const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
+    // SizeOfHeaders is 60 bytes into the optional header.
+    view.setUint32(o.checksum - 64 + 60, o.table + 8, true);
+    expect(await check(file)).toBe(NOT_CHECKED_TABLE);
   });
 
   it('says so when the stored digest cannot be read', async () => {

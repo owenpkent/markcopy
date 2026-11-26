@@ -43,6 +43,11 @@ export interface ImageLayout {
   checksumAt: number;
   /** Offset of the 8-byte certificate-table entry in the data directory. */
   directoryAt: number;
+  /**
+   * The end of the headers: the larger of SizeOfHeaders and the end of the
+   * section table. The certificate table may not start before it.
+   */
+  headersEnd: number;
   /** The certificate table as the data directory states it. */
   table: { address: number; size: number };
 }
@@ -174,11 +179,11 @@ export async function checkImageHash(
       check: 'Not checked: MarkCopy does not compute the digest algorithm the signature names.',
     };
   }
-  const { checksumAt, directoryAt, table } = layout;
+  const { checksumAt, directoryAt, headersEnd, table } = layout;
   const tableEnd = table.address + table.size;
   if (
     !Number.isSafeInteger(tableEnd) ||
-    table.address < directoryAt + 8 ||
+    table.address < Math.max(directoryAt + 8, headersEnd) ||
     tableEnd > reader.size
   ) {
     return {
