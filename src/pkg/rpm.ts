@@ -119,6 +119,9 @@ const MAX_RELATION_ENTRIES = 20_000;
 // boundaries. Tags can point at the same region, and each walk would otherwise repeat.
 const SCAN_BUDGET = 128 * 1024 * 1024;
 
+/** Decodes names for comparing: a leading U+FEFF is a character of the name, not a byte order mark. */
+const COMPARE = new TextDecoder('utf-8', { ignoreBOM: true });
+
 /**
  * Where the strings of one array start, found without building any of them. A
  * string is decoded only when asked for, cut to the length asked.
@@ -150,7 +153,7 @@ class Strings {
     // A character is at most 4 bytes, so looking further for the terminator is wasted work.
     const window = this.store.subarray(start, Math.min(this.store.length, start + max * 4));
     const end = window.indexOf(0);
-    return new TextDecoder().decode(end < 0 ? window : window.subarray(0, end)).slice(0, max);
+    return COMPARE.decode(end < 0 ? window : window.subarray(0, end)).slice(0, max);
   }
 }
 

@@ -26,6 +26,8 @@ export const MAX_MEMBER_NAME = 4096;
 /** Names of each kind of difference shown. */
 export const MAX_NAMES_SHOWN = 10;
 
+/** Decodes names for comparing: a leading U+FEFF is a character of the name, not a byte order mark. */
+const COMPARE = new TextDecoder('utf-8', { ignoreBOM: true });
 const NEWC_HEADER = 110;
 const TRAILER = 'TRAILER!!!';
 
@@ -129,7 +131,7 @@ export class CpioWalker {
   private readName(): void {
     const raw = this.buffer.subarray(0, this.nameSize);
     const nul = raw.indexOf(0);
-    const name = new TextDecoder().decode(nul < 0 ? raw : raw.subarray(0, nul));
+    const name = COMPARE.decode(nul < 0 ? raw : raw.subarray(0, nul));
     if (name === TRAILER) {
       this.finished = true;
       return;
