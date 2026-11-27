@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { applyMarkcopySetting } from './settingsScope';
 import { getNonce } from './previewShell';
+import { openExternalLink } from './externalLink';
 import { parsePdfMessage } from './messages/pdf';
 import { MAX_PDF_BYTES, readDocument } from './documentFile';
 import { MAX_COMMENTS_BYTES, parseComments, parseCommentsLenient } from './pdfComments';
@@ -76,6 +77,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         }
       } else if (msg.type === 'openExternal') {
         await openInDefaultApp(document.uri);
+      } else if (msg.type === 'openLink') {
+        // Validated by parsePdfMessage (http, https, mailto, length cap) and
+        // checked again by openExternalLink before it reaches the OS.
+        openExternalLink(msg.url);
       } else if (msg.type === 'revealInOS') {
         revealInOs(document.uri);
       } else if (msg.type === 'saveComments') {

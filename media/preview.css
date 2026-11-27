@@ -799,6 +799,33 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   background: transparent;
 }
 
+/* Link boxes from the PDF's link annotations, placed in percent of the page so
+   they hold at every zoom. Inert in pointer mode so the text underneath can be
+   selected; a click there is still followed (see pdf.ts). */
+.mc-link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.mc-link {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  pointer-events: none;
+}
+body.mc-mode-hand .mc-link {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.mc-link:hover {
+  background: color-mix(in srgb, var(--mc-accent, #0969da) 14%, transparent);
+}
+.mc-link:focus-visible {
+  outline: 2px solid var(--mc-accent, #0969da);
+  outline-offset: 1px;
+}
+
 /* Comment pins and their annotation overlay. The overlay ignores pointer events
    so it never blocks the page; only the pins themselves are interactive. */
 .mc-annot-layer {

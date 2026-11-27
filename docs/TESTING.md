@@ -521,6 +521,21 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
+### Links
+
+Use a PDF that has a table of contents or cross-references and a web link (a LaTeX document built with `hyperref`, or a paper from arXiv).
+
+- [ ] ★ Click a contents entry or cross-reference: the view jumps to the target page (and to the spot on it when the link names one) and the page indicator follows.
+- [ ] ★ Click an external link: the default browser opens that address, and the viewer is unchanged. A `mailto:` link opens the mail client.
+- [ ] Hover a link in the Hand tool: the pointer becomes a hand and a tooltip shows the address.
+- [ ] ★ Zoom in and out several steps, and use fit width: the link boxes (hover to find them) still sit on the linked text on every page, including after scrolling away and back.
+- [ ] With dark or green pages, links still work and sit on the right text.
+- [ ] Switch to the Pointer tool: dragging across linked text selects it without following the link; a plain click on the link follows it.
+- [ ] Tab to a link and press Enter: it is followed.
+- [ ] After a pan with the Hand tool that starts or ends over a link, the link is not followed.
+- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action) does nothing.
+- [ ] In the LaTeX preview, links in the compiled PDF behave the same.
+
 ### Tools, selection, and copy
 
 - [ ] Right-click -> **Preferences** toggles between **Hand Tool (Drag to Scroll)** and **Pointer Tool (Select Text)**.

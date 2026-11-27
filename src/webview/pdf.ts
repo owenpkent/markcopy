@@ -10,6 +10,16 @@ import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { fromHost } from './fromHost';
 import { MAX_COMMENT_COUNT, MAX_COMMENT_TEXT, MAX_COMMENT_TOTAL_TEXT } from '../pdfComments';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
+import {
+  linkBox,
+  linkTargetOf,
+  namedActionPage,
+  resolveDestination,
+  type Destination,
+  type LinkAnnotation,
+  type LinkTarget,
+  type PercentBox,
+} from './pdfLinks';
 
 // Minimal VS Code webview API surface we use.
 interface VsCodeApi {
@@ -221,7 +231,7 @@ async function load(data: Uint8Array): Promise<void> {
     wrap.dataset.page = String(n);
     wrap.innerHTML =
       '<canvas class="mc-canvas"></canvas><div class="textLayer"></div>' +
-      '<div class="mc-annot-layer"></div>';
+      '<div class="mc-link-layer"></div><div class="mc-annot-layer"></div>';
     root.appendChild(wrap);
     wrappers.push(wrap);
     layoutPage(n);
@@ -279,6 +289,7 @@ function resetViewer(): void {
   inFlight.clear();
   visible.clear();
   pageText.clear();
+  pageLinks.clear();
   root.textContent = '';
 }
 
@@ -413,6 +424,7 @@ async function renderPage(n: number): Promise<void> {
     viewport,
   }).render();
 
+  await placeLinks(n, page);
   placePins(n);
 }
 
@@ -426,7 +438,165 @@ function teardown(n: number): void {
   canvas.width = 0;
   canvas.height = 0;
   (wrap.querySelector('.textLayer') as HTMLElement).innerHTML = '';
+  (wrap.querySelector('.mc-link-layer') as HTMLElement).textContent = '';
 }
+
+// ---------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------
+// Each rendered page carries one box per link annotation, placed in percent of
+// the page so a zoom step needs no re-layout and the boxes cannot drift from
+// the canvas. They live in their own layer (the annotation layer is rebuilt for
+// comment pins on every render). Clicks are resolved by geometry in one
+// document listener rather than by each box's own handler, so a link still
+// follows a click in pointer mode, where the boxes let events through to the
+// selectable text; a drag or a selection is never taken for a click.
+const MAX_LINKS_PER_PAGE = 500;
+const CLICK_SLOP = 4; // px of pointer travel after which a press was a drag
+const pageLinks = new Map<number, { target: LinkTarget; box: PercentBox }[]>();
+const linkTargets = new WeakMap<HTMLElement, LinkTarget>();
+
+async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
+  const layer = wrappers[n - 1]?.querySelector('.mc-link-layer') as HTMLElement | null;
+  if (!layer) {
+    return;
+  }
+  let entries = pageLinks.get(n);
+  if (!entries) {
+    entries = [];
+    try {
+      const viewport = page.getViewport({ scale: 1 });
+      const annots = (await page.getAnnotations({ intent: 'display' })) as LinkAnnotation[];
+      for (const annot of annots) {
+        const target = linkTargetOf(annot);
+        const box = target ? linkBox(viewport, annot.rect) : null;
+        if (target && box && entries.length < MAX_LINKS_PER_PAGE) {
+          entries.push({ target, box });
+        }
+      }
+    } catch {
+      entries = []; // no links beats no page
+    }
+    if (pages[n - 1] !== page) {
+      return; // the document was replaced while the annotations loaded
+    }
+    pageLinks.set(n, entries);
+  }
+  layer.textContent = '';
+  for (const { target, box } of entries) {
+    const el = document.createElement('div');
+    el.className = 'mc-link';
+    el.setAttribute('role', 'link');
+    el.tabIndex = 0;
+    el.style.left = `${box.left}%`;
+    el.style.top = `${box.top}%`;
+    el.style.width = `${box.width}%`;
+    el.style.height = `${box.height}%`;
+    const label = linkLabel(target);
+    el.title = label;
+    el.setAttribute('aria-label', label);
+    linkTargets.set(el, target);
+    layer.appendChild(el);
+  }
+}
+
+function linkLabel(target: LinkTarget): string {
+  if (target.kind === 'url') {
+    return target.url;
+  }
+  return target.kind === 'named' ? 'Go to page' : 'Go to destination';
+}
+
+function linkAt(x: number, y: number): LinkTarget | null {
+  for (const el of document.querySelectorAll<HTMLElement>('.mc-link')) {
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      return linkTargets.get(el) ?? null;
+    }
+  }
+  return null;
+}
+
+function followLink(target: LinkTarget): void {
+  if (target.kind === 'url') {
+    // The host validates the address and opens it; the webview never navigates.
+    vscode.postMessage({ type: 'openLink', url: target.url });
+  } else if (target.kind === 'named') {
+    if (doc) {
+      goToPage(namedActionPage(target.action, currentPage, doc.numPages));
+    }
+  } else {
+    void goToDestination(target.dest);
+  }
+}
+
+async function goToDestination(dest: string | unknown[]): Promise<void> {
+  const current = doc;
+  if (!current) {
+    return;
+  }
+  const d: Destination | null = await resolveDestination(current, dest, current.numPages);
+  if (!d || doc !== current) {
+    return;
+  }
+  goToPage(d.pageIndex + 1);
+  if (d.top === null) {
+    return;
+  }
+  // Land on the destination's top edge, not only its page. The page was just
+  // scrolled to the top of the view, so its offset is the page-space point.
+  const [, y] = pages[d.pageIndex]
+    .getViewport({ scale: 1 })
+    .convertToViewportPoint(d.left ?? 0, d.top);
+  const s = scroller();
+  const before = s.scrollTop;
+  s.scrollTop += Math.max(0, Math.min(y, baseSize[d.pageIndex].h)) * scale;
+  pageJumpScrollPending = pageJumpScrollPending || s.scrollTop !== before;
+}
+
+let pressX = 0;
+let pressY = 0;
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    pressX = e.clientX;
+    pressY = e.clientY;
+  },
+  true,
+);
+document.addEventListener('click', (e) => {
+  if (
+    e.button !== 0 ||
+    Math.hypot(e.clientX - pressX, e.clientY - pressY) > CLICK_SLOP ||
+    !(window.getSelection()?.isCollapsed ?? true)
+  ) {
+    return;
+  }
+  const target = linkAt(e.clientX, e.clientY);
+  if (!target) {
+    return;
+  }
+  // A control stacked over the page (toolbar, menu, comment pin or note) wins.
+  const top = document.elementFromPoint?.(e.clientX, e.clientY) ?? e.target;
+  if (
+    top instanceof Element &&
+    top.closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, .mc-tex-card')
+  ) {
+    return;
+  }
+  e.preventDefault();
+  followLink(target);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !(e.target instanceof HTMLElement)) {
+    return;
+  }
+  const target = linkTargets.get(e.target);
+  if (target) {
+    e.preventDefault();
+    followLink(target);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Zoom
