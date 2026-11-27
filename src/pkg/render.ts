@@ -70,6 +70,7 @@ export function renderPackageHtml(info: PackageInfo, options: RenderOptions): st
     ['Format', info.format],
     ['Size', formatBytes(options.fileSize)],
   ];
+  file.push(...(info.fileRows ?? []));
   if (options.sha256) {
     file.push(['SHA-256', options.sha256]);
   } else if (options.hashNote) {

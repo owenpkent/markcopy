@@ -11,6 +11,7 @@ export {
   type PeSection,
   type PeImport,
   type PeExports,
+  type PeLoadConfig,
   type PeSignature,
 } from './read';
 export { type PeRich, type PeRichEntry } from './rich';

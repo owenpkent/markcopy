@@ -24,6 +24,8 @@ MarkCopy registers as the editor for `.docx` and `.docm` files, so opening one r
 
 Not drawn: SmartArt and embedded objects. A document too large for the preview stops at 50,000 paragraphs and says so. The preview is **read-only by design** and needs nothing installed: no Word, no Pandoc, no browser. A file that is not a real `.docx` (including the older `.doc`) shows a message in the panel rather than failing to open.
 
+A password-protected `.docx` or `.docm` is not a zip but an older OLE container, so it cannot be shown. The preview says it is password-protected and, when it can read it, names the method: for example "MarkCopy could not preview this document: it is password-protected (Agile encryption, AES-256, SHA512), and MarkCopy does not ask for passwords or decrypt files." It never asks for a password and says nothing about whether the file is safe. The same notice appears for `.pptx` and `.pptm` below and for `.xlsx` and `.xlsm` in [Excel preview](spreadsheets.md#excel-preview).
+
 Everything copies the way it does in the other previews (**Copy as Rich Text**, **Copy as Markdown**, per-table CSV, **Save as PDF**, **Save as Word**), and the right-click **Search Google** row works on a selection.
 
 ## PowerPoint preview

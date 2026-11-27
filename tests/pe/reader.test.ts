@@ -13,6 +13,7 @@ import {
   type PeSpec,
   type RichSpec,
 } from './fixture';
+import { concat, inlineBlock, MAGIC, pointerBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 const read = (spec: PeSpec = {}, patch: (bytes: Uint8Array) => Uint8Array = (b) => b) =>
   readPe(bytesSource(patch(buildPe(spec))));
@@ -1398,6 +1399,150 @@ describe('readPe: reading is ranged and budgeted', () => {
   });
 });
 
+describe('readPe: Go build information', () => {
+  const BASE_32 = 0x400000;
+  const BASE_64 = 0x140000000;
+
+  it('reads inline strings from the .data section', async () => {
+    const info = await read({ plus: true, data: inlineBlock({ info: SAMPLE_LINES }) });
+    expect(info.warnings).toEqual([]);
+    expect(info.go?.goVersion).toBe('go1.22.1');
+    expect(info.go?.path).toBe('example.com/app/cmd/app');
+    expect(info.go?.module).toEqual({ path: 'example.com/app', version: 'v1.4.0' });
+    expect(info.go?.depTotal).toBe(2);
+    expect(info.go?.deps[1].replacedBy).toEqual({
+      path: 'example.com/fork-sys',
+      version: 'v0.15.1',
+    });
+    expect(info.go?.settings).toContainEqual(['GOOS', 'linux']);
+  });
+
+  it('follows pointers, mapping a virtual address through the image base', async () => {
+    const wide = await read({
+      plus: true,
+      data: (rva) => pointerBlock({ info: SAMPLE_LINES })(BASE_64 + rva),
+    });
+    expect(wide.warnings).toEqual([]);
+    expect(wide.go?.goVersion).toBe('go1.16.5');
+    expect(wide.go?.depTotal).toBe(2);
+    const narrow = await read({
+      data: (rva) => pointerBlock({ pointerSize: 4, info: SAMPLE_LINES })(BASE_32 + rva),
+    });
+    expect(narrow.go?.goVersion).toBe('go1.16.5');
+    expect(narrow.go?.settings).toHaveLength(6);
+    // A relocated image: the image base in the header is not the one the pointers assume.
+    const moved = await read({
+      plus: true,
+      imageBase: 0x180000000n,
+      data: (rva) => pointerBlock({ info: SAMPLE_LINES })(BASE_64 + rva),
+    });
+    expect(moved.go).toBeUndefined();
+    expect(moved.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  it('finds the data section by its characteristics when it is not named .data', async () => {
+    const data = inlineBlock({ info: SAMPLE_LINES });
+    // Initialized data, read, write; the alignment bits do not matter.
+    for (const dataFlags of [0xc0000040, 0xc0600040]) {
+      const info = await read({ plus: true, data, dataName: '.mydata', dataFlags });
+      expect(info.warnings).toEqual([]);
+      expect(info.go?.goVersion).toBe('go1.22.1');
+    }
+    // Read-only data, or writable data that is not initialized, is not Go's data section.
+    for (const dataFlags of [0x40000040, 0xc0000080, 0xc0000060]) {
+      const info = await read({ plus: true, data, dataName: '.mydata', dataFlags });
+      expect(info.go).toBeUndefined();
+    }
+  });
+
+  it('reads the writable data section even when a read-only one is named .data', async () => {
+    // The fixture's read-only .rdata is renamed .data, and the record sits in a
+    // writable section named .rwdata: Go reads it from there, by its flags.
+    const renameRdata = (bytes: Uint8Array): Uint8Array => {
+      const out = bytes.slice();
+      const view = new DataView(out.buffer);
+      const pe = view.getUint32(0x3c, true);
+      const table = pe + 24 + view.getUint16(pe + 20, true);
+      for (let i = 0; i < view.getUint16(pe + 6, true); i++) {
+        const at = table + i * 40;
+        if (new TextDecoder().decode(out.subarray(at, at + 6)) === '.rdata') {
+          out.set(new TextEncoder().encode('.data\0\0\0'), at);
+          return out;
+        }
+      }
+      throw new Error('the fixture has no .rdata section');
+    };
+    const info = await read(
+      {
+        plus: true,
+        data: inlineBlock({ info: SAMPLE_LINES }),
+        dataName: '.rwdata',
+        dataFlags: 0xc0000040,
+      },
+      renameRdata,
+    );
+    expect(info.sections.map((s) => s.name)).toEqual(expect.arrayContaining(['.data', '.rwdata']));
+    expect(info.warnings).toEqual([]);
+    expect(info.go?.goVersion).toBe('go1.22.1');
+  });
+
+  it('aligns the search by virtual address, so an image base off a boundary shifts it', async () => {
+    const data = concat(new Uint8Array(8).fill(7), inlineBlock());
+    const shifted = await read({ plus: true, imageBase: 0x140000008n, data });
+    expect(shifted.go?.goVersion).toBe('go1.22.1');
+    expect((await read({ plus: true, data })).go).toBeUndefined();
+  });
+
+  it('refuses a string header that starts at the end of the section and ends in the overlay', async () => {
+    const data = (rva: number): Uint8Array => {
+      const out = new Uint8Array(512);
+      const view = new DataView(out.buffer);
+      out.set(MAGIC, 0);
+      out[14] = 8;
+      view.setBigUint64(16, BigInt(BASE_64 + rva + 504), true);
+      view.setBigUint64(504, BigInt(BASE_64 + rva + 100), true);
+      out.set(new TextEncoder().encode('go1.16.5'), 100);
+      return out;
+    };
+    // Bytes after the last section: the length the header would read.
+    const overlay = Uint8Array.from([8, 0, 0, 0, 0, 0, 0, 0]);
+    const info = await read({ plus: true, data, overlay });
+    expect(info.go).toBeUndefined();
+    expect(info.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  it('is absent from an image with no .data section or no header in it', async () => {
+    expect((await read({ plus: true })).go).toBeUndefined();
+    const plain = await read({ plus: true, data: new Uint8Array(512).fill(3) });
+    expect(plain.go).toBeUndefined();
+    expect(plain.warnings).toEqual([]);
+  });
+
+  it('warns about a damaged block and still reads the rest', async () => {
+    for (const block of [
+      inlineBlock({ pointerSize: 5 }),
+      inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 99999 }),
+    ]) {
+      const info = await read({ plus: true, version: { fileVersion: [1, 2, 3, 4] }, data: block });
+      expect(info.go).toBeUndefined();
+      expect(info.warnings).toEqual(['The Go build information could not be read.']);
+      expect(info.version?.fileVersion).toBe('1.2.3.4');
+    }
+  });
+
+  it('keeps only the version when the module text is too long, with a warning', async () => {
+    const info = await read({
+      plus: true,
+      data: inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 300 * 1024 }),
+    });
+    expect(info.go?.goVersion).toBe('go1.22.1');
+    expect(info.go?.deps).toEqual([]);
+    expect(info.warnings).toEqual([
+      'The Go module list is too long to read, so only the Go version is shown.',
+    ]);
+  });
+});
+
 describe('long section names', () => {
   // The table's first string sits at offset 4.
   const names = ['.debug_info_long', '.eh_frame_hdr'];
@@ -1602,5 +1747,109 @@ describe('Rich header', () => {
       expect(richToolset(0x010f, 0)).toBe('');
       expect(richTool(0)).toBe('Unmarked objects');
     });
+  });
+});
+
+describe('readPe: load configuration and CET', () => {
+  it('reads each PE32 field from its offset', async () => {
+    const info = await read({
+      loadConfig: {
+        cookie: 0x403000n,
+        seHandlerTable: 0x405000,
+        seHandlerCount: 7,
+        cfCount: 42n,
+        guardFlags: 0x100 | 0x400000,
+      },
+    });
+    expect(info.loadConfig).toEqual({
+      securityCookie: true,
+      safeSeh: { handlers: 7 },
+      guardFlags: 0x400100,
+      cfFunctionCount: 42,
+    });
+  });
+
+  it('reads each PE32+ field from its offset', async () => {
+    const info = await read({
+      plus: true,
+      loadConfig: { cookie: 0x140003000n, cfCount: 99n, guardFlags: 0x100 | 0x800 },
+    });
+    expect(info.loadConfig).toEqual({
+      securityCookie: true,
+      guardFlags: 0x900,
+      cfFunctionCount: 99,
+    });
+  });
+
+  it('tells a zero cookie from an absent one, and checks both halves of a 64-bit cookie', async () => {
+    expect((await read({ loadConfig: {} })).loadConfig?.securityCookie).toBe(false);
+    // Only the high half is set.
+    const high = await read({ plus: true, loadConfig: { cookie: 1n << 40n } });
+    expect(high.loadConfig?.securityCookie).toBe(true);
+    // Size 0x3C ends before the 32-bit cookie.
+    const short = await read({ loadConfig: { size: 0x3c, cookie: 5n } });
+    expect(short.loadConfig?.securityCookie).toBeUndefined();
+  });
+
+  it('trusts the structure size over the directory size, and leaves out fields past it', async () => {
+    // Guard flags sit at 0x58 in PE32 and 0x90 in PE32+. The size ends just before.
+    const narrow = await read({ loadConfig: { size: 0x58, cookie: 1n, guardFlags: 0x100 } });
+    expect(narrow.loadConfig?.guardFlags).toBeUndefined();
+    expect(narrow.loadConfig?.cfFunctionCount).toBe(0);
+    const wide = await read({
+      plus: true,
+      loadConfig: { size: 0x90, cookie: 1n, guardFlags: 0x100 },
+    });
+    expect(wide.loadConfig?.guardFlags).toBeUndefined();
+    expect(wide.loadConfig?.securityCookie).toBe(true);
+    // A size of zero leaves a structure with nothing in it, not an error.
+    const none = await read({ loadConfig: { size: 0 } });
+    expect(none.loadConfig).toEqual({});
+    expect(none.warnings).toEqual([]);
+  });
+
+  it('shows a very large 64-bit function count as a very large number', async () => {
+    const info = await read({ plus: true, loadConfig: { cfCount: (1n << 33n) + 5n } });
+    expect(info.loadConfig?.cfFunctionCount).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('has no load configuration when the image has none', async () => {
+    expect((await read()).loadConfig).toBeUndefined();
+  });
+
+  it('warns, and does not throw, when the directory points outside every section', async () => {
+    const info = await read({
+      loadConfig: {},
+      directories: { 10: { address: NOWHERE, size: 0x5c } },
+    });
+    expect(info.loadConfig).toBeUndefined();
+    expect(info.warnings).toContain('The load configuration could not be read.');
+  });
+
+  it('reads the CET flag from the debug directory entry of type 20', async () => {
+    expect((await read({ exDllCharacteristics: 0x1 })).cetCompat).toBe(true);
+    expect((await read({ exDllCharacteristics: 0x2 })).cetCompat).toBe(false);
+    expect((await read()).cetCompat).toBe(false);
+    // Beside the other entries.
+    const both = await read({
+      exDllCharacteristics: 0x1,
+      repro: true,
+      debug: { guid: '00112233-4455-6677-8899-AABBCCDDEEFF', age: 1, pdbPath: 'a.pdb' },
+    });
+    expect(both.cetCompat).toBe(true);
+    expect(both.reproducible).toBe(true);
+    expect(both.debug?.age).toBe(1);
+  });
+
+  it('skips a CET entry whose record lies outside the file', async () => {
+    const bytes = patched(buildPe({ exDllCharacteristics: 1 }), (image) => {
+      // The entry's PointerToRawData is the last field of the 28-byte record.
+      image.view.setUint32(image.directory(6) + 24, 0x7ffffff0, true);
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.cetCompat).toBe(false);
+    expect(info.warnings).toContain(
+      '1 entry of the debug directory could not be read and is left out.',
+    );
   });
 });

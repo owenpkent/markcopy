@@ -9,6 +9,7 @@ import {
   tlv,
   type PeSpec,
 } from './fixture';
+import { inlineBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 // A PKCS #7 SignedData with the given signerInfos and no certificates, built
 // here because the fixture's own always has exactly one signer and its
@@ -441,6 +442,60 @@ describe('renderPeHtml: the DEP row says what the flag is, not what Windows does
   });
 });
 
+describe('renderPeHtml: Go build information', () => {
+  it('draws the program, its build settings and its modules after the protections', async () => {
+    const html = await render({ plus: true, data: inlineBlock({ info: SAMPLE_LINES }) });
+    const at = (heading: string): number => html.indexOf(`<h2>${heading}</h2>`);
+    expect(at('Permissions and protections')).toBeGreaterThan(-1);
+    expect(at('Go')).toBeGreaterThan(at('Permissions and protections'));
+    expect(at('Go build settings')).toBeGreaterThan(at('Go'));
+    expect(at('Go modules')).toBeGreaterThan(at('Go build settings'));
+    expect(html).toContain('<td>Go version</td><td>go1.22.1</td>');
+    expect(html).toContain('<td>Package</td><td>example.com/app/cmd/app</td>');
+    expect(html).toContain('<td>Module version</td><td>v1.4.0</td>');
+    expect(html).toContain('<td>-trimpath</td><td>true</td>');
+    expect(html).toContain(
+      '<td>golang.org/x/sys</td><td>v0.15.0, replaced by example.com/fork-sys v0.15.1</td>',
+    );
+    expect(html).not.toContain('Showing the first');
+  });
+
+  it('draws nothing for a file that is not a Go program', async () => {
+    expect(await render({ plus: true })).not.toContain('<h2>Go');
+  });
+
+  it('lists 200 modules of the 700 it was given and says so', async () => {
+    const lines = Array.from({ length: 700 }, (_, i) => `dep\tx.org/m${i}\tv1.0.${i}`);
+    const html = await render({ data: inlineBlock({ info: lines }) });
+    expect(html.match(/<td>x\.org\/m\d+<\/td>/g)).toHaveLength(200);
+    expect(html).toContain('Showing the first 200 of 700 modules.');
+  });
+
+  it('escapes markup and removes direction overrides', async () => {
+    const html = await render({
+      data: inlineBlock({
+        info: [
+          `path\t<script>alert(1)</script>${RLO}x`,
+          'dep\t<img src=x onerror=1>\tv1',
+          `build\tk${RLO}=<b>`,
+        ],
+      }),
+    });
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;x');
+    expect(html).toContain('&lt;img src=x onerror=1&gt;');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<b>');
+    expect(html).not.toContain(RLO);
+  });
+
+  it('shows the note about a damaged block at the top', async () => {
+    const html = await render({ data: inlineBlock({ pointerSize: 7 }) });
+    expect(html).toContain('The Go build information could not be read.');
+    expect(html).not.toContain('<h2>Go</h2>');
+  });
+});
+
 describe('Build tools and loader flags', () => {
   const html = async (spec: PeSpec, patch = (b: Uint8Array) => b) =>
     renderPeHtml(await readPe(bytesSource(patch(buildPe(spec)))), { fileName: 'a.exe' });
@@ -490,5 +545,92 @@ describe('Build tools and loader flags', () => {
     expect(page).toContain(
       'No structured exception handlers (NO_SEH), Terminal Server aware (TERMINAL_SERVER_AWARE)',
     );
+  });
+});
+
+describe('renderPeHtml: Control Flow Guard and the other hardening rows', () => {
+  const row = (html: string, label: string): string | undefined =>
+    new RegExp(`<td>${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}</td><td>([^<]*)</td>`).exec(
+      html,
+    )?.[1];
+  const cfg = async (spec: PeSpec): Promise<string | undefined> =>
+    row(await render(spec), 'Control Flow Guard');
+  const CF = 0x4000;
+  const base = 0x140;
+
+  it('says Yes, with a count, when the header bit and the guard data agree', async () => {
+    const loadConfig = { guardFlags: 0x100, cfCount: 1234n };
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig })).toBe(
+      'Yes, 1,234 CFG target-table entries',
+    );
+    expect(await cfg({ plus: true, dllCharacteristics: base | CF, loadConfig })).toBe(
+      'Yes, 1,234 CFG target-table entries',
+    );
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig: { guardFlags: 0x100 } })).toBe(
+      'Yes',
+    );
+  });
+
+  it('says the flag is set but there is no guard data', async () => {
+    const none = 'Flag set, but the image has no guard data';
+    expect(await cfg({ dllCharacteristics: base | CF })).toBe(none);
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig: { guardFlags: 0 } })).toBe(none);
+    // The structure ends before GuardFlags, so nothing can be said of the table.
+    expect(
+      await cfg({ dllCharacteristics: base | CF, loadConfig: { size: 0x58, guardFlags: 0x100 } }),
+    ).toBe(none);
+  });
+
+  it('says compiled for it but not turned on, and No', async () => {
+    expect(await cfg({ dllCharacteristics: base, loadConfig: { guardFlags: 0x100 } })).toBe(
+      'Compiled for it, but not turned on',
+    );
+    expect(await cfg({ dllCharacteristics: base })).toBe('No');
+  });
+
+  it('shows stack cookies only when the structure holds the field', async () => {
+    const label = 'Stack cookies (/GS)';
+    expect(row(await render({}), label)).toBeUndefined();
+    expect(row(await render({ loadConfig: { cookie: 1n } }), label)).toBe('Yes');
+    expect(row(await render({ plus: true, loadConfig: { cookie: 1n } }), label)).toBe('Yes');
+    expect(row(await render({ loadConfig: {} }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { cookie: 1n, guardFlags: 0x800 } }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { size: 0x3c, cookie: 1n } }), label)).toBeUndefined();
+  });
+
+  it('words SafeSEH for 32-bit x86 only', async () => {
+    const label = 'Safe exception handlers (SafeSEH)';
+    expect(row(await render({ dllCharacteristics: base | 0x400 }), label)).toBe(
+      'Not needed (no exception handlers)',
+    );
+    expect(
+      row(await render({ loadConfig: { seHandlerTable: 0x405000, seHandlerCount: 3 } }), label),
+    ).toBe('Yes, 3 handlers');
+    expect(row(await render({ loadConfig: {} }), label)).toBe('No');
+    expect(row(await render({}), label)).toBe('No');
+    expect(row(await render({ plus: true }), label)).toBeUndefined();
+    expect(row(await render({ machine: 0x01c4 }), label)).toBeUndefined();
+  });
+
+  it('shows EH continuation metadata only when GuardFlags was read', async () => {
+    const label = 'EH continuation metadata';
+    expect(row(await render({}), label)).toBeUndefined();
+    expect(row(await render({ loadConfig: { guardFlags: 0x400000 } }), label)).toBe('Yes');
+    expect(row(await render({ loadConfig: { guardFlags: 0x100 } }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { size: 0x58 } }), label)).toBeUndefined();
+  });
+
+  it('shows CET compatibility for x64 only', async () => {
+    const label = 'CET shadow stack compatible';
+    expect(row(await render({ plus: true, exDllCharacteristics: 1 }), label)).toBe('Yes');
+    expect(row(await render({ plus: true }), label)).toBe('No');
+    expect(row(await render({ exDllCharacteristics: 1 }), label)).toBeUndefined();
+    expect(row(await render({ plus: true, machine: 0xaa64 }), label)).toBeUndefined();
+  });
+
+  it('puts the new rows before the other loader flags', async () => {
+    const html = await render({ plus: true, dllCharacteristics: base | 0x8000, loadConfig: {} });
+    expect(html.indexOf('Stack cookies')).toBeGreaterThan(html.indexOf('AppContainer only'));
+    expect(html.indexOf('Stack cookies')).toBeLessThan(html.indexOf('Other loader flags'));
   });
 });
