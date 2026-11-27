@@ -26,6 +26,7 @@ interface Report {
     perTarget: Map<string, Map<string, unknown[]>>,
     repoRoot?: string,
   ): Row;
+  builtSources(repoRoot?: string): Set<string>;
 }
 
 const report = createRequire(__filename)('../fuzz/coverage-report.js') as Report;
@@ -91,5 +92,49 @@ describe('fuzz coverage of a parser with no build output', () => {
     );
     expect(row.missing).toBe(true);
     expect(row.below).toBe(true);
+  });
+
+  it('is flagged when only an earlier build left its output behind', () => {
+    // Two reports in a row over the same out/fuzz/, as on a developer's machine:
+    // the parser is built the first time, then loses its last fuzz import. esbuild
+    // leaves the old .js and .js.map in place; only built.json says what this
+    // build emitted.
+    const repo = freshDir();
+    const file = 'src/pkg/kept.ts';
+    const out = path.join(repo, 'out/fuzz/src/pkg');
+    mkdirSync(out, { recursive: true });
+    mkdirSync(path.join(repo, 'src/pkg'), { recursive: true });
+    writeFileSync(path.join(repo, file), 'export const x = 1;\n');
+    writeFileSync(path.join(out, 'kept.js'), 'exports.x = 1;\n');
+    // One segment: built line 1, column 0, is source 0, line 1, column 0.
+    writeFileSync(
+      path.join(out, 'kept.js.map'),
+      JSON.stringify({ version: 3, sources: ['../../../../src/pkg/kept.ts'], mappings: 'AAAA' }),
+    );
+    const entry = { targets: ['pkg-kept'], minLineCoverage: 0 };
+    const built = path.join(repo, 'out/fuzz/built.json');
+
+    writeFileSync(built, JSON.stringify([file]));
+    const first = report.scoreParser(file, entry, new Map(), repo);
+    expect(first).toMatchObject({ covered: 0, total: 1, missing: false, below: false });
+
+    writeFileSync(built, JSON.stringify(['src/pkg/other.ts']));
+    const second = report.scoreParser(file, entry, new Map(), repo);
+    expect(second).toMatchObject({ covered: 0, total: 0, missing: true, below: true });
+  });
+
+  it('is flagged when the build left no record of what it emitted', () => {
+    const repo = freshDir();
+    const out = path.join(repo, 'out/fuzz/src/pkg');
+    mkdirSync(out, { recursive: true });
+    writeFileSync(path.join(out, 'kept.js.map'), '{}');
+    const row = report.scoreParser(
+      'src/pkg/kept.ts',
+      { targets: ['pkg-kept'], minLineCoverage: 0 },
+      new Map(),
+      repo,
+    );
+    expect(row.missing).toBe(true);
+    expect(report.builtSources(repo).size).toBe(0);
   });
 });

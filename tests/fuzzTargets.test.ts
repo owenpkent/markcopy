@@ -6,7 +6,7 @@
 // nights after src/webview/threeMf.ts gained an import the old build list
 // lacked (docs/FUZZING-STRATEGY.md).
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -28,6 +28,18 @@ describe('fuzz targets', () => {
     const targets = readdirSync(join(root, 'fuzz/targets')).filter((f) => f.endsWith('.fuzz.ts'));
     for (const file of targets) {
       expect(run.stdout).toContain(`${file.replace(/\.fuzz\.ts$/, '')}: `);
+    }
+    // The build records what it emitted, which is what the coverage report
+    // scores (an older build's output stays in out/fuzz/ and must not count).
+    const built = JSON.parse(readFileSync(join(root, 'out/fuzz/built.json'), 'utf8')) as string[];
+    for (const file of targets) {
+      expect(built).toContain(`fuzz/targets/${file}`);
+    }
+    const manifest = JSON.parse(readFileSync(join(root, 'fuzz/coverage.json'), 'utf8')) as {
+      parsers: Record<string, unknown>;
+    };
+    for (const parser of Object.keys(manifest.parsers)) {
+      expect(built).toContain(parser);
     }
   }, 150_000);
 });

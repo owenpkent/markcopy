@@ -373,7 +373,9 @@ opens or updates the `Fuzz coverage below threshold` issue, label `fuzz-coverage
 closes it when every parser is back above its minimum. Only a run on the default branch
 touches the issue; a manual run on another branch still writes the summary and the
 artifact. A listed parser with no build output (no fuzz target imports it) counts as 0%
-and below its minimum.
+and below its minimum. Output means output of the current build: esbuild leaves an
+earlier build's files in `out/fuzz/`, so `fuzz/build.js` writes the sources it built to
+`out/fuzz/built.json` each time and only those are scored.
 
 What the number means, so it is not read as more than it is:
 

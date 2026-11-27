@@ -10,8 +10,13 @@
 // and the 3mf target failed to load every night until it was noticed.
 // src/webview/ holds browser code that needs a DOM, so building only what a
 // target reaches also keeps that code out.
+//
+// esbuild leaves the output of earlier builds in out/fuzz/, so a file there
+// may belong to a source no target reaches any more. Each build therefore
+// writes out/fuzz/built.json, the sources it built this time, and the coverage
+// report scores only those.
 const esbuild = require('esbuild');
-const { globSync } = require('node:fs');
+const { globSync, writeFileSync } = require('node:fs');
 
 const targets = globSync('fuzz/targets/*.ts').filter((f) => !f.endsWith('.d.ts'));
 
@@ -45,6 +50,8 @@ async function build() {
     sourcesContent: false,
     logLevel: 'warning',
   });
+  const built = entryPoints.map((f) => f.replace(/\\/g, '/')).sort();
+  writeFileSync('out/fuzz/built.json', `${JSON.stringify(built, null, 2)}\n`);
 }
 
 module.exports = { build, reachedSources };
