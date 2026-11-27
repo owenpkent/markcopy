@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
+import { refuseProtectedFile } from './ooxml/encrypted';
 import { renderDocxHtml, DocxError } from './docx/read';
 import {
   OoxmlEditorProvider,
@@ -38,6 +39,8 @@ export class DocxEditorProvider extends OoxmlEditorProvider {
 
   private async renderDocument(uri: vscode.Uri): Promise<RenderResult> {
     const bytes = await readDocument(uri);
+    // A password-protected file is not a zip; say so rather than call it damaged.
+    await refuseProtectedFile(bytes);
     const math = vscode.workspace.getConfiguration('markcopy', uri).get<boolean>('math', true);
     const doc = renderDocxHtml(bytes, { math });
     return { html: doc.html, media: doc.media };
