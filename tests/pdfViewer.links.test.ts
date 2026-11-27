@@ -331,7 +331,11 @@ describe('auto-scroll', () => {
   }
   function startUpward(): void {
     document.getElementById('mc-autoscroll-toggle')!.click();
-    document.querySelector<HTMLElement>('[data-as="dir"]')!.click(); // down to up
+    // Fresh minus presses from 12 px/s down: 9, 7, 5, 4, then across zero to up.
+    const minus = document.querySelector<HTMLElement>('[data-as="minus"]')!;
+    for (let i = 0; i < 5; i++) {
+      minus.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    }
   }
 
   it('stays on while a recompile rebuilds the pages, and carries on from the restored page', async () => {
@@ -379,18 +383,18 @@ describe('auto-scroll', () => {
     await loadDoc();
     scrollTop = 300;
     document.getElementById('mc-autoscroll-toggle')!.click(); // 12 px/s down
-    const down = () =>
-      document.querySelector<HTMLElement>('[data-as="dir"]')!.getAttribute('aria-label');
+    const play = () =>
+      document.querySelector<HTMLElement>('[data-as="play"]')!.getAttribute('aria-label');
     const key = (repeat: boolean) =>
       document.body.dispatchEvent(
         new KeyboardEvent('keydown', { key: '-', repeat, bubbles: true }),
       );
     key(false); // 12 down to 9 down
     for (let i = 0; i < 7; i++) key(true);
-    // Held: stopped at the slowest speed, still going down ("Scroll up" is the reverse button).
-    expect(down()).toBe('Scroll up');
+    // Held: stopped at the slowest speed, still going down.
+    expect(play()).toBe('Pause (scrolling down)');
     key(false); // a fresh press reverses
-    expect(down()).toBe('Scroll down');
+    expect(play()).toBe('Pause (scrolling up)');
   });
 });
 
@@ -837,7 +841,7 @@ describe('Enter held on a speed button', () => {
     document.getElementById('mc-autoscroll-toggle')!.click(); // 12 px/s down
     const minus = document.querySelector<HTMLElement>('[data-as="minus"]')!;
     const label = () =>
-      document.querySelector<HTMLElement>('[data-as="dir"]')!.getAttribute('aria-label');
+      document.querySelector<HTMLElement>('[data-as="play"]')!.getAttribute('aria-label');
     // A keyboard click has detail 0 and arrives with every Enter keydown.
     const enter = (repeat: boolean) => {
       minus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat, bubbles: true }));
@@ -845,9 +849,9 @@ describe('Enter held on a speed button', () => {
     };
     enter(false);
     for (let i = 0; i < 8; i++) enter(true);
-    expect(label()).toBe('Scroll up'); // still going down, at the slowest
+    expect(label()).toBe('Pause (scrolling down)'); // still going down, at the slowest
     minus.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
     enter(false);
-    expect(label()).toBe('Scroll down'); // reversed by a fresh press
+    expect(label()).toBe('Pause (scrolling up)'); // reversed by a fresh press
   });
 });

@@ -13,7 +13,6 @@ import {
   clampSpeed,
   describeSpeed,
   parseSettings,
-  reverseSpeed,
   speedLabels,
   startingSpeed,
   stepSpeed,
@@ -76,10 +75,6 @@ describe('labels and descriptions', () => {
   it('says which way it goes', () => {
     expect(describeSpeed(12)).toBe('12 pixels per second, down');
     expect(describeSpeed(-12)).toBe('12 pixels per second, up');
-  });
-  it('reverses keeping the pace', () => {
-    expect(reverseSpeed(20)).toBe(-20);
-    expect(reverseSpeed(-20)).toBe(20);
   });
 });
 

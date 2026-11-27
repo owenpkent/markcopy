@@ -525,7 +525,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 
 - [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
 - [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
-- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up. The direction button reverses at once.
+- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up, and the Play/Pause name says which way it is scrolling.
 - [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
 - [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar. At Extra large, split the editor so the pane is about 760 px, then 300 px and 240 px wide: all three small buttons stay fully on screen (they shrink toward 44 px as the pane narrows).
 - [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.

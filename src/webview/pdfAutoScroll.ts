@@ -57,11 +57,6 @@ export function stepSpeed(speed: number, factor: number): number {
   return clampSpeed(speed / ratio);
 }
 
-/** Flip the direction, keeping the pace. */
-export function reverseSpeed(speed: number): number {
-  return clampSpeed(-speed);
-}
-
 /**
  * Whether a held press may take another step: not at a limit, and never across
  * zero (reversing always takes a fresh press).

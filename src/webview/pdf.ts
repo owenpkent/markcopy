@@ -19,7 +19,6 @@ import {
   canHoldStep,
   describeSpeed,
   parseSettings,
-  reverseSpeed,
   speedLabels,
   startingSpeed,
   stepSpeed,
@@ -1914,7 +1913,7 @@ function beginPageJump(): void {
 // ---------------------------------------------------------------------------
 // Auto-scroll
 // ---------------------------------------------------------------------------
-// Ported from folio. A corner puck (play/pause, small - and +, direction) glides
+// Ported from folio. A corner puck (play/pause, small - and +) glides
 // the page at a signed speed in CSS pixels per second. The loop is
 // requestAnimationFrame with time-based motion, so the pace does not depend on
 // the frame rate, and it owns a float position between frames. Anything that
@@ -1946,8 +1945,6 @@ const AS_ICONS = {
     '<rect x="13.7" y="5" width="3.8" height="14" rx="1" fill="currentColor" stroke="none" />',
   minus: '<path d="M5 12h14" />',
   plus: '<path d="M5 12h14" /><path d="M12 5v14" />',
-  up: '<path d="M12 19V5" /><path d="M6 11l6-6 6 6" />',
-  down: '<path d="M12 5v14" /><path d="M6 13l6 6 6-6" />',
   toggle:
     '<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 8v8" /><path d="M9 13l3 3 3-3" />',
 } as const;
@@ -1988,7 +1985,6 @@ function buildPuck(): HTMLDivElement {
     '<button type="button" class="mc-as-btn mc-as-play" data-as="play"></button>' +
     '<div class="mc-as-row">' +
     '<button type="button" class="mc-as-btn mc-as-small" data-as="minus"></button>' +
-    '<button type="button" class="mc-as-btn mc-as-small" data-as="dir"></button>' +
     '<button type="button" class="mc-as-btn mc-as-small" data-as="plus"></button>' +
     '</div>' +
     '<span class="mc-as-status" role="status" aria-live="polite"></span>';
@@ -1997,7 +1993,6 @@ function buildPuck(): HTMLDivElement {
     // A mouse or touch press already stepped on pointerdown; the click that
     // follows has a detail count. A keyboard click (detail 0) steps here.
     if (which === 'play') toggleAutoPause();
-    else if (which === 'dir') reverseAuto();
     else if ((which === 'minus' || which === 'plus') && e.detail === 0) {
       const factor = which === 'plus' ? SPEED_STEP : 1 / SPEED_STEP;
       // A held Enter sends a keyboard click per repeat: like a held key or
@@ -2107,7 +2102,9 @@ function applyAutoUi(): void {
     btn.innerHTML = autoScrollIcon(icon, as === 'play' ? 40 : 28);
     return btn;
   };
-  const playLabel = autoPaused ? 'Play' : 'Pause';
+  // The direction has no button of its own: the play name carries it, and each
+  // speed announcement says it too.
+  const playLabel = `${autoPaused ? 'Play' : 'Pause'} (scrolling ${speed < 0 ? 'up' : 'down'})`;
   set(
     'play',
     playLabel,
@@ -2116,8 +2113,6 @@ function applyAutoUi(): void {
   );
   const minus = set('minus', labels.minus, `${labels.minus} (Down arrow or -)`, 'minus');
   const plus = set('plus', labels.plus, `${labels.plus} (Up arrow or +)`, 'plus');
-  const dirLabel = speed < 0 ? 'Scroll down' : 'Scroll up';
-  set('dir', dirLabel, `${dirLabel} (reverse direction)`, speed < 0 ? 'down' : 'up');
   // Each disables only at full speed in its own direction.
   if (minus) minus.disabled = stepSpeed(speed, 1 / SPEED_STEP) === speed;
   if (plus) plus.disabled = stepSpeed(speed, SPEED_STEP) === speed;
@@ -2132,10 +2127,6 @@ function setAutoSpeed(speed: number): void {
 
 function adjustAutoSpeed(factor: number): void {
   setAutoSpeed(stepSpeed(autoSettings.speed, factor));
-}
-
-function reverseAuto(): void {
-  setAutoSpeed(reverseSpeed(autoSettings.speed));
 }
 
 function toggleAutoPause(): void {

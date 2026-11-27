@@ -1021,7 +1021,7 @@ body.mc-mode-hand .mc-link {
   --mc-as-room: calc(100vw - 56px - 12px * var(--mc-as-scale));
   --mc-as-small: min(
     calc(44px * var(--mc-as-scale)),
-    max(44px, calc((var(--mc-as-room) - 12px) / 3))
+    max(44px, calc((var(--mc-as-room) - 6px) / 2))
   );
   --mc-as-play: min(calc(64px * var(--mc-as-scale)), max(44px, var(--mc-as-room)));
   box-sizing: border-box;
