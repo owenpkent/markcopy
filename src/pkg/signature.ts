@@ -5,13 +5,20 @@
 // src/pe/signer.ts reads the names and dates out of either; this turns them
 // into the same section on every page, with the same caveat, so no format's
 // page can present a claim as a verdict.
-import type { Signer } from '../pe/signer';
+import { detailRows, type Signer } from '../pe/signer';
 import { rows, type PropertySection } from './model';
 
 // isSignedData and signerCount are how a reader decides a PKCS #7 blob is a
 // signature at all: SignedData, with at least one signer that carries a
 // signature value. A blob that fails them is certificate data, not a signature.
-export { isSignedData, readCertificate, readSigner, signerCount, type Signer } from '../pe/signer';
+export {
+  detailRows,
+  isSignedData,
+  readCertificate,
+  readSigner,
+  signerCount,
+  type Signer,
+} from '../pe/signer';
 
 const CAVEAT =
   'These names are what the file claims. MarkCopy does not check the signature, the ' +
@@ -40,6 +47,7 @@ export function signatureSection(scheme: string, signer?: Signer): PropertySecti
           ? `${signer.notBefore} to ${signer.notAfter}`
           : undefined,
       ],
+      ...detailRows(signer),
     ),
     note: CAVEAT,
   };

@@ -18,6 +18,7 @@ import {
   type PackageInfo,
 } from './model';
 import { signatureSection } from './signature';
+import { checkStoredDigest, SHA256 } from './storedDigest';
 import { readTar, tarData, TAR_MAX_ENTRIES, type TarResult } from './tar';
 import { own } from '../binary/own';
 
@@ -126,6 +127,10 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
   const sink = new ByteSink();
   // What the control archive holds, kept from the last look at the tar so far.
   const tar: TarResult = { entries: [], next: 0, stop: 'more' };
+  // Where each gzip stream starts in the file, and which one held `.PKGINFO`; the data
+  // archive is the stream after it.
+  const memberStarts: number[] = [];
+  let controlMember = -1;
   const look = (): boolean => {
     const buffer = sink.bytes();
     // Walk on from where the last look stopped. Starting over on every chunk makes
@@ -143,14 +148,22 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
     if (info < 0 || !tar.entries[info].complete) {
       return tar.stop !== 'more';
     }
+    if (controlMember < 0) {
+      controlMember = memberStarts.length - 1;
+    }
     // Control scripts follow `.PKGINFO`; the first plain path is the data archive.
     return tar.stop !== 'more' || tar.entries.slice(info).some((e) => !e.name.startsWith('.'));
   };
   try {
-    gunzipUntil(data, UNPACKED_MAX, (chunk) => {
-      sink.append(chunk);
-      return look();
-    });
+    gunzipUntil(
+      data,
+      UNPACKED_MAX,
+      (chunk) => {
+        sink.append(chunk);
+        return look();
+      },
+      (start) => memberStarts.push(start),
+    );
   } catch (error) {
     if (
       !(error instanceof PackageError) ||
@@ -167,6 +180,17 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
   if (!entry || !raw) {
     throw new PackageError(NOT_ALPINE);
   }
+
+  // `datahash` is the SHA-256 of the data archive's gzip stream: from where it starts to the end of the file.
+  const checkData = async (stored: string | undefined): Promise<string | undefined> => {
+    if (stored === undefined) {
+      return undefined;
+    }
+    const start = controlMember >= 0 ? memberStarts[controlMember + 1] : undefined;
+    return start === undefined
+      ? 'Not checked: MarkCopy did not find where the data archive starts.'
+      : checkStoredDigest(reader, SHA256, stored, start, reader.size);
+  };
 
   const warnings: string[] = [];
   if (entry.size > PKGINFO_MAX) {
@@ -201,6 +225,7 @@ export async function readAlpineApk(reader: RangeReader): Promise<PackageInfo> {
       ],
       ['Built', utc(one('builddate'))],
       ['Data SHA-256', one('datahash')],
+      ['Data SHA-256 check', await checkData(one('datahash'))],
     ]),
   ];
 

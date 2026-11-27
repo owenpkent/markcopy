@@ -13,8 +13,8 @@
 
 const SECTION_ALIGN = 0x1000;
 const FILE_ALIGN = 0x200;
-const HEADERS = 0x200;
-const PE_OFFSET = 0x80;
+const MIN_HEADERS = 0x200;
+const MIN_PE_OFFSET = 0x80;
 
 const alignTo = (n: number, to: number): number => Math.ceil(n / to) * to;
 
@@ -146,12 +146,59 @@ const SHA256_WITH_RSA = tlv(
   tlv(0x05),
 );
 
+/** The content bytes of an OBJECT IDENTIFIER written as dotted arcs. */
+export const oidBytes = (dotted: string): number[] => {
+  const arcs = dotted.split('.').map(Number);
+  const out = [arcs[0] * 40 + arcs[1]];
+  for (const arc of arcs.slice(2)) {
+    const group = [arc & 0x7f];
+    for (let n = arc >>> 7; n > 0; n >>>= 7) {
+      group.unshift((n & 0x7f) | 0x80);
+    }
+    out.push(...group);
+  }
+  return out;
+};
+
+/** A SubjectPublicKeyInfo: `algorithm` is the OID bytes, `parameters` an optional element, `key` the BIT STRING contents after the unused-bits byte. */
+export function spki(
+  algorithm: number[],
+  key: Uint8Array,
+  parameters: Uint8Array = tlv(0x05),
+): Uint8Array {
+  return tlv(
+    SEQUENCE,
+    tlv(SEQUENCE, oid(...algorithm), parameters),
+    tlv(0x03, Uint8Array.of(0), key),
+  );
+}
+
+/** An RSA SubjectPublicKeyInfo whose modulus is `bits` long (top bit set), written with the leading zero DER needs. */
+export function rsaSpki(
+  bits: number,
+  algorithm: number[] = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
+  parameters?: Uint8Array,
+): Uint8Array {
+  const modulus = new Uint8Array(Math.ceil(bits / 8));
+  modulus.fill(0xab);
+  modulus[0] = 1 << (((bits - 1) % 8) + 0);
+  const padded = Uint8Array.from([0, ...modulus]);
+  const key = tlv(SEQUENCE, tlv(INTEGER, padded), tlv(INTEGER, Uint8Array.of(1, 0, 1)));
+  return spki(algorithm, key, parameters);
+}
+
+/** An EC SubjectPublicKeyInfo naming a curve by its OID bytes. */
+export function ecSpki(curve: number[]): Uint8Array {
+  return spki([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], Uint8Array.of(4, 1, 2, 3), oid(...curve));
+}
+
 function certificate(
   serial: number,
   issuer: Uint8Array,
   subject: Uint8Array,
   notBefore: string,
   notAfter: string,
+  key?: Uint8Array,
 ): Uint8Array {
   const tbs = tlv(
     SEQUENCE,
@@ -161,12 +208,13 @@ function certificate(
     issuer,
     tlv(SEQUENCE, tlv(UTC_TIME, ascii(notBefore)), tlv(UTC_TIME, ascii(notAfter))),
     subject,
-    // SubjectPublicKeyInfo with a placeholder key: nothing reads it.
-    tlv(
-      SEQUENCE,
-      tlv(SEQUENCE, oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01), tlv(0x05)),
-      tlv(0x03, Uint8Array.from([0, 1, 2, 3, 4])),
-    ),
+    // SubjectPublicKeyInfo: a placeholder key unless the test gives one.
+    key ??
+      tlv(
+        SEQUENCE,
+        tlv(SEQUENCE, oid(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01), tlv(0x05)),
+        tlv(0x03, Uint8Array.from([0, 1, 2, 3, 4])),
+      ),
   );
   return tlv(SEQUENCE, tbs, SHA256_WITH_RSA, tlv(0x03, Uint8Array.from([0, 9, 9, 9])));
 }
@@ -180,6 +228,23 @@ export interface SignerSpec {
   notAfter?: string;
   /** DER tag for the name strings; PrintableString (0x13) is what older CAs wrote. */
   stringTag?: number;
+  /** The SignerInfo's digestAlgorithm OID bytes (SHA-256 when absent). */
+  digestOid?: number[];
+  /** The signer certificate's SubjectPublicKeyInfo. */
+  key?: Uint8Array;
+}
+
+/** The signer certificate buildSignedData embeds for this spec, as a bare X.509 DER. */
+export function buildLeafCertificate(spec: SignerSpec): Uint8Array {
+  const tag = spec.stringTag ?? UTF8_STRING;
+  return certificate(
+    0x2a,
+    name(spec.issuer, tag),
+    name(spec.subject, tag),
+    spec.notBefore ?? '230615000000Z',
+    spec.notAfter ?? '260615235959Z',
+    spec.key,
+  );
 }
 
 /**
@@ -205,10 +270,11 @@ export function buildSignedData(spec: SignerSpec): Uint8Array {
     subject,
     spec.notBefore ?? '230615000000Z',
     spec.notAfter ?? '260615235959Z',
+    spec.key,
   );
   const sha256 = tlv(
     SEQUENCE,
-    oid(0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01),
+    oid(...(spec.digestOid ?? [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01])),
     tlv(0x05),
   );
   const signerInfo = tlv(
@@ -595,6 +661,22 @@ export interface PeSpec {
   };
   /** A CodeView "RSDS" debug record. `guid` is the usual 8-4-4-4-12 text form. */
   debug?: { guid: string; age: number; pdbPath: string };
+  /**
+   * A load configuration directory (data directory 10), laid out as PE32 or
+   * PE32+ by `plus`. Each field is written at its real offset. `size` is what
+   * the structure's own Size field says, to cut it short on purpose; the
+   * bytes are always written in full.
+   */
+  loadConfig?: {
+    size?: number;
+    cookie?: bigint;
+    seHandlerTable?: number;
+    seHandlerCount?: number;
+    cfCount?: bigint;
+    guardFlags?: number;
+  };
+  /** Adds an IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS (20) entry holding these bits. */
+  exDllCharacteristics?: number;
   /** Adds an IMAGE_DEBUG_TYPE_REPRO (16) entry, which marks a deterministic build. */
   repro?: boolean;
   /** A CLR header and metadata root. `flags` are the COMIMAGE_FLAGS_* bits. */
@@ -605,10 +687,33 @@ export interface PeSpec {
   certificateType?: number;
   /** What the entry says its length is, when it should lie. */
   certificateLength?: number;
+  /**
+   * Bytes of a `.data` section after the others, or a function of the section's
+   * RVA for contents that hold addresses within it.
+   */
+  data?: Uint8Array | ((rva: number) => Uint8Array);
+  /** The name of that section: `.data` unless given. */
+  dataName?: string;
+  /** Its characteristics: 0xc0000040 (initialized data, read, write) unless given. */
+  dataFlags?: number;
   /** Bytes after the last section: given directly, or as a length of 0x5A fill. */
   overlay?: Uint8Array | number;
   /** Overrides the NumberOfSections field without adding sections. */
   declaredSections?: number;
+  /**
+   * Bytes placed at offset 0x40, between the DOS header and the PE header, such
+   * as a Rich header. The PE header moves to the next 8-byte boundary after them.
+   */
+  dosStub?: Uint8Array;
+  /** Replaces the names of the first sections, in order. A name over 8 bytes is cut to 8. */
+  sectionNames?: string[];
+  /**
+   * A COFF symbol table of `count` empty 18-byte records, followed by a string
+   * table holding `strings` one after another (the first at offset 4), placed
+   * after everything else in the file. `pointer` and `tableSize` override what
+   * the header and the table say, to point them wrong on purpose.
+   */
+  symbols?: { count?: number; strings: string[]; pointer?: number; tableSize?: number };
   /** Rewrites data directory entries after the image is built, to point where the test wants. */
   directories?: Record<number, { address: number; size: number }>;
 }
@@ -620,13 +725,21 @@ interface Piece {
 
 export function buildPe(spec: PeSpec = {}): Uint8Array {
   const plus = spec.plus ?? false;
+  const PE_OFFSET = Math.max(MIN_PE_OFFSET, alignTo(0x40 + (spec.dosStub?.length ?? 0), 8));
+  // Room for the PE header, the optional header and up to four section headers.
+  const HEADERS = Math.max(
+    MIN_HEADERS,
+    alignTo(PE_OFFSET + 24 + (plus ? 112 : 96) + 16 * 8 + 4 * 40, FILE_ALIGN),
+  );
+  // Specs with a data section keep the doubled header area their tests were written against.
+  const headerSize = spec.data === undefined ? HEADERS : HEADERS * 2;
   const dirs: Piece[] = Array.from({ length: 16 }, () => ({ rva: 0, size: 0 }));
 
   // .text
   const text = new Uint8Array(FILE_ALIGN).fill(0xcc);
   text[0] = 0xc3;
   const TEXT_RVA = SECTION_ALIGN;
-  const TEXT_RAW = HEADERS;
+  const TEXT_RAW = headerSize;
 
   // .rdata, built so that every structure can name the RVAs of what it points at.
   const RDATA_RVA = SECTION_ALIGN * 2;
@@ -735,7 +848,27 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       .u32(ordinalTable);
   }
 
-  if (spec.debug || spec.repro) {
+  if (spec.loadConfig) {
+    const lc = spec.loadConfig;
+    const body = new DataView(new ArrayBuffer(plus ? 0x94 : 0x5c));
+    body.setUint32(0, lc.size ?? body.byteLength, true);
+    if (plus) {
+      body.setBigUint64(0x58, lc.cookie ?? 0n, true);
+      body.setBigUint64(0x88, lc.cfCount ?? 0n, true);
+      body.setUint32(0x90, lc.guardFlags ?? 0, true);
+    } else {
+      body.setUint32(0x3c, Number(lc.cookie ?? 0n), true);
+      body.setUint32(0x40, lc.seHandlerTable ?? 0, true);
+      body.setUint32(0x44, lc.seHandlerCount ?? 0, true);
+      body.setUint32(0x54, Number(lc.cfCount ?? 0n), true);
+      body.setUint32(0x58, lc.guardFlags ?? 0, true);
+    }
+    rdata.pad(8);
+    dirs[10] = { rva: here(), size: body.byteLength };
+    rdata.raw(new Uint8Array(body.buffer));
+  }
+
+  if (spec.debug || spec.repro || spec.exDllCharacteristics !== undefined) {
     const entries: { type: number; size: number; rva: number; file: number }[] = [];
     if (spec.debug) {
       rdata.pad(4);
@@ -760,6 +893,13 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       const file = hereFile();
       rdata.u32(32).raw(new Uint8Array(32).fill(0x11)); // length-prefixed hash
       entries.push({ type: 16, size: 36, rva, file });
+    }
+    if (spec.exDllCharacteristics !== undefined) {
+      rdata.pad(4);
+      const rva = here();
+      const file = hereFile();
+      rdata.u32(spec.exDllCharacteristics);
+      entries.push({ type: 20, size: 4, rva, file });
     }
     rdata.pad(4);
     dirs[6] = { rva: here(), size: entries.length * 28 };
@@ -838,6 +978,17 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     dirs[2] = { rva: RSRC_RVA, size: rsrcBytes.length };
   }
 
+  // .data, last, so nothing else moves.
+  const DATA_RVA = RSRC_RVA + alignTo(rsrcBytes.length, SECTION_ALIGN);
+  const DATA_RAW = RSRC_RAW + rsrcBytes.length;
+  const dataBytes =
+    spec.data === undefined
+      ? new Uint8Array(0)
+      : new Bytes()
+          .raw(typeof spec.data === 'function' ? spec.data(DATA_RVA) : spec.data)
+          .pad(FILE_ALIGN)
+          .bytes();
+
   // Overlay and certificate table come after the last section.
   const overlay =
     spec.overlay === undefined
@@ -845,7 +996,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       : typeof spec.overlay === 'number'
         ? new Uint8Array(spec.overlay).fill(0x5a)
         : spec.overlay;
-  const sectionsEnd = RSRC_RAW + rsrcBytes.length;
+  const sectionsEnd = DATA_RAW + dataBytes.length;
   const certAt = alignTo(sectionsEnd + overlay.length, 8);
   let certBytes = new Uint8Array(0);
   if (spec.certificate) {
@@ -863,6 +1014,20 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     dirs[Number(index)] = { rva: dir.address, size: dir.size };
   }
 
+  let symbolBytes = new Uint8Array(0);
+  let symbolAt = 0;
+  if (spec.symbols) {
+    symbolAt = alignTo(certAt + certBytes.length, 4);
+    const strings = new Bytes();
+    for (const text of spec.symbols.strings) {
+      strings.cstr(text);
+    }
+    symbolBytes = new Bytes()
+      .zeros((spec.symbols.count ?? 0) * 18)
+      .u32(spec.symbols.tableSize ?? 4 + strings.length)
+      .raw(strings.bytes())
+      .bytes();
+  }
   // Headers.
   const sections: {
     name: string;
@@ -899,6 +1064,16 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       flags: 0x40000040,
     });
   }
+  if (dataBytes.length > 0) {
+    sections.push({
+      name: spec.dataName ?? '.data',
+      vsize: dataBytes.length,
+      va: DATA_RVA,
+      raw: DATA_RAW,
+      rawSize: dataBytes.length,
+      flags: spec.dataFlags ?? 0xc0000040,
+    });
+  }
   const last = sections[sections.length - 1];
   const sizeOfImage = last.va + alignTo(last.vsize, SECTION_ALIGN);
 
@@ -928,7 +1103,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   opt.setUint16(48, subMajor, true);
   opt.setUint16(50, subMinor, true);
   opt.setUint32(56, sizeOfImage, true);
-  opt.setUint32(60, HEADERS, true);
+  opt.setUint32(60, headerSize, true);
   opt.setUint32(64, spec.checksum ?? 0, true);
   opt.setUint16(68, spec.subsystem ?? 2, true);
   opt.setUint16(70, spec.dllCharacteristics ?? 0x140, true);
@@ -941,6 +1116,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
 
   const head = new Bytes();
   head.raw(ascii('MZ')).zeros(0x3a).u32(PE_OFFSET); // e_lfanew at 0x3C
+  head.raw(spec.dosStub ?? []);
   head.zeros(PE_OFFSET - head.length);
   head.raw(ascii('PE')).u16(0);
   let characteristics = 0x0002 | (plus ? 0 : 0x0100); // EXECUTABLE_IMAGE, 32BIT_MACHINE
@@ -954,14 +1130,14 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     .u16(spec.machine ?? (plus ? 0x8664 : 0x014c))
     .u16(spec.declaredSections ?? sections.length)
     .u32(spec.timestamp ?? 1700000000)
-    .u32(0) // PointerToSymbolTable
-    .u32(0) // NumberOfSymbols
+    .u32(spec.symbols ? (spec.symbols.pointer ?? symbolAt) : 0) // PointerToSymbolTable
+    .u32(spec.symbols?.count ?? 0) // NumberOfSymbols
     .u16(optionalSize)
     .u16(characteristics);
   head.raw(new Uint8Array(opt.buffer));
-  for (const s of sections) {
+  for (const [index, s] of sections.entries()) {
     const nameBytes = new Uint8Array(8);
-    nameBytes.set(ascii(s.name));
+    nameBytes.set(ascii(spec.sectionNames?.[index] ?? s.name).subarray(0, 8));
     head
       .raw(nameBytes)
       .u32(s.vsize)
@@ -974,15 +1150,69 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       .u16(0)
       .u32(s.flags);
   }
-  head.zeros(HEADERS - head.length);
+  head.zeros(headerSize - head.length);
 
-  const total = certAt + certBytes.length;
+  const total = symbolAt + symbolBytes.length || certAt + certBytes.length;
   const file = new Uint8Array(total);
   file.set(head.bytes(), 0);
   file.set(text, TEXT_RAW);
   file.set(rdataBytes, RDATA_RAW);
   file.set(rsrcBytes, RSRC_RAW);
+  file.set(dataBytes, DATA_RAW);
   file.set(overlay, sectionsEnd);
   file.set(certBytes, certAt);
+  file.set(symbolBytes, symbolAt);
   return file;
+}
+
+// ---- Rich header -----------------------------------------------------------
+
+export interface RichSpec {
+  entries: { productId: number; build: number; count: number }[];
+  /** Leave out the "DanS" start marker, so the record cannot be found. */
+  omitDans?: boolean;
+  /** An extra dword before the entries, so they are not a whole number of pairs. */
+  strayDword?: boolean;
+}
+
+const rol32 = (value: number, bits: number): number =>
+  ((value << bits) | (value >>> (32 - bits))) >>> 0;
+
+/**
+ * What goes at offset 0x40 to give an image a Rich header with a correct
+ * checksum: 0x40 bytes of filler (the rest of the DOS stub), then the record
+ * from 0x80, XOR-encoded with the checksum as the linker does. Written from the
+ * published description of the format, not from src/pe/rich.ts.
+ */
+export function buildRichStub(spec: RichSpec): Uint8Array {
+  const dansAt = 0x80;
+  // Bytes 0..0x3F of the image are "MZ" and zeros; e_lfanew (0x3C) is not summed.
+  const prefix = new Uint8Array(dansAt);
+  prefix[0] = 0x4d;
+  prefix[1] = 0x5a;
+  for (let i = 0x40; i < dansAt; i++) {
+    prefix[i] = (i * 7 + 3) & 0xff;
+  }
+  let key = dansAt;
+  for (let i = 0; i < dansAt; i++) {
+    if (i < 0x3c || i > 0x3f) {
+      key = (key + rol32(prefix[i], i % 32)) >>> 0;
+    }
+  }
+  const compIds = spec.entries.map((e) => ((e.productId << 16) | e.build) >>> 0);
+  spec.entries.forEach((e, i) => {
+    key = (key + rol32(compIds[i], e.count % 32)) >>> 0;
+  });
+  const out = new Bytes().raw(prefix.subarray(0x40));
+  const encode = (value: number): Bytes => out.u32((value ^ key) >>> 0);
+  encode(spec.omitDans ? 0x11111111 : 0x536e6144); // "DanS"
+  encode(0).u32(key).u32(key); // the padding, as the linker writes it: all three are zero before XOR
+  if (spec.strayDword) {
+    encode(0x12345678);
+  }
+  spec.entries.forEach((e, i) => {
+    encode(compIds[i]);
+    encode(e.count);
+  });
+  return out.u32(0x68636952).u32(key).bytes(); // "Rich", then the key
 }

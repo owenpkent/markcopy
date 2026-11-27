@@ -5,7 +5,9 @@
 // since that needs resources.arsc, so they are reported as references.
 import { printable } from '../binary/text';
 import { formatBytesShort, formatNumber } from '../binary/html';
+import { dexSections } from './dex';
 import { parseManifest, type ManifestNode } from './axml';
+import { APK_SCHEME_IDS, readApkSigner, type ApkSigner } from './apkSigner';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import {
   MAX_SIGNING_PAIRS,
@@ -22,6 +24,8 @@ const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const MAX_PERMISSIONS = 2000;
 const MAX_FEATURES = 500;
 const MAX_ABIS = 32;
+// The most of one signing scheme's data that is read. Real ones are a few KiB.
+const MAX_SIGNING_VALUE_BYTES = 1024 * 1024;
 
 // Block IDs from apksig (ApkSigningBlockUtils, V2/V3SchemeConstants,
 // SourceStampConstants). The container holds ID/value pairs and Android ignores
@@ -218,10 +222,13 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
       ],
       ['Native libraries for', [...abis].map((a) => printable(a)).join(', ')],
     ]),
+    ...(await dexSections(zip, dex, warnings)),
   );
 
   // Signature: v1 is a JAR-style PKCS #7 block with names to read. v2 and
-  // later live in the APK Signing Block, whose certificate MarkCopy does not parse.
+  // later live in the APK Signing Block; the newest scheme present is read for
+  // its first signer's certificate (see apkSigner.ts), and that signer is shown
+  // in place of the v1 one.
   const after: InfoSection[] = [];
   // apksig matches the block and .SF names exactly.
   const v1 = await readV1Signatures(zip, 'apksig', warnings);
@@ -242,13 +249,55 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
     ...new Set((ids ?? []).map((id) => SIGNING_SCHEMES[id]).filter(Boolean)),
   ];
   if (schemes.length > 0) {
-    const section = v1Section(`APK Signature Scheme ${schemes.join(', ')}`, v1);
-    if (!signer) {
+    let block: ApkSigner | undefined;
+    let blockScheme = '';
+    for (const scheme of APK_SCHEME_IDS) {
+      if (!ids?.includes(scheme.id)) {
+        continue;
+      }
+      let value: Uint8Array | undefined;
+      try {
+        value = await zip.signingBlockValue(scheme.id, MAX_SIGNING_VALUE_BYTES);
+      } catch (error) {
+        if (!(error instanceof PackageError)) {
+          throw error;
+        }
+      }
+      if (!value) {
+        warnings.push(
+          `The APK Signature Scheme ${scheme.name} data could not be read, or is larger than MarkCopy reads, so its signer was not shown.`,
+        );
+        continue;
+      }
+      const read = readApkSigner(value, scheme.hasSdkRange);
+      if (read.signer) {
+        block = read;
+        blockScheme = scheme.name;
+        break;
+      }
+    }
+    const section = v1Section(
+      `APK Signature Scheme ${schemes.join(', ')}`,
+      v1,
+      block?.signer ?? signer,
+    );
+    if (block && block.count > 1) {
+      section.rows.push(['Signers', `${block.count} signers`]);
+    }
+    // The schemes can hold different certificates (a v3.1 rotation), so with
+    // more than one listed, say which one the details above describe.
+    if (schemes.length > 1 && (block?.signer || signer)) {
+      section.rows.push([
+        'Certificate from',
+        block?.signer ? `APK Signature Scheme ${blockScheme}` : 'JAR signature (v1)',
+      ]);
+    }
+    if (!block?.signer && !signer) {
       section.rows.push([
         'Signer',
         v1.signed.length > 0
           ? 'Not read (the certificate names could not be read)'
-          : 'Not read (v2 and later signatures keep the certificate in the signing block, which MarkCopy does not parse)',
+          : 'Not read (the certificate in the APK Signing Block could not be read)',
       ]);
     }
     after.push(section);

@@ -22,4 +22,6 @@ Background and decisions for individual features, kept for maintainers:
 - [Image viewer](IMAGE-DESIGN.md)
 - [Video review](VIDEO-REVIEW-DESIGN.md)
 - [Security and fuzzing prior art (VLC, GIMP)](FUZZING-PRIOR-ART.md)
+- [Binary viewer prior art (Ghidra, Detect It Easy, PE-bear and others)](BINARY-VIEWER-PRIOR-ART.md): what they show that the executable and package previews do not
+- [Binary reader prior art (Ghidra)](GHIDRA-PRIOR-ART.md): what Ghidra's PE, ELF, Mach-O and container readers do, and what MarkCopy could take
 - [Fuzzing and unit-test strategy](FUZZING-STRATEGY.md): the plan after the executable, package and 3D merges, and its measurements
