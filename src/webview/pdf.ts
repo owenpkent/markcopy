@@ -439,7 +439,11 @@ function resetViewer(): void {
   }
   renderTasks.clear();
   positionTracked = false;
+  // Anything still waiting belongs to the document being replaced: a link offset
+  // must not land on the next one, and a lookup in flight must not run on it.
+  navGeneration++;
   pendingJump = null;
+  pendingOffset = null;
   observer?.disconnect();
   observer = null;
   // The worker holds the old document open until this resolves; a long editing
@@ -658,7 +662,12 @@ function whenPageExists(page: number, run: () => void): void {
 // still waiting: an older link, the offset inside a link's page, and the saved
 // position. Called before the navigation itself, so a link that queues its own
 // jump afterwards is not cancelled by it.
+// A counter makes that cancellation reach work that has not queued anything yet,
+// such as a destination lookup still waiting on pdf.js: it records the count when
+// it starts and drops its result if the count has moved.
+let navGeneration = 0;
 function readerNavigated(): void {
+  navGeneration++;
   pendingJump = null;
   pendingOffset = null;
   if (loadingDoc) {
@@ -677,17 +686,6 @@ for (const type of ['wheel', 'touchmove']) {
     { passive: true },
   );
 }
-const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
-document.addEventListener('keydown', (e) => {
-  if (
-    SCROLL_KEYS.has(e.key) &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    !(e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable="true"]')
-  ) {
-    readerNavigated();
-  }
-});
 document.addEventListener('pointerdown', (e) => {
   // A press on the page background or the scrollbar (the root element) is a drag
   // or a scrollbar jump, not a click on a control.
@@ -818,8 +816,10 @@ async function goToDestination(dest: string | unknown[]): Promise<void> {
   if (!current) {
     return;
   }
+  const generation = navGeneration;
   const d: Destination | null = await resolveDestination(current, dest, current.numPages);
-  if (!d || doc !== current) {
+  // A newer navigation (another link, a scroll, a drag, a zoom) beats this lookup.
+  if (!d || doc !== current || generation !== navGeneration) {
     return;
   }
   whenPageExists(d.pageIndex + 1, () => {
@@ -1742,8 +1742,12 @@ document.addEventListener('pointermove', (e) => {
     return;
   }
   const s = scroller();
+  const before = { x: s.scrollLeft, y: s.scrollTop };
   s.scrollLeft = startScrollX - (e.clientX - startX);
   s.scrollTop = startScrollY - (e.clientY - startY);
+  if (s.scrollLeft !== before.x || s.scrollTop !== before.y) {
+    readerNavigated();
+  }
 });
 
 function endPan(): void {
@@ -2403,3 +2407,22 @@ function escapeHtml(s: string): string {
 }
 
 vscode.postMessage({ type: 'ready' });
+
+// Keys that scroll the page are the reader's own navigation. Registered last so
+// the auto-scroll and focused-control handlers have already taken the keys that
+// only adjust a speed or press a button; a key that moves nothing must not cancel
+// the saved position.
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
+document.addEventListener('keydown', (e) => {
+  if (
+    SCROLL_KEYS.has(e.key) &&
+    !e.defaultPrevented &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !(e.target as Element | null)?.closest?.(
+      'input, textarea, select, [contenteditable="true"], button, a, [role="button"]',
+    )
+  ) {
+    readerNavigated();
+  }
+});

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   annots: {} as Record<number, unknown[]>,
   dests: {} as Record<string, unknown[]>,
   pageIndex: 3,
+  destGate: null as Promise<void> | null,
   observed: [] as Array<{ cb: (e: unknown[]) => void }>,
 }));
 
@@ -30,7 +31,10 @@ vi.mock('pdfjs-dist', () => ({
     destroy: () => Promise.resolve(),
     promise: Promise.resolve({
       numPages: h.pageCount,
-      getDestination: (name: string) => Promise.resolve(h.dests[name] ?? null),
+      getDestination: async (name: string) => {
+        await h.destGate;
+        return h.dests[name] ?? null;
+      },
       getPageIndex: () => Promise.resolve(h.pageIndex),
       getPage: async (n: number) => {
         await h.gates[n];
@@ -87,6 +91,7 @@ beforeEach(async () => {
   h.annots = {};
   h.dests = {};
   h.pageIndex = 3;
+  h.destGate = null;
   h.observed = [];
   document.body.innerHTML = BODY;
   document.body.dataset.workerSrc = 'w.js';
@@ -439,6 +444,45 @@ describe("the reader's own navigation while a PDF is opening", () => {
   });
 });
 
+describe('a slow destination lookup', () => {
+  it('does not override a newer selection when it finally returns', async () => {
+    h.dests.late = [{ num: 1, gen: 0 }, { name: 'Fit' }];
+    h.pageIndex = 4; // page 5
+    h.annots[1] = [
+      { ...CHAPTER, dest: 'late' },
+      { subtype: 'Link', rect: [60, 70, 90, 90], action: 'FirstPage' },
+    ];
+    await loadDoc();
+    await showPage(1);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    h.destGate = held;
+    clickAt(30, 80); // named destination: the lookup is held
+    clickAt(75, 20); // First Page
+    const lastPage = () => (scrollIntoView.mock.contexts.at(-1) as HTMLElement).dataset.page;
+    expect(lastPage()).toBe('1');
+    release();
+    await settle();
+    expect(lastPage()).toBe('1');
+    expect(document.getElementById('mc-page-label')!.textContent).toBe('1 / 5');
+  });
+});
+
+describe('an auto-scroll speed key while a PDF is opening', () => {
+  it('keeps the saved page', async () => {
+    let release!: () => void;
+    h.gates[2] = new Promise<void>((r) => (release = r));
+    await loadDoc({ page: 5, y: 0, zoom: 1, fitWidth: false });
+    document.getElementById('mc-autoscroll-toggle')!.click();
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    );
+    release();
+    await settle();
+    expect(document.getElementById('mc-page-label')!.textContent).toBe('5 / 5');
+  });
+});
+
 describe('a link offset that needs pages still being laid out', () => {
   // Five 100 px pages, a 90 px view: page 3's top is 200, and 80 px into it is
   // 280, but while only three pages exist the view can scroll to 210 at most.
@@ -495,6 +539,41 @@ describe('a link offset that needs pages still being laid out', () => {
     release();
     await settle();
     expect(scrollTop).toBe(210);
+  });
+
+  it('does not undo a Hand-tool drag made while the offset waits', async () => {
+    const release = await setup();
+    clickAt(30, 80);
+    await settle();
+    expect(scrollTop).toBe(210);
+    const canvas = document.querySelector('.mc-canvas')!;
+    const at = (y: number) => ({ bubbles: true, clientX: 50, clientY: y, button: 0 });
+    canvas.dispatchEvent(new MouseEvent('pointerdown', at(100)));
+    canvas.dispatchEvent(new MouseEvent('pointermove', at(160))); // drag down: 210 to 150
+    canvas.dispatchEvent(new MouseEvent('pointerup', at(160)));
+    expect(scrollTop).toBe(150);
+    release();
+    await settle();
+    expect(scrollTop).toBe(150);
+  });
+
+  it('does not carry a waiting offset into a replacement document', async () => {
+    h.dests.near = [{ num: 1, gen: 0 }, { name: 'XYZ' }, 0, 20]; // 80 px into page 1
+    h.pageIndex = 0;
+    h.annots[1] = [{ ...CHAPTER, dest: 'near' }];
+    let release!: () => void;
+    h.gates[2] = new Promise<void>((r) => (release = r));
+    realLayout();
+    await loadDoc();
+    await showPage(1);
+    clickAt(30, 80); // only page 1 exists, so the 80 px cannot be reached yet
+    await settle();
+    h.annots = {};
+    scrollTop = 0;
+    await loadDoc(); // a LaTeX recompile: a new document with no links
+    release();
+    await settle();
+    expect(scrollTop).toBe(0);
   });
 });
 
