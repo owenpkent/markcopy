@@ -11,8 +11,10 @@ export {
   type PeSection,
   type PeImport,
   type PeExports,
+  type PeLoadConfig,
   type PeSignature,
 } from './read';
+export { type PeRich, type PeRichEntry } from './rich';
 export { readSigner, type Signer } from './signer';
 export { iconToPng, pickIcon, encodePng, type PeIcon } from './icon';
 export { readVersionResource, type VersionInfo } from './version';
