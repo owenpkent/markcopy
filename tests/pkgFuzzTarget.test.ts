@@ -9,12 +9,18 @@ import {
   shaped,
   SHAPES,
 } from '../fuzz/targets/pkg.fuzz';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { bytesSource } from '../src/binary/reader';
+import { readPackage } from '../src/pkg';
 import { buildElf } from './pkg/elfFixture';
 import { buildMsi } from './pkg/msiFixture';
 
 // The first input byte that picks shape `index`.
+const DMG = SHAPES.findIndex((s) => s.format === 'dmg');
+const CORPUS = join(__dirname, '../fuzz/corpus/pkg');
+const seeds = (format: string): string[] =>
+  readdirSync(CORPUS).filter((f) => f.startsWith(`${format}-`) && f.endsWith('.seed'));
 const pick = (index: number, rest: Buffer): Buffer => Buffer.concat([Buffer.of(index), rest]);
 
 describe('pkg fuzz target', () => {
@@ -57,7 +63,7 @@ describe('pkg fuzz target', () => {
   });
 
   it('writes the disk image trailer over the last 512 bytes', () => {
-    const dmg = shaped(pick(SHAPES.length - 1, Buffer.alloc(2000, 0x41)));
+    const dmg = shaped(pick(DMG, Buffer.alloc(2000, 0x41)));
     expect(dmg.name).toMatch(/\.dmg$/);
     expect(dmg.bytes.subarray(dmg.bytes.length - 512, dmg.bytes.length - 508).toString()).toBe(
       'koly',
@@ -66,9 +72,53 @@ describe('pkg fuzz target', () => {
   });
 
   it('grows a short input to hold a disk image trailer', () => {
-    const dmg = shaped(pick(SHAPES.length - 1, Buffer.alloc(10)));
+    const dmg = shaped(pick(DMG, Buffer.alloc(10)));
     expect(dmg.bytes).toHaveLength(512);
     expect(dmg.bytes.subarray(0, 4).toString()).toBe('koly');
+  });
+
+  // A committed seed names its shape by index, so a shape inserted before an
+  // existing one silently turns every seed after it into another format.
+  it('keeps every committed seed on the shape of its own format', () => {
+    for (const format of PKG_FORMATS) {
+      expect(seeds(format).length, format).toBeGreaterThan(0);
+      for (const file of seeds(format)) {
+        const choice = readFileSync(join(CORPUS, file))[0];
+        expect(SHAPES[choice % SHAPES.length].format, file).toBe(format);
+      }
+    }
+    for (const file of seeds('dmg')) {
+      expect(shapeFor(readFileSync(join(CORPUS, file))[0]).trailer, file).toBe(true);
+    }
+    expect(DMG).toBe(12);
+  });
+
+  it('reaches the thin reader and the universal reader through shaped()', async () => {
+    const thin = readFileSync(join(CORPUS, 'macho-default.seed'));
+    const universal = readFileSync(join(CORPUS, 'macho-universal.seed'));
+    const thinFile = shaped(thin);
+    const fatFile = shaped(universal);
+    expect((await readPackage(bytesSource(thinFile.bytes), thinFile.name)).format).toMatch(
+      /^Mach-O dynamic library/,
+    );
+    const fat = await readPackage(bytesSource(fatFile.bytes), fatFile.name);
+    expect(fat.format).toMatch(/^Universal binary \(x86_64, ppc\)/);
+    // The macho variant keeps both: a seed's own shape is inside the format.
+    expect(shaped(universal, 'macho').name).toBe(fatFile.name);
+    expect(shaped(thin, 'macho').name).toBe(thinFile.name);
+    // Any other choice inside the variant still lands on one of its two shapes.
+    for (let choice = 0; choice < 256; choice++) {
+      expect(shapeFor(choice, 'macho').format).toBe('macho');
+    }
+  });
+
+  it('keeps a plausible architecture count and repairs an implausible one', () => {
+    const fat = SHAPES.findIndex((s) => s.name === 'fuzz.universal');
+    const count = (input: Buffer): number => shaped(pick(fat, input)).bytes.readUInt32BE(4);
+    expect(count(Buffer.alloc(40))).toBe(1);
+    expect(count(Buffer.alloc(3))).toBe(1);
+    expect(count(Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 3]))).toBe(3);
+    expect(count(Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0xff, 0xff, 0xff, 0xff]))).toBe(1);
   });
 
   it('leaves an empty input alone', () => {

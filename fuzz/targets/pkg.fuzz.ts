@@ -23,6 +23,8 @@ interface Shape {
   magic?: number[];
   /** A UDIF trailer is written over the last 512 bytes instead. */
   trailer?: boolean;
+  /** A universal binary: the architecture count after the magic must be 1 to 4,096. */
+  fat?: boolean;
 }
 
 const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
@@ -42,7 +44,13 @@ export const SHAPES: Shape[] = [
   { name: 'fuzz.jar', format: 'zip', magic: [0x50, 0x4b, 0x05, 0x06] },
   // Alpine packages are gzip, which the dispatcher only trusts by name.
   { name: 'fuzz.apk', format: 'alpine', magic: [0x1f, 0x8b, 0x08] },
+  // The disk image shape keeps its place: committed seeds name a shape by its
+  // index, and the DMG seeds start with 12. New shapes go after it, never before.
   { name: 'fuzz.dmg', format: 'dmg', trailer: true },
+  { name: 'fuzz.dylib', format: 'macho', magic: [0xcf, 0xfa, 0xed, 0xfe] },
+  // A universal binary: big-endian 0xcafebabe, then a count that is kept when it is
+  // plausible, so the architecture table behind it reaches the fat reader.
+  { name: 'fuzz.universal', format: 'macho', magic: [0xca, 0xfe, 0xba, 0xbe], fat: true },
 ];
 
 export const PKG_FORMATS = [...new Set(SHAPES.map((s) => s.format))];
@@ -90,9 +98,15 @@ export function shaped(
     return { bytes: out, name: shape.name };
   }
   const magic = shape.magic ?? [];
-  const out = Buffer.alloc(Math.max(rest.length, magic.length));
+  const out = Buffer.alloc(Math.max(rest.length, magic.length, shape.fat ? 8 : 0));
   rest.copy(out);
   Buffer.from(magic).copy(out);
+  if (shape.fat) {
+    const count = out.readUInt32BE(4);
+    if (count < 1 || count > 0x1000) {
+      out.writeUInt32BE(1, 4);
+    }
+  }
   return { bytes: out, name: shape.name };
 }
 

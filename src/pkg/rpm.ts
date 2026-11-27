@@ -1,7 +1,7 @@
 // RPM packages (.rpm): a 96-byte lead, a signature header, the main header and
 // then the compressed payload. Everything worth showing is in the two headers,
-// which are tables of tagged values; the payload (the files themselves) is
-// never opened. A header's store holds every string of the file list, so a
+// which are tables of tagged values; the payload (the files themselves) is only
+// walked for its member names (src/pkg/rpmPayload.ts). A header's store holds every string of the file list, so a
 // package with many files is megabytes and is read in pieces.
 import { formatBytes, formatNumber } from '../binary/html';
 import type { RangeReader } from '../binary/reader';
@@ -13,7 +13,23 @@ import {
   type InfoSection,
   type PackageInfo,
 } from './model';
+import {
+  normalizePath,
+  NotChecked,
+  payloadSections,
+  readPayloadNames,
+  type Listed,
+} from './rpmPayload';
 import { signatureSection } from './signature';
+import {
+  checkStoredDigest,
+  SHA1,
+  SHA256,
+  SHA384,
+  SHA3_256,
+  SHA512,
+  type DigestAlgorithm,
+} from './storedDigest';
 
 const LEAD_LENGTH = 96;
 const HEADER_MAGIC = [0x8e, 0xad, 0xe8, 0x01];
@@ -28,6 +44,15 @@ const PIECE = 1024 * 1024;
 const TABLE_LIMIT = 200;
 const RELATION_LIMIT = 500;
 const MAX_TEXT = 64 * 1024;
+
+// OpenPGP hash algorithm numbers (RFC 9580 section 9.5), which RPMTAG_PAYLOADDIGESTALGO uses.
+const PAYLOAD_ALGORITHMS = new Map<number, DigestAlgorithm>([
+  [2, SHA1],
+  [8, SHA256],
+  [9, SHA384],
+  [10, SHA512],
+  [12, SHA3_256],
+]);
 
 const INT8 = 2;
 const INT16 = 3;
@@ -112,6 +137,9 @@ const MAX_RELATION_ENTRIES = 20_000;
 // boundaries. Tags can point at the same region, and each walk would otherwise repeat.
 const SCAN_BUDGET = 128 * 1024 * 1024;
 
+/** Decodes names for comparing: a leading U+FEFF is a character of the name, not a byte order mark. */
+const COMPARE = new TextDecoder('utf-8', { ignoreBOM: true });
+
 /**
  * Where the strings of one array start, found without building any of them. A
  * string is decoded only when asked for, cut to the length asked.
@@ -130,6 +158,12 @@ class Strings {
 
   /** The string at `index`, at most `max` characters, cleaned; undefined past the end. */
   at(index: number, max: number, keepLineBreaks = false): string | undefined {
+    const decoded = this.raw(index, max);
+    return decoded === undefined ? undefined : printable(decoded, keepLineBreaks);
+  }
+
+  /** The string at `index` as decoded, control characters kept, for comparing; undefined past the end. */
+  raw(index: number, max: number): string | undefined {
     const start = this.starts[index];
     if (start === undefined) {
       return undefined;
@@ -137,8 +171,7 @@ class Strings {
     // A character is at most 4 bytes, so looking further for the terminator is wasted work.
     const window = this.store.subarray(start, Math.min(this.store.length, start + max * 4));
     const end = window.indexOf(0);
-    const decoded = new TextDecoder().decode(end < 0 ? window : window.subarray(0, end));
-    return printable(decoded.slice(0, max), keepLineBreaks);
+    return COMPARE.decode(end < 0 ? window : window.subarray(0, end)).slice(0, max);
   }
 }
 
@@ -641,7 +674,8 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
 
   const signature = await readHeader(reader, LEAD_LENGTH);
   // The signature header is padded to 8 bytes; the main header is not.
-  const main = await readHeader(reader, Math.ceil(signature.end / 8) * 8);
+  const mainAt = Math.ceil(signature.end / 8) * 8;
+  const main = await readHeader(reader, mainAt);
 
   const warnings: string[] = [];
   const get = (tag: number): string | undefined => text(main, tag);
@@ -659,9 +693,49 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   const installed = number(main, 5009) ?? number(main, 1009);
   const payloadAt = main.end;
   const compressor = get(1125);
-  // Version 6 packages keep the same digest in tag 273; rpm 6 also adds a SHA3-256 in 279.
-  const sha256 = text(signature, 273);
-  const sha3 = text(signature, 279);
+  // The signature header stores digests of the main header's bytes: SHA-1 in tag 269 and
+  // SHA-256 in tag 273 (a version 6 package keeps that one in 273 too); rpm 6 adds a SHA3-256 in 279.
+  const headerDigests = await Promise.all(
+    (
+      [
+        ['Header SHA-1', SHA1, 269],
+        ['Header SHA-256', SHA256, 273],
+        ['Header SHA3-256', SHA3_256, 279],
+      ] as const
+    ).map(async ([label, algorithm, tag]): Promise<[string, string | undefined][]> => {
+      const stored = text(signature, tag);
+      return stored === undefined
+        ? []
+        : [
+            [label, stored],
+            [
+              `${label} check`,
+              await checkStoredDigest(reader, algorithm, stored, mainAt, main.end),
+            ],
+          ];
+    }),
+  );
+  // The main header may also name a digest of the compressed payload, which runs from the
+  // end of that header to the end of the file. PAYLOADDIGESTALT (5097) is of the unpacked
+  // payload instead, so it is left alone.
+  const payloadDigest = text(main, 5092);
+  // Version 6 (RPMTAG_RPMFORMAT 5114 is 6) leaves out the obsolete algorithm tag 5093 because
+  // 5092 is defined as SHA-256 there; for older packages a missing 5093 names nothing.
+  const payloadId = number(main, 5093) ?? (number(main, 5114) === 6 ? 8 : undefined);
+  const payloadAlgorithm = payloadId === undefined ? undefined : PAYLOAD_ALGORITHMS.get(payloadId);
+  const payloadRows: [string, string | undefined][] = [];
+  if (payloadDigest !== undefined) {
+    const label = payloadAlgorithm ? `Payload ${payloadAlgorithm.label}` : 'Payload digest';
+    payloadRows.push([label, payloadDigest]);
+    payloadRows.push([
+      `${label} check`,
+      payloadAlgorithm
+        ? await checkStoredDigest(reader, payloadAlgorithm, payloadDigest, payloadAt, reader.size)
+        : payloadId === undefined
+          ? 'Not checked: the package does not name the digest algorithm.'
+          : `Not checked: MarkCopy does not compute the digest algorithm the package names (OpenPGP hash number ${payloadId}).`,
+    ]);
+  }
 
   sections.push(
     ...propertySection('Package', [
@@ -689,8 +763,8 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
           : undefined,
       ],
       ['Payload flags', get(1126)],
-      ['Header SHA-256', sha256],
-      ['Header SHA3-256', sha3],
+      ...headerDigests.flat(),
+      ...payloadRows,
     ]),
   );
 
@@ -745,6 +819,7 @@ export async function readRpm(reader: RangeReader): Promise<PackageInfo> {
   );
 
   sections.push(...contents(main, warnings));
+  sections.push(...(await payloadContents(reader, main, payloadAt)));
   if (main.limited) {
     warnings.push(
       'Some tables in the package are larger than MarkCopy will read, so they are cut short.',
@@ -823,6 +898,66 @@ function contents(main: Header, warnings: string[]): InfoSection[] {
     noun: 'files',
     lead,
   });
+}
+
+// RPMFILE_GHOST in tag 1037 (FILEFLAGS): listed in the header, not in the payload.
+const FILE_GHOST = 0x40;
+
+/** The header's file list as paths, split into those a payload should hold and %ghost entries. */
+function listedPaths(main: Header): Listed | NotChecked | undefined {
+  const base = strings(main, 1117, MAX_FILES);
+  if (!base || base.count === 0) {
+    return undefined;
+  }
+  const dirs = strings(main, 1118, MAX_FILES);
+  const indexes = numbers(main, 1116, MAX_FILES) ?? [];
+  const flags = numbers(main, 1037, MAX_FILES) ?? [];
+  if (base.truncated || main.limited) {
+    return new NotChecked('the header lists more files than MarkCopy reads');
+  }
+  if (indexes.length !== base.count) {
+    return new NotChecked('the header file list could not be read');
+  }
+  const expected = new Set<string>();
+  const ghosts = new Set<string>();
+  for (let i = 0; i < base.count; i++) {
+    // Raw, not cleaned: the payload's names are compared as they are, and only shown cleaned.
+    const dir = dirs?.raw(indexes[i], MAX_PATH_PART) ?? '';
+    const file = base.raw(i, MAX_PATH_PART) ?? '';
+    if (dir.length >= MAX_PATH_PART || file.length >= MAX_PATH_PART) {
+      return new NotChecked('a listed path is longer than MarkCopy reads');
+    }
+    const path = normalizePath(`${dir}${file}`);
+    ((flags[i] ?? 0) & FILE_GHOST ? ghosts : expected).add(path);
+  }
+  return { expected, ghosts };
+}
+
+/** Compare the payload's member names with the header's file list. */
+async function payloadContents(
+  reader: RangeReader,
+  main: Header,
+  payloadAt: number,
+): Promise<InfoSection[]> {
+  const listed = listedPaths(main);
+  if (!listed) {
+    return [];
+  }
+  if (listed instanceof NotChecked) {
+    return payloadSections({ expected: new Set(), ghosts: new Set() }, listed);
+  }
+  try {
+    const names = await readPayloadNames(reader, payloadAt, text(main, 1125), text(main, 1124));
+    return payloadSections(listed, names);
+  } catch (error) {
+    if (error instanceof NotChecked) {
+      return payloadSections(listed, error);
+    }
+    if (error instanceof PackageError) {
+      return payloadSections(listed, new NotChecked('the payload could not be read'));
+    }
+    throw error;
+  }
 }
 
 // RPM v6 keeps its OpenPGP signatures as base64 strings in tag 278 (RPMTAG_OPENPGP),

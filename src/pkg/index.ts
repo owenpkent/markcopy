@@ -22,6 +22,7 @@ import { LUKS_MAGIC, readLuks } from './luks';
 import { looksArmored, looksLikePacket, readOpenPgp } from './openpgp';
 import { RAR4_SIGNATURE, RAR5_SIGNATURE, readRar } from './rar';
 import { SEVEN_ZIP_SIGNATURE, readSevenZip } from './sevenZip';
+import { looksLikeMachO, readMachO } from './macho';
 import type { AlsoReading, InfoSection, PackageInfo } from './model';
 import { readMsi } from './msi';
 import { readRpm } from './rpm';
@@ -134,6 +135,12 @@ export function bound(info: PackageInfo): PackageInfo {
     sections,
     // Already bounded when the second reading was made.
     also: info.also,
+    fileRows: info.fileRows
+      ?.slice(0, MAX_ROWS)
+      .map((row): [string, string] => [
+        take(row[0], MAX_HEADLINE_CHARS),
+        take(row[1], MAX_VALUE_CHARS),
+      ]),
     warnings,
   };
 }
@@ -180,6 +187,14 @@ const PROBES: Probe[] = [
     fact: 'it starts with the ELF signature',
     matches: ({ head }) => startsWith(head, [0x7f, 0x45, 0x4c, 0x46]),
     read: readElf,
+  },
+  {
+    // 0xcafebabe starts a universal binary and a Java class file alike, so a
+    // fat header is believed only when its table holds up.
+    name: 'Mach-O file',
+    fact: 'it starts with a Mach-O or universal binary header whose table holds up',
+    matches: ({ reader }) => looksLikeMachO(reader),
+    read: (reader) => readMachO(reader),
   },
   {
     name: 'RPM package',

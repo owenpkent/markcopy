@@ -47,6 +47,8 @@ export interface PackageInfo {
   sections: InfoSection[];
   /** Set when the file has the structure of more than one format. */
   also?: AlsoReading;
+  /** Extra rows for the page's File section, such as how a zip's entries are encrypted. */
+  fileRows?: Row[];
   /** Parts of the file that were present but could not be read. */
   warnings: string[];
 }
