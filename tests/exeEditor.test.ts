@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveFileTarget } from '../src/fileInfoTarget';
 
 const openExternal = vi.hoisted(() => vi.fn());
 
@@ -342,5 +343,28 @@ describe('readRange', () => {
     });
     expect(info.warnings).toEqual([]);
     expect(info.version?.strings).toContainEqual(['ProductName', 'Contoso']);
+  });
+});
+
+describe('MarkCopy: Open as Package Info', () => {
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+
+  it('prefers the file the menu passed, else the active editor', () => {
+    expect(resolveFileTarget('menu', 'active')).toBe('menu');
+    expect(resolveFileTarget(undefined, 'active')).toBe('active');
+    expect(resolveFileTarget(undefined, undefined)).toBeUndefined();
+  });
+
+  it('is contributed, in the explorer menu for files and the palette when a file is active', () => {
+    const id = 'markcopy.fileInfo.openAsPackage';
+    expect(pkg.contributes.commands.some((c: { command: string }) => c.command === id)).toBe(true);
+    const explorer = pkg.contributes.menus['explorer/context'].find(
+      (m: { command: string }) => m.command === id,
+    );
+    expect(explorer.when).toContain('!explorerResourceIsFolder');
+    const palette = pkg.contributes.menus.commandPalette.find(
+      (m: { command: string }) => m.command === id,
+    );
+    expect(palette.when).toContain('resourceScheme');
   });
 });

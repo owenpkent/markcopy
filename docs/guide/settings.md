@@ -4,18 +4,19 @@ Every command and setting, and how to change them without leaving the preview.
 
 ## Commands
 
-| Command                                    | ID                                | What it does                                                                                        |
-| ------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------- |
-| MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor.                                                   |
-| MarkCopy: Show Preview                     | `markcopy.openRendered`           | Swaps a Markdown, CSV, or TSV tab to the rendered preview, in place.                                |
-| MarkCopy: Show Source                      | `markcopy.openSource`             | Swaps a preview tab back to the text, in place.                                                     |
-| MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                                                   |
-| MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it.                               |
-| MarkCopy: Save as Word Document            | `markcopy.saveAsDocx`             | Exports the rendered preview to a `.docx` file you choose, then opens it.                           |
-| MarkCopy: Save as PowerPoint               | `markcopy.saveAsPptx`             | Exports the rendered preview to a `.pptx` file you choose, then opens it.                           |
-| MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                                               |
-| MarkCopy: Read This File                   | `markcopy.fileInfo.read`          | Reads the executable or package whose info page is in front, as its **Read this file** button does. |
-| MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                                                                        |
+| Command                                    | ID                                | What it does                                                                                                           |
+| ------------------------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| MarkCopy: Open Rich Preview to the Side    | `markcopy.openPreview`            | Opens (or focuses) the preview beside the editor.                                                                      |
+| MarkCopy: Show Preview                     | `markcopy.openRendered`           | Swaps a Markdown, CSV, or TSV tab to the rendered preview, in place.                                                   |
+| MarkCopy: Show Source                      | `markcopy.openSource`             | Swaps a preview tab back to the text, in place.                                                                        |
+| MarkCopy: Copy Whole Document as Rich Text | `markcopy.copyDocumentAsRichText` | Copies the entire rendered document as rich text.                                                                      |
+| MarkCopy: Save as PDF                      | `markcopy.saveAsPdf`              | Exports the rendered preview to a PDF file you choose, then opens it.                                                  |
+| MarkCopy: Save as Word Document            | `markcopy.saveAsDocx`             | Exports the rendered preview to a `.docx` file you choose, then opens it.                                              |
+| MarkCopy: Save as PowerPoint               | `markcopy.saveAsPptx`             | Exports the rendered preview to a `.pptx` file you choose, then opens it.                                              |
+| MarkCopy: Recompile LaTeX                  | `markcopy.recompileTex`           | Recompiles the focused LaTeX preview.                                                                                  |
+| MarkCopy: Read This File                   | `markcopy.fileInfo.read`          | Reads the executable or package whose info page is in front, as its **Read this file** button does.                    |
+| MarkCopy: Open as Package Info             | `markcopy.fileInfo.openAsPackage` | Opens the file given, or the active editor's file, in the package info page (for an extensionless Mach-O or ELF file). |
+| MarkCopy: Settings                         | `markcopy.openSettings`           | Opens the MarkCopy settings.                                                                                           |
 
 ## Settings
 

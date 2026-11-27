@@ -8,6 +8,8 @@
 // offset, count; sorted by tag), then the store, in which 16-bit values sit on
 // even offsets, 32-bit on multiples of 4 and 64-bit on multiples of 8.
 
+import { createHash } from 'node:crypto';
+
 const ascii = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 export const TYPE = {
@@ -230,7 +232,16 @@ export interface RpmSpec {
   payload?: Uint8Array;
   mainOptions?: HeaderOptions;
   signatureOptions?: HeaderOptions;
+  /**
+   * Store the real digests of the main header (tags 269, 273, 279) and of the payload
+   * (5092, with the OpenPGP hash number 8 in 5093) instead of placeholders. Tags given in
+   * `main` or `signature` still win, so a test can then break one.
+   */
+  digests?: boolean;
 }
+
+export const hex = (algorithm: string, bytes: Uint8Array): string =>
+  createHash(algorithm).update(bytes).digest('hex');
 
 export const BUILD_TIME = 1700000000; // 2023-11-14 22:13:20 UTC
 
@@ -321,22 +332,25 @@ export const DEFAULT_FILES: RpmFile[] = [
 ];
 
 export function buildRpm(spec: RpmSpec = {}): Uint8Array {
+  const payload = spec.payload ?? new Uint8Array(500);
+  const mainDefaults = defaultMain(spec.files ?? DEFAULT_FILES);
+  if (spec.digests) {
+    mainDefaults.push(strings(5092, [hex('sha256', payload)]), int32(5093, 8));
+  }
+  const main = header(merge(mainDefaults, spec.main, spec.without), spec.mainOptions);
+  const signatureDefaults = spec.digests
+    ? merge(defaultSignature(), [
+        str(269, hex('sha1', main)),
+        str(273, hex('sha256', main)),
+        str(279, hex('sha3-256', main)),
+      ])
+    : defaultSignature();
   const sigHeader = header(
-    merge(defaultSignature(), spec.signature, spec.without),
+    merge(signatureDefaults, spec.signature, spec.without),
     spec.signatureOptions,
   );
   const padding = new Uint8Array((8 - (sigHeader.length % 8)) % 8);
-  const main = header(
-    merge(defaultMain(spec.files ?? DEFAULT_FILES), spec.main, spec.without),
-    spec.mainOptions,
-  );
-  const parts = [
-    lead(spec.leadType),
-    sigHeader,
-    padding,
-    main,
-    spec.payload ?? new Uint8Array(500),
-  ];
+  const parts = [lead(spec.leadType), sigHeader, padding, main, payload];
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const part of parts) {
