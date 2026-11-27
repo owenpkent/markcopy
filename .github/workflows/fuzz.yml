@@ -55,6 +55,7 @@ jobs:
             pkg-xar,
             pkg-zip,
             pkg-alpine,
+            pkg-macho,
             pkg-dmg,
             file-source,
             links,
