@@ -211,6 +211,80 @@ describe('readPdfEncryption', () => {
       expect(out?.label).toContain('AES-256');
     });
 
+    /** PNG-filters rows of equal length with one filter type (1 Sub, 2 Up, 3 Average, 4 Paeth). */
+    const pngRows = (rows: number[][], tag: number): Uint8Array => {
+      const out: number[] = [];
+      rows.forEach((row, r) => {
+        out.push(tag);
+        row.forEach((raw, c) => {
+          const left = c > 0 ? row[c - 1] : 0;
+          const up = r > 0 ? rows[r - 1][c] : 0;
+          const upLeft = r > 0 && c > 0 ? rows[r - 1][c - 1] : 0;
+          const p = left + up - upLeft;
+          const nearest = [left, up, upLeft].reduce((best, v) =>
+            Math.abs(p - v) < Math.abs(p - best) ? v : best,
+          );
+          const predicted = [0, left, up, (left + up) >> 1, nearest][tag];
+          out.push((raw - predicted) & 0xff);
+        });
+      });
+      return Uint8Array.from(out);
+    };
+
+    it.each([
+      [1, 'Sub'],
+      [2, 'Up'],
+      [3, 'Average'],
+      [4, 'Paeth'],
+    ])('undoes PNG row filter %i (%s) in a cross-reference stream', (tag) => {
+      const objectAt = textOf(pdf({ encrypt: real })).indexOf('9 0 obj');
+      // Two rows, objects 8 and 9, so Up, Average and Paeth have a row above.
+      const rows = [
+        [1, 0, 0, 0x12, 0x34, 0],
+        [1, 0, 0, objectAt >> 8, objectAt & 0xff, 0],
+      ];
+      const out = readPdfEncryption(
+        pdf({
+          encrypt: real,
+          stream: true,
+          streamData: zlibSync(pngRows(rows, tag)),
+          streamDict:
+            '/Index [8 2] /Filter /FlateDecode /DecodeParms << /Predictor 15 /Columns 6 >>',
+        }),
+      );
+      expect(out?.label).toBe('Encrypted: AES-256 (standard security handler, revision 6)');
+    });
+
+    it('reads a single filter written as a one-element array, from the same bytes', () => {
+      const objectAt = textOf(pdf({ encrypt: real })).indexOf('9 0 obj');
+      const streamData = zlibSync(Uint8Array.from([2, 1, 0, 0, objectAt >> 8, objectAt & 0xff, 0]));
+      const parms = '<< /Predictor 12 /Columns 6 >>';
+      for (const streamDict of [
+        `/Filter /FlateDecode /DecodeParms ${parms}`,
+        `/Filter [/FlateDecode] /DecodeParms ${parms}`,
+        `/Filter [/FlateDecode] /DecodeParms [${parms}]`,
+      ]) {
+        const out = readPdfEncryption(pdf({ encrypt: real, stream: true, streamData, streamDict }));
+        expect(out?.label, streamDict).toBe(
+          'Encrypted: AES-256 (standard security handler, revision 6)',
+        );
+      }
+    });
+
+    it('reports not determined for a row filter PNG does not define', () => {
+      const objectAt = textOf(pdf({ encrypt: real })).indexOf('9 0 obj');
+      const row = Uint8Array.from([5, 1, 0, 0, objectAt >> 8, objectAt & 0xff, 0]);
+      const out = readPdfEncryption(
+        pdf({
+          encrypt: real,
+          stream: true,
+          streamData: zlibSync(row),
+          streamDict: '/Filter /FlateDecode /DecodeParms << /Predictor 15 /Columns 6 >>',
+        }),
+      );
+      expect(out?.label).toBe(NOT_DETERMINED);
+    });
+
     it('reads a classic table whose trailer lies past the 64 KiB window', () => {
       // 4,000 free entries (80,000 bytes) before the subsection that lists object 9.
       const filler = `10 4000\n${'0000000000 65535 f \n'.repeat(4000)}`;

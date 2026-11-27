@@ -332,29 +332,50 @@ function inflate(data: Uint8Array, max: number): Uint8Array | undefined {
   return out;
 }
 
-/** Undoes a PNG predictor (/Predictor 10 to 15) for the None, Sub and Up row types; else undefined. */
-function unpredict(data: Uint8Array, columns: number): Uint8Array | undefined {
-  const rows = Math.floor(data.length / (columns + 1));
-  const out = new Uint8Array(rows * columns);
+/**
+ * Undoes a PNG predictor (/Predictor 10 to 15): each row of `rowBytes` bytes is
+ * led by a tag naming its filter (None, Sub, Up, Average or Paeth, which an
+ * encoder may choose row by row), and "left" is the byte `pixelBytes` back.
+ * Undefined for a tag PNG does not define.
+ */
+function unpredict(data: Uint8Array, rowBytes: number, pixelBytes: number): Uint8Array | undefined {
+  const rows = Math.floor(data.length / (rowBytes + 1));
+  const out = new Uint8Array(rows * rowBytes);
   for (let r = 0; r < rows; r++) {
-    const tag = data[r * (columns + 1)];
-    for (let c = 0; c < columns; c++) {
-      const raw = data[r * (columns + 1) + 1 + c];
-      const left = c > 0 ? out[r * columns + c - 1] : 0;
-      const up = r > 0 ? out[(r - 1) * columns + c] : 0;
-      if (tag === 0) {
-        out[r * columns + c] = raw;
-      } else if (tag === 1) {
-        out[r * columns + c] = (raw + left) & 0xff;
+    const tag = data[r * (rowBytes + 1)];
+    if (tag > 4) {
+      return undefined;
+    }
+    for (let c = 0; c < rowBytes; c++) {
+      const raw = data[r * (rowBytes + 1) + 1 + c];
+      const left = c >= pixelBytes ? out[r * rowBytes + c - pixelBytes] : 0;
+      const up = r > 0 ? out[(r - 1) * rowBytes + c] : 0;
+      const upLeft = r > 0 && c >= pixelBytes ? out[(r - 1) * rowBytes + c - pixelBytes] : 0;
+      let predicted = 0;
+      if (tag === 1) {
+        predicted = left;
       } else if (tag === 2) {
-        out[r * columns + c] = (raw + up) & 0xff;
-      } else {
-        return undefined;
+        predicted = up;
+      } else if (tag === 3) {
+        predicted = (left + up) >> 1;
+      } else if (tag === 4) {
+        // Paeth: whichever of left, up and up-left is nearest left + up - upLeft,
+        // ties going to left, then up.
+        const p = left + up - upLeft;
+        const dLeft = Math.abs(p - left);
+        const dUp = Math.abs(p - up);
+        const dUpLeft = Math.abs(p - upLeft);
+        predicted = dLeft <= dUp && dLeft <= dUpLeft ? left : dUp <= dUpLeft ? up : upLeft;
       }
+      out[r * rowBytes + c] = (raw + predicted) & 0xff;
     }
   }
   return out;
 }
+
+/** The one element of a one-element array, which is how a single filter may be written; else the value. */
+const single = (v: Value | undefined): Value | undefined =>
+  Array.isArray(v) && v.length === 1 ? v[0] : v;
 
 /**
  * A cross-reference stream (PDF 1.5+): an object whose stream is a table of
@@ -385,19 +406,26 @@ function streamSection(bytes: Uint8Array, offset: number, want: number): Section
     return undefined;
   }
   let data: Uint8Array | undefined = bytes.subarray(offset + from, offset + from + length);
-  const filter = dict.dict.get('Filter');
+  // /Filter /FlateDecode and /Filter [/FlateDecode] are the same stream, and
+  // with the array form /DecodeParms may be a one-element array too.
+  const filter = single(dict.dict.get('Filter'));
   if (isName(filter) && filter.name === 'FlateDecode') {
     data = inflate(data, MAX_XREF_BYTES);
   } else if (filter !== undefined) {
     return undefined;
   }
-  const parms = dict.dict.get('DecodeParms');
+  const parms = single(dict.dict.get('DecodeParms'));
   const predictor = isDict(parms) ? (num(parms, 'Predictor') ?? 1) : 1;
-  if (data && predictor >= 10 && predictor <= 15) {
-    const columns = isDict(parms) ? num(parms, 'Columns') : undefined;
+  if (data && isDict(parms) && predictor >= 10 && predictor <= 15) {
+    // The defaults of ISO 32000-1 table 8: one column of one 8-bit component.
+    const columns = num(parms, 'Columns') ?? 1;
+    const colors = num(parms, 'Colors') ?? 1;
+    const bits = num(parms, 'BitsPerComponent') ?? 8;
+    const rowBytes = Math.ceil((columns * colors * bits) / 8);
+    const pixelBytes = Math.max(1, Math.ceil((colors * bits) / 8));
     data =
-      columns !== undefined && Number.isSafeInteger(columns) && columns > 0 && columns <= 64
-        ? unpredict(data, columns)
+      [columns, colors, bits].every((x) => Number.isSafeInteger(x) && x > 0) && rowBytes <= 64
+        ? unpredict(data, rowBytes, pixelBytes)
         : undefined;
   } else if (predictor !== 1) {
     return undefined;
