@@ -292,6 +292,57 @@ Unit coverage after the guard tests (v8, whole suite, 3,676 tests): 88.8% of lin
 90.0 to 93.4, `step.ts` 90.8 to 93.4, `audioProbe.ts` 92.7 to 95.2; `isolate.ts` gained
 the worker-start failures.
 
+## Readers added after 2026-11-23, covered 2026-11-26
+
+The binary readers that merged after the first fuzzing pass (Mach-O, Go build
+information, DEX, the RPM payload check, stored digests, the Authenticode image hash,
+signer detail, zip and Office encryption labels) were reached only by the general
+`pe` and `pkg` targets, with seeds that did not hold them. Each now has seeds that
+exercise it; five readers that sit behind a whole file whose structure does not
+survive mutation also have a target of their own, which takes the reader's own input
+directly. A focused target's first input byte picks the stage and the rest is the
+input, so one corpus covers every stage.
+
+| Reader                                                       | Reached by                                           | What the target or seeds do                                                                                                                                                               |
+| ------------------------------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mach-O and universal binaries (`macho.ts`)                   | `pkg-macho`                                          | Seeds with every load command the reader decodes, encrypted images, a wide fat header, and a Java class file that carries the fat magic. The universal shape keeps a plausible count.     |
+| Go build information (`goBuildInfo.ts`)                      | `go-buildinfo`, and `pkg-elf` and `pe` seeds         | Stage 0 parses module text; stages 1 and 2 read a section, as written or with the magic and a pointer width written over its start. Caps on rows and settings, no control characters.     |
+| DEX summary and digests (`dex.ts`)                           | `dex`, and `pkg-zip` seeds                           | The input is a `classes.dex` in a small stored or deflated zip (and a second file), read through `readPackage` with the shared oracle. Adler-32 is checked against a plain definition.    |
+| RPM payload walker and streaming decompressors               | `cpio`, and `pkg-rpm` seeds with real stored digests | Stage 0 walks a cpio stream whole, in pieces of the input's choosing and byte by byte, and the names, finish flag and refusal must be identical. Stages 1 to 3 run gzip, zstd and xz.     |
+| Stored digests (`storedDigest.ts`)                           | `pkg-rpm`, `pkg-alpine` and `pkg-zip` seeds          | Seeds whose digests match and whose digests do not.                                                                                                                                       |
+| PE: Rich header, long section names, load config, image hash | `pe` seeds                                           | A Rich header, a COFF string table behind `/4` names, 32 and 64-bit load configurations, and signed images whose digest is right, wrong, SHA-1 or SHA-256.                                |
+| Signer detail DER, APK signing block v2 and v3 (`signer.ts`) | `signer`, and `pe` and `pkg-zip` seeds               | Stage 0 PKCS #7, 1 a bare certificate, 2 and 3 the signing block value. Nothing may throw; the signer count is capped, a thumbprint is 40 hex digits, no field holds a control character. |
+| ELF extended counts, GNU property notes, Go notes            | `pkg-elf` seeds                                      | `PN_XNUM` and `SHT_NULL` counts, x86 and Arm property notes, a property that runs past its note, the Go build ID.                                                                         |
+| Zip encryption labels                                        | `pkg-zip` seeds                                      | WinZip AE-1 and AE-2 fields, ZipCrypto, and strong encryption.                                                                                                                            |
+| Office `EncryptionInfo` (`ooxml/encrypted.ts`)               | `ooxml-encrypted`                                    | Stage 0 the stream (agile, standard, extensible), stage 1 a whole compound file. The notice is one short line without control characters, and a refusal always comes with a notice.       |
+
+The first run of `ooxml-encrypted` found, in 2 seconds, an agile description whose
+`cipherAlgorithm` held a control character, which reached the message the preview shows.
+`describeEncryptionInfo` now runs the attribute values through `printable`; the input is a
+seed and the unit test is in `tests/ooxmlEncrypted.test.ts`. The first run of `signer` stopped
+on its own oracle (a `Signer` field present but undefined), which was a bug in the target.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each, straight through Jazzer.js
+(the nightly runs are 10 minutes). One run each; no findings after the fix above.
+
+| Target            | Runs    | cov  | ft   |
+| ----------------- | ------- | ---- | ---- |
+| `cpio`            | 293,904 | 230  | 838  |
+| `dex`             | 105,322 | 300  | 396  |
+| `go-buildinfo`    | 196,130 | 338  | 1320 |
+| `signer`          | 359,204 | 410  | 1042 |
+| `ooxml-encrypted` | 99,968  | 246  | 591  |
+| `pkg-macho`       | 133,899 | 563  | 1233 |
+| `pkg-elf`         | 115,506 | 756  | 1809 |
+| `pkg-rpm`         | 65,034  | 878  | 2407 |
+| `pkg-zip`         | 88,886  | 1529 | 3416 |
+| `pe`              | 70,747  | 1437 | 3052 |
+
+Dictionaries: `pkg.dict` and `pe.dict` gained the Mach-O magics and load command ids, the Go
+magic and module text keys, the DEX magics, cpio magics and `TRAILER!!!`, WinZip AES fields,
+the APK signing block ids, and the ELF property note markers; each focused target has a
+dictionary of its own.
+
 ## Measuring progress
 
 Re-take, with the date, after each step: the unreached table (the esbuild metafile

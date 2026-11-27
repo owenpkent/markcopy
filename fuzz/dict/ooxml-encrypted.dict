@@ -1,0 +1,43 @@
+# Tokens for the ooxml-encrypted target (fuzz/targets/ooxml-encrypted.fuzz.ts): the EncryptionInfo stream and the compound file around it.
+
+# EncryptionInfo versions (major, minor as two 16-bit words) and the algorithm ids of the standard form
+kw1="\x04\x00\x04\x00"
+kw2="\x03\x00\x02\x00"
+kw3="\x04\x00\x02\x00"
+kw4="\x02\x00\x02\x00"
+kw5="\x03\x00\x03\x00"
+kw6="\x04\x00\x03\x00"
+kw7="\x0e\x66\x00\x00"
+kw8="\x0f\x66\x00\x00"
+kw9="\x10\x66\x00\x00"
+kw10="\x01\x68\x00\x00"
+
+# agile XML: element and attribute names, values, quotes around equals signs
+kw11="<keyData"
+kw12="<encryption"
+kw13="cipherAlgorithm"
+kw14="cipherChaining"
+kw15="keyBits"
+kw16="hashAlgorithm"
+kw17="hashSize"
+kw18="blockSize"
+kw19="saltSize"
+kw20="saltValue"
+kw21="ChainingModeCBC"
+kw22="AES"
+kw23="SHA512"
+kw24="SHA256"
+kw25="SHA1"
+kw26="128"
+kw27="192"
+kw28="256"
+kw29=" = "
+kw30="'"
+kw31="\""
+kw32="xmlns:"
+kw33="/>"
+
+# compound file: magic and the two stream names (UTF-16LE)
+kw34="\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+kw35="E\x00n\x00c\x00r\x00y\x00p\x00t\x00i\x00o\x00n\x00I\x00n\x00f\x00o\x00"
+kw36="E\x00n\x00c\x00r\x00y\x00p\x00t\x00e\x00d\x00P\x00a\x00c\x00k\x00a\x00g\x00e\x00"
