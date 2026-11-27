@@ -24,6 +24,17 @@ export const MAX_MILLISECONDS = 3000;
 export const MAX_HTML_CHARS = 4 * 1024 * 1024;
 export const MAX_HEAP_GROWTH = 256 * 1024 * 1024;
 
+/** Whether 	ext holds a C0 control character or DEL, which every reader's cleaning removes. */
+export function hasControl(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Thrown when an input was read without error but cost more than a preview may. */
 export class CostError extends Error {}
 

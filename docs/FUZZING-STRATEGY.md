@@ -292,6 +292,27 @@ Unit coverage after the guard tests (v8, whole suite, 3,676 tests): 88.8% of lin
 90.0 to 93.4, `step.ts` 90.8 to 93.4, `audioProbe.ts` 92.7 to 95.2; `isolate.ts` gained
 the worker-start failures.
 
+## Encryption labels (PDF, disk image, OpenDocument, Mach-O)
+
+Readers that say what a file declares about its encryption, without asking for a password or decrypting, are fuzzed as
+parsers of untrusted text: what they print goes into the page. Three have a target of their own because each sits
+behind structure a random input does not have; the fourth is reached by a variant.
+
+| Reader                                          | Reached by                            | What it does                                                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/pdfEncryption.ts` (the host-side /Encrypt) | `pdf-encryption`                      | The input is a whole PDF, or the Encrypt dictionary text framed as object 9 of a classic PDF, as the dictionary of a cross-reference stream, or inline in the trailer. The label and permissions are checked as text. |
+| `src/pkg/dmgEncryption.ts`                      | `dmg-encryption`, and `pkg-dmg` seeds | Version 2 header and version 1 trailer, as they are or with the magic written over. At most 17 slot lines, a cipher label from a fixed set, a plausible block size, no control characters.                            |
+| `src/pkg/odf.ts`                                | `odf`, and `pkg-zip` seeds            | The manifest text goes to `scanManifest`, and the same text sits in an OpenDocument zip read through `readPackage` with the shared oracle. Counts bounded, labels short and clean.                                    |
+| Mach-O `LC_ENCRYPTION_INFO(_64)` rows           | `pkg-macho` seeds                     | FairPlay (cryptid 1), another cryptid, and not encrypted, in 32 and 64-bit images.                                                                                                                                    |
+
+The first run of `pdf-encryption` found, in under a second, a `/Filter` name with a `#00` escape that put a NUL into the
+label (and a name of any length into it). The handler name is now cleaned with `printable` and clipped to 60 characters;
+the input is a seed and the unit test is in `tests/pdfEncryption.test.ts`. `odf` and `dmg-encryption` found nothing.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each: `pdf-encryption` 124,927 runs, `cov: 269`, `ft: 928` (after the
+fix); `odf` 148,419 runs, `cov: 421`, `ft: 755`; `dmg-encryption` 215,737 runs, `cov: 139`, `ft: 316`; `pkg-macho` 127,312
+runs, `cov: 544`; `pkg-zip` 106,937 runs, `cov: 1274`; `pkg-dmg` 150,600 runs, `cov: 419`. No other findings.
+
 ## Measuring progress
 
 Re-take, with the date, after each step: the unreached table (the esbuild metafile
