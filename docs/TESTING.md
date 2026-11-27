@@ -330,6 +330,7 @@ Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the read
 - Windows Installer: 7 real `.msi` files from 45 KB to 906 MB compared with Windows Installer's own database API (property count, product name, version, install scope, language and the row counts of eight tables). All matched, and each was read in under 25 ms.
 - Debian: a Debian `hello` package (xz control archive) and an Ubuntu one (zstd) compared with an independent extraction of the control file. RPM: a Fedora `hello` package compared with an independent header parse. Alpine: the `musl` package.
 - ELF: three real shared libraries (x86-64 and AArch64) and one statically linked Go executable compared with `file` and an independent header reader. No real kernel module or AppImage was checked.
+- ELF CET, BTI and PAC rows: six clang and lld shared libraries (x86-64, i386, AArch64) read by script, with the bits as expected. No independent reader (`llvm-readelf` is not installed), no GCC build and no executable was checked.
 - macOS installer: two real signed packages (one product archive, one flat component package), file lists and signer names compared with an independent read of the table of contents.
 - Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
 - Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
@@ -409,6 +410,7 @@ macOS (`.dmg`, `.pkg`):
 Linux binaries (`.so`, `*.so.*`, `.elf`, `.ko`, `.AppImage`):
 
 - [ ] Type, architecture, SONAME, build ID, interpreter, stripped or not, protections and needed libraries match `readelf` or `file` for the same file.
+- [ ] On an x86-64 or AArch64 library, the CET (IBT, SHSTK) or BTI and PAC rows match `readelf -n` (the `x86 feature` or `aarch64 feature` line of the GNU property note); a file with no such note shows No.
 - [ ] A kernel module shows its module information; an AppImage shows its payload size and is not run.
 
 Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):

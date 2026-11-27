@@ -44,10 +44,14 @@ export interface ElfSpec {
   /** PT_GNU_STACK: 'nx' (RW), 'exec' (RWX) or none. Defaults to 'nx'. */
   stack?: 'nx' | 'exec' | 'none';
   relro?: boolean;
+  /** Give the note segment the PT_GNU_PROPERTY type instead of PT_NOTE. */
+  propertySegment?: boolean;
   buildId?: number[];
   /** [os, major, minor, patch] of the GNU ABI tag note. */
   abiTag?: [number, number, number, number];
   goBuildId?: string;
+  /** Properties of a GNU property note; `size` overrides the declared data size. */
+  properties?: { type: number; data: number[]; size?: number }[];
   sections?: SectionSpec[];
   /** Leave out program headers (an object file, a kernel module). */
   noProgramHeaders?: boolean;
@@ -109,6 +113,7 @@ const PT = {
   DYNAMIC: 2,
   INTERP: 3,
   NOTE: 4,
+  GNU_PROPERTY: 0x6474e553,
   GNU_STACK: 0x6474e551,
   GNU_RELRO: 0x6474e552,
 };
@@ -155,6 +160,21 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
   if (spec.goBuildId) {
     note('Go', 4, utf8(spec.goBuildId));
   }
+  if (spec.properties) {
+    // NT_GNU_PROPERTY_TYPE_0: each property is a type, a size, the data, then
+    // padding to 8 bytes in a 64-bit file or 4 in a 32-bit one. The note
+    // starts on that same boundary.
+    const pad = wide ? 8 : 4;
+    const d = new Writer(le, wide);
+    for (const p of spec.properties) {
+      d.u32(p.type)
+        .u32(p.size ?? p.data.length)
+        .raw(p.data)
+        .pad(pad);
+    }
+    notes.pad(pad);
+    notes.u32(4).u32(d.length).u32(5).raw([0x47, 0x4e, 0x55, 0]).raw(d.out).pad(pad);
+  }
 
   const segmentKinds: number[] = [];
   if (!spec.noProgramHeaders) {
@@ -166,7 +186,7 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
       segmentKinds.push(PT.DYNAMIC);
     }
     if (notes.length > 0) {
-      segmentKinds.push(PT.NOTE);
+      segmentKinds.push(spec.propertySegment ? PT.GNU_PROPERTY : PT.NOTE);
     }
     if ((spec.stack ?? 'nx') !== 'none') {
       segmentKinds.push(PT.GNU_STACK);
@@ -306,9 +326,10 @@ export function buildElf(spec: ElfSpec = {}): Uint8Array {
         size = dynLength;
         break;
       case PT.NOTE:
+      case PT.GNU_PROPERTY:
         offset = noteOffset;
         size = notes.length;
-        align = 4;
+        align = spec.properties && wide ? 8 : 4;
         break;
       case PT.GNU_STACK:
         flags = spec.stack === 'exec' ? 7 : 6;

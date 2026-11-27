@@ -614,3 +614,127 @@ describe('readElf: rendering', () => {
     expect(html).toContain('ab.so');
   });
 });
+
+describe('readElf: control-flow hardening notes', () => {
+  const u32 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, n >>> 24];
+  const feature = (type: number, bits: number) => ({ type, data: u32(bits) });
+  const X86 = 0xc0000002;
+  const ARM = 0xc0000000;
+  const prot = async (spec: ElfSpec) =>
+    rowsOf(await read({ needed: ['libc.so.6'], ...spec }), 'Protections');
+  const IBT = 'Indirect branch tracking (CET IBT)';
+  const SHSTK = 'Shadow stack (CET SHSTK)';
+  const BTI = 'Branch target identification (BTI)';
+  const PAC = 'Pointer authentication (PAC)';
+  const NOTE_MISSING = 'Unknown (no GNU property note)';
+
+  it('reads IBT and shadow stack on x86-64', async () => {
+    const both = await prot({ properties: [feature(X86, 3)] });
+    expect([both[IBT], both[SHSTK]]).toEqual(['Yes', 'Yes']);
+    const ibt = await prot({ properties: [feature(X86, 1)] });
+    expect([ibt[IBT], ibt[SHSTK]]).toEqual(['Yes', 'No']);
+    const none = await prot({});
+    expect([none[IBT], none[SHSTK]]).toEqual([NOTE_MISSING, NOTE_MISSING]);
+    const zero = await prot({ properties: [feature(X86, 0)] });
+    expect([zero[IBT], zero[SHSTK]]).toEqual(['No', 'No']);
+  });
+
+  it('puts the new rows after the existing ones', async () => {
+    const info = await read({ needed: ['libc.so.6'], properties: [feature(X86, 3)] });
+    const s = section(info, 'Protections');
+    expect(s?.kind === 'properties' ? s.rows.map((r) => r[0]) : []).toEqual([
+      'Non-executable stack',
+      'RELRO',
+      IBT,
+      SHSTK,
+    ]);
+  });
+
+  it('reads a 32-bit x86 note with 4-byte padding, and keeps other notes', async () => {
+    const info = await read({
+      wide: false,
+      machine: 3,
+      needed: ['libc.so.6'],
+      buildId: [1, 2, 3],
+      properties: [feature(X86, 3)],
+    });
+    const p = rowsOf(info, 'Protections');
+    expect([p[IBT], p[SHSTK]]).toEqual(['Yes', 'Yes']);
+    expect(rowsOf(info, 'Binary')['Build ID']).toBe('010203');
+  });
+
+  it('reads BTI and pointer authentication on AArch64', async () => {
+    const both = await prot({ machine: 183, properties: [feature(ARM, 3)] });
+    expect([both[BTI], both[PAC]]).toEqual(['Yes', 'Yes']);
+    expect(both[IBT]).toBeUndefined();
+    const bti = await prot({ machine: 183, properties: [feature(ARM, 1)] });
+    expect([bti[BTI], bti[PAC]]).toEqual(['Yes', 'No']);
+    const none = await prot({ machine: 183 });
+    expect([none[BTI], none[PAC]]).toEqual([NOTE_MISSING, NOTE_MISSING]);
+  });
+
+  it('reads the property note from PT_GNU_PROPERTY as well as PT_NOTE', async () => {
+    const spec = { machine: 183, noSections: true, properties: [feature(ARM, 3)] };
+    const note = await prot(spec);
+    expect([note[BTI], note[PAC]]).toEqual(['Yes', 'Yes']);
+    const dedicated = await prot({ ...spec, propertySegment: true });
+    expect([dedicated[BTI], dedicated[PAC]]).toEqual(['Yes', 'Yes']);
+  });
+
+  it('falls back to the section when an unrelated PT_NOTE carries no property', async () => {
+    // namesz 4, descsz 16, type 5, "GNU ", then one 4-byte property padded to 8.
+    const prop = [4, 0, 0, 0, 16, 0, 0, 0, 5, 0, 0, 0, 0x47, 0x4e, 0x55, 0];
+    prop.push(...u32(ARM), 4, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0);
+    const p = await prot({
+      machine: 183,
+      buildId: [1, 2, 3],
+      sections: [{ name: '.note.gnu.property', type: 7, data: new Uint8Array(prop) }],
+    });
+    expect([p[BTI], p[PAC]]).toEqual(['Yes', 'Yes']);
+  });
+
+  it('keeps the notes it read when a later note range is damaged', async () => {
+    const info = await read({
+      buildId: [1, 2, 3],
+      sections: [{ name: '.note.bad', type: 7, size: 65536 }],
+    });
+    expect(rowsOf(info, 'Binary')['Build ID']).toBe('010203');
+    expect(info.warnings).toHaveLength(1);
+    expect(info.warnings[0]).toContain('.note.bad');
+  });
+
+  it('ignores a feature word that belongs to another architecture', async () => {
+    const p = await prot({ machine: 183, properties: [feature(X86, 3)] });
+    expect([p[BTI], p[PAC]]).toEqual(['No', 'No']);
+  });
+
+  it('skips an unrelated property that comes first', async () => {
+    const p = await prot({
+      properties: [{ type: 0xc0008002, data: u32(1) }, feature(X86, 2)],
+    });
+    expect([p[IBT], p[SHSTK]]).toEqual(['No', 'Yes']);
+  });
+
+  it('stops at a property whose size runs past the note, without failing', async () => {
+    const info = await read({
+      needed: ['libc.so.6'],
+      properties: [
+        { type: 0xc0008002, data: u32(1) },
+        { type: X86, data: u32(3), size: 4000 },
+      ],
+    });
+    const p = rowsOf(info, 'Protections');
+    expect([p[IBT], p[SHSTK]]).toEqual(['No', 'No']);
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('shows no hardening rows for other machines', async () => {
+    const p = await prot({ machine: 243, properties: [feature(X86, 3)] });
+    expect(Object.keys(p).filter((k) => /CET|BTI|PAC/.test(k))).toEqual([]);
+  });
+
+  it('shows no hardening rows where protections are not shown', async () => {
+    const object = await read({ type: 1, noProgramHeaders: true, properties: [feature(X86, 3)] });
+    expect(section(object, 'Protections')).toBeUndefined();
+  });
+});
