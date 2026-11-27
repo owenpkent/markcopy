@@ -624,6 +624,71 @@ pkg('fuzz.dmg', 'dmg', 'default', buildDmg());
 pkg('fuzz.dmg', 'dmg', 'encrypted-v2', buildEncryptedDmg(2));
 pkg('fuzz.dmg', 'dmg', 'encrypted-v1', buildEncryptedDmg(1));
 
+// ---- Files that are more than one format (the polyglot target) -------------
+
+const polyglotDir = join(out, 'polyglot');
+mkdirSync(polyglotDir, { recursive: true });
+const NAMES = ['fuzz.bin', 'fuzz.apk', 'fuzz.jar', 'fuzz.exe', 'fuzz.pdf', 'fuzz.pkg'];
+
+/** A seed for the polyglot target: a mode byte, a flags byte (the name for mode 1), then the file. */
+function polyglot(name: string, mode: number, flags: number, bytes: Uint8Array): void {
+  const seed = Buffer.concat([Uint8Array.of(mode, flags), bytes]);
+  if (seed.length > MAX_BYTES) {
+    skipped.push(`polyglot/${name} (${seed.length} bytes)`);
+    return;
+  }
+  writeFileSync(join(polyglotDir, name), seed);
+  console.log(`polyglot/${name}\t${seed.length}`);
+}
+const cat = (...parts: Uint8Array[]): Uint8Array => Buffer.concat(parts);
+const aZip = (prefix?: Uint8Array, comment?: string): Uint8Array =>
+  buildZip([{ name: 'a.txt', data: 'hello' }], { prefix, comment });
+/** A minimal PDF with a classic cross-reference table at exact byte offsets (as tests/pkg/polyglot.test.ts builds it). */
+function aPdf(): Uint8Array {
+  const bodies = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [] /Count 0 >>'];
+  let text = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  bodies.forEach((body, i) => {
+    offsets.push(text.length);
+    text += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = text.length;
+  text += 'xref\n0 3\n0000000000 65535 f \n';
+  for (const offset of offsets) {
+    text += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  }
+  text += `trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(text);
+}
+const NAME_AT = (name: string): number => NAMES.indexOf(name);
+polyglot('msi-then-zip', 1, NAME_AT('fuzz.bin'), cat(buildMsi(), aZip()));
+polyglot('rpm-then-zip', 1, NAME_AT('fuzz.bin'), cat(buildRpm(), aZip()));
+polyglot('elf-then-zip', 1, NAME_AT('fuzz.bin'), cat(buildElf(), aZip()));
+polyglot(
+  'elf-then-zip-long-comment',
+  1,
+  NAME_AT('fuzz.bin'),
+  cat(buildElf(), aZip(undefined, 'c'.repeat(600))),
+);
+polyglot('zip-then-pe', 1, NAME_AT('fuzz.jar'), cat(aZip(), buildPe()));
+polyglot('pe-then-zip', 1, NAME_AT('fuzz.exe'), cat(buildPe(), aZip()));
+polyglot('deb-then-pdf', 1, NAME_AT('fuzz.pdf'), cat(buildDeb({ dataSize: 64 }), aPdf()));
+polyglot('zip-with-pdf-comment', 1, NAME_AT('fuzz.pdf'), aZip(aPdf(), 'startxref 0 %%EOF'));
+polyglot('alpine-apk', 1, NAME_AT('fuzz.apk'), buildApk());
+polyglot('pe-overlay-zip', 2, 0, buildPe({ overlay: aZip() }));
+polyglot('pe-overlay-junk', 2, 0, buildPe({ overlay: 200 }));
+polyglot(
+  'pe-signed-overlay-zip',
+  2,
+  0x40,
+  buildPe({ certificate: buildSignedData(signer), overlay: aZip() }),
+);
+polyglot('signatures-zip-pdf-pe', 3, 0, cat(aPdf(), aZip(), buildPe().subarray(0, 0x200)));
+polyglot('signatures-zip64-style', 3, 0, aZip(undefined, 'PK\x06\x07'));
+polyglot('signatures-pdf', 3, 0, aPdf());
+// A shaped pkg file with an empty zip end record appended: mode 0, flags 1, then a SHAPES index and the file.
+const elfShape = SHAPES.findIndex((s) => s.format === 'elf');
+polyglot('shaped-elf-plus-zip-end', 0, 1, cat(Uint8Array.of(elfShape), buildElf()));
 if (skipped.length > 0) {
   console.log(`SKIPPED (over ${MAX_BYTES} bytes): ${skipped.join(', ')}`);
 }

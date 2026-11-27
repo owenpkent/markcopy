@@ -57,6 +57,7 @@ jobs:
             pkg-alpine,
             pkg-macho,
             pkg-dmg,
+            polyglot,
             file-source,
             links,
             markdown-html,
