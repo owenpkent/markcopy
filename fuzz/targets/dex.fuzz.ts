@@ -9,7 +9,9 @@ export { CostError, MAX_HEAP_GROWTH, MAX_HTML_CHARS, MAX_MILLISECONDS } from './
 // target reaches that only through an APK whose zip structure survives mutation
 // and whose entry is named classes.dex; here the input is the DEX file, and a
 // small zip around it (written below, so the target needs nothing from tests/) is
-// the APK. The first byte picks how the entry is stored.
+// the APK. The zip carries an empty AndroidManifest.xml, which is what makes the
+// package reader take the APK path rather than list a plain zip. The first byte
+// picks how the entry is stored.
 //
 //   0  stored   1  deflated   2  stored, and a second file (classes2.dex) made
 //   from the second half of the input, so the multi-file totals and the
@@ -88,6 +90,22 @@ export function withDexHeader(data: Buffer): Buffer {
   return out;
 }
 
+/** The APK the target reads for `dex` in `mode`: a manifest, classes.dex, and in mode 2 a classes2.dex. */
+export function apkOf(dex: Buffer, mode: number): Buffer {
+  const parts: Part[] = [
+    { name: 'AndroidManifest.xml', data: Buffer.alloc(0), deflate: false },
+    { name: 'classes.dex', data: dex, deflate: mode === 1 },
+  ];
+  if (mode === 2) {
+    parts.push({
+      name: 'classes2.dex',
+      data: withDexHeader(dex.subarray(dex.length >> 1)),
+      deflate: false,
+    });
+  }
+  return zipOf(parts);
+}
+
 function checkHeader(bytes: Buffer): void {
   const header = parseDexHeader(bytes);
   if (header === undefined) {
@@ -110,14 +128,7 @@ export async function fuzz(data: Buffer): Promise<void> {
   const dex = data.subarray(1);
   for (const bytes of [dex, withDexHeader(dex)]) {
     checkHeader(bytes);
-    const parts: Part[] = [{ name: 'classes.dex', data: bytes, deflate: mode === 1 }];
-    if (mode === 2) {
-      parts.push({
-        name: 'classes2.dex',
-        data: withDexHeader(bytes.subarray(bytes.length >> 1)),
-        deflate: false,
-      });
-    }
-    await readAndCheck(zipOf(parts), 'fuzz.apk');
+    const apk = apkOf(bytes, mode);
+    await readAndCheck(apk, 'fuzz.apk');
   }
 }

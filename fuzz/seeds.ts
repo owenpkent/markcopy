@@ -1117,6 +1117,13 @@ only(
   1,
   pointerBlock({ pointerSize: 4, info: SAMPLE_LINES })(BASE_GO),
 );
+// The longest "Module replaced by" row the reader assembles: a 512-character path, a space and a 512-character version.
+only(
+  'go-buildinfo',
+  'replacement-at-limit',
+  1,
+  inlineBlock({ info: ['mod	m	v1.0.0	', `=>	${'p'.repeat(512)}	v${'1'.repeat(511)}`] }),
+);
 only(
   'go-buildinfo',
   'long-length',

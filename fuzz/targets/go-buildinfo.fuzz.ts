@@ -38,13 +38,17 @@ const MODES = 3;
 const BASE = 0x400000;
 const MAGIC = [0xff, 0x20, 0x47, 0x6f, 0x20, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x69, 0x6e, 0x66, 0x3a];
 const MAX_SETTINGS = 64;
+// The reader caps each path and version at 512 characters.
+const MAX_FIELD = 512;
+// "Module replaced by" joins a replacement path and version with a space.
+const MAX_REPLACEMENT_ROW = 2 * MAX_FIELD + 1;
 
-function clean(label: string, text: string | undefined): void {
+function clean(label: string, text: string | undefined, limit = 1024): void {
   if (text === undefined) {
     return;
   }
-  if (hasControl(text) || text.length > 1024) {
-    throw new Error(`${label} holds a control character or runs past 1024 characters`);
+  if (hasControl(text) || text.length > limit) {
+    throw new Error(`${label} holds a control character or runs past ${limit} characters`);
   }
 }
 
@@ -61,8 +65,8 @@ function checkParsed(parsed: ParsedModinfo): void {
   for (const dep of parsed.deps) {
     clean('dependency path', dep.path);
     clean('dependency version', dep.version);
-    clean('replacement path', dep.replacedBy?.path);
-    clean('replacement version', dep.replacedBy?.version);
+    clean('replacement path', dep.replacedBy?.path, MAX_FIELD);
+    clean('replacement version', dep.replacedBy?.version, MAX_FIELD);
   }
   for (const [key, value] of parsed.settings) {
     clean('setting key', key);
@@ -81,7 +85,7 @@ function checkInfo(info: GoBuildInfo): void {
     throw new Error('goModuleRows does not give a row for each dependency');
   }
   for (const [label, value] of goProperties(info)) {
-    clean(label, value);
+    clean(label, value, label === 'Module replaced by' ? MAX_REPLACEMENT_ROW : 1024);
   }
 }
 
