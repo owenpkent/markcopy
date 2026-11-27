@@ -495,7 +495,9 @@ describe('Build tools and loader flags', () => {
 
 describe('renderPeHtml: Control Flow Guard and the other hardening rows', () => {
   const row = (html: string, label: string): string | undefined =>
-    new RegExp(`<td>${label.replace(/[()/]/g, '\\$&')}</td><td>([^<]*)</td>`).exec(html)?.[1];
+    new RegExp(`<td>${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}</td><td>([^<]*)</td>`).exec(
+      html,
+    )?.[1];
   const cfg = async (spec: PeSpec): Promise<string | undefined> =>
     row(await render(spec), 'Control Flow Guard');
   const CF = 0x4000;
