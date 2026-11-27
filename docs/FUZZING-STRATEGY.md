@@ -343,6 +343,86 @@ magic and module text keys, the DEX magics, cpio magics and `TRAILER!!!`, WinZip
 the APK signing block ids, and the ELF property note markers; each focused target has a
 dictionary of its own.
 
+## Coverage manifest, measured 2026-11-26
+
+A fuzz target that nobody remembers to write for a new parser is the gap this closes.
+`fuzz/coverage.json` lists every parser module and the fuzz targets that reach it:
+
+- `parsers`: `{ "src/pkg/rpm.ts": { "targets": ["pkg-rpm"], "minLineCoverage": 70 } }`. A
+  target is any name in the nightly matrix, variants included.
+- `notParsers`: a file that sits in a parser folder (or is listed on purpose) but reads
+  no untrusted bytes or text, with a one-line reason: types only, output escaping, geometry
+  over already-validated data.
+- `folders`: the directories whose every `.ts` file must be in one of the two. Standalone
+  parsers elsewhere in `src/` (CSV, Markdown rendering, the 3D readers, the probes) are
+  listed by path and have no folder to catch a new one, so add them by hand.
+
+**The check** is `tests/fuzzCoverage.test.ts`, part of `npm test`. It fails when a file in
+a listed folder is in neither table, when a path no longer exists (a rename), when a
+target is not in the `fuzz.yml` matrix, and when a file in `fuzz/targets/` is not run
+nightly. The message says what to add. It reads files only; nothing is fuzzed.
+
+**The nightly report** is the `coverage` job in `fuzz.yml`, after the fuzz jobs, on
+schedule and `workflow_dispatch` only. `node fuzz/coverage-report.js` (`npm run
+fuzz:coverage`) replays each listed target's committed seeds in its own process with
+`NODE_V8_COVERAGE`, maps V8's ranges on the built `out/fuzz/` files back to the `.ts`
+lines through the source maps, unions the coverage over a parser's targets and compares it
+with `minLineCoverage`. The table goes to the job summary. A second job with `issues:
+write` (the first holds only `contents: read`, because it runs the repository's code)
+opens or updates the `Fuzz coverage below threshold` issue, label `fuzz-coverage`, and
+closes it when every parser is back above its minimum.
+
+What the number means, so it is not read as more than it is:
+
+- It is the committed seeds replayed once. The nightly fuzzer mutates from them and from
+  its cached corpus, so it reaches at least this much. A threshold guards a regression in
+  the seeds and in the harness (a target that stops reaching a reader), not the fuzzer's
+  depth.
+- A variant (`pkg-rpm`, `image-png`) is replayed as its catch-all, which reads every
+  seed of every format, so the variants of one family measure the same.
+- A source line counts when the first token of any built line mapped to it ran (V8 block
+  coverage through a source map). It is close to what c8 would report on the `.ts` files,
+  not identical, and it is not branch coverage.
+- Minimums were set from one local run on Windows, 5 points under the measurement (10 for
+  files under 40 lines). The first Linux run may differ by a point or two.
+
+Measured, 121 parsers and 9 non-parsers; 15,104 of 19,917 lines (75.8%) overall:
+
+| Area                                 | Parsers | Lines covered | Lowest file (measured)      | Minimums |
+| ------------------------------------ | ------- | ------------- | --------------------------- | -------- |
+| `src/pkg/`                           | 29      | 80.4%         | `wheel.ts` 54.8             | 49 to 90 |
+| `src/pe/`                            | 8       | 88.1%         | `signer.ts` 83.1            | 78 to 90 |
+| `src/binary/`                        | 8       | 82.8%         | `goBuildInfo.ts` 71.4       | 66 to 95 |
+| `src/xlsx/`                          | 5       | 88.9%         | `render.ts` 87.2            | 82 to 85 |
+| `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
+| `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |
+| `src/ooxml/`                         | 9       | 82.2%         | `zip.ts` 64.7               | 59 to 92 |
+| `src/messages/`                      | 12      | 91.6%         | `markdown.ts` 76.7          | 71 to 90 |
+| `src/review/`                        | 5       | 40.2%         | `markdown.ts` 6.7           | 0 to 53  |
+| `src/` and `src/webview/` standalone | 21      | 67.1%         | `webview/videoInfo.ts` 11.8 | 6 to 86  |
+
+The weak spots are the review sidecar (`session.ts`, `markdown.ts`, `timecode.ts`: the
+`review` target reaches the YAML parser but little of what reads its output),
+`docx/read/extras.ts`, `webview/parts.ts`, `videoProxy.ts` and `webview/videoInfo.ts`.
+They are listed honestly with a low minimum; raising seeds there is the next step.
+
+The export writers (`ooxml/xhtml.ts`, `docx/build.ts`, `docx/package.ts`,
+`pptx/write/*`, `ooxml/write.ts`, `ooxml/tableLimits.ts`) had no target: they read the
+preview's serialized XHTML, whose text, `colspan`, `rowspan` and `style` values come from
+a document the user did not write. The `export-ooxml` target (seeds in
+`fuzz/corpus/export-ooxml/`, dictionary `fuzz/dict/export-ooxml.dict`) parses the input,
+builds both a .docx and a .pptx, checks each is a zip and that the same input gives the
+same report twice. Its first smoke run, 25 s on Windows, one process: 83,143 runs, cov
+845, ft 2864, no finding. The first version of its oracle compared the two docx byte for
+byte and failed within 5 seconds: `fflate` stamps each zip entry with the clock, so the
+bytes differ between runs a few seconds apart. That is the harness's mistake, not a
+finding, but exports are not byte-reproducible for that reason.
+
+Adding a parser: write its target (or seeds for an existing one) and dictionary tokens,
+add its path to `parsers` with the targets and a minimum a few points under what
+`npm run fuzz:coverage` prints, add the target to the `fuzz.yml` matrix, and add a row to
+the tables above, all in the same PR.
+
 ## Measuring progress
 
 Re-take, with the date, after each step: the unreached table (the esbuild metafile
