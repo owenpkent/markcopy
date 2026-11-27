@@ -745,6 +745,36 @@ describe('Space on a focused speed button while auto-scroll runs', () => {
   });
 });
 
+describe('Home while auto-scroll runs', () => {
+  it('cancels a link still being looked up, even once auto-scroll carries on from the top', async () => {
+    h.dests.four = [{ num: 4, gen: 0 }, { name: 'Fit' }];
+    h.pageByNum = { 4: 3 };
+    h.annots[1] = [{ ...CHAPTER, dest: 'four' }];
+    let releaseFour!: () => void;
+    await loadDoc();
+    await showPage(1);
+    await vi.waitFor(() => expect(links()).toHaveLength(1));
+    h.destGates.four = new Promise<void>((r) => (releaseFour = r));
+    scrollTop = 300;
+    clickAt(30, 80); // page 4, its lookup waits
+    document.getElementById('mc-autoscroll-toggle')!.click();
+    // Let auto-scroll write a few positions of its own first.
+    for (let t = 100; t <= 300; t += 100) {
+      frames.splice(0).forEach((f) => f(t));
+    }
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+    );
+    scrollTop = 0; // what the browser's default action does
+    for (let t = 400; t <= 700; t += 100) {
+      frames.splice(0).forEach((f) => f(t));
+    }
+    releaseFour();
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
 describe('Enter held on a speed button', () => {
   it('stops at the slowest speed, while a fresh press may reverse', async () => {
     await loadDoc();

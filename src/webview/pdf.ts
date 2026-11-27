@@ -2192,6 +2192,10 @@ function stopAutoScroll(message: string): void {
 // Where auto-scroll last put the view, so a key pressed while it runs is not
 // mistaken for the reader scrolling (see the key listener at the end of the file).
 let autoWroteTop: number | null = null;
+// Counts the frames that found the view somewhere auto-scroll did not put it (a key
+// such as Home moved it) and carried on from there. Such a move is the reader's even
+// though auto-scroll's next write then puts the view at autoWroteTop again.
+let autoAdoptedMoves = 0;
 
 function autoFrame(ts: number): void {
   autoRaf = 0;
@@ -2208,6 +2212,9 @@ function autoFrame(ts: number): void {
     // position current so resuming continues from wherever the page is.
     autoPos = s.scrollTop;
   } else {
+    if (autoWroteTop !== null && Math.abs(s.scrollTop - autoWroteTop) > 0.5) {
+      autoAdoptedMoves++;
+    }
     const result = advanceFrame({
       pos: autoPos,
       scrollTop: s.scrollTop,
@@ -2440,6 +2447,7 @@ document.addEventListener('keydown', (e) => {
   }
   const s = scroller();
   const { scrollTop, scrollLeft } = s;
+  const adopted = autoAdoptedMoves;
   const token = ++keyScrollCheck;
   let frames = 0;
   const check = (): void => {
@@ -2447,7 +2455,11 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     const moved = s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft;
-    const byAutoScroll = autoOn && s.scrollLeft === scrollLeft && s.scrollTop === autoWroteTop;
+    const byAutoScroll =
+      autoOn &&
+      autoAdoptedMoves === adopted &&
+      s.scrollLeft === scrollLeft &&
+      s.scrollTop === autoWroteTop;
     if (moved && !byAutoScroll) {
       readerNavigated();
     } else if (++frames < 3) {
