@@ -614,20 +614,20 @@ Robustness first, then the additions users would notice most:
 
 ### Status
 
-As of 2026-11-26. "Open" means a pull request exists and has not been merged yet.
+As of 2026-11-27. "Merged" means the pull request is in `main`; "Open" means it exists and has not been merged yet.
 
-| Item                                | Pull request                                     | State |
-| ----------------------------------- | ------------------------------------------------ | ----- |
-| 1. Per-entry tolerance              | #263                                             | Open  |
-| 2. `toOffset` and `VirtualSize`     | #263                                             | Open  |
-| 3. ELF `PN_XNUM` and `SHT_NULL`     | #264                                             | Open  |
-| 4. Go build info                    | #265                                             | Open  |
-| 5. Section names, flags, Rich       | #268 (on #263)                                   | Open  |
-| 6. Mach-O and fat reader            | #267                                             | Open  |
-| 7. Load config and GuardFlags       | #269 (on #268)                                   | Open  |
-| 7. GNU property bits (CET, BTI)     | #270 (on #264)                                   | Open  |
-| 8. DEX summary, RPM payload members | #277 (DEX), #278 (RPM payload)                   | Open  |
-| 9. Encryption labels                | #271                                             | Open  |
-| 9. Certificate detail, APK signer   | #272                                             | Open  |
-| 9. Digest checks                    | #275 (RPM, Alpine), #276 (Authenticode, on #275) | Open  |
-| 10. Table-driven detection          | #279                                             | Open  |
+| Item                                | Pull request                            | State  |
+| ----------------------------------- | --------------------------------------- | ------ |
+| 1. Per-entry tolerance              | #263                                    | Merged |
+| 2. `toOffset` and `VirtualSize`     | #263                                    | Merged |
+| 3. ELF `PN_XNUM` and `SHT_NULL`     | #264                                    | Merged |
+| 4. Go build info                    | #265                                    | Merged |
+| 5. Section names, flags, Rich       | #268                                    | Merged |
+| 6. Mach-O and fat reader            | #267                                    | Merged |
+| 7. Load config and GuardFlags       | #269                                    | Merged |
+| 7. GNU property bits (CET, BTI)     | #270                                    | Merged |
+| 8. DEX summary, RPM payload members | #277 (DEX), #278 (RPM payload)          | Merged |
+| 9. Encryption labels                | #271                                    | Merged |
+| 9. Certificate detail, APK signer   | #272                                    | Merged |
+| 9. Digest checks                    | #275 (RPM, Alpine), #276 (Authenticode) | Merged |
+| 10. Table-driven detection          | #279                                    | Open   |
