@@ -521,6 +521,49 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
+### Auto-scroll
+
+- [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
+- [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
+- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up, and the Play/Pause name says which way it is scrolling.
+- [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
+- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar. At Extra large, split the editor so the pane is about 760 px, then 300 px and 240 px wide: all three small buttons stay fully on screen (they shrink toward 44 px as the pane narrows).
+- [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.
+- [ ] Let it reach the end: it stops with a toast, and a screen reader says it stopped even though the controls have gone. Start it again at the end: it goes up. Scroll up to the top while it runs up: it stops.
+- [ ] Escape stops it; with the right-click menu open, Escape closes only the menu.
+- [ ] Tab reaches every puck button; Enter/Space steps with the keyboard; a screen reader announces pause, speed and size changes.
+- [ ] Stop it mid-document and reopen the PDF: the reading position is where it stopped (see Reading position). Hide and show the tab: speed and size are kept.
+- [ ] In the LaTeX preview it works the same, and a recompile does not break it.
+
+### Reading position
+
+- [ ] ★ Scroll a multi-page PDF to the middle of a page, close the tab, reopen it: the same page and spot are at the top of the view.
+- [ ] ★ Zoom to 200 percent first: it reopens at 200 percent. Turn on fit width: it reopens in fit width, re-fitted to the pane.
+- [ ] Restart VS Code with the PDF open: it comes back at the same place.
+- [ ] Scroll back to the very top at 100 percent and reopen: it opens at page 1, as for a PDF never opened.
+- [ ] Replace the PDF with a shorter one of the same name (so the saved page no longer exists) and reopen: it opens at page 1 and does not error.
+- [ ] Open a second, different PDF: it has its own position and does not inherit the first one's.
+- [ ] In the LaTeX preview, a recompile still keeps your place (this feature adds no storage for it).
+
+### Links
+
+Use a PDF that has a table of contents or cross-references and a web link (a LaTeX document built with `hyperref`, or a paper from arXiv).
+
+- [ ] ★ Click a contents entry or cross-reference: the view jumps to the target page (and to the spot on it when the link names one) and the page indicator follows.
+- [ ] ★ Click an external link: the default browser opens that address, and the viewer is unchanged. A `mailto:` link opens the mail client.
+- [ ] Hover a link in the Hand tool: the pointer becomes a hand and a tooltip shows the address.
+- [ ] ★ Zoom in and out several steps, and use fit width: the link boxes (hover to find them) still sit on the linked text on every page, including after scrolling away and back.
+- [ ] With dark or green pages, links still work and sit on the right text.
+- [ ] Switch to the Pointer tool: dragging across linked text selects it without following the link; a plain click on the link follows it.
+- [ ] Tab to a link and press Enter: it is followed.
+- [ ] After a pan with the Hand tool that starts or ends over a link, the link is not followed.
+- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action naming a local file) does nothing. A link to another PDF given as an `https` address, or a Launch action naming an `https` address, opens in the browser. Hovering an external link in the Hand tool shows its address.
+- [ ] A link that wraps over two lines does nothing when clicked in the blank gap between the lines.
+- [ ] With a screen reader, a table of contents reads as one named link per chapter, not "Go to destination" repeatedly.
+- [ ] Open a long PDF and click a first-page contents link to a late page before it finishes loading: no error, and the view jumps once the page appears.
+- [ ] A comment's Save or Delete button placed over a link does not also follow the link.
+- [ ] In the LaTeX preview, links in the compiled PDF behave the same.
+
 ### Tools, selection, and copy
 
 - [ ] Right-click -> **Preferences** toggles between **Hand Tool (Drag to Scroll)** and **Pointer Tool (Select Text)**.
