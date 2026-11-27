@@ -31,6 +31,7 @@ import { buildCertificate, buildProduct, buildXar, packageInfoXml } from '../tes
 import { buildZip, type FixtureEntry } from '../tests/pkg/zipFixture';
 import { buildAxml, type AxmlAttr, type AxmlElement } from '../tests/pkg/axmlFixture';
 import { buildApk } from '../tests/pkg/alpineFixture';
+import * as fx from '../tests/pkg/encryptionFixture';
 import { buildDmg, buildEncryptedDmg } from '../tests/pkg/dmgFixture';
 
 // fflate stamps gzip headers with the current time; pin it so a rerun gives identical bytes.
@@ -674,6 +675,14 @@ polyglot('zip-then-pe', 1, NAME_AT('fuzz.jar'), cat(aZip(), buildPe()));
 polyglot('pe-then-zip', 1, NAME_AT('fuzz.exe'), cat(buildPe(), aZip()));
 polyglot('deb-then-pdf', 1, NAME_AT('fuzz.pdf'), cat(buildDeb({ dataSize: 64 }), aPdf()));
 polyglot('zip-with-pdf-comment', 1, NAME_AT('fuzz.pdf'), aZip(aPdf(), 'startxref 0 %%EOF'));
+polyglot(
+  'sevenzip-then-zip',
+  1,
+  NAME_AT('fuzz.bin'),
+  cat(fx.sevenZipEncoded([[fx.AES_CODER(19), fx.LZMA]]), aZip()),
+);
+polyglot('kdbx-then-zip', 1, NAME_AT('fuzz.bin'), cat(fx.kdbx3(), aZip()));
+polyglot('luks-then-pdf', 1, NAME_AT('fuzz.pdf'), cat(fx.luks1({ slots: [100000] }), aPdf()));
 polyglot('alpine-apk', 1, NAME_AT('fuzz.apk'), buildApk());
 polyglot('pe-overlay-zip', 2, 0, buildPe({ overlay: aZip() }));
 polyglot('pe-overlay-junk', 2, 0, buildPe({ overlay: 200 }));
@@ -689,6 +698,390 @@ polyglot('signatures-pdf', 3, 0, aPdf());
 // A shaped pkg file with an empty zip end record appended: mode 0, flags 1, then a SHAPES index and the file.
 const elfShape = SHAPES.findIndex((s) => s.format === 'elf');
 polyglot('shaped-elf-plus-zip-end', 0, 1, cat(Uint8Array.of(elfShape), buildElf()));
+// ---- Encrypted containers and key files ----------------------------------------
+
+const focusedDirs = new Map<string, string>();
+
+/** A seed for a target that has no file-source counterpart: a stage byte, then the input. */
+function only(target: string, name: string, stage: number, bytes: Uint8Array): void {
+  let dir = focusedDirs.get(target);
+  if (dir === undefined) {
+    dir = join(out, target);
+    mkdirSync(dir, { recursive: true });
+    focusedDirs.set(target, dir);
+  }
+  const seed = new Uint8Array(bytes.length + 1);
+  seed[0] = stage;
+  seed.set(bytes, 1);
+  if (seed.length > MAX_BYTES) {
+    skipped.push(`${target}/${name} (${seed.length} bytes)`);
+    return;
+  }
+  writeFileSync(join(dir, name), seed);
+  console.log(`${target}/${name}\t${seed.length}`);
+}
+//
+// Built from tests/pkg/encryptionFixture.ts. Every salt, IV, nonce and wrapped key in them is the
+// marker byte 0xab, which the page oracle (fuzz/targets/binaryOracle.ts) looks for in a page.
+
+/** The `which`-th shape of a format (a format with two shapes, such as RAR 5 and RAR 4). */
+function pkgNth(format: string, which: number, seedName: string, bytes: Uint8Array): void {
+  const indexes = SHAPES.flatMap((s, i) => (s.format === format ? [i] : []));
+  const seed = new Uint8Array(bytes.length + 1);
+  seed[0] = indexes[which];
+  seed.set(bytes, 1);
+  emit(pkgDir, `${format}-${seedName}.seed`, seed);
+}
+const text = (value: string): Uint8Array => new TextEncoder().encode(value);
+
+// 7-Zip
+pkgNth('7z', 0, 'encrypted-header', fx.sevenZipEncoded([[fx.AES_CODER(19), fx.LZMA]]));
+pkgNth('7z', 0, 'encrypted-folder', fx.sevenZipPlain([[fx.AES_CODER(18), fx.LZMA]]));
+pkgNth('7z', 0, 'mixed-folders', fx.sevenZipPlain([[fx.AES_CODER(), fx.LZMA], [fx.LZMA]]));
+pkgNth('7z', 0, 'compressed-header', fx.sevenZipEncoded([[fx.LZMA]]));
+pkgNth('7z', 0, 'folder-count-lies', fx.sevenZipPlain([[fx.LZMA]], 9));
+
+// RAR 5 (shape 0) and RAR 4 (shape 1)
+pkgNth(
+  'rar',
+  0,
+  'rar5-encrypted-headers',
+  fx.rar5(fx.rar5Main(), fx.rar5EncryptionHeader(15), fx.rar5End()),
+);
+pkgNth(
+  'rar',
+  0,
+  'rar5-encrypted-file',
+  fx.rar5(fx.rar5Main(), fx.rar5File('a.txt', { kdf: 15 }), fx.rar5File('b.txt'), fx.rar5End()),
+);
+pkgNth(
+  'rar',
+  0,
+  'rar5-odd-version',
+  fx.rar5(fx.rar5Main(), fx.rar5File('c.txt', { kdf: 30, version: 3 })),
+);
+pkgNth('rar', 1, 'rar4-password-headers', fx.rar4(fx.rar4Main(true), fx.rar4End()));
+pkgNth(
+  'rar',
+  1,
+  'rar4-encrypted-file',
+  fx.rar4(fx.rar4Main(), fx.rar4File('a.txt', true), fx.rar4End()),
+);
+
+// LUKS: version 1 slots, and version 2 with its JSON area
+pkgNth('luks', 0, 'luks1-slots', fx.luks1({ slots: [200000, undefined, 150000] }));
+pkgNth('luks', 0, 'luks1-no-key-size', fx.luks1({ keyBytes: 0 }));
+const luksJson = {
+  keyslots: {
+    '0': {
+      type: 'luks2',
+      key_size: 64,
+      af: { type: 'luks1', stripes: 4000, hash: 'sha256' },
+      area: {
+        type: 'raw',
+        encryption: 'aes-xts-plain64',
+        key_size: 64,
+        offset: '32768',
+        size: '258048',
+      },
+      kdf: {
+        type: 'argon2id',
+        time: 4,
+        memory: 1048576,
+        cpus: 4,
+        salt: 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=',
+      },
+    },
+    '1': {
+      type: 'luks2',
+      key_size: 64,
+      area: { type: 'raw', encryption: 'aes-xts-plain64', key_size: 64 },
+      kdf: { type: 'pbkdf2', hash: 'sha256', iterations: 1000000, salt: 'q6urq6urq6urq6ur' },
+    },
+    '2': {
+      type: 'luks2',
+      key_size: 32,
+      area: { encryption: 'aes-cbc-essiv:sha256' },
+      kdf: { type: 'argon2i', time: 1, memory: 64, cpus: 1 },
+    },
+  },
+  tokens: {
+    '0': { type: 'luks2-keyring', keyslots: ['0'] },
+    '1': { type: 'systemd-tpm2', keyslots: ['1'] },
+  },
+  segments: {
+    '0': {
+      type: 'crypt',
+      offset: '16777216',
+      size: 'dynamic',
+      iv_tweak: '0',
+      encryption: 'aes-xts-plain64',
+      sector_size: 4096,
+    },
+  },
+  digests: {
+    '0': {
+      type: 'pbkdf2',
+      keyslots: ['0', '1'],
+      segments: ['0'],
+      hash: 'sha256',
+      iterations: 1000,
+      salt: 'q6urq6ur',
+      digest: 'q6urq6ur',
+    },
+  },
+  config: { json_size: '12288', keyslots_size: '4161536' },
+};
+pkgNth('luks', 0, 'luks2-json', fx.luks2(luksJson, { headerSize: 6144 }));
+pkgNth(
+  'luks',
+  0,
+  'luks2-json-damaged',
+  fx.luks2('{"keyslots": {"0": {"type": "luks2", "kdf": ', { headerSize: 6144 }),
+);
+pkgNth(
+  'luks',
+  0,
+  'luks2-wrong-types',
+  fx.luks2(
+    { keyslots: { '0': { kdf: { type: 5, time: 'x' } } }, tokens: [] },
+    { headerSize: 6144 },
+  ),
+);
+
+// KeePass
+pkgNth('kdbx', 0, 'kdbx3-aes', fx.kdbx3());
+pkgNth(
+  'kdbx',
+  0,
+  'kdbx3-twofish',
+  fx.kdbx3({ cipher: fx.TWOFISH_CIPHER, compression: 0, rounds: 1_000_000 }),
+);
+pkgNth(
+  'kdbx',
+  0,
+  'kdbx4-argon2id',
+  fx.kdbx4(
+    fx.variantDictionary([
+      fx.dictBytes('$UUID', fx.hex(fx.ARGON2ID)),
+      fx.dictU64('I', 2),
+      fx.dictU64('M', 67108864),
+      fx.dictU32('P', 4),
+      fx.dictU32('V', 0x13),
+      fx.dictBytes('S', fx.secret(32)),
+    ]),
+  ),
+);
+pkgNth(
+  'kdbx',
+  0,
+  'kdbx4-aes-kdf',
+  fx.kdbx4(
+    fx.variantDictionary([
+      fx.dictBytes('$UUID', fx.hex(fx.AES_KDF_V4)),
+      fx.dictU64('R', 60000),
+      fx.dictBytes('S', fx.secret(32)),
+    ]),
+    { cipher: fx.CHACHA_CIPHER },
+  ),
+);
+pkgNth('kdbx', 0, 'kdbx4-no-kdf', fx.kdbx4(undefined));
+
+// age, binary header (shape 0) and armored (shape 1)
+const ageStanzas = [
+  '-> X25519 ' + 'A'.repeat(43),
+  '-> scrypt ' + 'q6urq6urq6urq6urq6urq6' + ' 18',
+  '-> ssh-ed25519 abcdefgh ' + 'B'.repeat(43),
+  '-> plugin-fido2 x',
+];
+pkgNth('age', 0, 'stanzas', text(fx.ageFile(ageStanzas)));
+pkgNth(
+  'age',
+  0,
+  'scrypt-bad-work-factor',
+  text(fx.ageFile(['-> scrypt ' + 'q6urq6urq6urq6urq6urq6' + ' 99'])),
+);
+pkgNth(
+  'age',
+  1,
+  'armored',
+  text(
+    fx
+      .armor('AGE ENCRYPTED FILE', fx.enc(fx.ageFile(['-> X25519 ' + 'A'.repeat(43)])))
+      .replace('=AAAA\n', ''),
+  ),
+);
+
+// OpenPGP: armored messages (shape 0) and keys (shape 1), and a binary file named .gpg (shape 2)
+const KEY_ID = '829b606631645531';
+const pgpMessage = [
+  ...fx.newPacket(1, fx.pkesk(KEY_ID, 1)),
+  ...fx.newPacket(3, fx.skesk4(9, fx.s2kIterated(8, 0xff))),
+  ...fx.newPacket(18, fx.SEIPD1),
+];
+pkgNth('pgp', 0, 'armored-message', text(fx.armor('PGP MESSAGE', pgpMessage, ['Version: test'])));
+pkgNth(
+  'pgp',
+  0,
+  'armored-signed-message',
+  text('-----BEGIN PGP MESSAGE-----\n\n=AAAA\n-----END PGP MESSAGE-----\n'),
+);
+pkgNth(
+  'pgp',
+  1,
+  'armored-public-key',
+  text(fx.armor('PGP PUBLIC KEY BLOCK', fx.newPacket(6, [4, ...fx.secret(20)]))),
+);
+pkgNth('pgp', 2, 'binary-message', Uint8Array.from(pgpMessage));
+pkgNth(
+  'pgp',
+  2,
+  'binary-old-format',
+  Uint8Array.from([...fx.newPacket(1, fx.pkesk(KEY_ID, 16)), ...fx.oldPacket(18, fx.SEIPD1)]),
+);
+
+// PKCS #12
+const shroudedKey = fx.bag(fx.OID.shroudedKeyBag, fx.encryptedPrivateKeyInfo(fx.pbes2()));
+pkgNth(
+  'pkcs12',
+  0,
+  'modern',
+  fx.pfx(
+    [fx.safeContentsData([shroudedKey]), fx.safeContentsEncrypted(fx.pbes2({ iterations: 10000 }))],
+    {
+      algorithm: fx.OID.sha256,
+      iterations: 10000,
+    },
+  ),
+);
+pkgNth(
+  'pkcs12',
+  0,
+  'legacy-3des-rc2',
+  fx.pfx(
+    [
+      fx.safeContentsEncrypted(fx.legacyPbe(fx.OID.tripleDesP12, 2048)),
+      fx.safeContentsEncrypted(fx.legacyPbe(fx.OID.rc2_40P12, 2048)),
+    ],
+    { algorithm: fx.OID.sha1 },
+  ),
+);
+pkgNth(
+  'pkcs12',
+  0,
+  'scrypt-key',
+  fx.pfx([
+    fx.safeContentsData([
+      fx.bag(fx.OID.shroudedKeyBag, fx.encryptedPrivateKeyInfo(fx.pbes2Scrypt())),
+    ]),
+  ]),
+);
+pkgNth(
+  'pkcs12',
+  0,
+  'plain',
+  fx.pfx([
+    fx.safeContentsData([
+      fx.bag(fx.OID.keyBag, fx.seq(fx.derInt(0))),
+      fx.bag(fx.OID.certBag, fx.seq(fx.derInt(1))),
+    ]),
+  ]),
+);
+
+// PEM
+pkgNth(
+  'pem',
+  0,
+  'encrypted-pkcs8',
+  text(
+    fx.pem('ENCRYPTED PRIVATE KEY', fx.encryptedPrivateKeyInfo(fx.pbes2({ iterations: 600000 }))),
+  ),
+);
+pkgNth('pem', 0, 'encrypted-pkcs8-not-der', text(fx.pem('ENCRYPTED PRIVATE KEY', fx.secret(40))));
+pkgNth(
+  'pem',
+  1,
+  'openssh-bcrypt',
+  text(fx.pem('OPENSSH PRIVATE KEY', fx.openssh('aes256-ctr', 'bcrypt', 16))),
+);
+pkgNth('pem', 1, 'openssh-plain', text(fx.pem('OPENSSH PRIVATE KEY', fx.openssh('none', 'none'))));
+pkgNth(
+  'pem',
+  2,
+  'certificate-and-key',
+  text(fx.pem('CERTIFICATE', fx.secret(40)) + fx.pem('PRIVATE KEY', fx.secret(40))),
+);
+pkgNth(
+  'pem',
+  3,
+  'legacy-encrypted-rsa',
+  text(
+    fx.pem('RSA PRIVATE KEY', fx.secret(40), [
+      'Proc-Type: 4,ENCRYPTED',
+      'DEK-Info: AES-128-CBC,ABABABABABABABABABABABABABABABAB',
+    ]),
+  ),
+);
+
+// key-encodings target: stage 0 DER or BER, 1 base64 (the second byte is the output cap), 2 PEM text, 3 armor and age text.
+const modernPfx = fx.pfx(
+  [fx.safeContentsData([shroudedKey]), fx.safeContentsEncrypted(fx.pbes2())],
+  {
+    algorithm: fx.OID.sha256,
+    iterations: 10000,
+  },
+);
+only('key-encodings', 'der-pfx', 0, modernPfx);
+only('key-encodings', 'der-pbes2', 0, Uint8Array.from(fx.encryptedPrivateKeyInfo(fx.pbes2())));
+only(
+  'key-encodings',
+  'der-pbes2-scrypt',
+  0,
+  Uint8Array.from(fx.encryptedPrivateKeyInfo(fx.pbes2Scrypt())),
+);
+only(
+  'key-encodings',
+  'ber-indefinite',
+  0,
+  Uint8Array.from([
+    0x30, 0x80, 0x02, 0x01, 0x03, 0x24, 0x80, 0x04, 0x02, 0xab, 0xab, 0x00, 0x00, 0x00, 0x00,
+  ]),
+);
+only(
+  'key-encodings',
+  'der-deep',
+  0,
+  Uint8Array.from([...new Array<number>(14).fill(0x30), ...new Array<number>(14).fill(0x00)]),
+);
+only('key-encodings', 'base64-plain', 1, cat(Uint8Array.of(64), text('QUJDREVGRw==\nQUJD')));
+only(
+  'key-encodings',
+  'base64-whitespace-and-stop',
+  1,
+  cat(Uint8Array.of(8), text('QU JD\tRE\r\nRkc* more')),
+);
+only(
+  'key-encodings',
+  'pem-two-blocks',
+  2,
+  text(
+    fx.pem('CERTIFICATE', fx.secret(40)) +
+      fx.pem('RSA PRIVATE KEY', fx.secret(40), [
+        'Proc-Type: 4,ENCRYPTED',
+        'DEK-Info: AES-128-CBC,ABABABABABABABABABABABABABABABAB',
+      ]),
+  ),
+);
+only('key-encodings', 'pem-header-only', 2, text('-----BEGIN X-----\nA: b\n\n-----END X-----\n'));
+only('key-encodings', 'armor-pgp', 3, text(fx.armor('PGP MESSAGE', pgpMessage, ['Version: test'])));
+only(
+  'key-encodings',
+  'age-armor',
+  3,
+  text(fx.armor('AGE ENCRYPTED FILE', fx.enc(fx.ageFile(ageStanzas))).replace('=AAAA\n', '')),
+);
+only('key-encodings', 'age-binary', 3, text(fx.ageFile(ageStanzas)));
+
 if (skipped.length > 0) {
   console.log(`SKIPPED (over ${MAX_BYTES} bytes): ${skipped.join(', ')}`);
 }

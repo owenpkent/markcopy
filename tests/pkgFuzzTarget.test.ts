@@ -151,10 +151,12 @@ describe('pkg fuzz target: cost limits', () => {
 
   it('lists the same formats fuzz/run.js and the nightly matrix offer as pkg-<format>', () => {
     const run = readFileSync(join(__dirname, '../fuzz/run.js'), 'utf8');
-    const listed = /formats: \[('elf'[^\]]*)\]/
+    const listed = /formats: \[\s*('elf'[^\]]*)\]/
       .exec(run)?.[1]
       .split(',')
-      .map((f) => f.trim().slice(1, -1));
+      .map((f) => f.trim())
+      .filter((f) => f !== '')
+      .map((f) => f.slice(1, -1));
     expect(listed).toEqual(PKG_FORMATS);
     const nightly = readFileSync(join(__dirname, '../.github/workflows/fuzz.yml'), 'utf8');
     for (const format of PKG_FORMATS) {
