@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   destGate: null as Promise<void> | null,
   destGates: {} as Record<string, Promise<void>>,
   pageByNum: {} as Record<number, number>,
+  destLookups: [] as string[],
   observed: [] as Array<{ cb: (e: unknown[]) => void }>,
 }));
 
@@ -34,6 +35,7 @@ vi.mock('pdfjs-dist', () => ({
     promise: Promise.resolve({
       numPages: h.pageCount,
       getDestination: async (name: string) => {
+        h.destLookups.push(name);
         await h.destGate;
         await h.destGates[name];
         return h.dests[name] ?? null;
@@ -485,12 +487,17 @@ describe('two destination links followed in a row', () => {
     await loadDoc();
     await vi.waitFor(() => expect(document.querySelectorAll('.mc-page')).toHaveLength(5));
     await showPage(1);
+    // Both link boxes are drawn once page 1 has rendered; click only then, or a
+    // slower machine clicks an empty page.
+    await vi.waitFor(() => expect(links()).toHaveLength(2));
     const releases: Record<string, () => void> = {};
     for (const name of ['two', 'four']) {
       h.destGates[name] = new Promise<void>((r) => (releases[name] = r));
     }
+    h.destLookups = [];
     clickAt(30, 80); // page 2
     clickAt(75, 20); // page 4
+    expect(h.destLookups).toEqual(['two', 'four']);
     return { release: (n) => releases[n]() };
   }
   const label = () => document.getElementById('mc-page-label')!.textContent;
