@@ -687,6 +687,64 @@ describe('the first checkpoint after a zoom step', () => {
   });
 });
 
+describe('a page action after an older link still being looked up', () => {
+  it('lands on the action page, not the older link', async () => {
+    h.dests.two = [{ num: 2, gen: 0 }, { name: 'Fit' }];
+    h.pageByNum = { 2: 1 };
+    h.annots[1] = [
+      { ...CHAPTER, dest: 'two' },
+      { subtype: 'Link', rect: [60, 70, 90, 90], action: 'LastPage' },
+    ];
+    let releasePages!: () => void;
+    h.gates[3] = new Promise<void>((r) => (releasePages = r));
+    let releaseTwo!: () => void;
+    await loadDoc();
+    await showPage(1);
+    await vi.waitFor(() => expect(links()).toHaveLength(2));
+    h.destGates.two = new Promise<void>((r) => (releaseTwo = r));
+    clickAt(30, 80); // page 2, its lookup waits
+    clickAt(75, 20); // Last Page: page 5 is not laid out yet, so it waits
+    releaseTwo();
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled(); // the older link gave way
+    releasePages();
+    await vi.waitFor(() =>
+      expect((scrollIntoView.mock.contexts.at(-1) as HTMLElement)?.dataset.page).toBe('5'),
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Space on a focused speed button while auto-scroll runs', () => {
+  it('does not cancel a link still being looked up', async () => {
+    h.dests.two = [{ num: 2, gen: 0 }, { name: 'Fit' }];
+    h.pageByNum = { 2: 1 };
+    h.annots[1] = [{ ...CHAPTER, dest: 'two' }];
+    let releaseTwo!: () => void;
+    await loadDoc();
+    await showPage(1);
+    await vi.waitFor(() => expect(links()).toHaveLength(1));
+    h.destGates.two = new Promise<void>((r) => (releaseTwo = r));
+    scrollTop = 300;
+    clickAt(30, 80); // page 2, its lookup waits
+    document.getElementById('mc-autoscroll-toggle')!.click();
+    const minus = document.querySelector<HTMLElement>('[data-as="minus"]')!;
+    minus.focus();
+    minus.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }),
+    );
+    // Auto-scroll keeps moving the view over the frames the key check watches.
+    for (let t = 100; t <= 400; t += 100) {
+      frames.splice(0).forEach((f) => f(t));
+    }
+    expect(scrollTop).not.toBe(300);
+    releaseTwo();
+    await vi.waitFor(() =>
+      expect((scrollIntoView.mock.contexts.at(-1) as HTMLElement)?.dataset.page).toBe('2'),
+    );
+  });
+});
+
 describe('Enter held on a speed button', () => {
   it('stops at the slowest speed, while a fresh press may reverse', async () => {
     await loadDoc();

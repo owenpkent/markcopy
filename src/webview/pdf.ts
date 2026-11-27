@@ -803,8 +803,16 @@ function followLink(target: LinkTarget): void {
     vscode.postMessage({ type: 'openLink', url: target.url });
   } else if (target.kind === 'named') {
     if (doc) {
+      // A navigation like any link: it supersedes an older lookup still in flight,
+      // which would otherwise land first and drop this jump while it waits.
       const page = namedActionPage(target.action, currentPage, doc.numPages);
-      whenPageExists(page, () => goToPage(page));
+      readerNavigated();
+      const token = navGeneration;
+      whenPageExists(page, () => {
+        if (token === navGeneration) {
+          goToPage(page);
+        }
+      });
     }
   } else {
     // Activating a link is a navigation: it supersedes older ones and takes the
@@ -2181,6 +2189,10 @@ function stopAutoScroll(message: string): void {
   flushPosition();
 }
 
+// Where auto-scroll last put the view, so a key pressed while it runs is not
+// mistaken for the reader scrolling (see the key listener at the end of the file).
+let autoWroteTop: number | null = null;
+
 function autoFrame(ts: number): void {
   autoRaf = 0;
   if (!autoOn) {
@@ -2206,6 +2218,8 @@ function autoFrame(ts: number): void {
     autoPos = result.pos;
     if (Math.abs(s.scrollTop - autoPos) > 0.01) {
       s.scrollTop = autoPos;
+      // Read back, since the browser may round the offset it was given.
+      autoWroteTop = s.scrollTop;
     }
     if (result.edge) {
       stopAutoScroll(
@@ -2415,7 +2429,10 @@ vscode.postMessage({ type: 'ready' });
 // only adjust a speed or press a button; a key that moves nothing must not cancel
 // the saved position.
 // Whether a key scrolls depends on the focused control, so judge it by what the
-// browser did: only a key that actually moved the view counts as navigation.
+// browser did: only a key that actually moved the view counts as navigation. While
+// auto-scroll runs the view moves on its own, so a view sitting exactly where
+// auto-scroll last put it has not been moved by the key (Space on a focused speed
+// button, for one, presses the button and scrolls nothing).
 let keyScrollCheck = 0;
 document.addEventListener('keydown', (e) => {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey) {
@@ -2429,7 +2446,9 @@ document.addEventListener('keydown', (e) => {
     if (token !== keyScrollCheck) {
       return;
     }
-    if (s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft) {
+    const moved = s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft;
+    const byAutoScroll = autoOn && s.scrollLeft === scrollLeft && s.scrollTop === autoWroteTop;
+    if (moved && !byAutoScroll) {
       readerNavigated();
     } else if (++frames < 3) {
       requestAnimationFrame(check);
