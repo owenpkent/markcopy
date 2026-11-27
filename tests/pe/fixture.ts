@@ -595,6 +595,22 @@ export interface PeSpec {
   };
   /** A CodeView "RSDS" debug record. `guid` is the usual 8-4-4-4-12 text form. */
   debug?: { guid: string; age: number; pdbPath: string };
+  /**
+   * A load configuration directory (data directory 10), laid out as PE32 or
+   * PE32+ by `plus`. Each field is written at its real offset. `size` is what
+   * the structure's own Size field says, to cut it short on purpose; the
+   * bytes are always written in full.
+   */
+  loadConfig?: {
+    size?: number;
+    cookie?: bigint;
+    seHandlerTable?: number;
+    seHandlerCount?: number;
+    cfCount?: bigint;
+    guardFlags?: number;
+  };
+  /** Adds an IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS (20) entry holding these bits. */
+  exDllCharacteristics?: number;
   /** Adds an IMAGE_DEBUG_TYPE_REPRO (16) entry, which marks a deterministic build. */
   repro?: boolean;
   /** A CLR header and metadata root. `flags` are the COMIMAGE_FLAGS_* bits. */
@@ -755,7 +771,27 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       .u32(ordinalTable);
   }
 
-  if (spec.debug || spec.repro) {
+  if (spec.loadConfig) {
+    const lc = spec.loadConfig;
+    const body = new DataView(new ArrayBuffer(plus ? 0x94 : 0x5c));
+    body.setUint32(0, lc.size ?? body.byteLength, true);
+    if (plus) {
+      body.setBigUint64(0x58, lc.cookie ?? 0n, true);
+      body.setBigUint64(0x88, lc.cfCount ?? 0n, true);
+      body.setUint32(0x90, lc.guardFlags ?? 0, true);
+    } else {
+      body.setUint32(0x3c, Number(lc.cookie ?? 0n), true);
+      body.setUint32(0x40, lc.seHandlerTable ?? 0, true);
+      body.setUint32(0x44, lc.seHandlerCount ?? 0, true);
+      body.setUint32(0x54, Number(lc.cfCount ?? 0n), true);
+      body.setUint32(0x58, lc.guardFlags ?? 0, true);
+    }
+    rdata.pad(8);
+    dirs[10] = { rva: here(), size: body.byteLength };
+    rdata.raw(new Uint8Array(body.buffer));
+  }
+
+  if (spec.debug || spec.repro || spec.exDllCharacteristics !== undefined) {
     const entries: { type: number; size: number; rva: number; file: number }[] = [];
     if (spec.debug) {
       rdata.pad(4);
@@ -780,6 +816,13 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       const file = hereFile();
       rdata.u32(32).raw(new Uint8Array(32).fill(0x11)); // length-prefixed hash
       entries.push({ type: 16, size: 36, rva, file });
+    }
+    if (spec.exDllCharacteristics !== undefined) {
+      rdata.pad(4);
+      const rva = here();
+      const file = hereFile();
+      rdata.u32(spec.exDllCharacteristics);
+      entries.push({ type: 20, size: 4, rva, file });
     }
     rdata.pad(4);
     dirs[6] = { rva: here(), size: entries.length * 28 };

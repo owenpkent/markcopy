@@ -6,7 +6,7 @@
 // through escapeHtml, and the webview sanitizes the result again on arrival.
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
-import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
+import { CFG_LABEL, NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
 import type { PeRich } from './rich';
 import {
   block,
@@ -249,6 +249,66 @@ function manifestRows(info: PeInfo): Row[] {
   return rows;
 }
 
+// IMAGE_GUARD_* bits of the load configuration's GuardFlags.
+const GUARD_CF_INSTRUMENTED = 0x100;
+const GUARD_SECURITY_COOKIE_UNUSED = 0x800;
+const GUARD_EH_CONTINUATION_TABLE_PRESENT = 0x400000;
+// IMAGE_DLLCHARACTERISTICS_NO_SEH.
+const DLL_NO_SEH = 0x400;
+
+// The header bit only says Control Flow Guard was asked for. The guard flags in
+// the load configuration say whether the image really carries the checks, so
+// the row compares the two and says when they disagree.
+function guardRow(info: PeInfo, headerBit: boolean): string {
+  const config = info.loadConfig;
+  const instrumented = ((config?.guardFlags ?? 0) & GUARD_CF_INSTRUMENTED) !== 0;
+  if (headerBit && instrumented) {
+    const count = config?.cfFunctionCount;
+    return count !== undefined && count > 0
+      ? `Yes, ${number(count)} CFG target-table entries`
+      : 'Yes';
+  }
+  if (headerBit) {
+    return 'Flag set, but the image has no guard data';
+  }
+  return instrumented ? 'Compiled for it, but not turned on' : 'No';
+}
+
+// Hardening the linker records outside the header flags: the load
+// configuration and the debug directory. A row appears only when the file
+// recorded the fact, so a short structure from an old linker adds no guesses.
+function hardeningRows(info: PeInfo): Row[] {
+  const rows: Row[] = [];
+  const config = info.loadConfig;
+  const flags = config?.guardFlags;
+  if (config?.securityCookie !== undefined) {
+    const used = config.securityCookie && ((flags ?? 0) & GUARD_SECURITY_COOKIE_UNUSED) === 0;
+    rows.push(['Stack cookies (/GS)', used ? 'Yes' : 'No']);
+  }
+  if (info.machine === 0x014c) {
+    // A 32-bit image's handlers must be on a list unless it has none at all.
+    const noSeh = (info.dllCharacteristics & DLL_NO_SEH) !== 0;
+    rows.push([
+      'Safe exception handlers (SafeSEH)',
+      noSeh
+        ? 'Not needed (no exception handlers)'
+        : config?.safeSeh
+          ? `Yes, ${number(config.safeSeh.handlers)} handlers`
+          : 'No',
+    ]);
+  }
+  if (flags !== undefined) {
+    rows.push([
+      'EH continuation metadata',
+      (flags & GUARD_EH_CONTINUATION_TABLE_PRESENT) !== 0 ? 'Yes' : 'No',
+    ]);
+  }
+  if (info.machine === 0x8664) {
+    rows.push(['CET shadow stack compatible', info.cetCompat ? 'Yes' : 'No']);
+  }
+  return rows;
+}
+
 function protectionSection(info: PeInfo): string {
   const rows: Row[] = manifestRows(info);
   const narrow = info.format === 'PE32';
@@ -263,8 +323,9 @@ function protectionSection(info: PeInfo): string {
       rows.push([label, 'Flag not set (64-bit Windows enforces DEP regardless)']);
       continue;
     }
-    rows.push([label, on ? 'Yes' : 'No']);
+    rows.push([label, label === CFG_LABEL ? guardRow(info, on) : on ? 'Yes' : 'No']);
   }
+  rows.push(...hardeningRows(info));
   if (info.loaderFlags.length > 0) {
     rows.push(['Other loader flags', info.loaderFlags.join(', ')]);
   }

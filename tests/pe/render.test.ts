@@ -492,3 +492,90 @@ describe('Build tools and loader flags', () => {
     );
   });
 });
+
+describe('renderPeHtml: Control Flow Guard and the other hardening rows', () => {
+  const row = (html: string, label: string): string | undefined =>
+    new RegExp(`<td>${label.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}</td><td>([^<]*)</td>`).exec(
+      html,
+    )?.[1];
+  const cfg = async (spec: PeSpec): Promise<string | undefined> =>
+    row(await render(spec), 'Control Flow Guard');
+  const CF = 0x4000;
+  const base = 0x140;
+
+  it('says Yes, with a count, when the header bit and the guard data agree', async () => {
+    const loadConfig = { guardFlags: 0x100, cfCount: 1234n };
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig })).toBe(
+      'Yes, 1,234 CFG target-table entries',
+    );
+    expect(await cfg({ plus: true, dllCharacteristics: base | CF, loadConfig })).toBe(
+      'Yes, 1,234 CFG target-table entries',
+    );
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig: { guardFlags: 0x100 } })).toBe(
+      'Yes',
+    );
+  });
+
+  it('says the flag is set but there is no guard data', async () => {
+    const none = 'Flag set, but the image has no guard data';
+    expect(await cfg({ dllCharacteristics: base | CF })).toBe(none);
+    expect(await cfg({ dllCharacteristics: base | CF, loadConfig: { guardFlags: 0 } })).toBe(none);
+    // The structure ends before GuardFlags, so nothing can be said of the table.
+    expect(
+      await cfg({ dllCharacteristics: base | CF, loadConfig: { size: 0x58, guardFlags: 0x100 } }),
+    ).toBe(none);
+  });
+
+  it('says compiled for it but not turned on, and No', async () => {
+    expect(await cfg({ dllCharacteristics: base, loadConfig: { guardFlags: 0x100 } })).toBe(
+      'Compiled for it, but not turned on',
+    );
+    expect(await cfg({ dllCharacteristics: base })).toBe('No');
+  });
+
+  it('shows stack cookies only when the structure holds the field', async () => {
+    const label = 'Stack cookies (/GS)';
+    expect(row(await render({}), label)).toBeUndefined();
+    expect(row(await render({ loadConfig: { cookie: 1n } }), label)).toBe('Yes');
+    expect(row(await render({ plus: true, loadConfig: { cookie: 1n } }), label)).toBe('Yes');
+    expect(row(await render({ loadConfig: {} }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { cookie: 1n, guardFlags: 0x800 } }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { size: 0x3c, cookie: 1n } }), label)).toBeUndefined();
+  });
+
+  it('words SafeSEH for 32-bit x86 only', async () => {
+    const label = 'Safe exception handlers (SafeSEH)';
+    expect(row(await render({ dllCharacteristics: base | 0x400 }), label)).toBe(
+      'Not needed (no exception handlers)',
+    );
+    expect(
+      row(await render({ loadConfig: { seHandlerTable: 0x405000, seHandlerCount: 3 } }), label),
+    ).toBe('Yes, 3 handlers');
+    expect(row(await render({ loadConfig: {} }), label)).toBe('No');
+    expect(row(await render({}), label)).toBe('No');
+    expect(row(await render({ plus: true }), label)).toBeUndefined();
+    expect(row(await render({ machine: 0x01c4 }), label)).toBeUndefined();
+  });
+
+  it('shows EH continuation metadata only when GuardFlags was read', async () => {
+    const label = 'EH continuation metadata';
+    expect(row(await render({}), label)).toBeUndefined();
+    expect(row(await render({ loadConfig: { guardFlags: 0x400000 } }), label)).toBe('Yes');
+    expect(row(await render({ loadConfig: { guardFlags: 0x100 } }), label)).toBe('No');
+    expect(row(await render({ loadConfig: { size: 0x58 } }), label)).toBeUndefined();
+  });
+
+  it('shows CET compatibility for x64 only', async () => {
+    const label = 'CET shadow stack compatible';
+    expect(row(await render({ plus: true, exDllCharacteristics: 1 }), label)).toBe('Yes');
+    expect(row(await render({ plus: true }), label)).toBe('No');
+    expect(row(await render({ exDllCharacteristics: 1 }), label)).toBeUndefined();
+    expect(row(await render({ plus: true, machine: 0xaa64 }), label)).toBeUndefined();
+  });
+
+  it('puts the new rows before the other loader flags', async () => {
+    const html = await render({ plus: true, dllCharacteristics: base | 0x8000, loadConfig: {} });
+    expect(html.indexOf('Stack cookies')).toBeGreaterThan(html.indexOf('AppContainer only'));
+    expect(html.indexOf('Stack cookies')).toBeLessThan(html.indexOf('Other loader flags'));
+  });
+});
