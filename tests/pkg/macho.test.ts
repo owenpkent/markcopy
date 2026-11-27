@@ -303,9 +303,13 @@ describe('readMachO: load commands', () => {
     const binary = rowsOf(info, 'Binary');
     expect(binary['Dynamic linker']).toBe('/usr/lib/dyld');
     expect(binary['Entry point']).toBe('__TEXT + 0x4a20');
-    expect(binary['Encrypted']).toBe('Yes');
+    expect(binary['Encrypted']).toMatch(
+      /^Yes \(FairPlay, cryptid 1, 8.00 KB from offset 0x1000\)$/,
+    );
     const plain = await read({ wide: false, commands: [encryption(LC.ENCRYPTION_INFO, 0)] });
-    expect(rowsOf(plain, 'Binary')['Encrypted']).toBe('No');
+    expect(rowsOf(plain, 'Binary')['Encrypted']).toBe('No (cryptid 0)');
+    const other = await read({ commands: [encryption(LC.ENCRYPTION_INFO_64, 3)] });
+    expect(rowsOf(other, 'Binary')['Encrypted']).toMatch(/^Yes \(cryptid 3, /);
     expect(rowsOf(await read({}), 'Binary')['Code signature']).toBe('None');
   });
 
@@ -708,7 +712,7 @@ describe('readMachO: caps and damaged commands', () => {
     const encrypted = await read({
       commands: [ok, encryption(LC.ENCRYPTION_INFO_64, 1), rawCommand(LC.RPATH, 6)],
     });
-    expect(rowsOf(encrypted, 'Binary')['Encrypted']).toBe('Yes');
+    expect(rowsOf(encrypted, 'Binary')['Encrypted']).toContain('Yes (FairPlay');
     const complete = await read({ commands: [ok] });
     expect(rowsOf(complete, 'Binary')['Code signature']).toBe('None');
     expect(rowsOf(complete, 'Protections')['__RESTRICT,__restrict section']).toBe('No');
