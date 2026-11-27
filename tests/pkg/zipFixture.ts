@@ -23,6 +23,10 @@ export interface FixtureEntry {
   /** Leave general-purpose bit 11 clear, so the name is in the legacy code page. */
   legacyName?: boolean;
   encrypted?: boolean;
+  /** Extra general-purpose flag bits, such as 0x40 for PKWARE strong encryption. */
+  flagBits?: number;
+  /** Raw bytes of extra field written in the central directory only. */
+  centralExtra?: Uint8Array;
   /** Override the uncompressed size the directory declares (a lie). */
   declaredSize?: number;
   /** Override the compression method number (an unsupported one). */
@@ -112,7 +116,8 @@ export function buildZip(entries: FixtureEntry[], options: ZipOptions = {}): Uin
     const name = entry.legacyName
       ? Uint8Array.from([...entry.name].map((c) => c.charCodeAt(0) & 0xff))
       : utf8(entry.name);
-    const flags = (entry.legacyName ? 0 : 0x800) | (entry.encrypted ? 1 : 0);
+    const flags =
+      (entry.legacyName ? 0 : 0x800) | (entry.encrypted ? 1 : 0) | (entry.flagBits ?? 0);
     const offset = body.length;
     const declared = entry.declaredSize ?? raw.length;
     const methodField = entry.methodNumber ?? method;
@@ -147,7 +152,7 @@ export function buildZip(entries: FixtureEntry[], options: ZipOptions = {}): Uin
       .u32(wide ? 0xffffffff : stored.length)
       .u32(wide ? 0xffffffff : declared)
       .u16(name.length)
-      .u16(wide ? 28 : 0)
+      .u16((wide ? 28 : 0) + (entry.centralExtra?.length ?? 0))
       .u16(0)
       .u16(0)
       .u16(0)
@@ -162,6 +167,7 @@ export function buildZip(entries: FixtureEntry[], options: ZipOptions = {}): Uin
         .u64(stored.length)
         .u64(entry.declaredOffset ?? offset);
     }
+    directory.bytes(entry.centralExtra ?? []);
   }
 
   if (options.signingBlockIds || options.signingBlockPairs) {

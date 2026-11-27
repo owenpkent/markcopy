@@ -6,7 +6,8 @@
 // through escapeHtml, and the webview sanitizes the result again on arrival.
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
-import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
+import { CFG_LABEL, NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
+import type { PeRich } from './rich';
 import { detailRows } from './signer';
 import {
   block,
@@ -20,6 +21,7 @@ import {
 } from '../binary/html';
 import { printable } from '../binary/text';
 import { own } from '../binary/own';
+import { GO_MODULE_ROWS, goModuleRows, goProperties } from '../binary/goBuildInfo';
 
 /** The id the icon travels under: the shared shell's media channel wants "m" and digits. */
 export const ICON_MEDIA_ID = 'm1';
@@ -254,6 +256,66 @@ function manifestRows(info: PeInfo): Row[] {
   return rows;
 }
 
+// IMAGE_GUARD_* bits of the load configuration's GuardFlags.
+const GUARD_CF_INSTRUMENTED = 0x100;
+const GUARD_SECURITY_COOKIE_UNUSED = 0x800;
+const GUARD_EH_CONTINUATION_TABLE_PRESENT = 0x400000;
+// IMAGE_DLLCHARACTERISTICS_NO_SEH.
+const DLL_NO_SEH = 0x400;
+
+// The header bit only says Control Flow Guard was asked for. The guard flags in
+// the load configuration say whether the image really carries the checks, so
+// the row compares the two and says when they disagree.
+function guardRow(info: PeInfo, headerBit: boolean): string {
+  const config = info.loadConfig;
+  const instrumented = ((config?.guardFlags ?? 0) & GUARD_CF_INSTRUMENTED) !== 0;
+  if (headerBit && instrumented) {
+    const count = config?.cfFunctionCount;
+    return count !== undefined && count > 0
+      ? `Yes, ${number(count)} CFG target-table entries`
+      : 'Yes';
+  }
+  if (headerBit) {
+    return 'Flag set, but the image has no guard data';
+  }
+  return instrumented ? 'Compiled for it, but not turned on' : 'No';
+}
+
+// Hardening the linker records outside the header flags: the load
+// configuration and the debug directory. A row appears only when the file
+// recorded the fact, so a short structure from an old linker adds no guesses.
+function hardeningRows(info: PeInfo): Row[] {
+  const rows: Row[] = [];
+  const config = info.loadConfig;
+  const flags = config?.guardFlags;
+  if (config?.securityCookie !== undefined) {
+    const used = config.securityCookie && ((flags ?? 0) & GUARD_SECURITY_COOKIE_UNUSED) === 0;
+    rows.push(['Stack cookies (/GS)', used ? 'Yes' : 'No']);
+  }
+  if (info.machine === 0x014c) {
+    // A 32-bit image's handlers must be on a list unless it has none at all.
+    const noSeh = (info.dllCharacteristics & DLL_NO_SEH) !== 0;
+    rows.push([
+      'Safe exception handlers (SafeSEH)',
+      noSeh
+        ? 'Not needed (no exception handlers)'
+        : config?.safeSeh
+          ? `Yes, ${number(config.safeSeh.handlers)} handlers`
+          : 'No',
+    ]);
+  }
+  if (flags !== undefined) {
+    rows.push([
+      'EH continuation metadata',
+      (flags & GUARD_EH_CONTINUATION_TABLE_PRESENT) !== 0 ? 'Yes' : 'No',
+    ]);
+  }
+  if (info.machine === 0x8664) {
+    rows.push(['CET shadow stack compatible', info.cetCompat ? 'Yes' : 'No']);
+  }
+  return rows;
+}
+
 function protectionSection(info: PeInfo): string {
   const rows: Row[] = manifestRows(info);
   const narrow = info.format === 'PE32';
@@ -268,7 +330,11 @@ function protectionSection(info: PeInfo): string {
       rows.push([label, 'Flag not set (64-bit Windows enforces DEP regardless)']);
       continue;
     }
-    rows.push([label, on ? 'Yes' : 'No']);
+    rows.push([label, label === CFG_LABEL ? guardRow(info, on) : on ? 'Yes' : 'No']);
+  }
+  rows.push(...hardeningRows(info));
+  if (info.loaderFlags.length > 0) {
+    rows.push(['Other loader flags', info.loaderFlags.join(', ')]);
   }
   if (narrow) {
     rows.push(['Large address aware', info.largeAddressAware ? 'Yes' : 'No']);
@@ -320,12 +386,38 @@ function importsSection(info: PeInfo): string {
     ['Library', 'Functions'],
     shown.map((entry) => [
       entry.library.slice(0, MAX_NAME_CHARS),
-      `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}${entry.delayLoaded ? ', loaded on first use' : ''}`,
+      `${
+        entry.functions === undefined
+          ? 'Not counted: the function list could not be read'
+          : `${number(entry.functions)} ${entry.functions === 1 ? 'function' : 'functions'}`
+      }${entry.delayLoaded ? ', loaded on first use' : ''}`,
     ]),
   );
   return info.imports.length > shown.length
     ? `${html}<p class="mc-exe-note">Showing the first ${number(shown.length)} of ${number(info.imports.length)} libraries.</p>`
     : html;
+}
+
+// The Go blocks: the program's identity, its build settings and the modules it
+// was built from, as the ELF page shows them.
+function goBlocks(info: PeInfo): string[] {
+  const go = info.go;
+  if (!go) {
+    return [];
+  }
+  const parts = [block('Go', properties(goProperties(go)))];
+  if (go.settings.length > 0) {
+    parts.push(block('Go build settings', grid(['Setting', 'Value'], go.settings)));
+  }
+  const modules = goModuleRows(go).slice(0, GO_MODULE_ROWS);
+  if (modules.length > 0) {
+    const note =
+      go.depTotal > modules.length
+        ? `<p class="mc-exe-note">Showing the first ${number(modules.length)} of ${number(go.depTotal)} modules.</p>`
+        : '';
+    parts.push(block('Go modules', grid(['Module', 'Version'], modules) + note, true));
+  }
+  return parts;
 }
 
 function exportsSection(info: PeInfo): string {
@@ -350,16 +442,39 @@ function exportsSection(info: PeInfo): string {
     }
   }
   let html = `<p>${lead}</p>`;
+  const unread = exported.unreadNames ?? 0;
   if (exported.names.length > 0) {
     html += grid(
       ['Exported name'],
       exported.names.map((name) => [name.slice(0, MAX_NAME_CHARS)]),
     );
     if (exported.named > exported.names.length) {
-      html += `<p class="mc-exe-note">Showing the first ${number(exported.names.length)} of ${number(exported.named)} names.</p>`;
+      // With names skipped the list is not the table's first entries, so it
+      // does not say "the first".
+      const which = unread > 0 ? '' : 'the first ';
+      const why = unread > 0 ? ` ${number(unread)} could not be read.` : '';
+      html += `<p class="mc-exe-note">Showing ${which}${number(exported.names.length)} of ${number(exported.named)} names.${why}</p>`;
     }
+  } else if (unread > 0) {
+    html += `<p class="mc-exe-note">The exported names could not be read.</p>`;
   }
   return html;
+}
+
+function richSection(rich: PeRich): string {
+  let html =
+    "<p>Recorded by Microsoft's linker. Any tool can write or copy this record, so it is a claim about the build, not proof.</p>";
+  if (!rich.checksumValid) {
+    html +=
+      '<p class="mc-exe-note">Its checksum does not match the header it covers, so the record or the header before it was changed after linking.</p>';
+  }
+  return (
+    html +
+    table(
+      ['Tool', 'Toolset', 'Build', 'Objects'],
+      rich.entries.map((e) => [e.tool, e.toolset, String(e.build), number(e.count)]),
+    )
+  );
 }
 
 export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
@@ -390,6 +505,7 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   parts.push(block('File', fileSection(info, options)));
   parts.push(block('Signature', signatureSection(info)));
   parts.push(block('Permissions and protections', protectionSection(info)));
+  parts.push(...goBlocks(info));
   if (info.debug?.pdbPath || info.debug?.guid) {
     const rows: Row[] = [];
     if (info.debug.pdbPath) {
@@ -399,6 +515,9 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
       rows.push(['Symbol ID', `${info.debug.guid}, age ${info.debug.age ?? 0}`]);
     }
     parts.push(block('Debug information', properties(rows)));
+  }
+  if (info.rich) {
+    parts.push(block('Build tools', richSection(info.rich), true));
   }
   if (info.sections.length > 0) {
     parts.push(block('Sections', sectionsSection(info), true));
