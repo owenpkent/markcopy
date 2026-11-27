@@ -807,16 +807,18 @@ function followLink(target: LinkTarget): void {
       whenPageExists(page, () => goToPage(page));
     }
   } else {
-    void goToDestination(target.dest);
+    // Activating a link is a navigation: it supersedes older ones and takes the
+    // token its own lookup is checked against (the newest selection wins).
+    readerNavigated();
+    void goToDestination(target.dest, navGeneration);
   }
 }
 
-async function goToDestination(dest: string | unknown[]): Promise<void> {
+async function goToDestination(dest: string | unknown[], generation: number): Promise<void> {
   const current = doc;
   if (!current) {
     return;
   }
-  const generation = navGeneration;
   const d: Destination | null = await resolveDestination(current, dest, current.numPages);
   // A newer navigation (another link, a scroll, a drag, a zoom) beats this lookup.
   if (!d || doc !== current || generation !== navGeneration) {
@@ -2412,17 +2414,26 @@ vscode.postMessage({ type: 'ready' });
 // the auto-scroll and focused-control handlers have already taken the keys that
 // only adjust a speed or press a button; a key that moves nothing must not cancel
 // the saved position.
-const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
+// Whether a key scrolls depends on the focused control, so judge it by what the
+// browser did: only a key that actually moved the view counts as navigation.
+let keyScrollCheck = 0;
 document.addEventListener('keydown', (e) => {
-  if (
-    SCROLL_KEYS.has(e.key) &&
-    !e.defaultPrevented &&
-    !e.ctrlKey &&
-    !e.metaKey &&
-    !(e.target as Element | null)?.closest?.(
-      'input, textarea, select, [contenteditable="true"], button, a, [role="button"]',
-    )
-  ) {
-    readerNavigated();
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey) {
+    return;
   }
+  const s = scroller();
+  const { scrollTop, scrollLeft } = s;
+  const token = ++keyScrollCheck;
+  let frames = 0;
+  const check = (): void => {
+    if (token !== keyScrollCheck) {
+      return;
+    }
+    if (s.scrollTop !== scrollTop || s.scrollLeft !== scrollLeft) {
+      readerNavigated();
+    } else if (++frames < 3) {
+      requestAnimationFrame(check);
+    }
+  };
+  requestAnimationFrame(check);
 });

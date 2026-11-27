@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   dests: {} as Record<string, unknown[]>,
   pageIndex: 3,
   destGate: null as Promise<void> | null,
+  destGates: {} as Record<string, Promise<void>>,
+  pageByNum: {} as Record<number, number>,
   observed: [] as Array<{ cb: (e: unknown[]) => void }>,
 }));
 
@@ -33,9 +35,10 @@ vi.mock('pdfjs-dist', () => ({
       numPages: h.pageCount,
       getDestination: async (name: string) => {
         await h.destGate;
+        await h.destGates[name];
         return h.dests[name] ?? null;
       },
-      getPageIndex: () => Promise.resolve(h.pageIndex),
+      getPageIndex: (ref: { num: number }) => Promise.resolve(h.pageByNum[ref.num] ?? h.pageIndex),
       getPage: async (n: number) => {
         await h.gates[n];
         return {
@@ -92,6 +95,8 @@ beforeEach(async () => {
   h.dests = {};
   h.pageIndex = 3;
   h.destGate = null;
+  h.destGates = {};
+  h.pageByNum = {};
   h.observed = [];
   document.body.innerHTML = BODY;
   document.body.dataset.workerSrc = 'w.js';
@@ -466,6 +471,65 @@ describe('a slow destination lookup', () => {
     expect(lastPage()).toBe('1');
     expect(document.getElementById('mc-page-label')!.textContent).toBe('1 / 5');
   });
+});
+
+describe('two destination links followed in a row', () => {
+  async function twoLinks(): Promise<{ release: (n: 'two' | 'four') => void }> {
+    h.dests.two = [{ num: 2, gen: 0 }, { name: 'Fit' }];
+    h.dests.four = [{ num: 4, gen: 0 }, { name: 'Fit' }];
+    h.pageByNum = { 2: 1, 4: 3 };
+    h.annots[1] = [
+      { ...CHAPTER, dest: 'two' },
+      { subtype: 'Link', rect: [60, 70, 90, 90], dest: 'four' },
+    ];
+    await loadDoc();
+    await showPage(1);
+    const releases: Record<string, () => void> = {};
+    for (const name of ['two', 'four']) {
+      h.destGates[name] = new Promise<void>((r) => (releases[name] = r));
+    }
+    clickAt(30, 80); // page 2
+    clickAt(75, 20); // page 4
+    return { release: (n) => releases[n]() };
+  }
+  const label = () => document.getElementById('mc-page-label')!.textContent;
+
+  it('lands on the newest when the lookups finish in click order', async () => {
+    const { release } = await twoLinks();
+    release('two');
+    await settle();
+    release('four');
+    await settle();
+    expect(label()).toBe('4 / 5');
+  });
+
+  it('lands on the newest when the newest lookup finishes first', async () => {
+    const { release } = await twoLinks();
+    release('four');
+    await settle();
+    release('two');
+    await settle();
+    expect(label()).toBe('4 / 5');
+  });
+});
+
+describe('Page Down with a toolbar button focused while a PDF is opening', () => {
+  it('keeps the view the key scrolled to instead of restoring the saved page', async () => {
+    let release!: () => void;
+    h.gates[2] = new Promise<void>((r) => (release = r));
+    await loadDoc({ page: 5, y: 0, zoom: 1, fitWidth: false });
+    const button = document.querySelector<HTMLElement>('[data-act="in"]')!;
+    button.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true }),
+    );
+    scrollTop = 306; // what the browser's default action does
+    frames.splice(0).forEach((f) => f(0));
+    release();
+    await settle();
+    expect(label()).not.toBe('5 / 5');
+  });
+
+  const label = () => document.getElementById('mc-page-label')!.textContent;
 });
 
 describe('an auto-scroll speed key while a PDF is opening', () => {
