@@ -151,6 +151,18 @@ describe('a file that is two formats', () => {
     expect(html).not.toContain('Also read as: disk image');
   });
 
+  it("shows the second reading's File rows, such as a zip's encryption", async () => {
+    const bytes = buildZip([{ name: 'a.txt', data: 'hello', encrypted: true }], {
+      prefix: buildElf(),
+    });
+    const info = await read(bytes);
+    const label = '1 of 1 entry: ZipCrypto (legacy, easily broken)';
+    expect(info.also?.info?.fileRows).toEqual([['Encryption', label]]);
+    const html = page(info);
+    expect(html).toContain('Also read as: zip archive');
+    expect(html).toContain(label);
+  });
+
   it('says nothing of intent', async () => {
     const html = page(await read(join(buildMsi(), zip())));
     expect(html).not.toMatch(/malicious|suspicious|hidden|disguis/i);
