@@ -370,9 +370,10 @@ lines through the source maps, unions the coverage over a parser's targets and c
 with `minLineCoverage`. The table goes to the job summary. A second job with `issues:
 write` (the first holds only `contents: read`, because it runs the repository's code)
 opens or updates the `Fuzz coverage below threshold` issue, label `fuzz-coverage`, and
-closes it when every parser is back above its minimum. Only a run on the default branch touches the issue; a manual run on another
-branch still writes the summary and the artifact. A listed parser with no build output
-(no fuzz target imports it) counts as 0% and below its minimum.
+closes it when every parser is back above its minimum. Only a run on the default branch
+touches the issue; a manual run on another branch still writes the summary and the
+artifact. A listed parser with no build output (no fuzz target imports it) counts as 0%
+and below its minimum.
 
 What the number means, so it is not read as more than it is:
 

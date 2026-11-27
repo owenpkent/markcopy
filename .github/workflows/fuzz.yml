@@ -254,11 +254,15 @@ jobs:
   # Opens or updates "Fuzz coverage below threshold" while any parser is under its
   # minimum, and closes it when none is. Default branch only: the issue is shared by
   # the repository, so a manual run on a feature branch reports and uploads the
-  # artifact but leaves the issue alone.
+  # artifact but leaves the issue alone. A scheduled run is always on the default
+  # branch, so it does not depend on its event payload naming that branch.
   coverage-issue:
     name: Coverage issue
     needs: coverage
-    if: always() && needs.coverage.result == 'success' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: >-
+      always() && needs.coverage.result == 'success' &&
+      (github.event_name == 'schedule' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: ubuntu-latest
     permissions:
       contents: read
