@@ -126,7 +126,10 @@ describe('Authenticode image hash', () => {
       flipped[at] ^= 1;
       expect(await check(flipped), `byte ${at}`).toBe(DIFFER);
     }
-    expect(await render(file.slice().fill(0, 0x300, 0x301))).toContain(DIFFER);
+    // Flip rather than zero the byte: the fixture's header padding at 0x300 may already be zero.
+    const changed = file.slice();
+    changed[0x300] ^= 1;
+    expect(await render(changed)).toContain(DIFFER);
   });
 
   it('hashes bytes after the certificate table', async () => {
