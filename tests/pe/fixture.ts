@@ -621,6 +621,15 @@ export interface PeSpec {
   certificateType?: number;
   /** What the entry says its length is, when it should lie. */
   certificateLength?: number;
+  /**
+   * Bytes of a `.data` section after the others, or a function of the section's
+   * RVA for contents that hold addresses within it.
+   */
+  data?: Uint8Array | ((rva: number) => Uint8Array);
+  /** The name of that section: `.data` unless given. */
+  dataName?: string;
+  /** Its characteristics: 0xc0000040 (initialized data, read, write) unless given. */
+  dataFlags?: number;
   /** Bytes after the last section: given directly, or as a length of 0x5A fill. */
   overlay?: Uint8Array | number;
   /** Overrides the NumberOfSections field without adding sections. */
@@ -656,13 +665,15 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     MIN_HEADERS,
     alignTo(PE_OFFSET + 24 + (plus ? 112 : 96) + 16 * 8 + 4 * 40, FILE_ALIGN),
   );
+  // Specs with a data section keep the doubled header area their tests were written against.
+  const headerSize = spec.data === undefined ? HEADERS : HEADERS * 2;
   const dirs: Piece[] = Array.from({ length: 16 }, () => ({ rva: 0, size: 0 }));
 
   // .text
   const text = new Uint8Array(FILE_ALIGN).fill(0xcc);
   text[0] = 0xc3;
   const TEXT_RVA = SECTION_ALIGN;
-  const TEXT_RAW = HEADERS;
+  const TEXT_RAW = headerSize;
 
   // .rdata, built so that every structure can name the RVAs of what it points at.
   const RDATA_RVA = SECTION_ALIGN * 2;
@@ -901,6 +912,17 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
     dirs[2] = { rva: RSRC_RVA, size: rsrcBytes.length };
   }
 
+  // .data, last, so nothing else moves.
+  const DATA_RVA = RSRC_RVA + alignTo(rsrcBytes.length, SECTION_ALIGN);
+  const DATA_RAW = RSRC_RAW + rsrcBytes.length;
+  const dataBytes =
+    spec.data === undefined
+      ? new Uint8Array(0)
+      : new Bytes()
+          .raw(typeof spec.data === 'function' ? spec.data(DATA_RVA) : spec.data)
+          .pad(FILE_ALIGN)
+          .bytes();
+
   // Overlay and certificate table come after the last section.
   const overlay =
     spec.overlay === undefined
@@ -908,7 +930,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       : typeof spec.overlay === 'number'
         ? new Uint8Array(spec.overlay).fill(0x5a)
         : spec.overlay;
-  const sectionsEnd = RSRC_RAW + rsrcBytes.length;
+  const sectionsEnd = DATA_RAW + dataBytes.length;
   const certAt = alignTo(sectionsEnd + overlay.length, 8);
   let certBytes = new Uint8Array(0);
   if (spec.certificate) {
@@ -976,6 +998,16 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       flags: 0x40000040,
     });
   }
+  if (dataBytes.length > 0) {
+    sections.push({
+      name: spec.dataName ?? '.data',
+      vsize: dataBytes.length,
+      va: DATA_RVA,
+      raw: DATA_RAW,
+      rawSize: dataBytes.length,
+      flags: spec.dataFlags ?? 0xc0000040,
+    });
+  }
   const last = sections[sections.length - 1];
   const sizeOfImage = last.va + alignTo(last.vsize, SECTION_ALIGN);
 
@@ -1005,7 +1037,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   opt.setUint16(48, subMajor, true);
   opt.setUint16(50, subMinor, true);
   opt.setUint32(56, sizeOfImage, true);
-  opt.setUint32(60, HEADERS, true);
+  opt.setUint32(60, headerSize, true);
   opt.setUint32(64, spec.checksum ?? 0, true);
   opt.setUint16(68, spec.subsystem ?? 2, true);
   opt.setUint16(70, spec.dllCharacteristics ?? 0x140, true);
@@ -1052,7 +1084,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
       .u16(0)
       .u32(s.flags);
   }
-  head.zeros(HEADERS - head.length);
+  head.zeros(headerSize - head.length);
 
   const total = symbolAt + symbolBytes.length || certAt + certBytes.length;
   const file = new Uint8Array(total);
@@ -1060,6 +1092,7 @@ export function buildPe(spec: PeSpec = {}): Uint8Array {
   file.set(text, TEXT_RAW);
   file.set(rdataBytes, RDATA_RAW);
   file.set(rsrcBytes, RSRC_RAW);
+  file.set(dataBytes, DATA_RAW);
   file.set(overlay, sectionsEnd);
   file.set(certBytes, certAt);
   file.set(symbolBytes, symbolAt);

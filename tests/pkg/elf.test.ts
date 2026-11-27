@@ -4,7 +4,8 @@ import { readElf } from '../../src/pkg/elf';
 import { PackageError } from '../../src/pkg/model';
 import { renderPackageHtml } from '../../src/pkg/render';
 import type { InfoSection, PackageInfo } from '../../src/pkg/model';
-import { buildElf, FIELDS, type ElfSpec } from './elfFixture';
+import { BASE, buildElf, FIELDS, type ElfSpec, type SectionSpec } from './elfFixture';
+import { inlineBlock, MAGIC, pointerBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 const read = (input: ElfSpec | Uint8Array = {}): Promise<PackageInfo> =>
   // isView rather than instanceof: under jsdom a TextEncoder's bytes come from
@@ -612,6 +613,225 @@ describe('readElf: rendering', () => {
     expect(html).not.toContain('<script>');
     expect(html).not.toContain(RLO);
     expect(html).toContain('ab.so');
+  });
+});
+
+describe('readElf: Go build information', () => {
+  const goSection = (data: SectionSpec['data']) => ({
+    name: '.go.buildinfo',
+    align: 16,
+    data,
+  });
+
+  it('reads inline strings from the .go.buildinfo section', async () => {
+    const info = await read({
+      type: 2,
+      sections: [goSection(inlineBlock({ info: SAMPLE_LINES }))],
+    });
+    expect(info.warnings).toEqual([]);
+    expect(info.sections.map((s) => s.heading).slice(0, 3)).toEqual([
+      'Binary',
+      'Go',
+      'Go build settings',
+    ]);
+    expect(rowsOf(info, 'Go')).toEqual({
+      'Go version': 'go1.22.1',
+      Package: 'example.com/app/cmd/app',
+      Module: 'example.com/app',
+      'Module version': 'v1.4.0',
+    });
+    expect(tableOf(info, 'Go build settings')).toContainEqual(['-trimpath', 'true']);
+    expect(tableOf(info, 'Go modules')).toEqual([
+      ['github.com/spf13/cobra', 'v1.8.0'],
+      ['golang.org/x/sys', 'v0.15.0, replaced by example.com/fork-sys v0.15.1'],
+    ]);
+    expect(noteOf(info, 'Go modules')).toBeUndefined();
+  });
+
+  it('keeps the Go build ID in the Binary section', async () => {
+    const info = await read({
+      goBuildId: 'abc/def',
+      sections: [goSection(inlineBlock())],
+    });
+    expect(rowsOf(info, 'Binary')['Go build ID']).toBe('abc/def');
+    expect(rowsOf(info, 'Go')['Go version']).toBe('go1.22.1');
+  });
+
+  it('falls back to the first writable loadable segment when there is no section', async () => {
+    const spec = { loadFlags: 6, noSections: true, sections: [goSection(inlineBlock())] };
+    const info = await read(spec);
+    expect(rowsOf(info, 'Go')['Go version']).toBe('go1.22.1');
+    // The segment is not writable: the block is not looked for there.
+    const readOnly = await read({ ...spec, loadFlags: 5 });
+    expect(section(readOnly, 'Go')).toBeUndefined();
+  });
+
+  it('does not look in a .go.buildinfo section that holds no file data', async () => {
+    const info = await read({ sections: [{ name: '.go.buildinfo', type: 8, size: 64 }] });
+    expect(section(info, 'Go')).toBeUndefined();
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('follows pointers through the loadable segment in the older layout', async () => {
+    for (const spec of [{}, { pointerSize: 4 }, { big: true }]) {
+      const wide = spec.pointerSize !== 4;
+      const info = await read({
+        wide,
+        big: spec.big,
+        sections: [goSection((vaddr) => pointerBlock({ ...spec, info: SAMPLE_LINES })(vaddr))],
+      });
+      expect(info.warnings).toEqual([]);
+      expect(rowsOf(info, 'Go')['Go version']).toBe('go1.16.5');
+      expect(tableOf(info, 'Go modules')).toHaveLength(2);
+    }
+  });
+
+  it('shows only the version when the module text is declared too long', async () => {
+    const info = await read({
+      sections: [goSection(inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 300 * 1024 }))],
+    });
+    expect(rowsOf(info, 'Go')['Go version']).toBe('go1.22.1');
+    expect(section(info, 'Go modules')).toBeUndefined();
+    expect(info.warnings).toEqual([
+      'The Go module list is too long to read, so only the Go version is shown.',
+    ]);
+  });
+
+  it('warns about a damaged header instead of failing the page', async () => {
+    for (const block of [
+      inlineBlock({ pointerSize: 3 }),
+      inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 99999 }),
+      inlineBlock({ version: 'x'.repeat(100) }),
+    ]) {
+      const info = await read({ sections: [goSection(block)] });
+      expect(info.warnings).toEqual(['The Go build information could not be read.']);
+      expect(section(info, 'Go')).toBeUndefined();
+      expect(rowsOf(info, 'Binary')['Type']).toBe('Shared library');
+    }
+    // A pointer that maps nowhere.
+    const lost = await read({
+      sections: [goSection(() => pointerBlock({ info: SAMPLE_LINES })(0x900000))],
+    });
+    expect(lost.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  describe('without a section: every writable loadable segment, in order', () => {
+    const SECOND = 0x800000;
+    const block = inlineBlock({ info: SAMPLE_LINES });
+    // The first segment holds nothing of interest and is writable.
+    const base: ElfSpec = { loadFlags: 6, noSections: true, interp: '/lib/ld.so' };
+
+    it('finds a record that only the second writable segment holds', async () => {
+      const info = await read({ ...base, extraLoads: [{ vaddr: SECOND, data: block }] });
+      expect(info.warnings).toEqual([]);
+      expect(rowsOf(info, 'Go')['Go version']).toBe('go1.22.1');
+      expect(tableOf(info, 'Go modules')).toHaveLength(2);
+      // A read-only second segment is not searched.
+      const readOnly = await read({
+        ...base,
+        extraLoads: [{ vaddr: SECOND, data: block, flags: 4 }],
+      });
+      expect(section(readOnly, 'Go')).toBeUndefined();
+    });
+
+    it('stops searching after 256 KiB in all', async () => {
+      const filler = (i: number): { vaddr: number; data: Uint8Array } => ({
+        vaddr: SECOND + i * 0x100000,
+        data: new Uint8Array(70000),
+      });
+      // The first segment takes a few hundred bytes of the budget and three
+      // fillers 64 KiB each, so the fourth extra segment still gets some of it
+      // and the fifth gets none.
+      const fourth = await read({
+        ...base,
+        extraLoads: [
+          filler(0),
+          filler(1),
+          filler(2),
+          { vaddr: SECOND + 3 * 0x100000, data: block },
+        ],
+      });
+      expect(rowsOf(fourth, 'Go')['Go version']).toBe('go1.22.1');
+      const fifth = await read({
+        ...base,
+        extraLoads: [
+          filler(0),
+          filler(1),
+          filler(2),
+          filler(3),
+          { vaddr: SECOND + 4 * 0x100000, data: block },
+        ],
+      });
+      expect(section(fifth, 'Go')).toBeUndefined();
+    });
+  });
+
+  it('refuses a string header that starts at the end of one segment and ends in the next', async () => {
+    const SECOND = 0x800000;
+    // The first segment ends with a data pointer into the second. The version
+    // string header it would complete is that pointer plus the first 8 bytes of
+    // the next segment's file bytes, though their addresses are not adjacent.
+    const tail = (versionHeader: number): Uint8Array => {
+      const out = new Uint8Array(40);
+      const view = new DataView(out.buffer);
+      out.set(MAGIC, 0);
+      out[14] = 8;
+      view.setBigUint64(16, BigInt(versionHeader), true);
+      view.setBigUint64(32, BigInt(SECOND + 8), true);
+      return out;
+    };
+    const spec = (versionHeader: number): ElfSpec => ({
+      loadFlags: 6,
+      noSections: true,
+      sections: [{ name: '.x', align: 16, data: tail(versionHeader) }],
+      extraLoads: [
+        {
+          vaddr: SECOND,
+          data: Uint8Array.from([8, 0, 0, 0, 0, 0, 0, 0, ...new TextEncoder().encode('go1.16.5')]),
+        },
+      ],
+    });
+    // The first segment is the whole file but for the 16 bytes of the second.
+    const size = buildElf(spec(0)).length - 16;
+    const info = await read(spec(BASE + size - 8));
+    expect(section(info, 'Go')).toBeUndefined();
+    expect(info.warnings).toEqual(['The Go build information could not be read.']);
+  });
+
+  it('lists 200 modules and says how many there are', async () => {
+    const lines = Array.from({ length: 700 }, (_, i) => `dep\tx.org/m${i}\tv1.0.${i}`);
+    const info = await read({ sections: [goSection(inlineBlock({ info: lines }))] });
+    expect(tableOf(info, 'Go modules')).toHaveLength(200);
+    expect(noteOf(info, 'Go modules')).toBe('Showing the first 200 of 700 modules.');
+  });
+
+  it('is absent from an ELF file that is not a Go program', async () => {
+    const info = await read(library);
+    expect(info.sections.map((s) => s.heading)).not.toContain('Go');
+  });
+
+  it('renders escaped and cleaned', async () => {
+    const info = await read({
+      sections: [
+        goSection(
+          inlineBlock({
+            info: [
+              `path\t<script>alert(1)</script>${RLO}x`,
+              `dep\t<img src=x onerror=1>\tv1`,
+              `build\tk${RLO}=<b>`,
+            ],
+          }),
+        ),
+      ],
+    });
+    const html = renderPackageHtml(info, { fileName: 'a.out', fileSize: 10 });
+    expect(html).toContain('Go build settings');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;x');
+    expect(html).toContain('&lt;img src=x onerror=1&gt;');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<b>');
+    expect(html).not.toContain(RLO);
   });
 });
 

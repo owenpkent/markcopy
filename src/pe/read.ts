@@ -23,6 +23,7 @@ import {
   type ByteSource,
 } from '../binary/reader';
 import { printable } from '../binary/text';
+import { readGoBuildInfo, type GoBuildInfo } from '../binary/goBuildInfo';
 import { readRich, type PeRich } from './rich';
 import { readVersionResource, type VersionInfo } from './version';
 
@@ -37,6 +38,8 @@ export interface PeSection {
   virtualSize: number;
   rawOffset: number;
   rawSize: number;
+  /** The raw characteristics flags. */
+  characteristics: number;
   /** Readable, writable, executable, in that order, as the loader will map it. */
   read: boolean;
   write: boolean;
@@ -173,6 +176,8 @@ export interface PeInfo {
   rich?: PeRich;
   dotnet?: PeDotNet;
   signature?: PeSignature;
+  /** What `go version -m` would print, for a program built by the Go toolchain. */
+  go?: GoBuildInfo;
   /** Bytes after the last section that no header accounts for, as an installer's payload is. */
   overlay?: { offset: number; size: number };
   /** Parts of the file that were present but could not be read. */
@@ -180,6 +185,9 @@ export interface PeInfo {
 }
 
 const MAX_SECTIONS = 96;
+// Go's own test for its data section: initialized data, readable, writable, less the alignment bits.
+const GO_DATA_FLAGS = 0xc0000040;
+const GO_ALIGN_BITS = 0x600000;
 const MAX_IMPORTS = 1024;
 const MAX_THUNKS = 16384;
 // Across every imported library together. The per-library and per-table caps
@@ -403,6 +411,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       virtualAddress: table.getUint32(at + 12, true),
       rawSize: table.getUint32(at + 16, true),
       rawOffset: table.getUint32(at + 20, true),
+      characteristics: flags,
       read: (flags & 0x40000000) !== 0,
       write: (flags & 0x80000000) !== 0,
       execute: (flags & 0x20000000) !== 0,
@@ -805,6 +814,49 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         // mask works on 32-bit signed values, and turned a length near the
         // top of the range into a step backwards.
         at += Math.ceil(length / 8) * 8;
+      }
+    });
+  }
+
+  // The Go linker puts its build information in the data section. The old
+  // layout names it by address, which is the image base plus an RVA.
+  // Go looks in the first section that is initialized, readable and writable
+  // data (ignoring the alignment bits), whatever it is named, so that comes
+  // first; a section named .data is tried after it, in case the flags are odd.
+  // A name alone is not enough: a read-only section can be called .data while
+  // the record sits in another.
+  const usable = (s: PeSection): boolean => s.rawSize > 0 && s.rawOffset < reader.size;
+  const byFlags = sections.find(
+    (s) =>
+      usable(s) &&
+      s.virtualAddress !== 0 &&
+      (s.characteristics & ~GO_ALIGN_BITS) >>> 0 === GO_DATA_FLAGS,
+  );
+  const byName = sections.find((s) => s.name === '.data' && usable(s));
+  const candidates = [byFlags, byName].filter(
+    (s, i, all): s is PeSection => s !== undefined && all.indexOf(s) === i,
+  );
+  if (candidates.length > 0) {
+    await attempt('Go build information', async () => {
+      for (const data of candidates) {
+        const go = await readGoBuildInfo(
+          reader,
+          {
+            offset: data.rawOffset,
+            size: data.rawSize,
+            vaddr: imageBase + BigInt(data.virtualAddress),
+          },
+          (address) => {
+            const rva = address - imageBase;
+            const at = rva >= 0n && rva <= 0xffffffffn ? rangeOf(Number(rva)) : undefined;
+            return at === undefined ? undefined : { offset: at.offset, available: at.length };
+          },
+        );
+        if (go) {
+          info.go = go;
+          info.warnings.push(...go.warnings);
+          return;
+        }
       }
     });
   }

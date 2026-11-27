@@ -7,6 +7,13 @@
 // offset, size and count is checked before use and every loop has a cap.
 import { printable } from '../binary/text';
 import { formatBytes } from '../binary/html';
+import {
+  GO_MODULE_ROWS,
+  goModuleRows,
+  goProperties,
+  readGoBuildInfo,
+  type GoBuildInfo,
+} from '../binary/goBuildInfo';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import type { PackageInfo } from './model';
 import type { RangeReader } from '../binary/reader';
@@ -14,6 +21,9 @@ import type { RangeReader } from '../binary/reader';
 // Real binaries have 5 to 20 program headers. 256 leaves room for odd linker
 // scripts while keeping the table walk tiny.
 const MAX_SEGMENTS = 256;
+// Go build information: how far into one segment, and across all of them, to search.
+const GO_SEARCH_BYTES = 64 * 1024;
+const GO_SEARCH_TOTAL = 256 * 1024;
 // A relocatable object built with -ffunction-sections has one section per
 // function, so thousands are legitimate. Beyond this the names are not read.
 const MAX_SECTIONS = 4096;
@@ -49,6 +59,7 @@ const PT_LOAD = 1;
 const PT_DYNAMIC = 2;
 const PT_INTERP = 3;
 const PT_NOTE = 4;
+const PF_W = 2;
 const PT_GNU_PROPERTY = 0x6474e553;
 const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
@@ -173,6 +184,7 @@ interface Section {
   name: string;
   nameOffset: number;
   type: number;
+  addr: number;
   offset: number;
   size: number;
 }
@@ -328,6 +340,7 @@ async function sectionHeader(
         name: '',
         nameOffset: v.getUint32(0, h.le),
         type: v.getUint32(4, h.le),
+        addr: word(v, 16, true, h.le),
         offset: word(v, 24, true, h.le),
         size: word(v, 32, true, h.le),
         link: v.getUint32(40, h.le),
@@ -337,6 +350,7 @@ async function sectionHeader(
         name: '',
         nameOffset: v.getUint32(0, h.le),
         type: v.getUint32(4, h.le),
+        addr: v.getUint32(12, h.le),
         offset: v.getUint32(16, h.le),
         size: v.getUint32(20, h.le),
         link: v.getUint32(24, h.le),
@@ -430,9 +444,17 @@ async function readSections(
 
 /** The file offset a virtual address maps to, through the loadable segments. */
 function offsetOf(segments: Segment[], vaddr: number): number | undefined {
+  return mapAddress(segments, vaddr)?.offset;
+}
+
+/** The file offset a virtual address maps to, and the file bytes left from it to the end of its segment. */
+function mapAddress(
+  segments: Segment[],
+  vaddr: number,
+): { offset: number; available: number } | undefined {
   for (const s of segments) {
     if (s.type === PT_LOAD && vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz) {
-      return s.offset + (vaddr - s.vaddr);
+      return { offset: s.offset + (vaddr - s.vaddr), available: s.filesz - (vaddr - s.vaddr) };
     }
   }
   return undefined;
@@ -795,6 +817,55 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     );
   }
 
+  // Go build information: the `.go.buildinfo` section when the file has one
+  // that holds data, else the writable loadable segments in order, which is
+  // where the linker puts it in a file with its section headers stripped. The
+  // segment search is bounded in total, and stops at the first header found.
+  let go: GoBuildInfo | undefined;
+  const goSection = named('.go.buildinfo');
+  const goRegions: { offset: number; size: number; vaddr: number; search: number }[] = [];
+  if (goSection && goSection.type !== SHT_NOBITS) {
+    goRegions.push({
+      offset: goSection.offset,
+      size: goSection.size,
+      vaddr: goSection.addr,
+      search: GO_SEARCH_BYTES,
+    });
+  } else {
+    let budget = GO_SEARCH_TOTAL;
+    for (const s of segments) {
+      if (
+        budget > 0 &&
+        s.type === PT_LOAD &&
+        (s.flags & PF_W) !== 0 &&
+        s.filesz > 0 &&
+        s.offset < reader.size
+      ) {
+        const search = Math.min(GO_SEARCH_BYTES, budget, s.filesz);
+        budget -= search;
+        goRegions.push({ offset: s.offset, size: s.filesz, vaddr: s.vaddr, search });
+      }
+    }
+  }
+  if (goRegions.length > 0) {
+    go = await attempt(
+      'The Go build information',
+      async () => {
+        for (const region of goRegions) {
+          const found = await readGoBuildInfo(reader, region, (va) =>
+            va <= BigInt(Number.MAX_SAFE_INTEGER) ? mapAddress(segments, Number(va)) : undefined,
+          );
+          if (found) {
+            return found;
+          }
+        }
+        return undefined;
+      },
+      undefined,
+    );
+    warnings.push(...(go?.warnings ?? []));
+  }
+
   const modinfo = new Map<string, string[]>();
   let modinfoKeys = 0;
   if (modinfoSection && isModule) {
@@ -966,6 +1037,8 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
       ['Separate debug file', debugFile],
       ['Compiler', compilers.join('; ')],
     ]),
+    ...propertySection('Go', go ? goProperties(go) : []),
+    ...tableSection('Go build settings', ['Setting', 'Value'], go?.settings ?? []),
     ...appImage,
     ...propertySection('Protections', protections),
     ...propertySection('Kernel module', modRows),
@@ -975,6 +1048,11 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
       dyn.needed.map((n) => [n]),
       { total: dyn.neededTotal, noun: 'libraries' },
     ),
+    ...tableSection('Go modules', ['Module', 'Version'], go ? goModuleRows(go) : [], {
+      limit: GO_MODULE_ROWS,
+      total: go?.depTotal,
+      noun: 'modules',
+    }),
     ...tableSection('Sections', ['Name', 'Size', 'Type'], sectionRows, {
       limit: SECTION_ROWS,
       total: Math.max(table.total - 1, sectionRows.length),

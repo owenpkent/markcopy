@@ -9,6 +9,7 @@ import {
   tlv,
   type PeSpec,
 } from './fixture';
+import { inlineBlock, SAMPLE_LINES } from '../binary/goFixture';
 
 // A PKCS #7 SignedData with the given signerInfos and no certificates, built
 // here because the fixture's own always has exactly one signer and its
@@ -438,6 +439,60 @@ describe('renderPeHtml: the DEP row says what the flag is, not what Windows does
 
   it('says No for a 32-bit program without the flag, where the flag does decide', async () => {
     expect(dep(await render({ dllCharacteristics: 0x40 }))).toBe('No');
+  });
+});
+
+describe('renderPeHtml: Go build information', () => {
+  it('draws the program, its build settings and its modules after the protections', async () => {
+    const html = await render({ plus: true, data: inlineBlock({ info: SAMPLE_LINES }) });
+    const at = (heading: string): number => html.indexOf(`<h2>${heading}</h2>`);
+    expect(at('Permissions and protections')).toBeGreaterThan(-1);
+    expect(at('Go')).toBeGreaterThan(at('Permissions and protections'));
+    expect(at('Go build settings')).toBeGreaterThan(at('Go'));
+    expect(at('Go modules')).toBeGreaterThan(at('Go build settings'));
+    expect(html).toContain('<td>Go version</td><td>go1.22.1</td>');
+    expect(html).toContain('<td>Package</td><td>example.com/app/cmd/app</td>');
+    expect(html).toContain('<td>Module version</td><td>v1.4.0</td>');
+    expect(html).toContain('<td>-trimpath</td><td>true</td>');
+    expect(html).toContain(
+      '<td>golang.org/x/sys</td><td>v0.15.0, replaced by example.com/fork-sys v0.15.1</td>',
+    );
+    expect(html).not.toContain('Showing the first');
+  });
+
+  it('draws nothing for a file that is not a Go program', async () => {
+    expect(await render({ plus: true })).not.toContain('<h2>Go');
+  });
+
+  it('lists 200 modules of the 700 it was given and says so', async () => {
+    const lines = Array.from({ length: 700 }, (_, i) => `dep\tx.org/m${i}\tv1.0.${i}`);
+    const html = await render({ data: inlineBlock({ info: lines }) });
+    expect(html.match(/<td>x\.org\/m\d+<\/td>/g)).toHaveLength(200);
+    expect(html).toContain('Showing the first 200 of 700 modules.');
+  });
+
+  it('escapes markup and removes direction overrides', async () => {
+    const html = await render({
+      data: inlineBlock({
+        info: [
+          `path\t<script>alert(1)</script>${RLO}x`,
+          'dep\t<img src=x onerror=1>\tv1',
+          `build\tk${RLO}=<b>`,
+        ],
+      }),
+    });
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;x');
+    expect(html).toContain('&lt;img src=x onerror=1&gt;');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<b>');
+    expect(html).not.toContain(RLO);
+  });
+
+  it('shows the note about a damaged block at the top', async () => {
+    const html = await render({ data: inlineBlock({ pointerSize: 7 }) });
+    expect(html).toContain('The Go build information could not be read.');
+    expect(html).not.toContain('<h2>Go</h2>');
   });
 });
 
