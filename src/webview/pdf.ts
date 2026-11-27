@@ -9,6 +9,7 @@ import type {
 import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { fromHost } from './fromHost';
 import { MAX_COMMENT_COUNT, MAX_COMMENT_TEXT, MAX_COMMENT_TOTAL_TEXT } from '../pdfComments';
+import { validatePosition, type PdfPosition } from '../pdfPosition';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 import {
   linkBox,
@@ -128,6 +129,12 @@ window.addEventListener('message', (e: MessageEvent) => {
         comments.push(editing);
       }
     }
+    if ('resume' in msg) {
+      // The PDF preview's host sends where the reader was (or null); the LaTeX
+      // preview's does not, and keeps its own place across recompiles.
+      reportPosition = true;
+      pendingResume = validatePosition(msg.resume) ?? null;
+    }
     load(base64ToBytes(msg.data as string)).catch(showFatal);
   } else if (msg?.type === 'loadError' && typeof msg.message === 'string') {
     showFatal(msg.message);
@@ -240,15 +247,95 @@ async function load(data: Uint8Array): Promise<void> {
 
   updateZoomLabel();
   updatePageLabel();
-  if (wasAt > 1) {
+  const resume = pendingResume;
+  pendingResume = null;
+  if (resume && wasAt === 0) {
+    resumeAt(resume);
+  } else if (wasAt > 1) {
     // A LaTeX preview reloads on every save. Landing back at page 1 each time
     // would make the preview unusable for anything longer than a page, so hold
     // the reader's place. Clamped by goToPage, since the document may have got
     // shorter since they were last looking at it.
     goToPage(wasAt);
   }
+  // Report only from here: the viewer sits at page 1 while it is laid out and
+  // that must not overwrite the position that was just read back.
+  positionTracked = reportPosition;
   toast(`Loaded ${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`);
 }
+
+// ---------------------------------------------------------------------------
+// Reading position
+// ---------------------------------------------------------------------------
+// Reopening a PDF returns to the page, the spot on it and the zoom. The host keeps
+// the positions (src/pdfPosition.ts); this reports the current one when scrolling
+// or zooming settles and when the view hides, and applies the saved one once the
+// page placeholders exist (they are sized without rasterising, so the scroll
+// offset is exact and the lazy renderer simply follows).
+let reportPosition = false;
+let positionTracked = false;
+let pendingResume: PdfPosition | null = null;
+let positionTimer = 0;
+const POSITION_DEBOUNCE_MS = 600;
+
+function resumeAt(p: PdfPosition): void {
+  // A page past the end means the file is a different one now: ignore, do not clamp.
+  if (!doc || p.page > doc.numPages) {
+    return;
+  }
+  currentPage = p.page;
+  if (p.fitWidth) {
+    applyFitWidth();
+  } else {
+    setScale(p.zoom);
+  }
+  const rect = wrappers[p.page - 1].getBoundingClientRect();
+  const s = scroller();
+  const before = s.scrollTop;
+  s.scrollTop += rect.top + p.y * rect.height;
+  pageJumpScrollPending = s.scrollTop !== before;
+  updatePageLabel();
+}
+
+// The page at the top of the view and how far down it the top edge sits.
+function currentPosition(): PdfPosition | null {
+  if (!doc || !wrappers.length) {
+    return null;
+  }
+  for (let i = 0; i < wrappers.length; i++) {
+    const rect = wrappers[i].getBoundingClientRect();
+    if (rect.bottom > 0 || i === wrappers.length - 1) {
+      const y = rect.height > 0 ? Math.min(1, Math.max(0, -rect.top / rect.height)) : 0;
+      return { page: i + 1, y, zoom: scale, fitWidth };
+    }
+  }
+  return null;
+}
+
+function flushPosition(): void {
+  window.clearTimeout(positionTimer);
+  positionTimer = 0;
+  const position = positionTracked ? currentPosition() : null;
+  if (position) {
+    vscode.postMessage({ type: 'savePosition', ...position });
+  }
+}
+
+function queuePosition(): void {
+  if (!positionTracked) {
+    return;
+  }
+  window.clearTimeout(positionTimer);
+  positionTimer = window.setTimeout(flushPosition, POSITION_DEBOUNCE_MS);
+}
+
+window.addEventListener('scroll', queuePosition, { passive: true });
+window.addEventListener('pagehide', flushPosition);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    flushPosition();
+  }
+});
 
 /**
  * Drop everything belonging to the document currently on screen.
@@ -267,6 +354,7 @@ function resetViewer(): void {
     task.cancel();
   }
   renderTasks.clear();
+  positionTracked = false;
   observer?.disconnect();
   observer = null;
   // The worker holds the old document open until this resolves; a long editing
@@ -652,6 +740,7 @@ function setScale(next: number): void {
   const anchor = captureZoomAnchor();
   scale = clamped;
   updateZoomLabel();
+  queuePosition();
 
   // Resize placeholders immediately (keeps scroll layout correct), then
   // re-rasterise the visible pages once zooming settles.
@@ -723,6 +812,7 @@ function setFitWidth(on: boolean): void {
     return;
   }
   fitWidth = on;
+  queuePosition();
   // A queued re-fit must not outlive the mode. Its callback is applyFitWidth,
   // which turns fit width straight back on, so a manual zoom landing inside the
   // debounce window would otherwise be undone and the button would relight.

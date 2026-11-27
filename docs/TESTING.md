@@ -521,6 +521,16 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
+### Reading position
+
+- [ ] ★ Scroll a multi-page PDF to the middle of a page, close the tab, reopen it: the same page and spot are at the top of the view.
+- [ ] ★ Zoom to 200 percent first: it reopens at 200 percent. Turn on fit width: it reopens in fit width, re-fitted to the pane.
+- [ ] Restart VS Code with the PDF open: it comes back at the same place.
+- [ ] Scroll back to the very top at 100 percent and reopen: it opens at page 1, as for a PDF never opened.
+- [ ] Replace the PDF with a shorter one of the same name (so the saved page no longer exists) and reopen: it opens at page 1 and does not error.
+- [ ] Open a second, different PDF: it has its own position and does not inherit the first one's.
+- [ ] In the LaTeX preview, a recompile still keeps your place (this feature adds no storage for it).
+
 ### Links
 
 Use a PDF that has a table of contents or cross-references and a web link (a LaTeX document built with `hyperref`, or a paper from arXiv).

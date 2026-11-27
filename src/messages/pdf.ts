@@ -8,6 +8,7 @@ import {
 } from './common';
 import { isPdfSetting } from './settings';
 import { parseLinkUrl } from '../pdfLinkUrl';
+import { validatePosition, type PdfPosition } from '../pdfPosition';
 
 // Webview to host messages of the PDF viewer (src/pdfEditor.ts).
 export type PdfMessage =
@@ -17,6 +18,8 @@ export type PdfMessage =
   // An external link clicked inside the PDF. `openExternal` above opens the
   // PDF file itself; this one carries a validated http, https or mailto URL.
   | { type: 'openLink'; url: string }
+  // Where the reader is, posted when scrolling settles and when the view hides.
+  | ({ type: 'savePosition' } & PdfPosition)
   | SaveCommentsMessage
   | RejectedCommentsMessage
   | UpdateSettingMessage;
@@ -34,6 +37,10 @@ export function parsePdfMessage(raw: unknown): PdfMessage | undefined {
     case 'openLink': {
       const url = parseLinkUrl(msg.url);
       return url === undefined ? undefined : { type: 'openLink', url };
+    }
+    case 'savePosition': {
+      const position = validatePosition(msg);
+      return position && { type: 'savePosition', ...position };
     }
     case 'saveComments':
       return commentsMessage(msg);

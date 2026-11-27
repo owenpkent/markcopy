@@ -59,6 +59,8 @@ Links in the PDF work. An internal link (a table of contents entry, a cross-refe
 
 ![The PDF viewer in dark mode with the right-click menu open and the page/zoom toolbar in the corner](../media/pdf-viewer.png)
 
+MarkCopy remembers where you were in each PDF: reopening one returns to the same page, the same spot on it and the same zoom (fit width included). A PDF left at the top of page 1 at 100 percent is forgotten, and the 200 most recently read are kept. The positions live in VS Code's own storage, not beside the file.
+
 A floating toolbar in the bottom-right corner shows the current page (for example `3 / 12`) as you scroll; click it, type a page number, and press Enter to jump there. The same toolbar steps zoom through preset levels (50 to 400 percent) with minus/plus buttons, Ctrl and plus / Ctrl and minus / Ctrl and 0, or Ctrl plus the mouse wheel; clicking the percentage resets to 100 percent. The fit-width button (a page with a double-headed arrow across it, the same icon [folio](https://github.com/owenpkent/folio) uses) fits the page to the width of the pane and stays on, re-fitting as you resize the editor, until you zoom by hand again. Zooming keeps your place: whatever sits in the middle of the view stays there instead of the page sliding out from under you. Pages re-rasterise at each level, and only pages near the viewport stay rendered, so large PDFs stay sharp and memory-bounded. The view also has always-visible styled scrollbars.
 
 The extension host limits PDF previews to 64 MiB and renders the supplied bytes locally. To open a PDF as raw bytes, use **Reopen Editor With...** from the editor title menu.
