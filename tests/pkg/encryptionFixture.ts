@@ -185,14 +185,14 @@ const RAR4_SIG = [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00];
 export function rar4Main(passwordHeaders = false): number[] {
   return [0, 0, 0x73, ...u16le(passwordHeaders ? 0x0080 : 0), ...u16le(13), 0, 0, 0, 0, 0, 0];
 }
-export function rar4File(name: string, encrypted = false): number[] {
+export function rar4File(name: string, encrypted = false, unpVer = 29): number[] {
   const body = [
     ...u32le(8),
     ...u32le(8),
     2,
     ...u32le(0),
     ...u32le(0),
-    29,
+    unpVer,
     0x33,
     ...u16le(name.length),
     ...u32le(0),

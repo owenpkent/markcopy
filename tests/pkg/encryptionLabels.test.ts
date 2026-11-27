@@ -193,6 +193,18 @@ describe('RAR', () => {
     expect(rows['Entries']).toBe('RAR 2.9 format (legacy AES-128): 1 of 2 entries read');
   });
 
+  it.each([
+    [13, 'RAR 1.3 format (proprietary cipher, not AES)'],
+    [15, 'RAR 1.5 format (proprietary cipher, not AES)'],
+    [20, 'RAR 2.0 format (proprietary cipher, not AES)'],
+    [26, 'RAR 2.0 format (proprietary cipher, not AES)'],
+    [36, 'RAR 2.9 format (legacy AES-128)'],
+    [17, 'not determined (entry version 17)'],
+  ])('RAR4: an encrypted entry with UnpVer %i is labelled by its version', async (v, label) => {
+    const info = await read(fx.rar4(fx.rar4Main(), fx.rar4File('a.txt', true, v), fx.rar4End()));
+    expect(rowsOf(info)['Entries']).toBe(`${label}: 1 of 1 entries read`);
+  });
+
   it('RAR4: unencrypted, and a header of impossible size', async () => {
     const plain = await read(fx.rar4(fx.rar4Main(), fx.rar4File('a'), fx.rar4End()));
     expect(rowsOf(plain)['Entries']).toBe('none of 1 entries read are encrypted');

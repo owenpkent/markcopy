@@ -12,7 +12,8 @@
 // RAR 2.9 to 4.x ("RAR 4 format", the unrar sources' headers.hpp): a 7-byte
 // signature, then blocks of CRC16, type, flags and size. The main header flag
 // 0x0080 means the headers are encrypted; a file header's flag 0x0004 means
-// that file is.
+// that file is. The file header's UnpVer byte picks the scheme: 13, 15 and 20
+// (also 26) are the pre-AES RAR 1.3, 1.5 and 2.0 ciphers; 29 and up is AES-128.
 import type { RangeReader } from '../binary/reader';
 import { ENCRYPTION_NOTE, NOT_DETERMINED, Cursor, Undetermined, count } from './labels';
 import { propertySection, type PackageInfo } from './model';
@@ -28,6 +29,8 @@ const MAX_EXTRA_RECORDS = 32;
 /** RAR's own limit on the KDF exponent. */
 const MAX_KDF_EXPONENT = 24;
 const LEGACY = 'RAR 2.9 format (legacy AES-128)';
+/** A file header's UnpVer byte sits after the 7-byte block header and 17 bytes of sizes, CRC and times. */
+const RAR4_UNPVER_OFFSET = 24;
 
 function vint(c: Cursor): number {
   let value = 0;
@@ -55,6 +58,22 @@ function kdf(exponent: number): string {
   return exponent <= MAX_KDF_EXPONENT
     ? `PBKDF2 (HMAC-SHA256), 2^${exponent} iterations`
     : NOT_DETERMINED;
+}
+
+function cipherV4(unpVer: number | undefined): string {
+  if (unpVer === undefined) {
+    return NOT_DETERMINED;
+  }
+  if (unpVer >= 29) {
+    return LEGACY;
+  }
+  if (unpVer === 13 || unpVer === 15) {
+    return `RAR 1.${unpVer === 13 ? 3 : 5} format (proprietary cipher, not AES)`;
+  }
+  if (unpVer === 20 || unpVer === 26) {
+    return 'RAR 2.0 format (proprietary cipher, not AES)';
+  }
+  return `${NOT_DETERMINED} (entry version ${unpVer})`;
 }
 
 function cipherV5(version: number): string {
@@ -172,6 +191,7 @@ async function readRar4(reader: RangeReader): Promise<[string, string][]> {
   let headers = 0;
   let files = 0;
   let encryptedFiles = 0;
+  const ciphers = new Set<string>();
   let ended = false;
   let stopped = '';
   let headersEncrypted = false;
@@ -199,6 +219,13 @@ async function readRar4(reader: RangeReader): Promise<[string, string][]> {
         files++;
         if (flags & 0x0004) {
           encryptedFiles++;
+          ciphers.add(
+            cipherV4(
+              size > RAR4_UNPVER_OFFSET && window.length > RAR4_UNPVER_OFFSET
+                ? window[RAR4_UNPVER_OFFSET]
+                : undefined,
+            ),
+          );
         }
         if (flags & 0x0100) {
           // 64-bit sizes: the high half of the packed size follows the attributes.
@@ -222,7 +249,7 @@ async function readRar4(reader: RangeReader): Promise<[string, string][]> {
       rows.push([
         'Entries',
         encryptedFiles > 0
-          ? `${LEGACY}: ${count(encryptedFiles)} of ${count(files)} entries read`
+          ? `${[...ciphers].join(' and ')}: ${count(encryptedFiles)} of ${count(files)} entries read`
           : `none of ${count(files)} entries read are encrypted`,
       ]);
       if (!ended) {
