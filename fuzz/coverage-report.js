@@ -15,12 +15,18 @@
 //  - A source line counts as covered when the first token of any built line that
 //    maps to it ran. That is V8 block coverage seen through a source map, so it
 //    is close to, but not identical with, what c8 reports on the .ts files.
-//  - Lines the build removes (types, comments) are not counted. A file with no
-//    executable lines is reported as having none and passes.
+//  - Lines the build removes (types, comments) are not counted. A built file with
+//    no executable lines is reported as having none and passes. A listed parser
+//    with no build output at all (no fuzz target imports it) counts as 0% and
+//    is below its minimum.
+//  - --out is only created, never cleared: other files in it are kept and only
+//    the two report files are overwritten. Raw V8 data lives in a temporary
+//    directory that is removed afterwards.
 // Exit status: 0 when the report was written (a file below threshold is not an
 // error here; the workflow turns it into an issue), 1 when a replay failed.
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -125,111 +131,138 @@ function replayName(target) {
   return target.replace(/^(image|pkg)-.+$/, '$1');
 }
 
+// Creates the requested report directory if needed and nothing else: whatever
+// is already in it is left alone, and only the two report files are overwritten.
+function prepareOutput(outDir) {
+  fs.mkdirSync(outDir, { recursive: true });
+  return outDir;
+}
+
+// Writes fuzz-coverage.md and fuzz-coverage.json into outDir.
+function writeReport(outDir, markdown, data) {
+  fs.writeFileSync(path.join(outDir, 'fuzz-coverage.md'), markdown);
+  fs.writeFileSync(path.join(outDir, 'fuzz-coverage.json'), JSON.stringify(data, null, 2));
+}
+
+// One parser's row. A declared parser with no built source map (no fuzz target
+// imports it any more) is reported as 0 covered of 0 with missing set and counts
+// as below its minimum, so losing every import cannot pass as full coverage.
+function scoreParser(file, entry, perTarget, repoRoot = root) {
+  const jsFile = path.join(repoRoot, 'out/fuzz', file.replace(/\.ts$/, '.js'));
+  const missing = !fs.existsSync(`${jsFile}.map`);
+  let total = 0;
+  const covered = new Set();
+  const byTarget = {};
+  if (!missing) {
+    const built = builtLines(jsFile, path.join(repoRoot, file));
+    const universe = built.lines;
+    total = new Set(universe.map((l) => l.sourceLine)).size;
+    const url = pathToFileURL(jsFile).href;
+    for (const target of entry.targets.map(replayName)) {
+      const functions = perTarget.get(target)?.get(url);
+      if (!functions) continue;
+      const counts = countsByOffset(functions, built.length);
+      const own = new Set();
+      for (const l of universe) {
+        if (counts[l.offset] > 0) {
+          covered.add(l.sourceLine);
+          own.add(l.sourceLine);
+        }
+      }
+      byTarget[target] = total === 0 ? 100 : Math.round((1000 * own.size) / total) / 10;
+    }
+  }
+  // 100% only for a built file with no executable lines (types only).
+  const percent = missing ? 0 : total === 0 ? 100 : (100 * covered.size) / total;
+  return {
+    file,
+    targets: entry.targets,
+    covered: covered.size,
+    total,
+    percent: Math.round(percent * 10) / 10,
+    byTarget,
+    min: entry.minLineCoverage,
+    missing,
+    below: missing || percent < entry.minLineCoverage,
+  };
+}
+
 function main() {
   const args = process.argv.slice(2);
-  const outDir = path.resolve(root, args[args.indexOf('--out') + 1] || 'fuzz/coverage-report');
+  const outIndex = args.indexOf('--out');
+  const outDir = path.resolve(
+    root,
+    (outIndex >= 0 && args[outIndex + 1]) || 'fuzz/coverage-report',
+  );
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'fuzz/coverage.json'), 'utf8'));
   const parsers = manifest.parsers;
 
   const targets = [
     ...new Set(Object.values(parsers).flatMap((p) => p.targets.map(replayName))),
   ].sort();
-  const raw = path.join(outDir, 'v8');
-  fs.rmSync(outDir, { recursive: true, force: true });
-  fs.mkdirSync(raw, { recursive: true });
-
-  // Build once; each replay then skips its own build.
-  const build = spawnSync(process.execPath, [path.join(__dirname, 'build.js')], {
-    cwd: root,
-    stdio: 'inherit',
-  });
-  if (build.status !== 0) process.exit(build.status ?? 1);
-
-  const failed = [];
-  const perTarget = new Map();
-  for (const target of targets) {
-    const dir = path.join(raw, target);
-    const run = spawnSync(process.execPath, [path.join(__dirname, 'replay.js'), target], {
+  prepareOutput(outDir);
+  // Raw V8 data goes in a private temporary directory, removed in the finally
+  // below. Nothing under the caller's --out is ever deleted.
+  const raw = fs.mkdtempSync(path.join(os.tmpdir(), 'markcopy-fuzz-coverage-'));
+  try {
+    // Build once; each replay then skips its own build.
+    const build = spawnSync(process.execPath, [path.join(__dirname, 'build.js')], {
       cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, NODE_V8_COVERAGE: dir, FUZZ_REPLAY_NO_BUILD: '1' },
+      stdio: 'inherit',
     });
-    if (run.status !== 0) {
-      failed.push(
-        `${target}: ${(run.stderr || run.stdout).trim().split('\n').slice(0, 6).join(' | ')}`,
-      );
+    if (build.status !== 0) {
+      process.exitCode = build.status ?? 1;
+      return;
     }
-    perTarget.set(target, readCoverage(dir));
-  }
 
-  const rows = [];
-  for (const [file, entry] of Object.entries(parsers).sort()) {
-    const jsFile = path.join(root, 'out/fuzz', file.replace(/\.ts$/, '.js'));
-    let total = 0;
-    const covered = new Set();
-    const byTarget = {};
-    if (fs.existsSync(`${jsFile}.map`)) {
-      const built = builtLines(jsFile, path.join(root, file));
-      const universe = built.lines;
-      total = new Set(universe.map((l) => l.sourceLine)).size;
-      const url = pathToFileURL(jsFile).href;
-      for (const target of entry.targets.map(replayName)) {
-        const functions = perTarget.get(target)?.get(url);
-        if (!functions) continue;
-        const counts = countsByOffset(functions, built.length);
-        const own = new Set();
-        for (const l of universe) {
-          if (counts[l.offset] > 0) {
-            covered.add(l.sourceLine);
-            own.add(l.sourceLine);
-          }
-        }
-        byTarget[target] = total === 0 ? 100 : Math.round((1000 * own.size) / total) / 10;
+    const failed = [];
+    const perTarget = new Map();
+    for (const target of targets) {
+      const dir = path.join(raw, target);
+      const run = spawnSync(process.execPath, [path.join(__dirname, 'replay.js'), target], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, NODE_V8_COVERAGE: dir, FUZZ_REPLAY_NO_BUILD: '1' },
+      });
+      if (run.status !== 0) {
+        failed.push(
+          `${target}: ${(run.stderr || run.stdout).trim().split('\n').slice(0, 6).join(' | ')}`,
+        );
       }
+      perTarget.set(target, readCoverage(dir));
     }
-    const percent = total === 0 ? 100 : (100 * covered.size) / total;
-    rows.push({
-      file,
-      targets: entry.targets,
-      covered: covered.size,
-      total,
-      percent: Math.round(percent * 10) / 10,
-      byTarget,
-      min: entry.minLineCoverage,
-      below: percent < entry.minLineCoverage,
-    });
-  }
 
-  const below = rows.filter((r) => r.below);
-  const lines = [
-    '## Fuzz coverage of the parsers',
-    '',
-    `Line coverage of the committed seeds replayed through ${targets.length} targets (no mutation, no evolved corpus), unioned over the targets each parser lists in \`fuzz/coverage.json\`. ${rows.length} parsers, ${below.length} below threshold.`,
-    '',
-    '| Parser | Targets | Lines | Coverage | Minimum | |',
-    '| --- | --- | ---: | ---: | ---: | --- |',
-    ...rows.map(
-      (r) =>
-        `| \`${r.file}\` | ${r.targets.join(', ')} | ${r.covered}/${r.total} | ${r.percent}% | ${r.min}% | ${r.below ? 'below' : 'ok'} |`,
-    ),
-  ];
-  if (failed.length > 0) {
-    lines.push('', 'Replays that failed:', ...failed.map((f) => `- ${f}`));
+    const rows = Object.entries(parsers)
+      .sort()
+      .map(([file, entry]) => scoreParser(file, entry, perTarget));
+    const below = rows.filter((r) => r.below);
+    const lines = [
+      '## Fuzz coverage of the parsers',
+      '',
+      `Line coverage of the committed seeds replayed through ${targets.length} targets (no mutation, no evolved corpus), unioned over the targets each parser lists in \`fuzz/coverage.json\`. ${rows.length} parsers, ${below.length} below threshold.`,
+      '',
+      '| Parser | Targets | Lines | Coverage | Minimum | |',
+      '| --- | --- | ---: | ---: | ---: | --- |',
+      ...rows.map(
+        (r) =>
+          `| \`${r.file}\` | ${r.targets.join(', ')} | ${r.covered}/${r.total} | ${r.percent}% | ${r.min}% | ${r.missing ? 'below (no build output: no fuzz target imports it)' : r.below ? 'below' : 'ok'} |`,
+      ),
+    ];
+    if (failed.length > 0) {
+      lines.push('', 'Replays that failed:', ...failed.map((f) => `- ${f}`));
+    }
+    const markdown = `${lines.join('\n')}\n`;
+    writeReport(outDir, markdown, { rows, below: below.map((r) => r.file), failed });
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
+    }
+    console.log(markdown);
+    if (failed.length > 0) process.exitCode = 1;
+  } finally {
+    fs.rmSync(raw, { recursive: true, force: true });
   }
-  const markdown = `${lines.join('\n')}\n`;
-  fs.writeFileSync(path.join(outDir, 'fuzz-coverage.md'), markdown);
-  fs.writeFileSync(
-    path.join(outDir, 'fuzz-coverage.json'),
-    JSON.stringify({ rows, below: below.map((r) => r.file), failed }, null, 2),
-  );
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
-  }
-  console.log(markdown);
-  fs.rmSync(raw, { recursive: true, force: true });
-  if (failed.length > 0) process.exit(1);
 }
 
-module.exports = { decodeMappings, replayName };
+module.exports = { decodeMappings, replayName, prepareOutput, writeReport, scoreParser };
 
 if (require.main === module) main();
