@@ -56,6 +56,10 @@ Flip the lock/pencil pill in the top-right corner of a Markdown preview to edit 
 
 ![The same edit mode in a dark VS Code theme](../media/edit-mode-dark.png)
 
+## Auto-scroll
+
+Auto-scroll glides the page for you, hands-free. Press the auto-scroll button in the pill at the top right (after the lock and pencil; it stays lit while on), or right-click the page and choose **Start Auto-scroll**. A puck appears in the bottom-right corner with a large round **Play**/**Pause** button and **-** and **+**, and works exactly as in the [PDF preview](documents.md): **+** is faster downward, **-** faster upward and, past the slowest speed, turns around; hold either to keep stepping; right-click the puck for Small, Medium, Large or Extra large. **Space** pauses and resumes, the arrow keys and **+** / **-** change the speed, and **Escape** stops. Scrolling by hand is carried on from, and it stops by itself at the end or the top, announcing it to screen readers. Editing the file while it runs does not stop it: the page is held still while the preview redraws and then it carries on from where you were, and it waits while a block editor is open. The speed and size are remembered while the preview stays open, and shared with the PDF preview.
+
 ## Search Google for a selection
 
 Select some text and right-click for **Search Google for "…"**, which opens the search in your browser.

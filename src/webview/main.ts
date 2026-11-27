@@ -20,6 +20,7 @@ import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 import { fromHost } from './fromHost';
+import { autoScrollIcon, createAnnouncer, createAutoScroll } from './autoScroll';
 import { diagramHtml } from './diagramHtml';
 // Type only: the host owns the grid operations, and naming them in one place
 // keeps the menu and the writeback from drifting apart. Erased at build time, so
@@ -169,6 +170,10 @@ const editMode = createEditMode({
 
 // Only the latest render received while a block editor is open is kept.
 let pendingRender: Record<string, unknown> | undefined;
+// Renders started and not yet finished, and the latest one's number, for
+// auto-scroll (see applyRenderMessage).
+let rendersInFlight = 0;
+let renderSeq = 0;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
@@ -181,6 +186,14 @@ function applyRenderMessage(msg: Record<string, any>): void {
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
+  // Auto-scroll holds still while the content is being replaced: the page height
+  // is only transient until the math and diagrams have settled, and a scroll
+  // position clamped by a shorter page is not the reader's. Where the page was is
+  // put back afterwards, so a live edit does not set the reader back or look
+  // like reaching the end.
+  const keepTop = auto.isOn() && !docChanged ? scrollTop() : null;
+  const seq = ++renderSeq;
+  rendersInFlight++;
   void render(
     msg.html as string,
     msg.source as string,
@@ -196,7 +209,14 @@ function applyRenderMessage(msg: Record<string, any>): void {
     (msg.kind as string) ?? 'markdown',
     Number(msg.docVersion ?? -1),
     msg.revealFragment as string | undefined,
-  );
+  ).finally(() => {
+    rendersInFlight--;
+    if (keepTop !== null && seq === renderSeq && !msg.revealFragment && auto.isOn()) {
+      suppressSyncTo(Math.min(keepTop, maxScroll()));
+      setScrollTop(keepTop);
+    }
+    auto.resync();
+  });
   editMode.afterRender(
     Number.isSafeInteger(msg.ackEdit) ? (msg.ackEdit as number) : undefined,
     docChanged,
@@ -289,6 +309,9 @@ async function render(
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.mcKind = kind || 'markdown';
   editMode.setKind(kind || 'markdown');
+  if (!offersAutoScroll()) {
+    auto.stop('Auto-scroll off');
+  }
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
@@ -506,6 +529,47 @@ function maxScroll(): number {
     ? Math.max(0, el.scrollHeight - el.clientHeight)
     : Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
 }
+
+// ---------------------------------------------------------------------------
+// Auto-scroll (Markdown only)
+// ---------------------------------------------------------------------------
+// The puck, loop and keys are shared with the PDF viewer (autoScroll.ts). The
+// Markdown page scrolls the document itself, so that is the scroller. The grid
+// and the Word, PowerPoint, executable and package previews do not offer it.
+const announceAuto = createAnnouncer();
+const auto = createAutoScroll({
+  scroller: () => (document.scrollingElement ?? document.documentElement) as HTMLElement,
+  getState: () => vscode.getState(),
+  setState: (state) => vscode.setState(state),
+  contextMenu,
+  announce: announceAuto,
+  // The toast only: unlike toast() above it is not echoed to the host's status bar.
+  toast: (text) => {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    window.setTimeout(() => (toastEl.hidden = true), 1600);
+  },
+  // Holds still while a render is replacing the page, and while a block editor
+  // is open (the reader is typing, not reading).
+  isHeld: () => rendersInFlight > 0 || editMode.isEditing(),
+});
+
+function offersAutoScroll(): boolean {
+  return (document.body.dataset.mcKind ?? 'markdown') === 'markdown';
+}
+
+// The toggle lives in the read/edit pill at the top right (see editMode.ts), which
+// is shown for Markdown and hidden for every other kind, so it is offered exactly
+// where auto-scroll is. The puck opens at the bottom right.
+const autoToggle = document.createElement('button');
+autoToggle.type = 'button';
+autoToggle.id = 'mc-autoscroll-toggle';
+autoToggle.setAttribute('aria-pressed', 'false');
+autoToggle.setAttribute('aria-label', 'Auto-scroll');
+autoToggle.title = 'Auto-scroll (right-click the page for the same)';
+autoToggle.innerHTML = autoScrollIcon('toggle', 14);
+autoToggle.addEventListener('click', () => auto.toggle());
+editMode.addTool(autoToggle);
 
 // Anchors are measured once and reused: a long document has hundreds of them, and
 // re-measuring on every scroll frame would cost a forced layout each time. The
@@ -765,6 +829,22 @@ window.addEventListener('resize', invalidateAnchors, { passive: true });
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
+// Auto-scroll keys. Fields and open menus are left to themselves; a bare Escape
+// stops it only when it is not closing something else.
+document.addEventListener('keydown', (e) => {
+  if (!auto.isOn()) {
+    return;
+  }
+  if (e.key === 'Escape') {
+    const inField = (e.target as Element | null)?.closest?.('input, textarea, select');
+    if (!contextMenu.isOpen() && !inField && !editMode.isEditing()) {
+      auto.stop('Auto-scroll off');
+    }
+    return;
+  }
+  auto.key(e);
+});
+
 document.addEventListener('contextmenu', (e) => {
   // The block editor keeps the native cut/copy/paste menu.
   if ((e.target as Element | null)?.closest?.('.mc-block-editor')) return;
@@ -1081,6 +1161,13 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
+  if (offersAutoScroll()) {
+    entries.push({
+      kind: 'item',
+      label: auto.isOn() ? 'Stop Auto-scroll' : 'Start Auto-scroll',
+      run: () => auto.toggle(),
+    });
+  }
   entries.push({ kind: 'divider' });
   // The default app for an executable is the executable, and for a package it
   // is an installer: this row would run or install the file the reader opened a
