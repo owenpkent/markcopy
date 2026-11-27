@@ -114,6 +114,11 @@ export function renderAlsoReading(also: AlsoReading): string {
     lines.push(note(warning));
   }
   const parts = [block(heading, lines.join(''), true)];
+  // The reading's own file facts, such as a zip's encryption. The host rows
+  // (size, hash) belong to the whole file and are on the first reading.
+  if (info.fileRows?.length) {
+    parts.push(block('File', properties(info.fileRows)));
+  }
   for (const part of [
     ...info.sections.filter((p) => !isWide(p)),
     ...info.sections.filter(isWide),
