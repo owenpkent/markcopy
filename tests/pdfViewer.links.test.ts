@@ -483,6 +483,7 @@ describe('two destination links followed in a row', () => {
       { subtype: 'Link', rect: [60, 70, 90, 90], dest: 'four' },
     ];
     await loadDoc();
+    await vi.waitFor(() => expect(document.querySelectorAll('.mc-page')).toHaveLength(5));
     await showPage(1);
     const releases: Record<string, () => void> = {};
     for (const name of ['two', 'four']) {
@@ -499,14 +500,13 @@ describe('two destination links followed in a row', () => {
     release('two');
     await settle();
     release('four');
-    await settle();
-    expect(label()).toBe('4 / 5');
+    await vi.waitFor(() => expect(label()).toBe('4 / 5'));
   });
 
   it('lands on the newest when the newest lookup finishes first', async () => {
     const { release } = await twoLinks();
     release('four');
-    await settle();
+    await vi.waitFor(() => expect(label()).toBe('4 / 5'));
     release('two');
     await settle();
     expect(label()).toBe('4 / 5');
@@ -525,6 +525,7 @@ describe('Page Down with a toolbar button focused while a PDF is opening', () =>
     scrollTop = 306; // what the browser's default action does
     frames.splice(0).forEach((f) => f(0));
     release();
+    await vi.waitFor(() => expect(document.querySelectorAll('.mc-page')).toHaveLength(5));
     await settle();
     expect(label()).not.toBe('5 / 5');
   });
