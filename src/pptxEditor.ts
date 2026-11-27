@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
+import { refuseProtectedFile } from './ooxml/encrypted';
 import { renderDeckHtml, DeckError } from './pptx/read';
 import {
   OoxmlEditorProvider,
@@ -46,6 +47,8 @@ export class PptxEditorProvider extends OoxmlEditorProvider {
   private async renderDeck(uri: vscode.Uri): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     const bytes = await readDocument(uri);
+    // A password-protected file is not a zip; say so rather than call it damaged.
+    await refuseProtectedFile(bytes);
     const deck = renderDeckHtml(bytes, {
       maxSlides: cfg.get<number>('pptx.maxSlides', 100),
       showNotes: cfg.get<boolean>('pptx.showNotes', true),

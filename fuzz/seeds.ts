@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { SHAPES } from './targets/pkg.fuzz';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from '../tests/pe/fixture';
 import { buildElf } from '../tests/pkg/elfFixture';
+import { buildFat, buildMacho, CPU, dylib, LC, segment, uuid } from '../tests/pkg/machoFixture';
 import {
   bin,
   buildRpm,
@@ -204,6 +205,32 @@ pkg(
   'elf',
   'appimage-type2',
   buildElf({ appImage: 2, interp: LD, needed: ['libc.so.6'], payload: squashfs }),
+);
+
+// Mach-O
+const MACHO_UUID = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+const machoLibrary = buildMacho({
+  filetype: 6,
+  commands: [
+    segment('__TEXT'),
+    dylib(LC.ID_DYLIB, '@rpath/libdemo.dylib'),
+    dylib(LC.LOAD_DYLIB, '/usr/lib/libSystem.B.dylib'),
+    uuid(MACHO_UUID),
+  ],
+});
+pkg('fuzz.dylib', 'macho', 'default', machoLibrary);
+pkg(
+  'fuzz.universal',
+  'macho',
+  'universal',
+  buildFat(
+    [
+      { bytes: machoLibrary, cputype: CPU.X86_64 },
+      { bytes: buildMacho({ wide: false, big: true, cputype: CPU.PPC }), cputype: CPU.PPC },
+    ],
+    // Small enough for emit's 8 KiB limit, and still a power of two.
+    { align: 0x400 },
+  ),
 );
 
 // RPM

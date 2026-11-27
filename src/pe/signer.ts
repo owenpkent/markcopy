@@ -10,6 +10,7 @@
 // beside these fields; this module's output is a claim the file makes, and
 // must never be presented as a verdict.
 
+import { sha1Hex } from '../binary/sha1';
 import { printable } from '../binary/text';
 
 export interface Signer {
@@ -18,10 +19,20 @@ export interface Signer {
   issuer?: string;
   notBefore?: string;
   notAfter?: string;
+  /** The hash algorithm the signature says it used. A claim, not a check. */
+  digest?: string;
+  /** The signature algorithm, for formats that name one rather than a hash (APK v2 and later). */
+  signatureAlgorithm?: string;
+  /** The kind and size of the signer certificate's public key, as the certificate states it. */
+  publicKey?: string;
+  /** SHA-1 of the certificate's DER, uppercase hex, as Windows shows a thumbprint. */
+  thumbprint?: string;
 }
 
 interface Tlv {
   tag: number;
+  /** Where the header begins, so the whole element can be hashed. */
+  from: number;
   start: number;
   end: number;
 }
@@ -46,7 +57,7 @@ function tlvAt(der: Uint8Array, at: number, limit: number): Tlv | undefined {
     }
   }
   const end = start + length;
-  return end <= limit ? { tag, start, end } : undefined;
+  return end <= limit ? { tag, from: at, start, end } : undefined;
 }
 
 function children(der: Uint8Array, parent: Tlv, max = 64): Tlv[] {
@@ -223,6 +234,161 @@ function isSignerInfo(der: Uint8Array, info: Tlv): boolean {
   return value?.tag === 0x04 && value.end > value.start;
 }
 
+const DIGESTS: Record<string, string> = {
+  '1.2.840.113549.2.5': 'MD5',
+  '1.3.14.3.2.26': 'SHA-1',
+  '2.16.840.1.101.3.4.2.1': 'SHA-256',
+  '2.16.840.1.101.3.4.2.2': 'SHA-384',
+  '2.16.840.1.101.3.4.2.3': 'SHA-512',
+};
+
+const CURVES: Record<string, string> = {
+  '1.2.840.10045.3.1.7': 'P-256',
+  '1.3.132.0.34': 'P-384',
+  '1.3.132.0.35': 'P-521',
+};
+
+/** An OBJECT IDENTIFIER as dotted arcs. Bounded: long or oversized ones give nothing. */
+function oidText(der: Uint8Array, value: Tlv | undefined): string | undefined {
+  if (value?.tag !== 0x06 || value.end - value.start < 1 || value.end - value.start > 32) {
+    return undefined;
+  }
+  const arcs: number[] = [];
+  let n = 0;
+  for (let i = value.start; i < value.end; i++) {
+    n = n * 128 + (der[i] & 0x7f);
+    // Past 2^40 an arc is no OID anyone assigns; stop before doubles lose digits.
+    if (n > 2 ** 40) {
+      return undefined;
+    }
+    if (der[i] & 0x80) {
+      if (i === value.end - 1) {
+        // The last byte still says "more follows": cut off.
+        return undefined;
+      }
+      continue;
+    }
+    if (arcs.length === 0) {
+      // The first value holds two arcs: 40 * first + second, first at most 2.
+      const first = Math.min(Math.floor(n / 40), 2);
+      arcs.push(first, n - first * 40);
+    } else {
+      arcs.push(n);
+    }
+    n = 0;
+  }
+  return arcs.join('.');
+}
+
+/** The name of the hash in an AlgorithmIdentifier, or its dotted OID when unknown. */
+function digestName(der: Uint8Array, algorithm: Tlv): string | undefined {
+  const dotted = oidText(der, children(der, algorithm, 1)[0]);
+  return dotted === undefined ? undefined : (DIGESTS[dotted] ?? dotted);
+}
+
+/** "RSA, 2048 bits" and the like, from a SubjectPublicKeyInfo. */
+function keyName(der: Uint8Array, spki: Tlv | undefined): string | undefined {
+  if (spki?.tag !== 0x30) {
+    return undefined;
+  }
+  const [algorithm, bits] = children(der, spki, 2);
+  if (algorithm?.tag !== 0x30 || bits?.tag !== 0x03) {
+    return undefined;
+  }
+  const [kind, parameters] = children(der, algorithm, 2);
+  const dotted = oidText(der, kind);
+  if (dotted === undefined) {
+    return undefined;
+  }
+  switch (dotted) {
+    case '1.2.840.113549.1.1.1':
+    case '1.2.840.113549.1.1.10': {
+      // id-RSASSA-PSS (a key restricted to PSS) holds the same RSAPublicKey.
+      const name = dotted === '1.2.840.113549.1.1.10' ? 'RSA-PSS' : 'RSA';
+      // The BIT STRING (first byte: unused bits) holds SEQUENCE { modulus, exponent }.
+      const key = tlvAt(der, bits.start + 1, bits.end);
+      const modulus = key?.tag === 0x30 ? children(der, key, 1)[0] : undefined;
+      if (modulus?.tag !== 0x02) {
+        return name;
+      }
+      // A leading zero byte only keeps the INTEGER positive; it is not key size.
+      let at = modulus.start;
+      while (at < modulus.end - 1 && der[at] === 0) {
+        at++;
+      }
+      if (at >= modulus.end || der[at] === 0) {
+        return name;
+      }
+      return `${name}, ${(modulus.end - at - 1) * 8 + (32 - Math.clz32(der[at]))} bits`;
+    }
+    case '1.2.840.10045.2.1': {
+      const curve = oidText(der, parameters);
+      return curve === undefined ? 'ECDSA' : `ECDSA, ${CURVES[curve] ?? curve}`;
+    }
+    case '1.3.101.112':
+      return 'Ed25519';
+    case '1.2.840.10040.4.1':
+      return 'DSA';
+    default:
+      return dotted;
+  }
+}
+
+/**
+ * What a certificate says about itself: names, dates, key and thumbprint.
+ * `fields` are the TBSCertificate's first elements and `base` is where the
+ * serial number sits (1 when an explicit version comes first).
+ */
+function describe(
+  der: Uint8Array,
+  certificate: Tlv,
+  fields: Tlv[],
+  base: number,
+): Signer | undefined {
+  const issuer = fields[base + 2];
+  const validity = fields[base + 3];
+  const subject = fields[base + 4];
+  if (!issuer || !validity || !subject) {
+    return undefined;
+  }
+  const [notBefore, notAfter] = children(der, validity, 2);
+  const signer: Signer = {
+    subject: nameField(der, subject, COMMON_NAME),
+    organization: nameField(der, subject, ORGANIZATION),
+    issuer: nameField(der, issuer, COMMON_NAME) ?? nameField(der, issuer, ORGANIZATION),
+    notBefore: date(der, notBefore),
+    notAfter: date(der, notAfter),
+    publicKey: keyName(der, fields[base + 5]),
+  };
+  // The thumbprint always exists, so "found nothing" is judged before it is added.
+  if (!Object.values(signer).some((value) => value !== undefined)) {
+    return undefined;
+  }
+  signer.thumbprint = sha1Hex(der.subarray(certificate.from, certificate.end));
+  return signer;
+}
+
+/** The "weak" wording for a hash name; one place so every page says the same. */
+export function digestLabel(digest: string): string {
+  return digest === 'MD5' ? 'MD5 (broken)' : digest === 'SHA-1' ? 'SHA-1 (weak)' : digest;
+}
+
+/** The "weak" wording for a key description: RSA under 2048 bits. */
+export function keyLabel(key: string): string {
+  const bits = /^RSA(?:-PSS)?, (\d+) bits$/.exec(key);
+  return bits && Number(bits[1]) < 2048 ? `${key} (weak)` : key;
+}
+
+/** The detail rows every signature section shows after "Certificate valid"; empty values are left for the caller to drop. */
+export function detailRows(signer?: Signer): [string, string | undefined][] {
+  return [
+    ['Digest', signer?.digest === undefined ? undefined : digestLabel(signer.digest)],
+    ['Signature algorithm', signer?.signatureAlgorithm],
+    ['Public key', signer?.publicKey === undefined ? undefined : keyLabel(signer.publicKey)],
+    ['Certificate thumbprint (SHA-1)', signer?.thumbprint],
+  ];
+}
+
 export function readSigner(der: Uint8Array): Signer | undefined {
   // ContentInfo ::= SEQUENCE { contentType OID, [0] EXPLICIT SignedData }
   const outer = tlvAt(der, 0, der.length);
@@ -249,11 +415,14 @@ export function readSigner(der: Uint8Array): Signer | undefined {
   }
   // SignerInfo ::= SEQUENCE { version, IssuerAndSerialNumber { issuer, serial }, ... }
   const signerInfo = children(der, signers, 1)[0];
-  const cited = signerInfo && children(der, signerInfo, 2)[1];
+  const cited = signerInfo && children(der, signerInfo, 3)[1];
   const [citedIssuer, citedSerial] = cited ? children(der, cited, 2) : [];
   if (!citedIssuer || !citedSerial) {
     return undefined;
   }
+  // The hash the signer says it used: the AlgorithmIdentifier after the sid.
+  const algorithm = signerInfo && children(der, signerInfo, 3)[2];
+  const digest = algorithm?.tag === 0x30 ? digestName(der, algorithm) : undefined;
   for (const certificate of children(der, certificates, 32)) {
     // Certificate ::= SEQUENCE { tbsCertificate SEQUENCE { [0] version OPTIONAL,
     //   serial, signature, issuer, validity { notBefore, notAfter }, subject, ... }, ... }
@@ -273,15 +442,11 @@ export function readSigner(der: Uint8Array): Signer | undefined {
     if (!same(der, serial, citedSerial) || !same(der, issuer, citedIssuer)) {
       continue;
     }
-    const [notBefore, notAfter] = children(der, validity, 2);
-    const signer: Signer = {
-      subject: nameField(der, subject, COMMON_NAME),
-      organization: nameField(der, subject, ORGANIZATION),
-      issuer: nameField(der, issuer, COMMON_NAME) ?? nameField(der, issuer, ORGANIZATION),
-      notBefore: date(der, notBefore),
-      notAfter: date(der, notAfter),
-    };
-    return Object.values(signer).some((value) => value !== undefined) ? signer : undefined;
+    const signer = describe(der, certificate, fields, base);
+    if (signer && digest) {
+      signer.digest = digest;
+    }
+    return signer;
   }
   return undefined;
 }
@@ -295,24 +460,10 @@ export function readSigner(der: Uint8Array): Signer | undefined {
 export function readCertificate(der: Uint8Array): Signer | undefined {
   const certificate = tlvAt(der, 0, der.length);
   const tbs = certificate?.tag === 0x30 ? children(der, certificate, 1)[0] : undefined;
-  if (!tbs) {
+  if (!certificate || !tbs) {
     return undefined;
   }
   const fields = children(der, tbs, 8);
   const base = fields[0]?.tag === 0xa0 ? 1 : 0;
-  const issuer = fields[base + 2];
-  const validity = fields[base + 3];
-  const subject = fields[base + 4];
-  if (!issuer || !validity || !subject) {
-    return undefined;
-  }
-  const [notBefore, notAfter] = children(der, validity, 2);
-  const signer: Signer = {
-    subject: nameField(der, subject, COMMON_NAME),
-    organization: nameField(der, subject, ORGANIZATION),
-    issuer: nameField(der, issuer, COMMON_NAME) ?? nameField(der, issuer, ORGANIZATION),
-    notBefore: date(der, notBefore),
-    notAfter: date(der, notAfter),
-  };
-  return Object.values(signer).some((value) => value !== undefined) ? signer : undefined;
+  return describe(der, certificate, fields, base);
 }

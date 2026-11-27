@@ -133,6 +133,7 @@ describe('package.json: markcopy.packagePreview', () => {
       'nupkg',
       'snupkg',
       'so',
+      'dylib',
       'elf',
       'ko',
     ];
