@@ -703,6 +703,9 @@ describe('readPe: signature', () => {
       issuer: 'Contoso Code Signing CA',
       notBefore: '2023-06-15',
       notAfter: '2026-06-15',
+      digest: 'SHA-256',
+      publicKey: 'RSA',
+      thumbprint: expect.stringMatching(/^[0-9A-F]{40}$/),
     });
   });
 

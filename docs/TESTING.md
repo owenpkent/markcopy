@@ -311,7 +311,7 @@ Measured so far, manually on Windows 11 on 2026-11-22 with a script over the par
 - [ ] The file's icon is above its name and matches the one Explorer shows, with a transparent background in every theme. `kernel32.dll` shows no icon and no gap. An old program with only small bitmap icons (`hh.exe`, `winhlp32.exe`) shows its icon at natural size, not blurred.
 - [ ] The Version table matches Explorer's Properties > Details for the same file: description, product, company, file and product versions, copyright, original file name.
 - [ ] The SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
-- [ ] A signed file shows its signer, organization, issuer and validity dates matching `Get-AuthenticodeSignature <file>`, and the page says nothing is verified. A catalog-signed file (many Windows components) shows no embedded signature, which is expected.
+- [ ] A signed file shows its signer, organization, issuer and validity dates, public key size and SHA-1 thumbprint matching `Get-AuthenticodeSignature <file>` (`SignerCertificate`), and the page says nothing is verified. A catalog-signed file (many Windows components) shows no embedded signature, which is expected.
 - [ ] The File table is plausible: architecture ("Any CPU" for the .NET assembly), PE32 or PE32+, subsystem, build time (or "not recorded" for a reproducible build), minimum Windows version, entry point, appended data on an installer.
 - [ ] Permissions and protections shows the manifest's execution level and the loader mitigations (ASLR, DEP, Control Flow Guard with its count of CFG target-table entries) for a modern executable, the stack cookie, EH continuation and CET rows for a 64-bit one, SafeSEH for a 32-bit x86 one, and large address aware for that one. Compare `kernel32.dll` against `python -I -c "import pefile"` (`DIRECTORY_ENTRY_LOAD_CONFIG`) if in doubt.
 - [ ] A Visual C++ build (for example `notepad.exe`) shows a Build tools block with its linker and compiler versions and no checksum warning; a MinGW build shows real section names such as `.text` and `.debug_info` instead of `/4`; a program with no linker record shows no Build tools block.
@@ -421,7 +421,7 @@ Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):
 - [ ] A Java archive shows its manifest, Maven coordinates when there are some, the class count and Java version; a signed one shows its signer.
 - [ ] A VS Code extension shows its identity, engine, activation events and contribution counts.
 - [ ] A wheel shows its metadata, requirements and entry points; a NuGet package its dependencies by framework and whether it carries build or install scripts.
-- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed only with scheme v2 or later shows the scheme without a signer. Its label and icon are not shown.
+- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed with scheme v2 or later shows the signer, key size and thumbprint, which match `apksigner verify --print-certs`. Its label and icon are not shown.
 - [ ] A `.zip` renamed to `.jar` with none of these inside shows its contents only.
 
 ## CSV / TSV grid
