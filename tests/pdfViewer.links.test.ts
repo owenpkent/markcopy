@@ -775,6 +775,62 @@ describe('Home while auto-scroll runs', () => {
   });
 });
 
+describe('a link chosen while auto-scroll is paused', () => {
+  const run = (from: number, to: number) => {
+    for (let t = from; t <= to; t += 100) {
+      frames.splice(0).forEach((f) => f(t));
+    }
+  };
+  async function pausedWithLink(): Promise<{ play: HTMLElement; releaseFour: () => void }> {
+    h.dests.four = [{ num: 4, gen: 0 }, { name: 'Fit' }];
+    h.pageByNum = { 4: 3 };
+    h.annots[1] = [{ ...CHAPTER, dest: 'four' }];
+    let releaseFour!: () => void;
+    await loadDoc();
+    await showPage(1);
+    await vi.waitFor(() => expect(links()).toHaveLength(1));
+    h.destGates.four = new Promise<void>((r) => (releaseFour = r));
+    scrollTop = 300;
+    document.getElementById('mc-autoscroll-toggle')!.click();
+    run(100, 300); // auto-scroll writes positions of its own
+    const play = document.querySelector<HTMLElement>('[data-as="play"]')!;
+    play.click(); // pause
+    run(400, 500);
+    scrollTop = 500; // the reader scrolls while paused
+    run(600, 700);
+    h.destLookups = [];
+    clickAt(30, 80); // page 4, its lookup waits
+    expect(h.destLookups).toEqual(['four']);
+    return { play, releaseFour };
+  }
+
+  it('still lands on it when Enter on Play resumes before it loads', async () => {
+    const { play, releaseFour } = await pausedWithLink();
+    play.focus();
+    play.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+    play.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); // resume
+    run(800, 1100);
+    releaseFour();
+    await vi.waitFor(() =>
+      expect((scrollIntoView.mock.contexts.at(-1) as HTMLElement)?.dataset.page).toBe('4'),
+    );
+  });
+
+  it('gives way to Home pressed while still paused', async () => {
+    const { releaseFour } = await pausedWithLink();
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+    );
+    scrollTop = 0; // what the browser's default action does
+    run(800, 1100);
+    releaseFour();
+    await settle();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
 describe('Enter held on a speed button', () => {
   it('stops at the slowest speed, while a fresh press may reverse', async () => {
     await loadDoc();

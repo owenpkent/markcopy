@@ -2165,6 +2165,8 @@ function startAutoScroll(): void {
   autoOn = true;
   autoPaused = false;
   autoPos = s.scrollTop;
+  // Start from where the view is: a position written by an earlier run is stale.
+  autoWroteTop = s.scrollTop;
   autoLast = 0;
   applyAutoUi();
   announceAuto(`Auto-scroll on, ${describeSpeed(autoSettings.speed)}`);
@@ -2196,6 +2198,10 @@ let autoWroteTop: number | null = null;
 // such as Home moved it) and carried on from there. Such a move is the reader's even
 // though auto-scroll's next write then puts the view at autoWroteTop again.
 let autoAdoptedMoves = 0;
+// Counts auto-scroll's own writes. A key is only taken for auto-scroll's movement if
+// auto-scroll actually moved the view after it: while paused it writes nothing, so a
+// key that moved the view then (Home, Page Down) is the reader's.
+let autoWrites = 0;
 
 function autoFrame(ts: number): void {
   autoRaf = 0;
@@ -2209,8 +2215,10 @@ function autoFrame(ts: number): void {
   if (autoPaused || panning || loadingDoc) {
     // Hold still (paused, a hand drag is moving the page, or the pages are being
     // rebuilt and the scroll position is only transient) but keep the
-    // position current so resuming continues from wherever the page is.
+    // position current so resuming continues from wherever the page is. A move
+    // made meanwhile was seen here, so resuming must not count it as a new one.
     autoPos = s.scrollTop;
+    autoWroteTop = s.scrollTop;
   } else {
     if (autoWroteTop !== null && Math.abs(s.scrollTop - autoWroteTop) > 0.5) {
       autoAdoptedMoves++;
@@ -2227,6 +2235,7 @@ function autoFrame(ts: number): void {
       s.scrollTop = autoPos;
       // Read back, since the browser may round the offset it was given.
       autoWroteTop = s.scrollTop;
+      autoWrites++;
     }
     if (result.edge) {
       stopAutoScroll(
@@ -2448,6 +2457,7 @@ document.addEventListener('keydown', (e) => {
   const s = scroller();
   const { scrollTop, scrollLeft } = s;
   const adopted = autoAdoptedMoves;
+  const writes = autoWrites;
   const token = ++keyScrollCheck;
   let frames = 0;
   const check = (): void => {
@@ -2458,6 +2468,7 @@ document.addEventListener('keydown', (e) => {
     const byAutoScroll =
       autoOn &&
       autoAdoptedMoves === adopted &&
+      autoWrites !== writes &&
       s.scrollLeft === scrollLeft &&
       s.scrollTop === autoWroteTop;
     if (moved && !byAutoScroll) {
