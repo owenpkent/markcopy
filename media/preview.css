@@ -1010,9 +1010,22 @@ body.mc-mode-hand .mc-link {
    button 64px, the small ones 44px at Medium), scaled by the size choice via
    data-size so no inline style is needed. It sits below menus and notes, so it
    never covers or takes clicks from an open one. Colours are the toolbar's own,
-   so it reads in light, dark and green. */
+   so it reads in light, dark and green.
+
+   In a narrow pane the buttons give way before the panel runs off the edge: each
+   size is capped by the width the pane has (100vw less the right inset, a
+   scrollbar's width and the panel's padding and gaps), never below 44px, and the
+   row wraps if even 44px buttons cannot sit side by side. */
 #mc-autoscroll {
   --mc-as-scale: 1;
+  --mc-as-room: calc(100vw - 56px - 12px * var(--mc-as-scale));
+  --mc-as-small: min(
+    calc(44px * var(--mc-as-scale)),
+    max(44px, calc((var(--mc-as-room) - 12px) / 3))
+  );
+  --mc-as-play: min(calc(64px * var(--mc-as-scale)), max(44px, var(--mc-as-room)));
+  box-sizing: border-box;
+  max-width: calc(100vw - 36px);
   position: fixed;
   right: 18px;
   bottom: 62px;
@@ -1043,6 +1056,8 @@ body.mc-mode-hand .mc-link {
 }
 #mc-autoscroll .mc-as-row {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 #mc-autoscroll .mc-as-btn {
@@ -1057,8 +1072,8 @@ body.mc-mode-hand .mc-link {
   cursor: pointer;
 }
 #mc-autoscroll .mc-as-play {
-  width: calc(64px * var(--mc-as-scale));
-  height: calc(64px * var(--mc-as-scale));
+  width: var(--mc-as-play);
+  height: var(--mc-as-play);
   align-self: center;
   border-radius: 50%;
   background: var(--vscode-button-background, #0969da);
@@ -1066,16 +1081,16 @@ body.mc-mode-hand .mc-link {
   border-color: transparent;
 }
 #mc-autoscroll .mc-as-small {
-  width: calc(44px * var(--mc-as-scale));
-  height: calc(44px * var(--mc-as-scale));
+  width: var(--mc-as-small);
+  height: var(--mc-as-small);
 }
 #mc-autoscroll .mc-as-play svg {
-  width: calc(36px * var(--mc-as-scale));
-  height: calc(36px * var(--mc-as-scale));
+  width: calc(var(--mc-as-play) * 0.5625);
+  height: calc(var(--mc-as-play) * 0.5625);
 }
 #mc-autoscroll .mc-as-small svg {
-  width: calc(26px * var(--mc-as-scale));
-  height: calc(26px * var(--mc-as-scale));
+  width: calc(var(--mc-as-small) * 0.59);
+  height: calc(var(--mc-as-small) * 0.59);
 }
 #mc-autoscroll .mc-as-btn:hover:not(:disabled) {
   filter: brightness(1.2);

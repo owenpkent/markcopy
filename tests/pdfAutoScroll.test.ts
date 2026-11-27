@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   AUTO_SCROLL_DEFAULT,
@@ -151,5 +152,21 @@ describe('parseSettings', () => {
   it('keeps valid values and clamps the speed', () => {
     expect(parseSettings({ speed: -40, size: 3 })).toEqual({ speed: -40, size: 3 });
     expect(parseSettings({ speed: 99999, size: 0 })).toEqual({ speed: AUTO_SCROLL_MAX, size: 0 });
+  });
+});
+
+describe('the puck in a narrow pane (stylesheet)', () => {
+  // Measured in headless Chromium at Extra large: the three small buttons ended
+  // up at 69 px wide at 300 px, 49 px at 240 px and 44 px at 220 px, all inside
+  // the pane. This checks that the rules producing that are still there.
+  const css = readFileSync('media/preview.css', 'utf8').replace(/\r\n/g, '\n');
+  it('caps the button size by the room the pane has, never below 44px', () => {
+    expect(css).toMatch(
+      /--mc-as-small: min\(\s*calc\(44px \* var\(--mc-as-scale\)\),\s*max\(44px, /,
+    );
+    expect(css).toMatch(/width: var\(--mc-as-small\);/);
+  });
+  it('wraps the row when even 44px buttons cannot sit side by side', () => {
+    expect(css).toMatch(/\.mc-as-row \{\n {2}display: flex;\n {2}flex-wrap: wrap;/);
   });
 });

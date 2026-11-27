@@ -303,6 +303,7 @@ async function loadDocument(data: Uint8Array): Promise<void> {
       job.run();
       jumpedWhileLoading = true;
     }
+    applyPendingOffset();
   }
 
   updateZoomLabel();
@@ -641,6 +642,9 @@ const linkRegionsOf = new WeakMap<HTMLElement, PercentBox[]>();
 // long document is still being laid out) waits here, and runs as soon as it does.
 let pendingJump: { page: number; run: () => void } | null = null;
 let jumpedWhileLoading = false;
+// A link offset that did not fit in the scroll range yet (the pages below the
+// destination are still being laid out): applied again as pages arrive.
+let pendingOffset: { page: number; px: number } | null = null;
 function whenPageExists(page: number, run: () => void): void {
   if (wrappers.length >= page) {
     run();
@@ -648,6 +652,49 @@ function whenPageExists(page: number, run: () => void): void {
     pendingJump = { page, run };
   }
 }
+
+// The reader chose where to be (a scroll, a page entered, a link, a zoom). While
+// a document is still opening that choice beats everything automatic that is
+// still waiting: an older link, the offset inside a link's page, and the saved
+// position. Called before the navigation itself, so a link that queues its own
+// jump afterwards is not cancelled by it.
+function readerNavigated(): void {
+  pendingJump = null;
+  pendingOffset = null;
+  if (loadingDoc) {
+    jumpedWhileLoading = true;
+  }
+}
+for (const type of ['wheel', 'touchmove']) {
+  window.addEventListener(
+    type,
+    (e) => {
+      // Ctrl + wheel is zoom, which announces itself.
+      if (!(e as WheelEvent).ctrlKey && !(e as WheelEvent).metaKey) {
+        readerNavigated();
+      }
+    },
+    { passive: true },
+  );
+}
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ']);
+document.addEventListener('keydown', (e) => {
+  if (
+    SCROLL_KEYS.has(e.key) &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !(e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable="true"]')
+  ) {
+    readerNavigated();
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  // A press on the page background or the scrollbar (the root element) is a drag
+  // or a scrollbar jump, not a click on a control.
+  if (e.target === document.documentElement) {
+    readerNavigated();
+  }
+});
 
 async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
   const layer = wrappers[n - 1]?.querySelector('.mc-link-layer') as HTMLElement | null;
@@ -693,12 +740,19 @@ async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
     el.style.top = `${box.top}%`;
     el.style.width = `${box.width}%`;
     el.style.height = `${box.height}%`;
-    el.title = label;
+    // The tooltip previews where an external link goes; the accessible name stays
+    // the text it covers (or the fallback description).
+    el.title = target.kind === 'url' ? boundedTitle(target.url) : label;
     el.setAttribute('aria-label', label);
     linkTargets.set(el, target);
     linkRegionsOf.set(el, regions);
     layer.appendChild(el);
   }
+}
+
+const MAX_LINK_TITLE = 200;
+function boundedTitle(url: string): string {
+  return url.length > MAX_LINK_TITLE ? `${url.slice(0, MAX_LINK_TITLE - 1)}\u2026` : url;
 }
 
 // What a screen reader announces for a link: the text it covers when pdf.js has
@@ -779,11 +833,34 @@ async function goToDestination(dest: string | unknown[]): Promise<void> {
     if (y === null) {
       return;
     }
-    const s = scroller();
-    const before = s.scrollTop;
-    s.scrollTop += Math.max(0, Math.min(y, baseSize[d.pageIndex].h)) * scale;
-    pageJumpScrollPending = pageJumpScrollPending || s.scrollTop !== before;
+    pendingOffset = {
+      page: d.pageIndex + 1,
+      px: Math.max(0, Math.min(y, baseSize[d.pageIndex].h)) * scale,
+    };
+    applyPendingOffset();
   });
+}
+
+// Put the top of the pending offset at the top of the view. The scroll range only
+// reaches that far once enough pages below are laid out, so while the document is
+// still opening the offset is kept and tried again as each page arrives.
+function applyPendingOffset(): void {
+  const job = pendingOffset;
+  const wrap = job ? wrappers[job.page - 1] : undefined;
+  if (!job || !wrap) {
+    return;
+  }
+  const s = scroller();
+  const before = s.scrollTop;
+  const miss = wrap.getBoundingClientRect().top + job.px;
+  if (Math.abs(miss) > 0.5) {
+    s.scrollTop += miss;
+    pageJumpScrollPending = pageJumpScrollPending || s.scrollTop !== before;
+  }
+  const left = wrap.getBoundingClientRect().top + job.px;
+  if (Math.abs(left) <= 0.5 || !doc || wrappers.length >= doc.numPages) {
+    pendingOffset = null;
+  }
 }
 
 const VIEWER_CONTROLS = '.mc-menu, .mc-pin, .mc-note, #mc-toolbar, #mc-autoscroll, .mc-tex-card';
@@ -886,15 +963,17 @@ function setScale(next: number): void {
   const anchor = captureZoomAnchor();
   scale = clamped;
   updateZoomLabel();
-  queuePosition();
 
   // Resize placeholders immediately (keeps scroll layout correct), then
   // re-rasterise the visible pages once zooming settles.
-  for (let n = 1; n <= (doc?.numPages ?? 0); n++) {
+  for (let n = 1; n <= wrappers.length; n++) {
     renderTasks.get(n)?.cancel();
     layoutPage(n);
   }
   restoreZoomAnchor(anchor);
+  // Only now do the scale, the fit mode and the scroll anchor all agree, so this
+  // (the leading checkpoint after an idle spell) is the finished change.
+  queuePosition();
   renderedScale.clear();
   inFlight.clear();
   window.clearTimeout(zoomTimer);
@@ -911,17 +990,23 @@ function setScale(next: number): void {
 // The three manual controls drop fit width: the user has asked for a specific
 // size, so the pages should stop chasing the pane's width.
 function zoomIn(): void {
+  readerNavigated();
   setFitWidth(false);
   setScale(ZOOM_LEVELS.find((z) => z > scale + SCALE_EPSILON) ?? MAX_SCALE);
+  queuePosition();
 }
 function zoomOut(): void {
+  readerNavigated();
   setFitWidth(false);
   const below = ZOOM_LEVELS.filter((z) => z < scale - SCALE_EPSILON);
   setScale(below.length ? below[below.length - 1] : MIN_SCALE);
+  queuePosition();
 }
 function zoomReset(): void {
+  readerNavigated();
   setFitWidth(false);
   setScale(1);
+  queuePosition();
 }
 
 // ---------------------------------------------------------------------------
@@ -958,7 +1043,6 @@ function setFitWidth(on: boolean): void {
     return;
   }
   fitWidth = on;
-  queuePosition();
   // A queued re-fit must not outlive the mode. Its callback is applyFitWidth,
   // which turns fit width straight back on, so a manual zoom landing inside the
   // debounce window would otherwise be undone and the button would relight.
@@ -974,13 +1058,16 @@ function applyFitWidth(): void {
   setFitWidth(true);
   fittedBaseWidth = baseSize[currentPage - 1].w;
   setScale(next);
+  queuePosition();
 }
 
 // Turning the mode off leaves the pages at the size they already have and just
 // stops them chasing the pane, which is what the pressed state describes.
 function toggleFitWidth(): void {
+  readerNavigated();
   if (fitWidth) {
     setFitWidth(false);
+    queuePosition();
   } else {
     applyFitWidth();
   }
@@ -1745,6 +1832,7 @@ function goToPage(n: number): void {
   if (!wrappers[clamped - 1]) {
     return; // the page is not laid out yet
   }
+  readerNavigated();
   const s = scroller();
   const { scrollTop, scrollLeft } = s;
   wrappers[clamped - 1].scrollIntoView({ block: 'start' });
@@ -1897,8 +1985,20 @@ function buildPuck(): HTMLDivElement {
     if (which === 'play') toggleAutoPause();
     else if (which === 'dir') reverseAuto();
     else if ((which === 'minus' || which === 'plus') && e.detail === 0) {
-      adjustAutoSpeed(which === 'plus' ? SPEED_STEP : 1 / SPEED_STEP);
+      const factor = which === 'plus' ? SPEED_STEP : 1 / SPEED_STEP;
+      // A held Enter sends a keyboard click per repeat: like a held key or
+      // press it stops at the slowest speed, while a fresh press may reverse.
+      if (!keyRepeating || canHoldStep(autoSettings.speed, factor)) {
+        adjustAutoSpeed(factor);
+      }
     }
+  });
+  let keyRepeating = false;
+  el.addEventListener('keydown', (e) => {
+    keyRepeating = e.repeat;
+  });
+  el.addEventListener('keyup', () => {
+    keyRepeating = false;
   });
   el.addEventListener('pointerdown', (e) => {
     e.stopPropagation();

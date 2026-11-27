@@ -2,7 +2,8 @@
 // What pdf.js really hands back for a remote GoTo (GoToR) and a Launch action,
 // so the link policy is checked against the actual annotation shape rather than
 // a hand-written one: a web address arrives in `url` like an ordinary URI action
-// and opens through the validated openLink path; a local file never gets a `url`.
+// (also from a JavaScript action pdf.js can read an address out of) and opens
+// through the validated openLink path; a local file never gets a `url`.
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { linkTargetOf, type LinkAnnotation } from '../src/webview/pdfLinks';
@@ -54,6 +55,19 @@ describe('remote GoTo and Launch actions as pdf.js parses them', () => {
       url: 'https://example.com/other.pdf#chap3',
     });
     expect(linkTargetOf(uri)).toEqual({ kind: 'url', url: 'https://example.com/page' });
+  });
+
+  it('opens a Launch naming a web address, and a web address pdf.js finds in JavaScript', async () => {
+    const [launch, scripted, unsafe] = await annotationsOf([
+      '<< /S /Launch /F (https://example.com/doc.pdf) >>',
+      '<< /S /JavaScript /JS (app.launchURL("https://example.com/js", true);) >>',
+      '<< /S /JavaScript /JS (app.launchURL("javascript:alert(1)");) >>',
+    ]);
+    // The policy is about the destination pdf.js supplies in `url`: it is
+    // validated and opened by the host, and the script itself is never run.
+    expect(linkTargetOf(launch)).toEqual({ kind: 'url', url: 'https://example.com/doc.pdf' });
+    expect(linkTargetOf(scripted)).toEqual({ kind: 'url', url: 'https://example.com/js' });
+    expect(linkTargetOf(unsafe)).toBeNull();
   });
 
   it('ignores a remote GoTo or Launch that names a local file', async () => {

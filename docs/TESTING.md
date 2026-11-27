@@ -527,7 +527,7 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
 - [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up. The direction button reverses at once.
 - [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
-- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar.
+- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar. At Extra large, split the editor so the pane is about 760 px, then 300 px and 240 px wide: all three small buttons stay fully on screen (they shrink toward 44 px as the pane narrows).
 - [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.
 - [ ] Let it reach the end: it stops with a toast, and a screen reader says it stopped even though the controls have gone. Start it again at the end: it goes up. Scroll up to the top while it runs up: it stops.
 - [ ] Escape stops it; with the right-click menu open, Escape closes only the menu.
@@ -557,7 +557,7 @@ Use a PDF that has a table of contents or cross-references and a web link (a LaT
 - [ ] Switch to the Pointer tool: dragging across linked text selects it without following the link; a plain click on the link follows it.
 - [ ] Tab to a link and press Enter: it is followed.
 - [ ] After a pan with the Hand tool that starts or ends over a link, the link is not followed.
-- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action naming a local file) does nothing. A link to another PDF given as an `https` address opens in the browser.
+- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action naming a local file) does nothing. A link to another PDF given as an `https` address, or a Launch action naming an `https` address, opens in the browser. Hovering an external link in the Hand tool shows its address.
 - [ ] A link that wraps over two lines does nothing when clicked in the blank gap between the lines.
 - [ ] With a screen reader, a table of contents reads as one named link per chapter, not "Go to destination" repeatedly.
 - [ ] Open a long PDF and click a first-page contents link to a late page before it finishes loading: no error, and the view jumps once the page appears.

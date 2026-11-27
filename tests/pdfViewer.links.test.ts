@@ -50,6 +50,22 @@ vi.mock('pdfjs-dist', () => ({
   }),
 }));
 
+// Every import of the viewer listens on the shared window and document; without
+// removing them, a message or click would also reach each earlier test's copy
+// and they would all rebuild the same page.
+const listeners: Array<[EventTarget, string, EventListenerOrEventListenerObject]> = [];
+for (const target of [window, document]) {
+  const add = target.addEventListener.bind(target) as EventTarget['addEventListener'];
+  target.addEventListener = ((
+    type: string,
+    fn: EventListenerOrEventListenerObject,
+    o?: unknown,
+  ) => {
+    listeners.push([target, type, fn]);
+    add(type, fn, o as AddEventListenerOptions);
+  }) as EventTarget['addEventListener'];
+}
+
 let posted: Array<Record<string, unknown>> = [];
 let scrollTop = 0;
 let frames: Array<(ts: number) => void> = [];
@@ -138,6 +154,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  for (const [target, type, fn] of listeners.splice(0)) {
+    target.removeEventListener(type, fn);
+  }
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.querySelectorAll('.mc-note').forEach((n) => n.remove());
@@ -360,5 +379,175 @@ describe('auto-scroll', () => {
     expect(down()).toBe('Scroll up');
     key(false); // a fresh press reverses
     expect(down()).toBe('Scroll down');
+  });
+});
+
+describe("the reader's own navigation while a PDF is opening", () => {
+  const FIRST = { subtype: 'Link', rect: [60, 70, 90, 90], action: 'FirstPage' };
+  const label = () => document.getElementById('mc-page-label')!.textContent;
+  const lastPage = () => (scrollIntoView.mock.contexts.at(-1) as HTMLElement).dataset.page;
+
+  it('lets a later available-page link supersede an older pending one', async () => {
+    h.annots[1] = [{ ...CHAPTER, action: 'LastPage' }, FIRST];
+    let release!: () => void;
+    h.gates[3] = new Promise<void>((r) => (release = r));
+    await loadDoc();
+    await showPage(1);
+    clickAt(30, 80); // Last Page: page 5 does not exist yet, so it waits
+    clickAt(75, 20); // First Page: exists, so it goes now
+    expect(lastPage()).toBe('1');
+    release();
+    await settle();
+    expect(document.querySelectorAll('.mc-page')).toHaveLength(5);
+    expect(lastPage()).toBe('1'); // page 5 must not take over
+  });
+
+  it('keeps an available page chosen during load over the saved position', async () => {
+    h.dests.two = [{ num: 1, gen: 0 }, { name: 'Fit' }];
+    h.pageIndex = 1; // page 2
+    h.annots[1] = [{ ...CHAPTER, dest: 'two' }];
+    let release!: () => void;
+    h.gates[4] = new Promise<void>((r) => (release = r));
+    await loadDoc({ page: 5, y: 0, zoom: 1, fitWidth: false });
+    await showPage(1);
+    clickAt(30, 80);
+    await settle();
+    expect(label()).toBe('2 / 5');
+    release();
+    await settle();
+    expect(label()).toBe('2 / 5'); // restoration must not put it back on page 5
+  });
+
+  it('drops the saved position when the reader scrolls first', async () => {
+    let release!: () => void;
+    h.gates[2] = new Promise<void>((r) => (release = r));
+    await loadDoc({ page: 5, y: 0, zoom: 1, fitWidth: false });
+    window.dispatchEvent(new Event('wheel'));
+    release();
+    await settle();
+    expect(label()).toBe('1 / 5');
+  });
+
+  it('drops the saved position when the reader zooms first', async () => {
+    let release!: () => void;
+    h.gates[2] = new Promise<void>((r) => (release = r));
+    await loadDoc({ page: 5, y: 0, zoom: 1, fitWidth: false });
+    document.querySelector<HTMLElement>('[data-act="in"]')!.click();
+    release();
+    await settle();
+    expect(label()).toBe('1 / 5');
+  });
+});
+
+describe('a link offset that needs pages still being laid out', () => {
+  // Five 100 px pages, a 90 px view: page 3's top is 200, and 80 px into it is
+  // 280, but while only three pages exist the view can scroll to 210 at most.
+  function realLayout(): void {
+    const pagesNow = () => document.querySelectorAll('.mc-page').length;
+    const clamp = (v: number) => Math.max(0, Math.min(v, pagesNow() * 100 - 90));
+    Object.defineProperty(document.documentElement, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = clamp(v);
+      },
+    });
+    const prev = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains('mc-page')) {
+        const n = Number((this as HTMLElement).dataset.page);
+        const top = (n - 1) * 100 - scrollTop;
+        return { left: 0, top, right: 100, bottom: top + 100, width: 100, height: 100 } as DOMRect;
+      }
+      return prev.call(this);
+    };
+    scrollIntoView.mockImplementation(function (this: HTMLElement) {
+      scrollTop = clamp((Number(this.dataset.page) - 1) * 100);
+    });
+  }
+  async function setup(): Promise<() => void> {
+    h.dests.deep = [{ num: 1, gen: 0 }, { name: 'XYZ' }, 0, 20]; // 80 px down
+    h.pageIndex = 2;
+    h.annots[1] = [{ ...CHAPTER, dest: 'deep' }];
+    let release!: () => void;
+    h.gates[4] = new Promise<void>((r) => (release = r));
+    realLayout();
+    await loadDoc();
+    await showPage(1);
+    return release;
+  }
+
+  it('finishes landing on the destination once the layout reaches it', async () => {
+    const release = await setup();
+    clickAt(30, 80);
+    await settle();
+    expect(scrollTop).toBe(210); // all the range there is for now
+    release();
+    await settle();
+    expect(scrollTop).toBe(280);
+  });
+
+  it('does not finish it if the reader moved elsewhere meanwhile', async () => {
+    const release = await setup();
+    clickAt(30, 80);
+    await settle();
+    window.dispatchEvent(new Event('wheel'));
+    release();
+    await settle();
+    expect(scrollTop).toBe(210);
+  });
+});
+
+describe("an external link's tooltip and name", () => {
+  it('shows the address as the tooltip and keeps the text as the accessible name', async () => {
+    h.annots[1] = [
+      { ...CHAPTER, url: 'https://example.com/guide', overlaidText: 'Read the guide' },
+      { subtype: 'Link', rect: [60, 70, 90, 90], url: `https://example.com/${'a'.repeat(900)}` },
+    ];
+    await loadDoc();
+    await showPage(1);
+    const [named, long] = links();
+    expect(named.title).toBe('https://example.com/guide');
+    expect(named.getAttribute('aria-label')).toBe('Read the guide');
+    expect(long.title.length).toBeLessThanOrEqual(200);
+    expect(long.title.startsWith('https://example.com/aaa')).toBe(true);
+  });
+});
+
+describe('the first checkpoint after a zoom step', () => {
+  it('already carries the new zoom and the dropped fit-width mode', async () => {
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      get: () => 232, // 200 px of paper for a 100 px page: fits at 200%
+    });
+    await loadDoc(null);
+    vi.useFakeTimers();
+    document.getElementById('mc-fit-width')!.click();
+    vi.advanceTimersByTime(5000); // idle: the next movement is a leading checkpoint
+    posted.length = 0;
+    document.querySelector<HTMLElement>('[data-act="in"]')!.click();
+    const first = posted.find((m) => m.type === 'savePosition')!;
+    expect(first).toMatchObject({ zoom: 2.5, fitWidth: false });
+  });
+});
+
+describe('Enter held on a speed button', () => {
+  it('stops at the slowest speed, while a fresh press may reverse', async () => {
+    await loadDoc();
+    document.getElementById('mc-autoscroll-toggle')!.click(); // 12 px/s down
+    const minus = document.querySelector<HTMLElement>('[data-as="minus"]')!;
+    const label = () =>
+      document.querySelector<HTMLElement>('[data-as="dir"]')!.getAttribute('aria-label');
+    // A keyboard click has detail 0 and arrives with every Enter keydown.
+    const enter = (repeat: boolean) => {
+      minus.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat, bubbles: true }));
+      minus.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    };
+    enter(false);
+    for (let i = 0; i < 8; i++) enter(true);
+    expect(label()).toBe('Scroll up'); // still going down, at the slowest
+    minus.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    enter(false);
+    expect(label()).toBe('Scroll down'); // reversed by a fresh press
   });
 });

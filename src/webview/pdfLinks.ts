@@ -25,13 +25,15 @@ export interface LinkAnnotation {
 const NAMED_ACTIONS = new Set(['NextPage', 'PrevPage', 'FirstPage', 'LastPage']);
 
 /**
- * The target of a Link annotation, or null when it has none MarkCopy follows
- * (JavaScript, a scheme outside http, https and mailto, and any file path).
- * pdf.js folds a remote GoTo (GoToR) or Launch action that names a web address
- * into `url`, the field an ordinary URI action uses, so such a link opens in the
- * browser like any other web link; one that names a local file leaves `url`
- * unset and is ignored. The host checks an external address again before
- * opening it.
+ * The target of a Link annotation, or null when it has none MarkCopy follows.
+ * The rule is about the address pdf.js puts in `url`, and an address is followed
+ * only when it is http, https or mailto. pdf.js fills `url` for a URI action, for
+ * a remote GoTo (GoToR) or Launch action that names a web address, and for a
+ * JavaScript action whose code is a plain open-this-address call
+ * (`app.launchURL`, `window.open`). Only that address is used: the script is
+ * never run. A GoToR or Launch naming a local file leaves `url` unset and is
+ * ignored, as is any other JavaScript, and so is a scheme outside the three. The
+ * host checks the address again before opening it.
  */
 export function linkTargetOf(annot: LinkAnnotation): LinkTarget | null {
   if (annot.subtype !== 'Link') {
