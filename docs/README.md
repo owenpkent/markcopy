@@ -22,4 +22,5 @@ Background and decisions for individual features, kept for maintainers:
 - [Image viewer](IMAGE-DESIGN.md)
 - [Video review](VIDEO-REVIEW-DESIGN.md)
 - [Security and fuzzing prior art (VLC, GIMP)](FUZZING-PRIOR-ART.md)
+- [Binary viewer prior art (Ghidra, Detect It Easy, PE-bear and others)](BINARY-VIEWER-PRIOR-ART.md): what they show that the executable and package previews do not
 - [Fuzzing and unit-test strategy](FUZZING-STRATEGY.md): the plan after the executable, package and 3D merges, and its measurements
