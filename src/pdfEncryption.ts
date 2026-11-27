@@ -14,6 +14,8 @@
 // Layout of the dictionary: ISO 32000-1 section 7.6 (/Filter, /V, /R, /Length,
 // /P, /CF with /StmF and /StrF) and ISO 32000-2 for revision 6 (AES-256).
 
+import { clip, printable } from './binary/text';
+
 const WINDOW = 64 * 1024;
 const OBJECT_BYTES = 8 * 1024;
 const MAX_DEPTH = 8;
@@ -339,10 +341,12 @@ export function readPdfEncryption(bytes: Uint8Array): PdfEncryption | undefined 
     const v = num(enc, 'V');
     const r = num(enc, 'R');
     if (handler !== 'Standard') {
+      // The handler's name is the file's own text and ends up in the label: clean and bound it.
+      const shown = clip(printable(handler ?? '').trim(), 60);
       const found = cipher(enc, v, r);
       return {
-        label: handler
-          ? `Encrypted: ${handler} security handler, ${found ? found : 'cipher not determined'}`
+        label: shown
+          ? `Encrypted: ${shown} security handler, ${found ? found : 'cipher not determined'}`
           : NOT_DETERMINED,
       };
     }

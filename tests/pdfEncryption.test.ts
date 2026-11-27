@@ -104,6 +104,15 @@ describe('readPdfEncryption', () => {
     expect(out?.label).toBe('Encrypted: Adobe.PubSec security handler, AES-256');
   });
 
+  it('cleans and bounds a handler name taken from the file (found by the pdf-encryption fuzz target)', () => {
+    // #00 is a NUL in a PDF name, #20 a space; neither may reach the label.
+    const nul = readPdfEncryption(pdf({ encrypt: '<< /Filter /Standar#00V /V 4 >>' }));
+    expect(nul?.label).toBe('Encrypted: StandarV security handler, cipher not determined');
+    const long = readPdfEncryption(pdf({ encrypt: `<< /Filter /${'A'.repeat(500)} /V 4 >>` }));
+    expect(long?.label.length).toBeLessThan(120);
+    const blank = readPdfEncryption(pdf({ encrypt: '<< /Filter /#01#02 /V 4 >>' }));
+    expect(blank?.label).toBe('Encrypted: the encryption details were not determined.');
+  });
   it('degrades on a truncated /Encrypt object without throwing', () => {
     const cut = readPdfEncryption(
       pdf({ encrypt: '<< /Filter /Standard /V 4 /R 4 /CF << /StdCF <<' }),
