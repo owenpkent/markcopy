@@ -17,11 +17,11 @@ import { renderPackageHtml } from './pkg';
 // preview. This class says only which reader runs and how its result is drawn.
 export class PackageEditorProvider extends FileInfoEditorProvider {
   public static readonly viewType = 'markcopy.packagePreview';
-  protected readonly viewType = PackageEditorProvider.viewType;
+  protected readonly viewType: string = PackageEditorProvider.viewType;
   protected readonly kind = 'package';
   protected readonly infoKind = 'package';
-  protected readonly noun = 'Package or installer';
-  protected readonly promise =
+  protected readonly noun: string = 'Package or installer';
+  protected readonly promise: string =
     'Reading it shows what the package is, its version, what it depends on, whether installing it runs scripts, what is inside, and its SHA-256.';
 
   protected renderInfo(

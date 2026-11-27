@@ -183,7 +183,7 @@
         "command": "markcopy.fileInfo.read",
         "title": "MarkCopy: Read This File",
         "category": "MarkCopy",
-        "enablement": "activeCustomEditorId == markcopy.exePreview || activeCustomEditorId == markcopy.packagePreview"
+        "enablement": "activeCustomEditorId == markcopy.exePreview || activeCustomEditorId == markcopy.packagePreview || activeCustomEditorId == markcopy.keyFilePreview"
       },
       {
         "command": "markcopy.openSettings",
@@ -473,9 +473,82 @@
           },
           {
             "filenamePattern": "*.APPIMAGE"
+          },
+          {
+            "filenamePattern": "*.7z"
+          },
+          {
+            "filenamePattern": "*.7Z"
+          },
+          {
+            "filenamePattern": "*.rar"
+          },
+          {
+            "filenamePattern": "*.RAR"
+          },
+          {
+            "filenamePattern": "*.gpg"
+          },
+          {
+            "filenamePattern": "*.GPG"
+          },
+          {
+            "filenamePattern": "*.pgp"
+          },
+          {
+            "filenamePattern": "*.PGP"
+          },
+          {
+            "filenamePattern": "*.age"
+          },
+          {
+            "filenamePattern": "*.AGE"
+          },
+          {
+            "filenamePattern": "*.kdbx"
+          },
+          {
+            "filenamePattern": "*.KDBX"
+          },
+          {
+            "filenamePattern": "*.p12"
+          },
+          {
+            "filenamePattern": "*.P12"
+          },
+          {
+            "filenamePattern": "*.pfx"
+          },
+          {
+            "filenamePattern": "*.PFX"
           }
         ],
         "priority": "default"
+      },
+      {
+        "viewType": "markcopy.keyFilePreview",
+        "displayName": "MarkCopy Key File Info",
+        "selector": [
+          {
+            "filenamePattern": "*.pem"
+          },
+          {
+            "filenamePattern": "*.PEM"
+          },
+          {
+            "filenamePattern": "*.key"
+          },
+          {
+            "filenamePattern": "*.KEY"
+          },
+          {
+            "filenamePattern": "*.asc"
+          },
+          {
+            "filenamePattern": "*.ASC"
+          }
+        ],
+        "priority": "option"
       },
       {
         "viewType": "markcopy.stlPreview",

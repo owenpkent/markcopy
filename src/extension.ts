@@ -42,6 +42,7 @@ import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
 import { ExeEditorProvider } from './exeEditor';
 import { readFileInfo } from './fileInfoEditor';
+import { KeyFileEditorProvider } from './keyFileEditor';
 import { PackageEditorProvider } from './packageEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
@@ -204,6 +205,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       PackageEditorProvider.viewType,
       new PackageEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Key and signature text files (.pem, .key, .asc) are offered the same
+    // page through Reopen Editor With, and still open as text by default.
+    vscode.window.registerCustomEditorProvider(
+      KeyFileEditorProvider.keyFileViewType,
+      new KeyFileEditorProvider(
         context,
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
