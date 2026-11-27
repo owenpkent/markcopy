@@ -10,7 +10,8 @@
 //
 // The manifest is scanned by one linear tokenizer over its first 1 MiB, not
 // parsed as XML (comments and text are skipped, only elements are read), so a
-// manifest that is cut short still yields the entries before the cut. Attribute names are matched without regard to their prefix.
+// manifest that is cut short still yields the entries before the cut. Attribute
+// names are matched without regard to their prefix.
 import { own } from '../binary/own';
 import { printable } from '../binary/text';
 import type { ZipArchive, ZipFlavour } from './zipRange';

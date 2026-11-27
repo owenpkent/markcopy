@@ -211,6 +211,33 @@ describe('readPdfEncryption', () => {
       expect(out?.label).toContain('AES-256');
     });
 
+    it('reads a classic table whose trailer lies past the 64 KiB window', () => {
+      // 4,000 free entries (80,000 bytes) before the subsection that lists object 9.
+      const filler = `10 4000\n${'0000000000 65535 f \n'.repeat(4000)}`;
+      const text = textOf(pdf({ encrypt: real })).replace('9 1\n', `${filler}9 1\n`);
+      expect(text.indexOf('trailer') - text.indexOf('xref\n')).toBeGreaterThan(64 * 1024);
+      const out = readPdfEncryption(bytesOf(text));
+      expect(out?.label).toBe('Encrypted: AES-256 (standard security handler, revision 6)');
+    });
+
+    it('reads a cross-reference stream longer than the 64 KiB window', () => {
+      const objectAt = textOf(pdf({ encrypt: real })).indexOf('9 0 obj');
+      // The index lists 20,000 free entries (objects 100 to 20099) and then
+      // object 9, so its entry sits 120,000 bytes into the stream.
+      const data = new Uint8Array(20_001 * 6);
+      data.set([1, 0, 0, objectAt >> 8, objectAt & 0xff, 0], 20_000 * 6);
+      expect(data.length).toBeGreaterThan(64 * 1024);
+      const out = readPdfEncryption(
+        pdf({
+          encrypt: real,
+          stream: true,
+          streamData: data,
+          streamDict: '/Index [100 20000 9 1]',
+        }),
+      );
+      expect(out?.label).toBe('Encrypted: AES-256 (standard security handler, revision 6)');
+    });
+
     it('follows /Prev to an older table for an object the newest one lacks', () => {
       const base = textOf(pdf({ encrypt: real }));
       const older = base.indexOf('xref\n0 1');

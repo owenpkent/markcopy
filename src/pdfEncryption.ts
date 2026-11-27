@@ -223,7 +223,9 @@ function trailerDict(bytes: Uint8Array): Dict | undefined {
   if (head.startsWith('xref')) {
     from = section.indexOf('trailer');
     if (from < 0) {
-      return undefined;
+      // A table longer than the window (about 3,270 objects): step over its
+      // subsections by their counts to the trailer that follows.
+      return classicSection(bytes, offset, -1)?.trailer;
     }
     from += 7;
   } else if (/^\d+\s+\d+\s+obj\b/.test(head)) {
@@ -247,6 +249,8 @@ const slice = (bytes: Uint8Array, from: number, length: number): string =>
 interface Section {
   entry: number | null | undefined;
   prev: number | undefined;
+  /** A classic table's trailer dictionary. */
+  trailer?: Dict;
 }
 
 const prevOf = (d: Dict): number | undefined => {
@@ -294,7 +298,8 @@ function classicSection(bytes: Uint8Array, offset: number, want: number): Sectio
     pos = entries + count * 20;
   }
   const v = new Parser(slice(bytes, pos, WINDOW)).value();
-  return { entry, prev: isDict(v) ? prevOf(v) : undefined };
+  const trailer = isDict(v) ? v : undefined;
+  return { entry, prev: trailer ? prevOf(trailer) : undefined, trailer };
 }
 
 /** Deflate-decoded `data`, or undefined when it is damaged or expands past `max`. */
@@ -353,8 +358,10 @@ function unpredict(data: Uint8Array, columns: number): Uint8Array | undefined {
 
 /**
  * A cross-reference stream (PDF 1.5+): an object whose stream is a table of
- * fixed-width entries. Only an unfiltered or Flate stream that fits in the
- * window is read; undefined for anything else.
+ * fixed-width entries. Its dictionary has to sit in the window; the stream itself
+ * may run past it, to at most MAX_XREF_BYTES stored and as many inflated (a
+ * document with many objects has a table larger than the window). Only an
+ * unfiltered or Flate stream is read; undefined for anything else.
  */
 function streamSection(bytes: Uint8Array, offset: number, want: number): Section | undefined {
   const text = slice(bytes, offset, WINDOW);
@@ -374,7 +381,7 @@ function streamSection(bytes: Uint8Array, offset: number, want: number): Section
     return undefined;
   }
   const from = after + keyword[0].length;
-  if (from + length > text.length) {
+  if (length > MAX_XREF_BYTES || offset + from + length > bytes.length) {
     return undefined;
   }
   let data: Uint8Array | undefined = bytes.subarray(offset + from, offset + from + length);
