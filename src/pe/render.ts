@@ -7,6 +7,7 @@
 import { escapeHtml } from '../escape';
 import { MEDIA_ATTR } from '../ooxml/media';
 import { NX_COMPAT_LABEL, type PeInfo, type PeSection } from './read';
+import type { PeRich } from './rich';
 import {
   block,
   formatBytes,
@@ -264,6 +265,9 @@ function protectionSection(info: PeInfo): string {
     }
     rows.push([label, on ? 'Yes' : 'No']);
   }
+  if (info.loaderFlags.length > 0) {
+    rows.push(['Other loader flags', info.loaderFlags.join(', ')]);
+  }
   if (narrow) {
     rows.push(['Large address aware', info.largeAddressAware ? 'Yes' : 'No']);
   }
@@ -367,6 +371,22 @@ function exportsSection(info: PeInfo): string {
   return html;
 }
 
+function richSection(rich: PeRich): string {
+  let html =
+    "<p>Recorded by Microsoft's linker. Any tool can write or copy this record, so it is a claim about the build, not proof.</p>";
+  if (!rich.checksumValid) {
+    html +=
+      '<p class="mc-exe-note">Its checksum does not match the header it covers, so the record or the header before it was changed after linking.</p>';
+  }
+  return (
+    html +
+    table(
+      ['Tool', 'Toolset', 'Build', 'Objects'],
+      rich.entries.map((e) => [e.tool, e.toolset, String(e.build), number(e.count)]),
+    )
+  );
+}
+
 export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
   const description = info.version?.strings.find(([key]) => key === 'FileDescription')?.[1];
   const summary = `${info.kind}, ${architecture(info)}`;
@@ -404,6 +424,9 @@ export function renderPeHtml(info: PeInfo, options: RenderOptions): string {
       rows.push(['Symbol ID', `${info.debug.guid}, age ${info.debug.age ?? 0}`]);
     }
     parts.push(block('Debug information', properties(rows)));
+  }
+  if (info.rich) {
+    parts.push(block('Build tools', richSection(info.rich), true));
   }
   if (info.sections.length > 0) {
     parts.push(block('Sections', sectionsSection(info), true));

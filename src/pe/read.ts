@@ -23,6 +23,7 @@ import {
   type ByteSource,
 } from '../binary/reader';
 import { printable } from '../binary/text';
+import { readRich, type PeRich } from './rich';
 import { readVersionResource, type VersionInfo } from './version';
 
 // The shared reader's error under this feature's name, so a file the ranged
@@ -135,6 +136,8 @@ export interface PeInfo {
   largeAddressAware: boolean;
   /** Loader-enforced mitigations, each as [label, enabled]. */
   mitigations: [string, boolean][];
+  /** Other DllCharacteristics bits that are set, in words. Empty when none is. */
+  loaderFlags: string[];
   sections: PeSection[];
   version?: VersionInfo;
   /** The largest image of the file's first icon, as a PNG. */
@@ -143,6 +146,8 @@ export interface PeInfo {
   imports: PeImport[];
   exports?: PeExports;
   debug?: PeDebug;
+  /** The linker's record of the tools that built the image, when it has one. */
+  rich?: PeRich;
   dotnet?: PeDotNet;
   signature?: PeSignature;
   /** Bytes after the last section that no header accounts for, as an installer's payload is. */
@@ -166,6 +171,13 @@ const MAX_RESOURCE_ENTRIES = 4096;
 const MAX_VERSION_BYTES = 512 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_MANIFEST_NODES = 5000;
+// The most of the COFF string table read for long section names. A section name
+// is a short word; the table can hold every symbol name of a large program.
+const MAX_STRING_TABLE_BYTES = 64 * 1024;
+const MAX_LONG_NAME_BYTES = 256;
+// The most of the DOS header and stub read for the Rich header. A real stub
+// with its record is a few hundred bytes.
+const MAX_STUB_BYTES = 4096;
 const MAX_SIGNATURE_BYTES = 1024 * 1024;
 // A signed file has one entry, a dual-signed one two.
 const MAX_CERTIFICATES = 16;
@@ -246,6 +258,16 @@ function kindOf(isDll: boolean, subsystem: number): string {
   }
   return subsystem === 3 ? 'Console application' : 'Application';
 }
+
+// DllCharacteristics bits that have no row of their own in `mitigations`, in
+// the order the page lists them.
+const LOADER_FLAGS: [bit: number, label: string][] = [
+  [0x0200, 'Ignores side-by-side manifests (NO_ISOLATION)'],
+  [0x0400, 'No structured exception handlers (NO_SEH)'],
+  [0x0800, 'Never bound (NO_BIND)'],
+  [0x2000, 'WDM driver (WDM_DRIVER)'],
+  [0x8000, 'Terminal Server aware (TERMINAL_SERVER_AWARE)'],
+];
 
 /** The label of the NX_COMPAT row in `PeInfo.mitigations`, which the page words specially. */
 export const NX_COMPAT_LABEL = 'DEP compatible (NX_COMPAT)';
@@ -358,6 +380,8 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     });
   }
 
+  await resolveLongNames(reader, sections, coff.getUint32(12, true), coff.getUint32(16, true));
+
   // What the loader maps of each section. Its extent in memory is VirtualSize
   // rounded up to the section alignment (or SizeOfRawData when VirtualSize is
   // 0, as old linkers left it), and only the part of that the file holds is
@@ -459,6 +483,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       ['Forced integrity checks', (dllFlags & 0x80) !== 0],
       ['AppContainer only', (dllFlags & 0x1000) !== 0],
     ],
+    loaderFlags: LOADER_FLAGS.filter(([bit]) => (dllFlags & bit) !== 0).map(([, label]) => label),
     sections,
     imports: [],
     warnings: early,
@@ -474,6 +499,13 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
       info.warnings.push(`The ${what} could not be read.`);
     }
   };
+
+  // The record sits between the DOS stub and the PE header, so it is read from
+  // the start of the file up to e_lfanew, as far as is plausible.
+  await attempt('build tools record', async () => {
+    const stub = await reader.bytes(0, Math.min(peOffset, MAX_STUB_BYTES));
+    info.rich = readRich(stub);
+  });
 
   const resources = directory(DIR_RESOURCE);
   if (resources) {
@@ -702,6 +734,56 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   }
 
   return info;
+}
+
+// MinGW and GCC name a section whose name is over 8 bytes "/N": a slash and the
+// decimal offset of the real name in the COFF string table. The table follows
+// the symbol table, and its first four bytes are its own size. Resolved with
+// one bounded read for all sections. Anything out of range leaves the name
+// as it was written, and this never throws: the short name is still worth
+// showing.
+async function resolveLongNames(
+  reader: Reader,
+  sections: PeSection[],
+  symbolPointer: number,
+  symbolCount: number,
+): Promise<void> {
+  if (symbolPointer === 0 || !sections.some((s) => /^\/\d+$/.test(s.name))) {
+    return;
+  }
+  try {
+    const tableAt = symbolPointer + symbolCount * 18;
+    if (tableAt + 4 > reader.size) {
+      return;
+    }
+    const bytes = await reader.upTo(tableAt, MAX_STRING_TABLE_BYTES);
+    if (bytes.length < 4) {
+      return;
+    }
+    const size = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+    // What was read, but no further than the table says it extends.
+    const limit = Math.min(size, bytes.length);
+    for (const section of sections) {
+      if (!/^\/\d+$/.test(section.name)) {
+        continue;
+      }
+      const at = Number(section.name.slice(1));
+      if (!Number.isSafeInteger(at) || at < 4 || at >= limit) {
+        continue;
+      }
+      const end = bytes.subarray(at, Math.min(limit, at + MAX_LONG_NAME_BYTES)).indexOf(0);
+      const text = bytes.subarray(
+        at,
+        end < 0 ? Math.min(limit, at + MAX_LONG_NAME_BYTES) : at + end,
+      );
+      const name = printable(new TextDecoder().decode(text));
+      if (name) {
+        section.name = name;
+      }
+    }
+  } catch {
+    // Keep the "/N" names.
+  }
 }
 
 function guidAt(view: DataView, at: number): string {

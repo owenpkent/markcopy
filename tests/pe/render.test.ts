@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { bytesSource, formatBytes, ICON_MEDIA_ID, readPe, renderPeHtml } from '../../src/pe';
-import { buildPe, buildSignedData, iconBitmap, pngStub, tlv, type PeSpec } from './fixture';
+import {
+  buildPe,
+  buildRichStub,
+  buildSignedData,
+  iconBitmap,
+  pngStub,
+  tlv,
+  type PeSpec,
+} from './fixture';
 
 // A PKCS #7 SignedData with the given signerInfos and no certificates, built
 // here because the fixture's own always has exactly one signer and its
@@ -430,5 +438,57 @@ describe('renderPeHtml: the DEP row says what the flag is, not what Windows does
 
   it('says No for a 32-bit program without the flag, where the flag does decide', async () => {
     expect(dep(await render({ dllCharacteristics: 0x40 }))).toBe('No');
+  });
+});
+
+describe('Build tools and loader flags', () => {
+  const html = async (spec: PeSpec, patch = (b: Uint8Array) => b) =>
+    renderPeHtml(await readPe(bytesSource(patch(buildPe(spec)))), { fileName: 'a.exe' });
+  const entries = [
+    { productId: 0x0102, build: 33808, count: 1234 },
+    { productId: 0x0105, build: 29913, count: 7 },
+  ];
+
+  it('shows a Build tools block with a row for each entry, after Debug information', async () => {
+    const page = await html({
+      dosStub: buildRichStub({ entries }),
+      debug: { guid: '11111111-2222-3333-4444-555555555555', age: 1, pdbPath: 'a.pdb' },
+    });
+    expect(page).toContain('<h2>Build tools</h2>');
+    expect(page).toContain("Recorded by Microsoft's linker.");
+    expect(page).toContain('<th>Tool</th><th>Toolset</th><th>Build</th><th>Objects</th>');
+    expect(page).toContain(
+      '<td>Linker</td><td>Visual Studio 2022 or later</td><td>33808</td><td>1,234</td>',
+    );
+    expect(page).toContain(
+      '<td>C++ compiler</td><td>Visual Studio 2019</td><td>29913</td><td>7</td>',
+    );
+    expect(page).not.toContain('Its checksum does not match');
+    expect(page.indexOf('Debug information')).toBeLessThan(page.indexOf('Build tools'));
+    expect(page.indexOf('Build tools')).toBeLessThan(page.indexOf('<h2>Sections</h2>'));
+  });
+
+  it('says so when the checksum does not match', async () => {
+    const page = await html({ dosStub: buildRichStub({ entries }) }, (bytes) => {
+      bytes[0x50] ^= 0xff;
+      return bytes;
+    });
+    expect(page).toContain(
+      '<p class="mc-exe-note">Its checksum does not match the header it covers',
+    );
+    expect(page).toContain('<td>Linker</td>');
+  });
+
+  it('draws no Build tools block without a record', async () => {
+    expect(await html({})).not.toContain('Build tools');
+  });
+
+  it('shows Other loader flags only when one is set', async () => {
+    expect(await html({ dllCharacteristics: 0x140 })).not.toContain('Other loader flags');
+    const page = await html({ dllCharacteristics: 0x8540 });
+    expect(page).toContain('Other loader flags');
+    expect(page).toContain(
+      'No structured exception handlers (NO_SEH), Terminal Server aware (TERMINAL_SERVER_AWARE)',
+    );
   });
 });
