@@ -16,6 +16,7 @@ import { parseXmlBounded } from '../binary/xml';
 import { child, type XNode } from '../ooxml/xnode';
 import { PackageError, propertySection, tableSection } from './model';
 import type { InfoSection, PackageInfo } from './model';
+import { encryptionRows, readDmgEncryption } from './dmgEncryption';
 import { isSignedData, readSigner, signatureSection, signerCount } from './signature';
 
 const KOLY_SIZE = 512;
@@ -311,10 +312,14 @@ function codeSignatureSection(blob: Uint8Array): InfoSection {
 export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
   const warnings: string[] = [];
   if (reader.size >= 8) {
-    const encrypted =
-      ascii(await reader.bytes(0, 8)) === 'encrcdsa' ||
-      ascii(await reader.bytes(reader.size - 8, 8)) === 'cdsaencr';
-    if (encrypted) {
+    const encryptedVersion =
+      ascii(await reader.bytes(0, 8)) === 'encrcdsa'
+        ? 2
+        : ascii(await reader.bytes(reader.size - 8, 8)) === 'cdsaencr'
+          ? 1
+          : undefined;
+    if (encryptedVersion) {
+      const declared = await readDmgEncryption(reader, encryptedVersion);
       return {
         format: 'Apple disk image (encrypted)',
         summary: 'An encrypted Apple disk image.',
@@ -322,6 +327,7 @@ export async function readDmg(reader: RangeReader): Promise<PackageInfo> {
           ...propertySection('Disk image', [
             ['Format', 'Apple disk image (UDIF)'],
             ['Encrypted', 'Yes'],
+            ...encryptionRows(declared),
             ['Stored size', formatBytes(reader.size)],
           ]),
           {

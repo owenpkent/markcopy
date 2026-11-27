@@ -118,6 +118,7 @@ window.addEventListener('message', (e: MessageEvent) => {
         comments.push(editing);
       }
     }
+    showEncryption(msg.encryption);
     load(base64ToBytes(msg.data as string)).catch(showFatal);
   } else if (msg?.type === 'loadError' && typeof msg.message === 'string') {
     showFatal(msg.message);
@@ -139,6 +140,30 @@ function base64ToBytes(b64: string): Uint8Array {
     bytes[i] = bin.charCodeAt(i);
   }
   return bytes;
+}
+
+// A small, static line saying what the file declares about its encryption. The
+// host sends two strings at most; anything else is ignored, and the text is set
+// with textContent so it can never be markup.
+function showEncryption(value: unknown): void {
+  document.getElementById('mc-enc-notice')?.remove();
+  const enc = value as { label?: unknown; permissions?: unknown } | null | undefined;
+  if (!enc || typeof enc.label !== 'string') {
+    return;
+  }
+  const el = document.createElement('div');
+  el.id = 'mc-enc-notice';
+  el.className = 'mc-pdf-notice';
+  el.setAttribute('role', 'note');
+  const label = document.createElement('div');
+  label.textContent = enc.label.slice(0, 300);
+  el.appendChild(label);
+  if (typeof enc.permissions === 'string') {
+    const permissions = document.createElement('div');
+    permissions.textContent = enc.permissions.slice(0, 400);
+    el.appendChild(permissions);
+  }
+  document.body.appendChild(el);
 }
 
 function saveComments(): void {

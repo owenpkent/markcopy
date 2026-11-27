@@ -5,6 +5,7 @@ import { getNonce } from './previewShell';
 import { parsePdfMessage } from './messages/pdf';
 import { MAX_PDF_BYTES, readDocument } from './documentFile';
 import { MAX_COMMENTS_BYTES, parseComments, parseCommentsLenient } from './pdfComments';
+import { readPdfEncryption } from './pdfEncryption';
 import { missing, replaceSidecar } from './sidecarFile';
 
 // A read-only custom editor that renders PDF files with pdf.js in a webview,
@@ -68,6 +69,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             type: 'load',
             data: Buffer.from(bytes).toString('base64'),
             comments: await readComments(commentsUri),
+            // What the trailer declares, as two plain sentences (or absent). Label only.
+            encryption: readPdfEncryption(bytes),
           });
         } catch (err) {
           void webview.postMessage({ type: 'loadError', message: String(err) });

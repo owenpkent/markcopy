@@ -496,6 +496,8 @@ Keep the file open in the editor beside the grid so you can watch the text chang
 
 Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass)).
 
+- [ ] A PDF encrypted with an owner password only (AES-256 and RC4 variants) shows the small encryption note at the bottom left with its label and, if any, the permissions sentence, and never a password prompt from MarkCopy. An unencrypted PDF shows no note.
+
 ### Loading and navigation
 
 - [ ] ★ The PDF opens in MarkCopy's viewer with a "Loaded 12 pages" toast, and the toolbar (bottom-right) reads `1 / 12`.
