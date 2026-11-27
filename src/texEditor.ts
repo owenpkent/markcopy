@@ -217,6 +217,30 @@ export function texPanelFor(uri: vscode.Uri): vscode.WebviewPanel | undefined {
   return undefined;
 }
 
+/** What a LaTeX preview last told its webview: the state and the text shown with it. */
+export interface TexStatus {
+  state: 'compiling' | 'failed' | 'unavailable' | 'ok';
+  text?: string;
+  /** Counts the posts of one preview, starting at 1, so a test can tell a new one from a cached one. */
+  seq: number;
+}
+
+/**
+ * The last status the preview for `uri` posted, or undefined before it has posted
+ * one or when there is no such preview. Read only. The integration tests use it
+ * (through `markcopy.tex.status`) to see what the webview was told, because the
+ * webview itself is out of their reach.
+ */
+export function texStatusFor(uri: vscode.Uri): TexStatus | undefined {
+  const key = uri.toString();
+  for (const entry of active) {
+    if (entry.document.uri.toString() === key) {
+      return entry.session.lastStatus;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Recompile whichever LaTeX preview is focused. Returns false when none is, so
  * the command can say something useful instead of silently doing nothing.
@@ -262,6 +286,9 @@ class CompileSession {
   // The last successfully compiled PDF, which is what the preview shows. Held
   // apart from outDir because a failed rebuild can delete the engine's output.
   private readonly snapshot = new PdfSnapshot();
+  /** The last state posted to the webview. Read only, for `texStatusFor`. */
+  lastStatus: TexStatus | undefined;
+  private statusSeq = 0;
 
   constructor(
     private readonly document: vscode.TextDocument,
@@ -507,6 +534,7 @@ class CompileSession {
     detail?: string;
     action?: string;
   }): void {
+    this.lastStatus = { state: msg.state, text: msg.text, seq: ++this.statusSeq };
     void this.webview.postMessage({ type: 'texState', ...msg });
   }
 }
