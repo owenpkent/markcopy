@@ -118,6 +118,12 @@ export function bound(info: PackageInfo): PackageInfo {
     title: info.title === undefined ? undefined : clip(info.title, MAX_HEADLINE_CHARS),
     summary: info.summary === undefined ? undefined : clip(info.summary, MAX_PARAGRAPH_CHARS),
     sections,
+    fileRows: info.fileRows
+      ?.slice(0, MAX_ROWS)
+      .map((row): [string, string] => [
+        take(row[0], MAX_HEADLINE_CHARS),
+        take(row[1], MAX_VALUE_CHARS),
+      ]),
     warnings,
   };
 }
