@@ -8,22 +8,33 @@
 // Every read is bounded: the last 64 KiB for `startxref`, 64 KiB at the offset it
 // names for the trailer (a classic `trailer` dictionary, or the dictionary of a
 // cross-reference stream, PDF 1.5+), and the one indirect object /Encrypt refers
-// to, whose dictionary is parsed from at most 8 KiB. Only the last startxref is
-// followed; earlier sections of an incrementally updated file are not.
+// to, whose dictionary is parsed from at most 8 KiB. That object is found where
+// the cross-reference data puts it (a classic table entry, or an entry of an
+// unfiltered or Flate cross-reference stream, followed along /Prev for at most 8
+// sections), never by searching the file for text shaped like an object header, so
+// a comment or stream cannot stand in for it. When the entry cannot be read or
+// does not lead to that object, the details are reported as not determined.
 //
 // Layout of the dictionary: ISO 32000-1 section 7.6 (/Filter, /V, /R, /Length,
 // /P, /CF with /StmF and /StrF) and ISO 32000-2 for revision 6 (AES-256).
 
+import { Unzlib } from 'fflate';
 import { clip, printable } from './binary/text';
 
 const WINDOW = 64 * 1024;
 const OBJECT_BYTES = 8 * 1024;
 const MAX_DEPTH = 8;
 const MAX_TOKENS = 4000;
+// Cross-reference sections followed along /Prev, subsections walked in one table,
+// and the most a cross-reference stream may inflate to.
+const MAX_SECTIONS = 8;
+const MAX_SUBSECTIONS = 1000;
+const MAX_XREF_BYTES = 1024 * 1024;
 
 type Value = number | string | boolean | null | Ref | Name | Value[] | Dict;
 interface Ref {
   ref: number;
+  gen: number;
 }
 interface Name {
   name: string;
@@ -171,7 +182,7 @@ class Parser {
           !/[^\0\t\n\f\r ()<>[\]{}/%]/.test(this.s[this.i + 1] ?? ' ')
         ) {
           this.i++;
-          return { ref: n };
+          return { ref: n, gen: Number(gen) };
         }
         this.i = save;
       }
@@ -189,15 +200,21 @@ function latin1(bytes: Uint8Array): string {
   return out;
 }
 
-/** The trailer dictionary at the last startxref, or undefined. */
-function trailerDict(bytes: Uint8Array): Dict | undefined {
+/** The offset the last startxref names, or undefined. */
+function startXref(bytes: Uint8Array): number | undefined {
   const tail = latin1(bytes.subarray(Math.max(0, bytes.length - WINDOW)));
   const at = tail.lastIndexOf('startxref');
   if (at < 0) {
     return undefined;
   }
   const offset = Number(/^\s*(\d{1,15})/.exec(tail.slice(at + 9, at + 40))?.[1]);
-  if (!Number.isSafeInteger(offset) || offset >= bytes.length) {
+  return Number.isSafeInteger(offset) && offset < bytes.length ? offset : undefined;
+}
+
+/** The trailer dictionary at the last startxref, or undefined. */
+function trailerDict(bytes: Uint8Array): Dict | undefined {
+  const offset = startXref(bytes);
+  if (offset === undefined) {
     return undefined;
   }
   const section = latin1(bytes.subarray(offset, Math.min(bytes.length, offset + WINDOW)));
@@ -219,28 +236,243 @@ function trailerDict(bytes: Uint8Array): Dict | undefined {
   return isDict(v) ? v : undefined;
 }
 
-/** The dictionary of indirect object `num`, found by its header in the head or tail window. */
-function objectDict(bytes: Uint8Array, num: number): Dict | undefined {
-  const re = new RegExp(
-    `(?:^|[\\0\\t\\n\\f\\r ])${num}[\\0\\t\\n\\f\\r ]+\\d+[\\0\\t\\n\\f\\r ]+obj[\\0\\t\\n\\f\\r ]*<<`,
-    'g',
-  );
-  const windows = [
-    latin1(bytes.subarray(Math.max(0, bytes.length - WINDOW))),
-    latin1(bytes.subarray(0, Math.min(bytes.length, WINDOW))),
-  ];
-  for (const text of windows) {
-    let last: RegExpExecArray | null = null;
-    for (let m = re.exec(text); m; m = re.exec(text)) {
-      last = m;
+const slice = (bytes: Uint8Array, from: number, length: number): string =>
+  latin1(bytes.subarray(from, Math.min(bytes.length, from + length)));
+
+/**
+ * What one cross-reference section says about an object: the byte offset of its
+ * object when it is in use, null when it is free or lives in an object stream,
+ * undefined when the section does not list it. `prev` is the older section.
+ */
+interface Section {
+  entry: number | null | undefined;
+  prev: number | undefined;
+}
+
+const prevOf = (d: Dict): number | undefined => {
+  const p = num(d, 'Prev');
+  return p !== undefined && Number.isSafeInteger(p) && p >= 0 ? p : undefined;
+};
+
+/**
+ * A classic table: "xref", subsections of "first count" and then 20-byte
+ * entries, "trailer". The one entry wanted is read by position, so a table
+ * larger than the window costs the same as a small one. Undefined when the
+ * section is not a table or an entry is not in the standard 20-byte shape.
+ */
+function classicSection(bytes: Uint8Array, offset: number, want: number): Section | undefined {
+  const start = /^[\0\t\n\f\r ]*xref/.exec(slice(bytes, offset, 32));
+  if (!start) {
+    return undefined;
+  }
+  let pos = offset + start[0].length;
+  let entry: number | null | undefined;
+  for (let k = 0; ; k++) {
+    if (k >= MAX_SUBSECTIONS) {
+      return undefined;
     }
-    if (last) {
-      const start = text.indexOf('obj', last.index) + 3;
-      const v = new Parser(text.slice(start, start + OBJECT_BYTES)).value();
-      return isDict(v) ? v : undefined;
+    const head = slice(bytes, pos, 64);
+    const trailer = /^[\0\t\n\f\r ]*trailer/.exec(head);
+    if (trailer) {
+      pos += trailer[0].length;
+      break;
+    }
+    const sub = /^[\0\t\n\f\r ]*(\d{1,10}) +(\d{1,10})[ \t]*(?:\r\n|\n|\r)/.exec(head);
+    if (!sub) {
+      return undefined;
+    }
+    const first = Number(sub[1]);
+    const count = Number(sub[2]);
+    const entries = pos + sub[0].length;
+    if (entry === undefined && want >= first && want < first + count) {
+      const e = /^(\d{10}) (\d{5}) ([nf])/.exec(slice(bytes, entries + (want - first) * 20, 20));
+      if (!e) {
+        return undefined;
+      }
+      entry = e[3] === 'n' ? Number(e[1]) : null;
+    }
+    pos = entries + count * 20;
+  }
+  const v = new Parser(slice(bytes, pos, WINDOW)).value();
+  return { entry, prev: isDict(v) ? prevOf(v) : undefined };
+}
+
+/** Deflate-decoded `data`, or undefined when it is damaged or expands past `max`. */
+function inflate(data: Uint8Array, max: number): Uint8Array | undefined {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const stream = new Unzlib((chunk) => {
+    total += chunk.length;
+    if (total <= max) {
+      chunks.push(chunk);
+    }
+  });
+  try {
+    // Small slices, so one slice cannot expand far past the cap before it is checked.
+    for (let i = 0; i < data.length && total <= max; i += 1024) {
+      stream.push(data.subarray(i, i + 1024), i + 1024 >= data.length);
+    }
+  } catch {
+    return undefined;
+  }
+  if (total > max) {
+    return undefined;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/** Undoes a PNG predictor (/Predictor 10 to 15) for the None, Sub and Up row types; else undefined. */
+function unpredict(data: Uint8Array, columns: number): Uint8Array | undefined {
+  const rows = Math.floor(data.length / (columns + 1));
+  const out = new Uint8Array(rows * columns);
+  for (let r = 0; r < rows; r++) {
+    const tag = data[r * (columns + 1)];
+    for (let c = 0; c < columns; c++) {
+      const raw = data[r * (columns + 1) + 1 + c];
+      const left = c > 0 ? out[r * columns + c - 1] : 0;
+      const up = r > 0 ? out[(r - 1) * columns + c] : 0;
+      if (tag === 0) {
+        out[r * columns + c] = raw;
+      } else if (tag === 1) {
+        out[r * columns + c] = (raw + left) & 0xff;
+      } else if (tag === 2) {
+        out[r * columns + c] = (raw + up) & 0xff;
+      } else {
+        return undefined;
+      }
     }
   }
+  return out;
+}
+
+/**
+ * A cross-reference stream (PDF 1.5+): an object whose stream is a table of
+ * fixed-width entries. Only an unfiltered or Flate stream that fits in the
+ * window is read; undefined for anything else.
+ */
+function streamSection(bytes: Uint8Array, offset: number, want: number): Section | undefined {
+  const text = slice(bytes, offset, WINDOW);
+  const header = /^[\0\t\n\f\r ]*\d+[\0\t\n\f\r ]+\d+[\0\t\n\f\r ]+obj\b/.exec(text);
+  if (!header) {
+    return undefined;
+  }
+  const parser = new Parser(text.slice(header[0].length));
+  const dict = parser.value();
+  if (!isDict(dict) || nameOf(dict, 'Type') !== 'XRef') {
+    return undefined;
+  }
+  const after = header[0].length + parser.at();
+  const keyword = /^[\0\t\n\f\r ]*stream(?:\r\n|\n)/.exec(text.slice(after, after + 32));
+  const length = num(dict, 'Length');
+  if (!keyword || length === undefined || !Number.isSafeInteger(length) || length < 0) {
+    return undefined;
+  }
+  const from = after + keyword[0].length;
+  if (from + length > text.length) {
+    return undefined;
+  }
+  let data: Uint8Array | undefined = bytes.subarray(offset + from, offset + from + length);
+  const filter = dict.dict.get('Filter');
+  if (isName(filter) && filter.name === 'FlateDecode') {
+    data = inflate(data, MAX_XREF_BYTES);
+  } else if (filter !== undefined) {
+    return undefined;
+  }
+  const parms = dict.dict.get('DecodeParms');
+  const predictor = isDict(parms) ? (num(parms, 'Predictor') ?? 1) : 1;
+  if (data && predictor >= 10 && predictor <= 15) {
+    const columns = isDict(parms) ? num(parms, 'Columns') : undefined;
+    data =
+      columns !== undefined && Number.isSafeInteger(columns) && columns > 0 && columns <= 64
+        ? unpredict(data, columns)
+        : undefined;
+  } else if (predictor !== 1) {
+    return undefined;
+  }
+  const w = dict.dict.get('W');
+  if (!data || !Array.isArray(w) || w.length !== 3 || !w.every((x) => Number.isSafeInteger(x))) {
+    return undefined;
+  }
+  const [w0, w1, w2] = w as number[];
+  if ([w0, w1, w2].some((x) => x < 0 || x > 6)) {
+    return undefined;
+  }
+  const size = num(dict, 'Size');
+  const indexValue = dict.dict.get('Index');
+  const index: number[] =
+    Array.isArray(indexValue) && indexValue.every((x) => Number.isSafeInteger(x))
+      ? (indexValue as number[])
+      : size !== undefined
+        ? [0, size]
+        : [];
+  const width = w0 + w1 + w2;
+  let row = 0;
+  let entry: number | null | undefined;
+  for (let k = 0; k + 1 < index.length && width > 0; k += 2) {
+    const first = index[k];
+    const count = index[k + 1];
+    if (want >= first && want < first + count && entry === undefined) {
+      const at = (row + (want - first)) * width;
+      if (at + width > data.length) {
+        return undefined;
+      }
+      const field = (from: number, n: number): number => {
+        let v = 0;
+        for (let b = 0; b < n; b++) {
+          v = v * 256 + data[at + from + b];
+        }
+        return v;
+      };
+      const type = w0 === 0 ? 1 : field(0, w0);
+      entry = type === 1 ? field(w0, w1) : null;
+    }
+    row += count;
+  }
+  return { entry, prev: prevOf(dict) };
+}
+
+/**
+ * Where indirect object `want` starts, by the cross-reference data from the last
+ * startxref back along /Prev, or undefined when that cannot be established. The
+ * object is taken from where the file says it is, never from text that merely
+ * looks like an object header elsewhere in the file.
+ */
+function locate(bytes: Uint8Array, want: number): number | undefined {
+  const seen = new Set<number>();
+  let offset = startXref(bytes);
+  while (offset !== undefined && seen.size < MAX_SECTIONS && !seen.has(offset)) {
+    seen.add(offset);
+    const section = classicSection(bytes, offset, want) ?? streamSection(bytes, offset, want);
+    if (!section) {
+      return undefined;
+    }
+    if (section.entry !== undefined) {
+      return section.entry ?? undefined;
+    }
+    offset = section.prev;
+  }
   return undefined;
+}
+
+/** The dictionary of the indirect object a reference names, read where the cross-reference data puts it. */
+function objectDict(bytes: Uint8Array, ref: Ref): Dict | undefined {
+  const at = locate(bytes, ref.ref);
+  if (at === undefined) {
+    return undefined;
+  }
+  const text = slice(bytes, at, OBJECT_BYTES + 64);
+  const m = /^[\0\t\n\f\r ]*(\d+)[\0\t\n\f\r ]+(\d+)[\0\t\n\f\r ]+obj\b/.exec(text);
+  if (!m || Number(m[1]) !== ref.ref || Number(m[2]) !== ref.gen) {
+    return undefined;
+  }
+  const v = new Parser(text.slice(m[0].length, m[0].length + OBJECT_BYTES)).value();
+  return isDict(v) ? v : undefined;
 }
 
 export interface PdfEncryption {
@@ -316,6 +548,8 @@ function permissions(p: number, r: number | undefined): string {
   const restricted = PERMISSIONS.filter(
     ([bit, , rev3]) => (!rev3 || (r ?? 0) >= 3) && !(bits & (1 << (bit - 1))),
   )
+    // From revision 3, form filling is also allowed by bit 6 (annotations).
+    .filter(([bit]) => !(bit === 9 && (r ?? 0) >= 3 && (bits & (1 << 5)) !== 0))
     // High-quality printing is moot when printing is already restricted.
     .filter(([bit]) => !(bit === 12 && !(bits & 4)))
     .map(([, words]) => words);
@@ -333,7 +567,7 @@ export function readPdfEncryption(bytes: Uint8Array): PdfEncryption | undefined 
     if (entry === undefined || entry === null) {
       return undefined;
     }
-    const enc = isRef(entry) ? objectDict(bytes, entry.ref) : isDict(entry) ? entry : undefined;
+    const enc = isRef(entry) ? objectDict(bytes, entry) : isDict(entry) ? entry : undefined;
     if (!enc) {
       return { label: NOT_DETERMINED };
     }

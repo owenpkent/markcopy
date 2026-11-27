@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { zlibSync } from 'fflate';
 import { readPdfEncryption } from '../src/pdfEncryption';
 
 const OU = '/O <0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF> /U (a\\)>>b)';
+
+/** The bytes of a string, one per character. */
+const bytesOf = (text: string): Uint8Array => Uint8Array.from(text, (c) => c.charCodeAt(0));
+const textOf = (bytes: Uint8Array): string => String.fromCharCode(...bytes);
 
 /** A PDF whose trailer (or xref stream) names the Encrypt dictionary in `encrypt` (or object 9). */
 function pdf(opts: {
@@ -9,22 +14,40 @@ function pdf(opts: {
   direct?: string;
   stream?: boolean;
   pad?: number;
+  /** Text placed between the objects and the cross-reference section. */
+  before?: string;
+  /** Replaces the xref stream's data, with `streamDict` for the entries that describe it. */
+  streamData?: Uint8Array;
+  streamDict?: string;
 }): Uint8Array {
   let body = '%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n';
   body += 'x'.repeat(opts.pad ?? 0) + '\n';
+  const objectAt = body.length;
   if (opts.encrypt !== undefined) {
     body += `9 0 obj\n${opts.encrypt}\nendobj\n`;
   }
+  body += opts.before ?? '';
   const ref = opts.direct ?? (opts.encrypt !== undefined ? '9 0 R' : '');
   const enc = ref ? ` /Encrypt ${ref}` : '';
   const at = body.length;
   if (opts.stream) {
-    body += `10 0 obj\n<< /Type /XRef /Size 11 /W [1 2 1] /Root 1 0 R${enc} /Length 0 >>\nstream\n\nendstream\nendobj\n`;
-  } else {
-    body += `xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 10 /Root 1 0 R${enc} /ID [<AA><BB>] >>\n`;
+    // One entry, for object 9: type 1, a 4-byte offset, a 1-byte generation.
+    const data =
+      opts.streamData ??
+      Uint8Array.from(
+        [1, objectAt >>> 24, objectAt >>> 16, objectAt >>> 8, objectAt, 0].map((x) => x & 0xff),
+      );
+    body += `10 0 obj\n<< /Type /XRef /Size 11 /Index [9 1] /W [1 4 1] /Root 1 0 R${enc} ${opts.streamDict ?? ''} /Length ${data.length} >>\nstream\n`;
+    return Uint8Array.from([
+      ...bytesOf(body),
+      ...data,
+      ...bytesOf(`\nendstream\nendobj\nstartxref\n${at}\n%%EOF\n`),
+    ]);
   }
+  const entry = `${String(objectAt).padStart(10, '0')} 00000 n \n`;
+  body += `xref\n0 1\n0000000000 65535 f \n9 1\n${entry}trailer\n<< /Size 10 /Root 1 0 R${enc} /ID [<AA><BB>] >>\n`;
   body += `startxref\n${at}\n%%EOF\n`;
-  return Uint8Array.from(body, (c) => c.charCodeAt(0));
+  return bytesOf(body);
 }
 
 describe('readPdfEncryption', () => {
@@ -136,6 +159,70 @@ describe('readPdfEncryption', () => {
     expect(out?.label).toContain('RC4 40-bit');
   });
 
+  describe('finding the Encrypt object', () => {
+    const real =
+      '<< /Filter /Standard /V 5 /R 6 /CF << /StdCF << /CFM /AESV3 >> >> /StmF /StdCF /P -1 >>';
+    const decoy = '<< /Filter /Standard /V 1 /R 2 /P -4 >>';
+    const NOT_DETERMINED = 'Encrypted: the encryption details were not determined.';
+
+    it('is not taken from an object-shaped comment before the xref section', () => {
+      const out = readPdfEncryption(
+        pdf({ encrypt: real, before: `% example: 9 0 obj ${decoy}\n` }),
+      );
+      expect(out?.label).toBe('Encrypted: AES-256 (standard security handler, revision 6)');
+      expect(out?.permissions).toContain('declares no restrictions');
+    });
+
+    it('is not taken from object-shaped text in a stream either', () => {
+      const stream = `5 0 obj\n<< /Length 40 >>\nstream\n\n9 0 obj ${decoy}\nendstream\nendobj\n`;
+      const out = readPdfEncryption(pdf({ encrypt: real, before: stream }));
+      expect(out?.label).toContain('AES-256');
+    });
+
+    it('reports not determined when the xref offset does not lead to the object', () => {
+      const moved = textOf(pdf({ encrypt: real })).replace(/\d{10} 00000 n/, '0000000003 00000 n');
+      expect(readPdfEncryption(bytesOf(moved))?.label).toBe(NOT_DETERMINED);
+    });
+
+    it('reports not determined when the object is not listed', () => {
+      const text = textOf(pdf({ encrypt: real })).replace('9 1\n', '3 1\n');
+      expect(readPdfEncryption(bytesOf(text))?.label).toBe(NOT_DETERMINED);
+    });
+
+    it('reads the entry from a cross-reference stream, not from a decoy', () => {
+      const out = readPdfEncryption(
+        pdf({ encrypt: real, stream: true, before: `% 9 0 obj ${decoy}\n` }),
+      );
+      expect(out?.label).toContain('AES-256');
+    });
+
+    it('reads a Flate cross-reference stream with a PNG predictor', () => {
+      const objectAt = textOf(pdf({ encrypt: real })).indexOf('9 0 obj');
+      // One row of 6 bytes after its Up tag: type 1, a 4-byte offset, generation 0.
+      const row = Uint8Array.from([2, 1, 0, 0, objectAt >> 8, objectAt & 0xff, 0]);
+      const out = readPdfEncryption(
+        pdf({
+          encrypt: real,
+          stream: true,
+          streamData: zlibSync(row),
+          streamDict: '/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 6 >>',
+        }),
+      );
+      expect(out?.label).toContain('AES-256');
+    });
+
+    it('follows /Prev to an older table for an object the newest one lacks', () => {
+      const base = textOf(pdf({ encrypt: real }));
+      const older = base.indexOf('xref\n0 1');
+      const update = `${base}% update\n`;
+      const text =
+        update +
+        `xref\n20 1\n0000000000 00000 f \ntrailer\n<< /Size 21 /Root 1 0 R /Encrypt 9 0 R /Prev ${older} >>\n` +
+        `startxref\n${update.length}\n%%EOF\n`;
+      expect(readPdfEncryption(bytesOf(text))?.label).toContain('AES-256');
+    });
+  });
+
   describe('permissions', () => {
     const withP = (p: number, r = 3) =>
       readPdfEncryption(
@@ -171,6 +258,21 @@ describe('readPdfEncryption', () => {
 
     it('ignores the revision 3 bits for revision 2', () => {
       expect(withP(-1 & ~(1 << 8), 2)?.permissions).toContain('declares no restrictions');
+    });
+
+    it('lets bit 6 allow form filling from revision 3, as bit 9 does', () => {
+      // /P -260: bit 6 set, bit 9 clear.
+      expect(withP(-260)?.permissions).not.toContain('filling in forms');
+      // Bit 9 set, bit 6 clear.
+      expect(withP(-1 & ~(1 << 5))?.permissions).not.toContain('filling in forms');
+      // Both clear.
+      expect(withP(-1 & ~(1 << 5) & ~(1 << 8))?.permissions).toContain('filling in forms');
+    });
+
+    it('does not give bit 9 a meaning for revision 2', () => {
+      expect(withP(-1 & ~(1 << 5), 2)?.permissions).toBe(
+        'The file restricts: adding or editing annotations. Whether a viewer honours this is up to the viewer.',
+      );
     });
 
     it('gives no permissions sentence when /P is missing', () => {

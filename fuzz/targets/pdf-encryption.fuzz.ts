@@ -25,6 +25,7 @@ const MAX_PERMISSIONS = 400;
 function frame(mode: number, text: string): Uint8Array {
   let body = '%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n';
   let reference = '9 0 R';
+  const objectAt = body.length;
   if (mode === 3) {
     reference = text;
   } else {
@@ -32,9 +33,12 @@ function frame(mode: number, text: string): Uint8Array {
   }
   const at = body.length;
   if (mode === 2) {
-    body += `10 0 obj\n<< /Type /XRef /Size 11 /W [1 2 1] /Root 1 0 R /Encrypt ${reference} /Length 0 >>\nstream\n\nendstream\nendobj\n`;
+    // The entry for object 9: type 1, a 4-byte offset, generation 0.
+    const entry = String.fromCharCode(1, 0, 0, objectAt >> 8, objectAt & 0xff, 0);
+    body += `10 0 obj\n<< /Type /XRef /Size 11 /Index [9 1] /W [1 4 1] /Root 1 0 R /Encrypt ${reference} /Length 6 >>\nstream\n${entry}\nendstream\nendobj\n`;
   } else {
-    body += `xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 10 /Root 1 0 R /Encrypt ${reference} >>\n`;
+    const entry = `${String(objectAt).padStart(10, '0')} 00000 n \n`;
+    body += `xref\n0 1\n0000000000 65535 f \n9 1\n${entry}trailer\n<< /Size 10 /Root 1 0 R /Encrypt ${reference} >>\n`;
   }
   body += `startxref\n${at}\n%%EOF\n`;
   return Uint8Array.from(body, (c) => c.charCodeAt(0) & 0xff);
