@@ -29,17 +29,20 @@ describe('fuzz targets', () => {
     for (const file of targets) {
       expect(run.stdout).toContain(`${file.replace(/\.fuzz\.ts$/, '')}: `);
     }
-    // The build records what it emitted, which is what the coverage report
-    // scores (an older build's output stays in out/fuzz/ and must not count).
-    const built = JSON.parse(readFileSync(join(root, 'out/fuzz/built.json'), 'utf8')) as string[];
+    // The build records what the runnable targets reach, which is what the
+    // coverage report scores: an older build's output stays in out/fuzz/, and a
+    // support module no target uses is compiled too, and neither must count.
+    const reached = JSON.parse(
+      readFileSync(join(root, 'out/fuzz/reached.json'), 'utf8'),
+    ) as string[];
     for (const file of targets) {
-      expect(built).toContain(`fuzz/targets/${file}`);
+      expect(reached).toContain(`fuzz/targets/${file}`);
     }
     const manifest = JSON.parse(readFileSync(join(root, 'fuzz/coverage.json'), 'utf8')) as {
       parsers: Record<string, unknown>;
     };
     for (const parser of Object.keys(manifest.parsers)) {
-      expect(built).toContain(parser);
+      expect(reached).toContain(parser);
     }
   }, 150_000);
 });

@@ -372,10 +372,12 @@ write` (the first holds only `contents: read`, because it runs the repository's 
 opens or updates the `Fuzz coverage below threshold` issue, label `fuzz-coverage`, and
 closes it when every parser is back above its minimum. Only a run on the default branch
 touches the issue; a manual run on another branch still writes the summary and the
-artifact. A listed parser with no build output (no fuzz target imports it) counts as 0%
-and below its minimum. Output means output of the current build: esbuild leaves an
-earlier build's files in `out/fuzz/`, so `fuzz/build.js` writes the sources it built to
-`out/fuzz/built.json` each time and only those are scored.
+artifact. A listed parser that no fuzz target imports counts as 0% and below its
+minimum. That is read from `out/fuzz/reached.json`, which `fuzz/build.js` rewrites on
+every build with the sources the `*.fuzz.ts` files reach, directly or through other
+files. What sits in `out/fuzz/` does not decide it: esbuild leaves an earlier build's
+files there, and the build also compiles the support modules in `fuzz/targets/`, so a
+parser imported only by a helper that no target uses is compiled without being run.
 
 What the number means, so it is not read as more than it is:
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 // The coverage report must never delete what is already in --out, and a parser with
 // no build output must not read as covered. Every directory here is a fresh
 // mkdtemp under the OS temp directory; nothing touches the repo.
@@ -26,10 +27,13 @@ interface Report {
     perTarget: Map<string, Map<string, unknown[]>>,
     repoRoot?: string,
   ): Row;
-  builtSources(repoRoot?: string): Set<string>;
+  reachedByTargets(repoRoot?: string): Set<string>;
 }
 
 const report = createRequire(__filename)('../fuzz/coverage-report.js') as Report;
+const fuzzBuild = createRequire(__filename)('../fuzz/build.js') as {
+  build(root?: string): Promise<void>;
+};
 const made: string[] = [];
 
 function freshDir(): string {
@@ -97,7 +101,7 @@ describe('fuzz coverage of a parser with no build output', () => {
   it('is flagged when only an earlier build left its output behind', () => {
     // Two reports in a row over the same out/fuzz/, as on a developer's machine:
     // the parser is built the first time, then loses its last fuzz import. esbuild
-    // leaves the old .js and .js.map in place; only built.json says what this
+    // leaves the old .js and .js.map in place; only reached.json says what this
     // build emitted.
     const repo = freshDir();
     const file = 'src/pkg/kept.ts';
@@ -112,7 +116,7 @@ describe('fuzz coverage of a parser with no build output', () => {
       JSON.stringify({ version: 3, sources: ['../../../../src/pkg/kept.ts'], mappings: 'AAAA' }),
     );
     const entry = { targets: ['pkg-kept'], minLineCoverage: 0 };
-    const built = path.join(repo, 'out/fuzz/built.json');
+    const built = path.join(repo, 'out/fuzz/reached.json');
 
     writeFileSync(built, JSON.stringify([file]));
     const first = report.scoreParser(file, entry, new Map(), repo);
@@ -135,6 +139,50 @@ describe('fuzz coverage of a parser with no build output', () => {
       repo,
     );
     expect(row.missing).toBe(true);
-    expect(report.builtSources(repo).size).toBe(0);
+    expect(report.reachedByTargets(repo).size).toBe(0);
+  });
+
+  it('is flagged when its only importer is a helper that no fuzz target uses', async () => {
+    // The real build, over a small tree: one runnable target that reaches one
+    // parser, and a support module in fuzz/targets/ that nothing imports and
+    // that is the only importer of a second parser.
+    const repo = freshDir();
+    mkdirSync(path.join(repo, 'fuzz/targets'), { recursive: true });
+    mkdirSync(path.join(repo, 'src/pkg'), { recursive: true });
+    writeFileSync(path.join(repo, 'src/pkg/used.ts'), 'export const used = (): number => 1;\n');
+    writeFileSync(path.join(repo, 'src/pkg/orphan.ts'), 'export const orphan = (): number => 2;\n');
+    writeFileSync(
+      path.join(repo, 'fuzz/targets/one.fuzz.ts'),
+      "import { used } from '../../src/pkg/used';\nexport const fuzz = (): number => used();\n",
+    );
+    writeFileSync(
+      path.join(repo, 'fuzz/targets/helper.ts'),
+      "import { orphan } from '../../src/pkg/orphan';\nexport const help = (): number => orphan();\n",
+    );
+
+    await fuzzBuild.build(repo);
+
+    // The helper and what it imports are still compiled, as support modules are.
+    expect(existsSync(path.join(repo, 'out/fuzz/src/pkg/orphan.js.map'))).toBe(true);
+    expect([...report.reachedByTargets(repo)].sort()).toEqual([
+      'fuzz/targets/one.fuzz.ts',
+      'src/pkg/used.ts',
+    ]);
+    const entry = { targets: ['one'], minLineCoverage: 0 };
+    expect(report.scoreParser('src/pkg/used.ts', entry, new Map(), repo).missing).toBe(false);
+    const orphan = report.scoreParser('src/pkg/orphan.ts', entry, new Map(), repo);
+    expect(orphan).toMatchObject({ total: 0, missing: true, below: true });
+
+    // Once a runnable target uses the helper, the same parser is scored.
+    writeFileSync(
+      path.join(repo, 'fuzz/targets/one.fuzz.ts'),
+      "import { help } from './helper';\nexport const fuzz = (): number => help();\n",
+    );
+    await fuzzBuild.build(repo);
+    expect(report.scoreParser('src/pkg/orphan.ts', entry, new Map(), repo).missing).toBe(false);
+    // And the parser the target dropped is now the one that is missing, with its
+    // output from the first build still on disk.
+    expect(existsSync(path.join(repo, 'out/fuzz/src/pkg/used.js.map'))).toBe(true);
+    expect(report.scoreParser('src/pkg/used.ts', entry, new Map(), repo).missing).toBe(true);
   });
 });

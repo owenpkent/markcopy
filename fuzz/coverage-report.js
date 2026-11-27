@@ -17,10 +17,11 @@
 //    is close to, but not identical with, what c8 reports on the .ts files.
 //  - Lines the build removes (types, comments) are not counted. A built file with
 //    no executable lines is reported as having none and passes. A listed parser
-//    with no build output at all (no fuzz target imports it) counts as 0% and
-//    is below its minimum. Build output means output of this build: esbuild
-//    keeps the files of earlier builds in out/fuzz/, so a parser is scored only
-//    when out/fuzz/built.json, which fuzz/build.js rewrites each time, lists it.
+//    that no fuzz target imports counts as 0% and is below its minimum. That is
+//    decided by out/fuzz/reached.json, which fuzz/build.js rewrites each time
+//    with the sources the *.fuzz.ts files reach, not by what is in out/fuzz/:
+//    esbuild keeps the files of earlier builds there, and the build also
+//    compiles support modules that no target may use.
 //  - --out is only created, never cleared: other files in it are kept and only
 //    the two report files are overwritten. Raw V8 data lives in a temporary
 //    directory that is removed afterwards.
@@ -146,25 +147,32 @@ function writeReport(outDir, markdown, data) {
   fs.writeFileSync(path.join(outDir, 'fuzz-coverage.json'), JSON.stringify(data, null, 2));
 }
 
-// The sources the last run of fuzz/build.js built, from out/fuzz/built.json. An
-// empty set when that file is absent or unreadable, so nothing is scored from
-// output whose build is unknown.
-function builtSources(repoRoot = root) {
+// The sources the runnable targets (*.fuzz.ts) reached in the last run of
+// fuzz/build.js, from out/fuzz/reached.json. An empty set when that file is
+// absent or unreadable, so nothing is scored from output whose build is unknown.
+function reachedByTargets(repoRoot = root) {
   try {
-    const list = JSON.parse(fs.readFileSync(path.join(repoRoot, 'out/fuzz/built.json'), 'utf8'));
+    const list = JSON.parse(fs.readFileSync(path.join(repoRoot, 'out/fuzz/reached.json'), 'utf8'));
     return new Set(Array.isArray(list) ? list : []);
   } catch {
     return new Set();
   }
 }
 
-// One parser's row. A declared parser the current build did not emit (no fuzz
-// target imports it any more) is reported as 0 covered of 0 with missing set and
-// counts as below its minimum, so losing every import cannot pass as full
-// coverage. A source map left in out/fuzz/ by an earlier build does not count.
-function scoreParser(file, entry, perTarget, repoRoot = root, emitted = builtSources(repoRoot)) {
+// One parser's row. A declared parser no runnable target reaches in the current
+// build is reported as 0 covered of 0 with missing set and counts as below its
+// minimum, so losing every import cannot pass as full coverage. Neither a source
+// map left in out/fuzz/ by an earlier build nor one compiled for a support
+// module that no target uses counts.
+function scoreParser(
+  file,
+  entry,
+  perTarget,
+  repoRoot = root,
+  reached = reachedByTargets(repoRoot),
+) {
   const jsFile = path.join(repoRoot, 'out/fuzz', file.replace(/\.ts$/, '.js'));
-  const missing = !emitted.has(file) || !fs.existsSync(`${jsFile}.map`);
+  const missing = !reached.has(file) || !fs.existsSync(`${jsFile}.map`);
   let total = 0;
   const covered = new Set();
   const byTarget = {};
@@ -247,10 +255,10 @@ function main() {
       perTarget.set(target, readCoverage(dir));
     }
 
-    const emitted = builtSources();
+    const reached = reachedByTargets();
     const rows = Object.entries(parsers)
       .sort()
-      .map(([file, entry]) => scoreParser(file, entry, perTarget, root, emitted));
+      .map(([file, entry]) => scoreParser(file, entry, perTarget, root, reached));
     const below = rows.filter((r) => r.below);
     const lines = [
       '## Fuzz coverage of the parsers',
@@ -284,7 +292,7 @@ module.exports = {
   replayName,
   prepareOutput,
   writeReport,
-  builtSources,
+  reachedByTargets,
   scoreParser,
 };
 
