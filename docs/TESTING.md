@@ -521,6 +521,20 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
+### Auto-scroll
+
+- [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
+- [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
+- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up. The direction button reverses at once.
+- [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
+- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar.
+- [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.
+- [ ] Let it reach the end: it stops with a toast. Start it again at the end: it goes up. Scroll up to the top while it runs up: it stops.
+- [ ] Escape stops it; with the right-click menu open, Escape closes only the menu.
+- [ ] Tab reaches every puck button; Enter/Space steps with the keyboard; a screen reader announces pause, speed and size changes.
+- [ ] Stop it mid-document and reopen the PDF: the reading position is where it stopped (see Reading position). Hide and show the tab: speed and size are kept.
+- [ ] In the LaTeX preview it works the same, and a recompile does not break it.
+
 ### Reading position
 
 - [ ] ★ Scroll a multi-page PDF to the middle of a page, close the tab, reopen it: the same page and spot are at the top of the view.

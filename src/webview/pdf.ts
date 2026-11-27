@@ -10,6 +10,20 @@ import { createMenu, revealLabel, type MenuEntry } from './menu';
 import { fromHost } from './fromHost';
 import { MAX_COMMENT_COUNT, MAX_COMMENT_TEXT, MAX_COMMENT_TOTAL_TEXT } from '../pdfComments';
 import { validatePosition, type PdfPosition } from '../pdfPosition';
+import {
+  HOLD_DELAY_MS,
+  HOLD_INTERVAL_MS,
+  SIZES,
+  SPEED_STEP,
+  advanceFrame,
+  canHoldStep,
+  describeSpeed,
+  parseSettings,
+  reverseSpeed,
+  speedLabels,
+  startingSpeed,
+  stepSpeed,
+} from './pdfAutoScroll';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 import {
   linkBox,
@@ -668,7 +682,7 @@ document.addEventListener('click', (e) => {
   const top = document.elementFromPoint?.(e.clientX, e.clientY) ?? e.target;
   if (
     top instanceof Element &&
-    top.closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, .mc-tex-card')
+    top.closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, #mc-autoscroll, .mc-tex-card')
   ) {
     return;
   }
@@ -891,8 +905,16 @@ document.addEventListener(
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    // Escape closes an open menu or note first; only a bare Escape stops auto-scroll.
+    const closesOverlay = contextMenu.isOpen() || noteEl !== null;
     contextMenu.hide();
     closeNote();
+    if (autoOn && !closesOverlay) {
+      stopAutoScroll('Auto-scroll off');
+    }
+    return;
+  }
+  if (autoOn && autoKey(e)) {
     return;
   }
   if (e.ctrlKey || e.metaKey) {
@@ -1202,6 +1224,14 @@ document.addEventListener('contextmenu', (e) => {
     });
   }
 
+  entries.push({ kind: 'divider' });
+  entries.push({
+    kind: 'item',
+    label: autoOn ? 'Stop Auto-scroll' : 'Start Auto-scroll',
+    disabled: !doc,
+    run: toggleAutoScroll,
+  });
+
   if (texMode) {
     entries.push({ kind: 'divider' });
     entries.push({
@@ -1467,7 +1497,9 @@ document.addEventListener('pointerdown', (e) => {
     mode !== 'hand' ||
     // The LaTeX card's Compile button included: capturing the pointer for a pan
     // would move the click off the button, so it would do nothing.
-    (e.target as HTMLElement).closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, .mc-tex-card')
+    (e.target as HTMLElement).closest(
+      '.mc-menu, .mc-pin, .mc-note, #mc-toolbar, #mc-autoscroll, .mc-tex-card',
+    )
   ) {
     return;
   }
@@ -1643,6 +1675,339 @@ function beginPageJump(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-scroll
+// ---------------------------------------------------------------------------
+// Ported from folio. A corner puck (play/pause, small - and +, direction) glides
+// the page at a signed speed in CSS pixels per second. The loop is
+// requestAnimationFrame with time-based motion, so the pace does not depend on
+// the frame rate, and it owns a float position between frames. Anything that
+// moves the page by hand (wheel, keys, a zoom, a page jump, a drag in hand mode)
+// is adopted rather than fought, so lazy rendering, zoom anchoring and the
+// reading-position reports all keep working untouched: the loop never writes
+// anything but scrollTop. The speed and the puck's size live in the webview's
+// own state (getState/setState), validated on read.
+interface WebviewState {
+  [key: string]: unknown;
+}
+function readWebviewState(): WebviewState {
+  const raw = vscode.getState();
+  return raw && typeof raw === 'object' ? (raw as WebviewState) : {};
+}
+let autoSettings = parseSettings(readWebviewState().autoScroll);
+let autoOn = false;
+let autoPaused = false;
+let autoRaf = 0;
+let autoLast = 0;
+let autoPos = 0;
+let autoHoldTimer = 0;
+let puck: HTMLDivElement | null = null;
+
+const AS_ICONS = {
+  play: '<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />',
+  pause:
+    '<rect x="6.5" y="5" width="3.8" height="14" rx="1" fill="currentColor" stroke="none" />' +
+    '<rect x="13.7" y="5" width="3.8" height="14" rx="1" fill="currentColor" stroke="none" />',
+  minus: '<path d="M5 12h14" />',
+  plus: '<path d="M5 12h14" /><path d="M12 5v14" />',
+  up: '<path d="M12 19V5" /><path d="M6 11l6-6 6 6" />',
+  down: '<path d="M12 5v14" /><path d="M6 13l6 6 6-6" />',
+  toggle:
+    '<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 8v8" /><path d="M9 13l3 3 3-3" />',
+} as const;
+
+// Inline currentColor icons, like the fit-width one: they follow the button's
+// foreground in every theme and carry no meaning of their own for a screen
+// reader (every button has an aria-label).
+function autoScrollIcon(name: keyof typeof AS_ICONS, size: number): string {
+  return (
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" ` +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ' +
+    `focusable="false">${AS_ICONS[name]}</svg>`
+  );
+}
+
+function saveAutoSettings(): void {
+  vscode.setState({ ...readWebviewState(), autoScroll: autoSettings });
+}
+
+function announceAuto(text: string): void {
+  const status = puck?.querySelector('.mc-as-status');
+  if (status) {
+    // Clear first so repeating the same text is announced again.
+    status.textContent = '';
+    window.setTimeout(() => {
+      status.textContent = text;
+    }, 30);
+  }
+}
+
+function buildPuck(): HTMLDivElement {
+  const el = document.createElement('div');
+  el.id = 'mc-autoscroll';
+  el.setAttribute('role', 'toolbar');
+  el.setAttribute('aria-label', 'Auto-scroll controls');
+  el.hidden = true;
+  el.innerHTML =
+    '<button type="button" class="mc-as-btn mc-as-play" data-as="play"></button>' +
+    '<div class="mc-as-row">' +
+    '<button type="button" class="mc-as-btn mc-as-small" data-as="minus"></button>' +
+    '<button type="button" class="mc-as-btn mc-as-small" data-as="dir"></button>' +
+    '<button type="button" class="mc-as-btn mc-as-small" data-as="plus"></button>' +
+    '</div>' +
+    '<span class="mc-as-status" role="status" aria-live="polite"></span>';
+  el.addEventListener('click', (e) => {
+    const which = (e.target as HTMLElement).closest<HTMLElement>('[data-as]')?.dataset.as;
+    // A mouse or touch press already stepped on pointerdown; the click that
+    // follows has a detail count. A keyboard click (detail 0) steps here.
+    if (which === 'play') toggleAutoPause();
+    else if (which === 'dir') reverseAuto();
+    else if ((which === 'minus' || which === 'plus') && e.detail === 0) {
+      adjustAutoSpeed(which === 'plus' ? SPEED_STEP : 1 / SPEED_STEP);
+    }
+  });
+  el.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-as]');
+    const which = btn?.dataset.as;
+    if (!btn || e.button !== 0 || (which !== 'minus' && which !== 'plus') || btn.disabled) {
+      return;
+    }
+    const factor = which === 'plus' ? SPEED_STEP : 1 / SPEED_STEP;
+    stopHold();
+    // Keep receiving pointerup even if the pointer drifts off the button.
+    try {
+      btn.setPointerCapture(e.pointerId);
+    } catch {
+      /* best-effort */
+    }
+    adjustAutoSpeed(factor);
+    // Once on the press, again after the delay, then at the interval. A held
+    // press stops at the slowest speed rather than reversing.
+    const tick = (delay: number): void => {
+      autoHoldTimer = window.setTimeout(() => {
+        if (autoOn && canHoldStep(autoSettings.speed, factor)) {
+          adjustAutoSpeed(factor);
+          tick(HOLD_INTERVAL_MS);
+        } else {
+          stopHold();
+        }
+      }, delay);
+    };
+    tick(HOLD_DELAY_MS);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    el.addEventListener(type, stopHold);
+  }
+  // Right-click (or Shift+F10 / the Menu key) on the puck picks its size.
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let { pageX: x, pageY: y } = e;
+    if (e.clientX === 0 && e.clientY === 0) {
+      const box = (e.target as Element).getBoundingClientRect();
+      x = box.left + window.scrollX;
+      y = box.top + window.scrollY;
+    }
+    contextMenu.show(
+      x,
+      y,
+      SIZES.map((size, i) => ({
+        kind: 'radio' as const,
+        label: size.label,
+        checked: autoSettings.size === i,
+        run: () => {
+          autoSettings = { ...autoSettings, size: i };
+          saveAutoSettings();
+          applyAutoUi();
+          announceAuto(`Auto-scroll controls ${size.label}`);
+        },
+      })),
+    );
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+function stopHold(): void {
+  window.clearTimeout(autoHoldTimer);
+  autoHoldTimer = 0;
+}
+
+// Reflect the speed, the paused state and the size in the puck and the toolbar.
+function applyAutoUi(): void {
+  document.getElementById('mc-autoscroll-toggle')?.setAttribute('aria-pressed', String(autoOn));
+  if (!puck) {
+    return;
+  }
+  puck.hidden = !autoOn;
+  puck.dataset.size = String(autoSettings.size);
+  const { speed } = autoSettings;
+  const labels = speedLabels(speed);
+  const set = (
+    as: string,
+    label: string,
+    title: string,
+    icon: Parameters<typeof autoScrollIcon>[0],
+  ) => {
+    const btn = puck?.querySelector<HTMLButtonElement>(`[data-as="${as}"]`);
+    if (!btn) {
+      return;
+    }
+    btn.setAttribute('aria-label', label);
+    btn.title = title;
+    btn.innerHTML = autoScrollIcon(icon, as === 'play' ? 40 : 28);
+    return btn;
+  };
+  const playLabel = autoPaused ? 'Play' : 'Pause';
+  set(
+    'play',
+    playLabel,
+    `${playLabel} (Space). Right-click for size`,
+    autoPaused ? 'play' : 'pause',
+  );
+  const minus = set('minus', labels.minus, `${labels.minus} (Down arrow or -)`, 'minus');
+  const plus = set('plus', labels.plus, `${labels.plus} (Up arrow or +)`, 'plus');
+  const dirLabel = speed < 0 ? 'Scroll down' : 'Scroll up';
+  set('dir', dirLabel, `${dirLabel} (reverse direction)`, speed < 0 ? 'down' : 'up');
+  // Each disables only at full speed in its own direction.
+  if (minus) minus.disabled = stepSpeed(speed, 1 / SPEED_STEP) === speed;
+  if (plus) plus.disabled = stepSpeed(speed, SPEED_STEP) === speed;
+}
+
+function setAutoSpeed(speed: number): void {
+  autoSettings = { ...autoSettings, speed };
+  saveAutoSettings();
+  applyAutoUi();
+  announceAuto(`Auto-scroll speed ${describeSpeed(speed)}`);
+}
+
+function adjustAutoSpeed(factor: number): void {
+  setAutoSpeed(stepSpeed(autoSettings.speed, factor));
+}
+
+function reverseAuto(): void {
+  setAutoSpeed(reverseSpeed(autoSettings.speed));
+}
+
+function toggleAutoPause(): void {
+  autoPaused = !autoPaused;
+  applyAutoUi();
+  announceAuto(autoPaused ? 'Auto-scroll paused' : 'Auto-scroll playing');
+}
+
+function toggleAutoScroll(): void {
+  if (autoOn) {
+    stopAutoScroll('Auto-scroll off');
+  } else {
+    startAutoScroll();
+  }
+}
+
+function startAutoScroll(): void {
+  if (!doc || autoOn) {
+    return;
+  }
+  puck ??= buildPuck();
+  const s = scroller();
+  autoSettings = {
+    ...autoSettings,
+    speed: startingSpeed(autoSettings.speed, s.scrollTop, s.scrollHeight - s.clientHeight),
+  };
+  autoOn = true;
+  autoPaused = false;
+  autoPos = s.scrollTop;
+  autoLast = 0;
+  applyAutoUi();
+  announceAuto(`Auto-scroll on, ${describeSpeed(autoSettings.speed)}`);
+  autoRaf = requestAnimationFrame(autoFrame);
+}
+
+function stopAutoScroll(message: string): void {
+  if (!autoOn) {
+    return;
+  }
+  autoOn = false;
+  cancelAnimationFrame(autoRaf);
+  autoRaf = 0;
+  stopHold();
+  saveAutoSettings();
+  applyAutoUi();
+  // The puck is hidden now, so its live region would not be read; the toast
+  // carries the message instead.
+  toast(message);
+  // The reading position is only reported once scrolling settles; do it now.
+  flushPosition();
+}
+
+function autoFrame(ts: number): void {
+  autoRaf = 0;
+  if (!autoOn) {
+    return;
+  }
+  const dt = autoLast ? (ts - autoLast) / 1000 : 0;
+  autoLast = ts;
+  const s = scroller();
+  const maxTop = s.scrollHeight - s.clientHeight;
+  if (autoPaused || panning) {
+    // Hold still (paused, or a hand drag is moving the page) but keep the
+    // position current so resuming continues from wherever the page is.
+    autoPos = s.scrollTop;
+  } else {
+    const result = advanceFrame({
+      pos: autoPos,
+      scrollTop: s.scrollTop,
+      speed: autoSettings.speed,
+      dt,
+      maxTop,
+    });
+    autoPos = result.pos;
+    if (Math.abs(s.scrollTop - autoPos) > 0.01) {
+      s.scrollTop = autoPos;
+    }
+    if (result.edge) {
+      stopAutoScroll(
+        result.edge === 'end' ? 'Auto-scroll reached the end' : 'Auto-scroll reached the top',
+      );
+      return;
+    }
+  }
+  autoRaf = requestAnimationFrame(autoFrame);
+}
+
+// Keys while auto-scroll is on: Space pauses and resumes, the arrows and + / -
+// step the speed. Returns whether the key was taken. Fields, open menus and
+// modifier chords (Ctrl +/- is zoom) are left alone, and Space on a focused
+// button is that button's own click.
+function autoKey(e: KeyboardEvent): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey || contextMenu.isOpen()) {
+    return false;
+  }
+  const el = e.target as Element | null;
+  if (el?.closest('input, textarea, select, [contenteditable="true"], [role="menu"]')) {
+    return false;
+  }
+  if (e.key === ' ' && !el?.closest('button, a, [role="button"]')) {
+    e.preventDefault();
+    // Holding Space repeats keydown: only the first press toggles.
+    if (!e.repeat) {
+      toggleAutoPause();
+    }
+    return true;
+  }
+  if (e.key === 'ArrowUp' || e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    adjustAutoSpeed(SPEED_STEP);
+    return true;
+  }
+  if (e.key === 'ArrowDown' || e.key === '-' || e.key === '_') {
+    e.preventDefault();
+    adjustAutoSpeed(1 / SPEED_STEP);
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 function buildToolbar(): void {
@@ -1657,6 +2022,10 @@ function buildToolbar(): void {
     '<button type="button" id="mc-zoom-label" title="Reset zoom (Ctrl 0)">100%</button>' +
     '<button type="button" data-act="in" title="Zoom in (Ctrl +)">+</button>' +
     '<span class="mc-toolbar-sep" aria-hidden="true"></span>' +
+    '<button type="button" id="mc-autoscroll-toggle" data-act="autoscroll" aria-pressed="false" ' +
+    'aria-label="Auto-scroll" title="Auto-scroll (right-click the page for the same)">' +
+    autoScrollIcon('toggle', 16) +
+    '</button>' +
     // Folio's fit-width icon (src/components/common/Icon.tsx there): a page with
     // a double-headed arrow across it, stroked in currentColor so it follows the
     // toolbar's foreground in every theme. The icon carries no meaning to a
@@ -1685,6 +2054,7 @@ function buildToolbar(): void {
     if (act === 'in') zoomIn();
     else if (act === 'out') zoomOut();
     else if (act === 'fit') toggleFitWidth();
+    else if (act === 'autoscroll') toggleAutoScroll();
   });
   document.body.appendChild(bar);
 }

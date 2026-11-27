@@ -1005,6 +1005,102 @@ body.mc-mode-hand .mc-link {
   -webkit-appearance: none;
 }
 
+/* Auto-scroll puck (src/webview/pdf.ts): a play/pause button with small - and +
+   under it, fixed above the floating toolbar. Sized as pointer targets (the play
+   button 64px, the small ones 44px at Medium), scaled by the size choice via
+   data-size so no inline style is needed. It sits below menus and notes, so it
+   never covers or takes clicks from an open one. Colours are the toolbar's own,
+   so it reads in light, dark and green. */
+#mc-autoscroll {
+  --mc-as-scale: 1;
+  position: fixed;
+  right: 18px;
+  bottom: 62px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: calc(6px * var(--mc-as-scale));
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, #24292f);
+  color: var(--vscode-editorWidget-foreground, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+#mc-autoscroll[hidden] {
+  display: none;
+}
+#mc-autoscroll[data-size='0'] {
+  --mc-as-scale: 0.75;
+}
+#mc-autoscroll[data-size='2'] {
+  --mc-as-scale: 1.5;
+}
+#mc-autoscroll[data-size='3'] {
+  --mc-as-scale: 2;
+}
+#mc-autoscroll .mc-as-row {
+  display: flex;
+  gap: 6px;
+}
+#mc-autoscroll .mc-as-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.2));
+  border-radius: 8px;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
+  color: inherit;
+  cursor: pointer;
+}
+#mc-autoscroll .mc-as-play {
+  width: calc(64px * var(--mc-as-scale));
+  height: calc(64px * var(--mc-as-scale));
+  align-self: center;
+  border-radius: 50%;
+  background: var(--vscode-button-background, #0969da);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+#mc-autoscroll .mc-as-small {
+  width: calc(44px * var(--mc-as-scale));
+  height: calc(44px * var(--mc-as-scale));
+}
+#mc-autoscroll .mc-as-play svg {
+  width: calc(36px * var(--mc-as-scale));
+  height: calc(36px * var(--mc-as-scale));
+}
+#mc-autoscroll .mc-as-small svg {
+  width: calc(26px * var(--mc-as-scale));
+  height: calc(26px * var(--mc-as-scale));
+}
+#mc-autoscroll .mc-as-btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+#mc-autoscroll .mc-as-btn:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+}
+#mc-autoscroll .mc-as-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The live region is for screen readers only. */
+#mc-autoscroll .mc-as-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#mc-toolbar #mc-autoscroll-toggle svg {
+  display: block;
+}
+
 /* Dark-mode page inversion is applied to the canvas bitmap in pdf.ts (see
    renderPage), NOT via a CSS filter: a CSS filter re-rasterises the layer at CSS
    resolution and blurs the page on HiDPI displays. The placeholder colours above
