@@ -503,10 +503,17 @@ describe('two destination links followed in a row', () => {
   const label = () => document.getElementById('mc-page-label')!.textContent;
 
   it('lands on the newest when the lookups finish in click order', async () => {
+    const t0 = performance.now();
+    const jumps = () =>
+      scrollIntoView.mock.contexts.map((c) => (c as HTMLElement).dataset.page).join(',');
     const { release } = await twoLinks();
+    console.log(`DIAG after clicks t=${performance.now() - t0} label=${label()} jumps=${jumps()}`);
     release('two');
     await settle();
+    console.log(`DIAG after two t=${performance.now() - t0} label=${label()} jumps=${jumps()}`);
     release('four');
+    await settle();
+    console.log(`DIAG after four t=${performance.now() - t0} label=${label()} jumps=${jumps()}`);
     await vi.waitFor(() => expect(label()).toBe('4 / 5'));
   });
 
