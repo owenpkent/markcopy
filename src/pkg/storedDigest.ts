@@ -25,6 +25,7 @@ export const SHA1: DigestAlgorithm = { node: 'sha1', label: 'SHA-1', hexLength: 
 export const SHA256: DigestAlgorithm = { node: 'sha256', label: 'SHA-256', hexLength: 64 };
 export const SHA384: DigestAlgorithm = { node: 'sha384', label: 'SHA-384', hexLength: 96 };
 export const SHA512: DigestAlgorithm = { node: 'sha512', label: 'SHA-512', hexLength: 128 };
+export const MD5: DigestAlgorithm = { node: 'md5', label: 'MD5', hexLength: 32 };
 export const SHA3_256: DigestAlgorithm = { node: 'sha3-256', label: 'SHA3-256', hexLength: 64 };
 
 // Hashing reads every byte of the range, as hashing the whole file does, so the
@@ -35,30 +36,50 @@ export const CHECK_LIMIT = 256 * 1024 * 1024;
  * The sentence for one stored digest: whether the digest of `start` up to `end`
  * of the file equals `stored`. Hex is compared without regard to case.
  */
-export async function checkStoredDigest(
+export function checkStoredDigest(
   reader: RangeReader,
   algorithm: DigestAlgorithm,
   stored: string,
   start: number,
   end: number,
 ): Promise<string> {
+  return checkStoredDigestRanges(reader, algorithm, stored, [[start, end]]);
+}
+
+/**
+ * As checkStoredDigest, for a digest over several ranges of the file, each as
+ * [start, end), hashed in the order given. A digest that skips parts of the
+ * file (an Authenticode image hash) names the ranges it keeps.
+ */
+export async function checkStoredDigestRanges(
+  reader: RangeReader,
+  algorithm: DigestAlgorithm,
+  stored: string,
+  ranges: [number, number][],
+): Promise<string> {
   const name = algorithm.label;
   const wanted = stored.trim().toLowerCase();
   if (wanted.length !== algorithm.hexLength || !/^[0-9a-f]+$/.test(wanted)) {
     return `Not checked: the stored value is not a ${name} digest.`;
   }
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start) {
-    return 'Not checked: the range the digest covers is not valid.';
+  let total = 0;
+  for (const [start, end] of ranges) {
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start) {
+      return 'Not checked: the range the digest covers is not valid.';
+    }
+    if (end > reader.size) {
+      return 'Not checked: the file ends before the data the digest covers.';
+    }
+    total += end - start;
   }
-  if (end > reader.size) {
-    return 'Not checked: the file ends before the data the digest covers.';
-  }
-  if (end - start > CHECK_LIMIT) {
+  if (total > CHECK_LIMIT) {
     return `Not checked: the data the digest covers is over ${formatBytesShort(CHECK_LIMIT)}.`;
   }
   const hash = createHash(algorithm.node);
   try {
-    await reader.scan(start, end - start, (chunk) => hash.update(chunk));
+    for (const [start, end] of ranges) {
+      await reader.scan(start, end - start, (chunk) => hash.update(chunk));
+    }
   } catch {
     return 'Not checked: the file could not be read to the end of the data the digest covers.';
   }

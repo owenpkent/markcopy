@@ -15,6 +15,7 @@
 import { parseXmlBounded } from '../binary/xml';
 import { child, findAll } from '../ooxml/xnode';
 import { iconToPng, pickIcon, type PeIcon } from './icon';
+import { checkImageHash, type PeImageHash } from './imageHash';
 import { isSignedData, readSigner, signerCount, type Signer } from './signer';
 import {
   RangeReader as Reader,
@@ -113,6 +114,8 @@ export interface PeSignature {
   entries: string[];
   /** Who the signature names. Absent when there is no SignedData, or it cannot be walked. */
   signer?: Signer;
+  /** The image digest the signature stores, and whether the file still hashes to it. */
+  imageHash?: PeImageHash;
 }
 
 /**
@@ -808,6 +811,12 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
           if (isSignedData(der) && signerCount(der) > 0) {
             signature.signedData = true;
             signature.signer = readSigner(der);
+            signature.imageHash = await checkImageHash(reader, der, {
+              checksumAt: optOffset + 64,
+              directoryAt: optOffset + dirCountOffset + 4 + DIR_SECURITY * 8,
+              headersEnd: Math.max(sizeOfHeaders, optOffset + optionalSize + sectionCount * 40),
+              table: security,
+            });
           }
         }
         // Entries are padded to eight bytes. Arithmetic, not a bit mask: a
