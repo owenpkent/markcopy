@@ -1,6 +1,6 @@
 # MarkCopy user guide
 
-MarkCopy turns VS Code into a document workspace where you read any file, make light edits, and hand it off (rich paste, Word, PowerPoint, PDF) without leaving the editor.
+MarkCopy opens the files in a repository that are not code as the real thing, without leaving the editor. You can read documents and edit them lightly, review media and PDFs with notes, inspect executables and installers without running them, and hand it off: copy as rich text, Markdown, CSV or PNG, or save a Markdown, CSV, Excel, Word or PowerPoint preview, or an executable or package info page, as PDF, Word or PowerPoint. The PDF, image, media and 3D viewers have their own actions instead: in the video viewer, for example, you copy or save a frame as PNG and copy your review notes as Markdown. The [Copy Matrix](../COPY-MATRIX.md) lists every viewer's actions.
 
 - [Getting started](getting-started.md): install, open a file, the Show Preview / Show Source swap, side-by-side preview, editor associations, and auto-preview.
 - [Markdown preview](markdown.md): live preview, themes, Mermaid, math, local images, and edit mode.

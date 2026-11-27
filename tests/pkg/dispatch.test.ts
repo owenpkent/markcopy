@@ -8,6 +8,7 @@ import { bytesSource } from '../../src/binary/reader';
 import { PackageError, readPackage } from '../../src/pkg';
 import { buildDmg } from './dmgFixture';
 import { buildElf } from './elfFixture';
+import { buildClassFileLike, buildMacho } from './machoFixture';
 import { buildMsi } from './msiFixture';
 import { buildXar } from './xarFixture';
 
@@ -46,6 +47,14 @@ describe('readPackage: routing by content, with a real file', () => {
     expect(info.format).toMatch(/^(?:ELF|Linux|AppImage)/);
     const again = await read(buildElf(), 'notes.txt');
     expect(again.format).toBe(info.format);
+  });
+
+  it('reads a Mach-O file as Mach-O, and leaves a Java class file alone', async () => {
+    const info = await read(buildMacho(), 'tool');
+    expect(info.format).toBe('Mach-O executable (x86_64)');
+    const err = await read(buildClassFileLike(), 'Hello.class').catch((e) => e);
+    expect(err).toBeInstanceOf(PackageError);
+    expect(err.message).toBe('it is not a package format this preview reads.');
   });
 
   it('reads a Windows Installer database as one, whatever it is named', async () => {
