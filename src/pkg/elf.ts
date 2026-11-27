@@ -44,8 +44,18 @@ const PT_NOTE = 4;
 const PT_GNU_STACK = 0x6474e551;
 const PT_GNU_RELRO = 0x6474e552;
 
+const SHT_NULL = 0;
+const SHT_STRTAB = 3;
 const SHT_NOTE = 7;
 const SHT_NOBITS = 8;
+
+// The 16-bit header counts overflow into the first section header: e_phnum
+// PN_XNUM moves the program header count to its sh_info, e_shnum 0 moves the
+// section count to its sh_size, and e_shstrndx SHN_XINDEX moves the name
+// table's index to its sh_link. That entry is otherwise unused, and only
+// trusted for this when it is the reserved SHT_NULL entry it should be.
+const PN_XNUM = 0xffff;
+const SHN_XINDEX = 0xffff;
 
 const DT_NEEDED = 1;
 const DT_STRTAB = 5;
@@ -252,9 +262,20 @@ async function readSegments(
   if (h.phentsize < min) {
     throw new PackageError('its program headers are smaller than the format allows.');
   }
-  const count = Math.min(h.phnum, MAX_SEGMENTS);
-  if (h.phnum > count) {
-    warnings.push(`Only the first ${count} of ${h.phnum} program headers were read.`);
+  let phnum = h.phnum;
+  if (phnum === PN_XNUM) {
+    const first = h.shoff === 0 ? undefined : await sectionHeader(reader, h, 0);
+    if (!first || first.type !== SHT_NULL || first.info === 0) {
+      warnings.push(
+        'The program header count is too large for the file header, and the first section header, which should hold it, does not.',
+      );
+      return [];
+    }
+    phnum = first.info;
+  }
+  const count = Math.min(phnum, MAX_SEGMENTS);
+  if (phnum > count) {
+    warnings.push(`Only the first ${count} of ${phnum} program headers were read.`);
   }
   const out: Segment[] = [];
   for (let i = 0; i < count; i++) {
@@ -282,10 +303,44 @@ async function readSegments(
   return out;
 }
 
+/** Section header `i`, with the link and info fields the count overflow uses. */
+async function sectionHeader(
+  reader: RangeReader,
+  h: Header,
+  i: number,
+): Promise<Section & { link: number; info: number }> {
+  const min = h.wide ? 64 : 40;
+  if (h.shentsize < min) {
+    throw new PackageError('its section headers are smaller than the format allows.');
+  }
+  const v = await reader.view(h.shoff + i * h.shentsize, min);
+  return h.wide
+    ? {
+        name: '',
+        nameOffset: v.getUint32(0, h.le),
+        type: v.getUint32(4, h.le),
+        offset: word(v, 24, true, h.le),
+        size: word(v, 32, true, h.le),
+        link: v.getUint32(40, h.le),
+        info: v.getUint32(44, h.le),
+      }
+    : {
+        name: '',
+        nameOffset: v.getUint32(0, h.le),
+        type: v.getUint32(4, h.le),
+        offset: v.getUint32(16, h.le),
+        size: v.getUint32(20, h.le),
+        link: v.getUint32(24, h.le),
+        info: v.getUint32(28, h.le),
+      };
+}
+
 interface SectionTable {
   sections: Section[];
   /** Entries in the table, including the unused first one. */
   total: number;
+  /** Whether `total` is known: false when the table could not be read, or its extended count was not trusted. */
+  counted: boolean;
 }
 
 async function readSections(
@@ -294,48 +349,37 @@ async function readSections(
   warnings: string[],
 ): Promise<SectionTable> {
   if (h.shoff === 0) {
-    return { sections: [], total: 0 };
+    return { sections: [], total: 0, counted: true };
   }
-  const min = h.wide ? 64 : 40;
-  if (h.shentsize < min) {
-    throw new PackageError('its section headers are smaller than the format allows.');
-  }
-  const entry = async (i: number): Promise<Section & { link: number }> => {
-    const v = await reader.view(h.shoff + i * h.shentsize, min);
-    return h.wide
-      ? {
-          name: '',
-          nameOffset: v.getUint32(0, h.le),
-          type: v.getUint32(4, h.le),
-          offset: word(v, 24, true, h.le),
-          size: word(v, 32, true, h.le),
-          link: v.getUint32(40, h.le),
-        }
-      : {
-          name: '',
-          nameOffset: v.getUint32(0, h.le),
-          type: v.getUint32(4, h.le),
-          offset: v.getUint32(16, h.le),
-          size: v.getUint32(20, h.le),
-          link: v.getUint32(24, h.le),
-        };
-  };
+  const entry = (i: number) => sectionHeader(reader, h, i);
   let total = h.shnum;
   let strIndex = h.shstrndx;
   // A table too long for the 16-bit count keeps the real count in the first
   // entry's size, and a section-name table past 0xfeff keeps its index in the
   // first entry's link.
-  if (total === 0 || strIndex === 0xffff) {
+  if (total === 0 || strIndex === SHN_XINDEX) {
     const first = await entry(0);
-    if (total === 0) {
-      total = first.size;
-    }
-    if (strIndex === 0xffff) {
-      strIndex = first.link;
+    if (first.type !== SHT_NULL) {
+      warnings.push(
+        'The section headers point to the first one for their count or name table, but it is not the reserved empty entry, so neither was taken from it.',
+      );
+      if (total === 0) {
+        return { sections: [], total: 0, counted: false };
+      }
+      strIndex = 0;
+    } else {
+      if (total === 0) {
+        total = first.size;
+      }
+      if (strIndex === SHN_XINDEX) {
+        strIndex = first.link;
+      }
     }
   }
   if (total === 0) {
-    return { sections: [], total: 0 };
+    // The table is there (e_shoff is set) but its extended count in section
+    // zero is 0: inconsistent, so how long it is is not known.
+    return { sections: [], total: 0, counted: false };
   }
   const count = Math.min(total, MAX_SECTIONS);
   if (total > count) {
@@ -345,16 +389,34 @@ async function readSections(
   for (let i = 0; i < count; i++) {
     sections.push(await entry(i));
   }
-  if (strIndex > 0 && strIndex < sections.length) {
-    const str = sections[strIndex];
-    if (str.type !== SHT_NOBITS && str.offset < reader.size) {
+  // The name table's header may lie past the entries enumerated above: an
+  // extended index is 0xff00 or more by definition, so that one header is
+  // fetched on its own rather than raising the enumeration cap.
+  let str: Section | undefined;
+  if (strIndex > 0 && strIndex < total) {
+    try {
+      str = strIndex < sections.length ? sections[strIndex] : await entry(strIndex);
+    } catch {
+      warnings.push('The section name table could not be read.');
+    }
+  }
+  // Names come only from a string table: any other section's bytes would be
+  // read as names. Whatever goes wrong here costs the names, not the sections.
+  if (str && str.type !== SHT_STRTAB) {
+    warnings.push(
+      'The section the header names as the section name table is not a string table, so section names are not shown.',
+    );
+  } else if (str && str.offset < reader.size) {
+    try {
       const names = await reader.upTo(str.offset, Math.min(str.size, MAX_STRTAB));
       for (const s of sections) {
         s.name = stringAt(names, s.nameOffset, 128);
       }
+    } catch {
+      warnings.push('The section names could not be read.');
     }
   }
-  return { sections, total };
+  return { sections, total, counted: true };
 }
 
 /** The file offset a virtual address maps to, through the loadable segments. */
@@ -581,6 +643,7 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
   const table = await attempt('The section headers', () => readSections(reader, h, warnings), {
     sections: [],
     total: 0,
+    counted: false,
   } as SectionTable);
   const sections = table.sections;
   const dyn = await attempt(
@@ -693,9 +756,21 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
     head[8] === 0x41 && head[9] === 0x49 && (head[10] === 1 || head[10] === 2) ? head[10] : 0;
   let appImage: InfoSection[] = [];
   if (appImageType) {
+    // The section header table ends the ELF part when it comes last. An
+    // ordinary count is in the file header and holds whether or not the table
+    // itself could be read, so a file cut off inside the table still shows as
+    // cut off. An extended count is known only from a first section header
+    // that was read and checked; without one the boundary is unknown.
     let end = 0;
-    if (h.shoff > 0 && h.shnum > 0) {
-      end = h.shoff + h.shnum * h.shentsize;
+    let bounded = true;
+    if (h.shoff > 0) {
+      if (h.shnum > 0) {
+        end = h.shoff + h.shnum * h.shentsize;
+      } else if (table.counted) {
+        end = h.shoff + table.total * h.shentsize;
+      } else {
+        bounded = false;
+      }
     }
     for (const s of segments) {
       end = Math.max(end, s.offset + s.filesz);
@@ -705,7 +780,7 @@ export async function readElf(reader: RangeReader): Promise<PackageInfo> {
         end = Math.max(end, s.offset + s.size);
       }
     }
-    if (Number.isSafeInteger(end) && end > 0 && end <= reader.size) {
+    if (bounded && Number.isSafeInteger(end) && end > 0 && end <= reader.size) {
       const payload = reader.size - end;
       const magic = payload >= 4 ? decode(await reader.bytes(end, 4)) : '';
       appImage = propertySection('AppImage', [
