@@ -1099,7 +1099,7 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   left: 18px;
   bottom: 18px;
   z-index: 1040;
-  max-width: min(46ch, calc(100vw - 260px));
+  max-width: min(64ch, calc(100vw - 260px));
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 12px;
