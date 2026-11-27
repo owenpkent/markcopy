@@ -5,6 +5,7 @@
 // since that needs resources.arsc, so they are reported as references.
 import { printable } from '../binary/text';
 import { formatBytesShort, formatNumber } from '../binary/html';
+import { dexSections } from './dex';
 import { parseManifest, type ManifestNode } from './axml';
 import { APK_SCHEME_IDS, readApkSigner, type ApkSigner } from './apkSigner';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
@@ -221,6 +222,7 @@ export async function readApk(zip: ZipArchive): Promise<ZipFlavour> {
       ],
       ['Native libraries for', [...abis].map((a) => printable(a)).join(', ')],
     ]),
+    ...(await dexSections(zip, dex, warnings)),
   );
 
   // Signature: v1 is a JAR-style PKCS #7 block with names to read. v2 and
