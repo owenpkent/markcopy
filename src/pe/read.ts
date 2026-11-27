@@ -46,7 +46,8 @@ export interface PeSection {
 
 export interface PeImport {
   library: string;
-  functions: number;
+  /** Absent when the library's name is readable but its function list is not. */
+  functions?: number;
   delayLoaded: boolean;
 }
 
@@ -68,6 +69,8 @@ export interface PeExports {
   named: number;
   /** The first names, in table order. `named` says how many there are in all. */
   names: string[];
+  /** Names among the first ones that could not be read, so `names` is not a prefix of the table. */
+  unreadNames?: number;
 }
 
 export interface PeDebug {
@@ -293,6 +296,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   const subsystem = opt.getUint16(68, true);
   const dllFlags = opt.getUint16(70, true);
   const imageBase = plus ? opt.getBigUint64(24, true) : BigInt(opt.getUint32(28, true));
+  const sectionAlignment = opt.getUint32(32, true);
   const sizeOfHeaders = opt.getUint32(60, true);
 
   const dirCount = Math.min(opt.getUint32(dirCountOffset, true), 16);
@@ -312,9 +316,19 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   if (sectionCount > MAX_SECTIONS) {
     throw new PeError(`it declares ${sectionCount} sections, more than a real image has.`);
   }
-  const table = await reader.view(optOffset + optionalSize, sectionCount * 40);
+  // A download cut off inside the section table still has headers worth
+  // showing, so the table is read as far as the file goes.
+  const tableAt = optOffset + optionalSize;
+  const present = Math.min(sectionCount, Math.max(0, Math.floor((reader.size - tableAt) / 40)));
+  const early: string[] = [];
+  if (present < sectionCount) {
+    early.push(
+      `The file ends inside the section table: ${present} of ${sectionCount} sections are shown.`,
+    );
+  }
+  const table = await reader.view(tableAt, present * 40);
   const sections: PeSection[] = [];
-  for (let i = 0; i < sectionCount; i++) {
+  for (let i = 0; i < present; i++) {
     const at = i * 40;
     const nameBytes = new Uint8Array(table.buffer, table.byteOffset + at, 8);
     const nameEnd = nameBytes.indexOf(0);
@@ -344,23 +358,71 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     });
   }
 
-  /** Where in the file a relative virtual address lives, if it is backed by file data at all. */
-  const toOffset = (rva: number): number | undefined => {
-    for (const s of sections) {
-      if (rva >= s.virtualAddress && rva - s.virtualAddress < s.rawSize) {
-        const offset = s.rawOffset + (rva - s.virtualAddress);
-        return offset < reader.size ? offset : undefined;
+  // What the loader maps of each section. Its extent in memory is VirtualSize
+  // rounded up to the section alignment (or SizeOfRawData when VirtualSize is
+  // 0, as old linkers left it), and only the part of that the file holds is
+  // backed by bytes. Raw data past the extent is file padding, or bytes that
+  // belong to the next section, never what an address there reads.
+  const align = sectionAlignment > 0 ? sectionAlignment : 1;
+  const spans = sections.map((s) => {
+    const extent = s.virtualSize === 0 ? s.rawSize : Math.ceil(s.virtualSize / align) * align;
+    return {
+      start: s.virtualAddress,
+      extent,
+      backed: Math.min(s.rawSize, extent),
+      raw: s.rawOffset,
+    };
+  });
+
+  /**
+   * The file bytes behind a relative virtual address: where they start and how
+   * many follow before the section's file data ends, or the file does.
+   */
+  const rangeOf = (rva: number): Mapped | undefined => {
+    for (const s of spans) {
+      if (rva >= s.start && rva - s.start < s.extent) {
+        // Inside the section but past its file data: zero-filled at load time.
+        if (rva - s.start >= s.backed) {
+          return undefined;
+        }
+        const offset = s.raw + (rva - s.start);
+        const end = s.raw + s.backed;
+        return offset < reader.size
+          ? {
+              offset,
+              length: Math.min(end, reader.size) - offset,
+              cut: end > reader.size,
+              zeroFill: s.extent - s.backed,
+            }
+          : undefined;
       }
     }
-    // The headers are mapped at the image base, one to one.
-    return rva < sizeOfHeaders && rva < reader.size ? rva : undefined;
+    // The headers are mapped at the image base, one to one. What the loader
+    // maps after them is not counted on here as zeros.
+    return rva < sizeOfHeaders && rva < reader.size
+      ? {
+          offset: rva,
+          length: Math.min(sizeOfHeaders, reader.size) - rva,
+          cut: sizeOfHeaders > reader.size,
+          zeroFill: 0,
+        }
+      : undefined;
   };
+  /** Where in the file a relative virtual address lives, if it is backed by file data at all. */
+  const toOffset = (rva: number): number | undefined => rangeOf(rva)?.offset;
   const need = (rva: number): number => {
     const offset = toOffset(rva);
     if (offset === undefined) {
       throw new PeError(TRUNCATED);
     }
     return offset;
+  };
+  const needRange = (rva: number): Mapped => {
+    const range = rangeOf(rva);
+    if (range === undefined) {
+      throw new PeError(TRUNCATED);
+    }
+    return range;
   };
 
   const isDll = (characteristics & 0x2000) !== 0;
@@ -399,7 +461,7 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
     ],
     sections,
     imports: [],
-    warnings: [],
+    warnings: early,
   };
 
   // A damaged table costs that table, not the preview: the headers above are
@@ -470,14 +532,30 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   const imports = directory(DIR_IMPORT);
   if (imports) {
     await attempt('import table', async () => {
-      info.imports.push(...(await readImports(reader, need, need(imports.address), plus, thunks)));
+      info.imports.push(
+        ...(await readImports(
+          reader,
+          rangeOf,
+          needRange(imports.address),
+          plus,
+          thunks,
+          info.warnings,
+        )),
+      );
     });
   }
   const delayed = directory(DIR_DELAY_IMPORT);
   if (delayed) {
     await attempt('delay-load import table', async () => {
       info.imports.push(
-        ...(await readDelayImports(reader, need, need(delayed.address), plus, thunks)),
+        ...(await readDelayImports(
+          reader,
+          rangeOf,
+          needRange(delayed.address),
+          plus,
+          thunks,
+          info.warnings,
+        )),
       );
     });
   }
@@ -485,15 +563,31 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
   const exported = directory(DIR_EXPORT);
   if (exported) {
     await attempt('export table', async () => {
-      info.exports = await readExports(reader, need, need(exported.address));
+      info.exports = await readExports(
+        reader,
+        need,
+        rangeOf,
+        need(exported.address),
+        info.warnings,
+      );
     });
   }
 
   const debug = directory(DIR_DEBUG);
   if (debug) {
     await attempt('debug directory', async () => {
-      const count = Math.min(Math.floor(debug.size / 28), 32);
-      const entries = await reader.view(need(debug.address), count * 28);
+      // The entries are read as far as the file holds them, and one whose
+      // record lies outside the file is skipped rather than ending the loop.
+      const declared = Math.min(Math.floor(debug.size / 28), 32);
+      const bytes = await reader.upTo(need(debug.address), declared * 28);
+      const entries = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const count = Math.floor(bytes.length / 28);
+      if (count < declared) {
+        info.warnings.push(
+          'The file ends inside the debug directory: the entries before that are shown.',
+        );
+      }
+      let skipped = 0;
       for (let i = 0; i < count; i++) {
         const type = entries.getUint32(i * 28 + 12, true);
         const size = entries.getUint32(i * 28 + 16, true);
@@ -501,16 +595,23 @@ export async function readPe(source: ByteSource): Promise<PeInfo> {
         if (type === 16) {
           info.reproducible = true;
         } else if (type === 2 && size >= 24 && !info.debug) {
-          const head = await reader.view(pointer, 24);
-          // "RSDS": the PDB 7.0 record every toolchain of the last two decades writes.
-          if (head.getUint32(0, true) === 0x53445352) {
-            info.debug = {
-              guid: guidAt(head, 4),
-              age: head.getUint32(20, true),
-              pdbPath: await reader.cstr(pointer + 24, Math.min(size - 24, 1024)),
-            };
+          try {
+            const head = await reader.view(pointer, 24);
+            // "RSDS": the PDB 7.0 record every toolchain of the last two decades writes.
+            if (head.getUint32(0, true) === 0x53445352) {
+              info.debug = {
+                guid: guidAt(head, 4),
+                age: head.getUint32(20, true),
+                pdbPath: await reader.cstr(pointer + 24, Math.min(size - 24, 1024)),
+              };
+            }
+          } catch {
+            skipped++;
           }
         }
+      }
+      if (skipped > 0) {
+        info.warnings.push(leftOut(skipped, 'debug directory'));
       }
     });
   }
@@ -658,79 +759,220 @@ async function findResource(
   return undefined;
 }
 
-/** Count a NUL-terminated array of import thunks, 4 bytes each in PE32 and 8 in PE32+. */
-async function countThunks(
+/** The file bytes behind an RVA, up to where the section's file data or the file ends. */
+export interface Mapped {
+  offset: number;
+  length: number;
+  /** The file ends before the section's file data does: the bytes past `length` are missing. */
+  cut: boolean;
+  /** Bytes of the section after its file data that the loader fills with zeros. */
+  zeroFill: number;
+}
+
+/**
+ * Count a NUL-terminated array of import thunks, 4 bytes each in PE32 and 8
+ * in PE32+, within the bytes mapped at its start. An array that runs to the end
+ * of those bytes ends there only when a whole zero entry is known to follow:
+ * the leftover file bytes are zero and the section's zero-filled tail makes up
+ * the rest. Otherwise (the file is cut off, or the section's data runs right
+ * up to its mapped end, where the next address may be another section's) the
+ * count is not known. Every entry looked at is charged to `budget`, including
+ * on the way out of a read error.
+ */
+export async function countThunks(
   reader: Reader,
-  offset: number,
+  start: Mapped,
   plus: boolean,
   budget: { left: number },
-): Promise<number> {
+): Promise<number | undefined> {
   const width = plus ? 8 : 4;
   const chunk = 512;
   const most = Math.min(MAX_THUNKS, budget.left);
+  const limit = Math.floor(start.length / width);
   let count = 0;
-  while (count < most) {
-    const bytes = await reader.upTo(offset + count * width, chunk * width);
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const entries = Math.floor(bytes.length / width);
-    if (entries === 0) {
-      break;
-    }
-    for (let i = 0; i < entries; i++) {
-      const zero = plus
-        ? view.getBigUint64(i * width, true) === 0n
-        : view.getUint32(i * width, true) === 0;
-      if (zero) {
-        budget.left -= count;
+  try {
+    while (count < most) {
+      if (count >= limit) {
+        if (start.cut) {
+          return undefined;
+        }
+        const tail = start.length - limit * width;
+        if (tail + start.zeroFill < width) {
+          return undefined;
+        }
+        if (tail > 0) {
+          const rest = await reader.bytes(start.offset + limit * width, tail);
+          if (rest.some((b) => b !== 0)) {
+            return undefined;
+          }
+        }
         return count;
       }
-      count++;
-      if (count >= most) {
-        break;
+      const entries = Math.min(chunk, limit - count, most - count);
+      const view = await reader.view(start.offset + count * width, entries * width);
+      for (let i = 0; i < entries; i++) {
+        const zero = plus
+          ? view.getBigUint64(i * width, true) === 0n
+          : view.getUint32(i * width, true) === 0;
+        if (zero) {
+          return count;
+        }
+        count++;
       }
     }
+    return count;
+  } finally {
+    budget.left -= count;
   }
-  budget.left -= count;
-  return count;
+}
+
+// One bad entry costs that entry, not the table: a library whose name points
+// nowhere is left out and the rest are still listed. Each reader says what it
+// left out in one warning, so a badly damaged table does not flood the page.
+
+/** "2 entries of the import table could not be read and are left out." */
+function leftOut(count: number, table: string): string {
+  return count === 1
+    ? `1 entry of the ${table} could not be read and is left out.`
+    : `${count} entries of the ${table} could not be read and are left out.`;
+}
+
+/**
+ * Descriptor `index` of a table read entry by entry, within the bytes mapped
+ * at the table's start: the walk does not run on into whatever follows the
+ * section's file data. When the table stops early, one warning says why, and
+ * the entries before are kept. The first entry failing fails the table.
+ */
+async function descriptor(
+  reader: Reader,
+  start: Mapped,
+  index: number,
+  size: number,
+  table: string,
+  warnings: string[],
+): Promise<DataView | undefined> {
+  const at = index * size;
+  if (at + size > start.length) {
+    if (index === 0) {
+      throw new PeError(TRUNCATED);
+    }
+    warnings.push(
+      start.cut
+        ? `The file ends inside the ${table}: the entries before that are shown.`
+        : `The ${table} runs to the end of its section without a closing entry: the entries before that are shown.`,
+    );
+    return undefined;
+  }
+  try {
+    return await reader.view(start.offset + at, size);
+  } catch (error) {
+    if (index === 0) {
+      throw error;
+    }
+    // Not the end of the file, which the check above rules out: the read
+    // budget or the file system stopped it, and the page says which.
+    const reason = error instanceof Error ? error.message : 'a read failed.';
+    warnings.push(`The rest of the ${table} could not be read: ${reason}`);
+    return undefined;
+  }
+}
+
+/** A descriptor's library name, or undefined when it points nowhere or cannot be read. */
+async function libraryName(
+  reader: Reader,
+  rangeOf: (rva: number) => Mapped | undefined,
+  rva: number,
+): Promise<string | undefined> {
+  const at = rangeOf(rva);
+  if (!at) {
+    return undefined;
+  }
+  try {
+    return await reader.cstr(at.offset, Math.min(260, at.length));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Count the thunks at an RVA, or undefined when they cannot be reached or end unseen. */
+async function thunksAt(
+  reader: Reader,
+  rangeOf: (rva: number) => Mapped | undefined,
+  rvas: number[],
+  plus: boolean,
+  budget: { left: number },
+): Promise<number | undefined> {
+  // The first RVA that maps is used; a later one is a fallback for an
+  // earlier one that does not.
+  const start = rvas.map((rva) => (rva === 0 ? undefined : rangeOf(rva))).find(Boolean);
+  if (!start) {
+    return undefined;
+  }
+  try {
+    return await countThunks(reader, start, plus, budget);
+  } catch {
+    return undefined;
+  }
 }
 
 async function readImports(
   reader: Reader,
-  need: (rva: number) => number,
-  offset: number,
+  rangeOf: (rva: number) => Mapped | undefined,
+  start: Mapped,
   plus: boolean,
   budget: { left: number },
+  warnings: string[],
 ): Promise<PeImport[]> {
+  const table = 'import table';
   const out: PeImport[] = [];
+  let skipped = 0;
   for (let i = 0; i < MAX_IMPORTS; i++) {
-    const entry = await reader.view(offset + i * 20, 20);
+    const entry = await descriptor(reader, start, i, 20, table, warnings);
+    if (!entry) {
+      break;
+    }
     const lookup = entry.getUint32(0, true);
     const name = entry.getUint32(12, true);
     const address = entry.getUint32(16, true);
     if (lookup === 0 && name === 0 && address === 0) {
       break;
     }
+    const library = await libraryName(reader, rangeOf, name);
+    if (library === undefined) {
+      skipped++;
+      continue;
+    }
     out.push({
-      library: await reader.cstr(need(name), 260),
+      library,
       // The lookup table is the one a bound image leaves untouched; the
-      // address table is all an old linker wrote.
-      functions: await countThunks(reader, need(lookup || address), plus, budget),
+      // address table is all an old linker wrote, and the copy to fall back
+      // on when the lookup table's address does not resolve.
+      functions: await thunksAt(reader, rangeOf, [lookup, address], plus, budget),
       delayLoaded: false,
     });
+  }
+  if (skipped > 0) {
+    warnings.push(leftOut(skipped, table));
   }
   return out;
 }
 
 async function readDelayImports(
   reader: Reader,
-  need: (rva: number) => number,
-  offset: number,
+  rangeOf: (rva: number) => Mapped | undefined,
+  start: Mapped,
   plus: boolean,
   budget: { left: number },
+  warnings: string[],
 ): Promise<PeImport[]> {
+  const table = 'delay-load import table';
   const out: PeImport[] = [];
+  let skipped = 0;
   for (let i = 0; i < MAX_IMPORTS; i++) {
-    const entry = await reader.view(offset + i * 32, 32);
+    const entry = await descriptor(reader, start, i, 32, table, warnings);
+    if (!entry) {
+      break;
+    }
     const attributes = entry.getUint32(0, true);
     const name = entry.getUint32(4, true);
     const names = entry.getUint32(16, true);
@@ -742,11 +984,19 @@ async function readDelayImports(
     if ((attributes & 1) === 0) {
       break;
     }
+    const library = await libraryName(reader, rangeOf, name);
+    if (library === undefined) {
+      skipped++;
+      continue;
+    }
     out.push({
-      library: await reader.cstr(need(name), 260),
-      functions: names === 0 ? 0 : await countThunks(reader, need(names), plus, budget),
+      library,
+      functions: names === 0 ? 0 : await thunksAt(reader, rangeOf, [names], plus, budget),
       delayLoaded: true,
     });
+  }
+  if (skipped > 0) {
+    warnings.push(leftOut(skipped, table));
   }
   return out;
 }
@@ -754,7 +1004,9 @@ async function readDelayImports(
 async function readExports(
   reader: Reader,
   need: (rva: number) => number,
+  rangeOf: (rva: number) => Mapped | undefined,
   offset: number,
+  warnings: string[],
 ): Promise<PeExports> {
   const head = await reader.view(offset, 40);
   const nameRva = head.getUint32(12, true);
@@ -780,21 +1032,60 @@ async function readExports(
       functions = undefined;
     }
   }
+  // The name table is read as far as its section's file data holds it, and a
+  // name whose pointer leads nowhere is left out. If the table itself cannot
+  // be reached, the counts above are still shown without names.
   const shown = Math.min(named, MAX_EXPORT_NAMES);
   const names: string[] = [];
+  let skipped = 0;
   if (shown > 0) {
-    const pointers = await reader.view(need(namesRva), shown * 4);
-    for (let i = 0; i < shown; i++) {
-      names.push(await reader.cstr(need(pointers.getUint32(i * 4, true)), 512));
+    const table = rangeOf(namesRva);
+    const present = table ? Math.min(shown, Math.floor(table.length / 4)) : 0;
+    let view: DataView | undefined;
+    if (table && present > 0) {
+      try {
+        view = await reader.view(table.offset, present * 4);
+      } catch {
+        view = undefined;
+      }
+    }
+    if (!view) {
+      skipped = shown;
+      warnings.push('The table of exported names could not be read.');
+    } else {
+      skipped += shown - present;
+      for (let i = 0; i < present; i++) {
+        try {
+          names.push(await reader.cstr(need(view.getUint32(i * 4, true)), 512));
+        } catch {
+          skipped++;
+        }
+      }
+      if (skipped > 0) {
+        warnings.push(
+          skipped === 1
+            ? '1 exported name could not be read and is left out.'
+            : `${skipped} exported names could not be read and are left out.`,
+        );
+      }
+    }
+  }
+  let name = '';
+  if (nameRva !== 0) {
+    try {
+      name = await reader.cstr(need(nameRva), 260);
+    } catch {
+      warnings.push('The name the library exports under could not be read.');
     }
   }
   return {
-    name: nameRva === 0 ? '' : await reader.cstr(need(nameRva), 260),
+    name,
     base,
     functions,
     slots,
     named,
     names,
+    ...(skipped > 0 ? { unreadNames: skipped } : {}),
   };
 }
 

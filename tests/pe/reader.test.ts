@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bytesSource, PeError, readPe, renderPeHtml, type ByteSource } from '../../src/pe';
 import { isSignedData, readSigner, signerCount } from '../../src/pe/signer';
+import { countThunks } from '../../src/pe/read';
 import { readVersionResource } from '../../src/pe/version';
 import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from './fixture';
 
@@ -27,6 +28,50 @@ function patchExportSlots(bytes: Uint8Array, slots: number): Uint8Array {
   }
   throw new Error('the image has no export directory to patch');
 }
+
+// Where a built image's headers are, read the way a loader reads them.
+function layout(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const pe = view.getUint32(0x3c, true);
+  const optional = pe + 24;
+  const plus = view.getUint16(optional, true) === 0x20b;
+  const table = optional + view.getUint16(pe + 20, true);
+  const count = view.getUint16(pe + 6, true);
+  /** The file offset of section header `name`. */
+  const header = (name: string): number => {
+    for (let i = 0; i < count; i++) {
+      const at = table + i * 40;
+      if (new TextDecoder().decode(bytes.subarray(at, at + 8)).replace(/\0+$/, '') === name) {
+        return at;
+      }
+    }
+    throw new Error(`the image has no ${name} section`);
+  };
+  /** The file offset of an RVA, mapped through the section table as built. */
+  const fileOf = (rva: number): number => {
+    for (let i = 0; i < count; i++) {
+      const at = table + i * 40;
+      const start = view.getUint32(at + 12, true);
+      if (rva >= start && rva - start < view.getUint32(at + 16, true)) {
+        return view.getUint32(at + 20, true) + (rva - start);
+      }
+    }
+    throw new Error(`RVA ${rva} is not in the image`);
+  };
+  /** The file offset of data directory `index`'s contents. */
+  const directory = (index: number): number =>
+    fileOf(view.getUint32(optional + (plus ? 112 : 96) + index * 8, true));
+  return { view, optional, table, count, header, fileOf, directory };
+}
+
+/** A copy of `bytes` with `edit` applied to it through the image's layout. */
+function patched(bytes: Uint8Array, edit: (image: ReturnType<typeof layout>) => void): Uint8Array {
+  const out = bytes.slice();
+  edit(layout(out));
+  return out;
+}
+
+const NOWHERE = 0x7fff0000;
 
 const RLO = String.fromCharCode(0x202e);
 
@@ -912,6 +957,313 @@ describe('readPe: damaged images', () => {
     expect(info.version).toBeUndefined();
     expect(info.warnings).toContain('The version resource could not be read.');
     expect(info.warnings).toContain('The manifest could not be read.');
+  });
+
+  const threeLibraries = {
+    imports: [
+      { library: 'KERNEL32.dll', functions: 3 },
+      { library: 'USER32.dll', functions: 2 },
+      { library: 'ADVAPI32.dll', functions: 1 },
+    ],
+  };
+
+  it('leaves out an import whose library name points nowhere and keeps the rest', async () => {
+    const bytes = patched(buildPe(threeLibraries), (image) => {
+      image.view.setUint32(image.directory(1) + 20 + 12, NOWHERE, true); // second descriptor's Name
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.imports.map((i) => [i.library, i.functions])).toEqual([
+      ['KERNEL32.dll', 3],
+      ['ADVAPI32.dll', 1],
+    ]);
+    expect(info.warnings).toEqual([
+      '1 entry of the import table could not be read and is left out.',
+    ]);
+  });
+
+  it('counts an import from its address table when the lookup table points nowhere', async () => {
+    const bytes = patched(buildPe(threeLibraries), (image) => {
+      image.view.setUint32(image.directory(1) + 20, NOWHERE, true); // OriginalFirstThunk
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.imports.map((i) => i.functions)).toEqual([3, 2, 1]);
+    expect(info.warnings).toEqual([]);
+  });
+
+  it('keeps the library but not a count when neither thunk table resolves', async () => {
+    const bytes = patched(buildPe(threeLibraries), (image) => {
+      image.view.setUint32(image.directory(1) + 20, NOWHERE, true); // OriginalFirstThunk
+      image.view.setUint32(image.directory(1) + 20 + 16, NOWHERE, true); // FirstThunk
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.imports.map((i) => [i.library, i.functions])).toEqual([
+      ['KERNEL32.dll', 3],
+      ['USER32.dll', undefined],
+      ['ADVAPI32.dll', 1],
+    ]);
+  });
+
+  it('leaves out a delay-load import whose name points nowhere and keeps the rest', async () => {
+    const bytes = patched(
+      buildPe({
+        delayImports: [
+          { library: 'WINHTTP.dll', functions: 2 },
+          { library: 'dbghelp.dll', functions: 4 },
+        ],
+      }),
+      (image) => {
+        image.view.setUint32(image.directory(13) + 4, NOWHERE, true); // first DllNameRVA
+      },
+    );
+    const info = await readPe(bytesSource(bytes));
+    expect(info.imports.map((i) => [i.library, i.functions, i.delayLoaded])).toEqual([
+      ['dbghelp.dll', 4, true],
+    ]);
+    expect(info.warnings).toEqual([
+      '1 entry of the delay-load import table could not be read and is left out.',
+    ]);
+  });
+
+  it('leaves out an exported name that points nowhere and keeps the counts', async () => {
+    const bytes = patched(
+      buildPe({ dll: true, exports: { dllName: 'core.dll', names: ['Alpha', 'Beta', 'Gamma'] } }),
+      (image) => {
+        const names = image.view.getUint32(image.directory(0) + 32, true); // AddressOfNames
+        image.view.setUint32(image.fileOf(names) + 4, NOWHERE, true); // "Beta"
+      },
+    );
+    const info = await readPe(bytesSource(bytes));
+    expect(info.exports?.name).toBe('core.dll');
+    expect(info.exports?.functions).toBe(3);
+    expect(info.exports?.names).toEqual(['Alpha', 'Gamma']);
+    expect(info.warnings).toEqual(['1 exported name could not be read and is left out.']);
+    // Alpha and Gamma are the first and third names, not "the first 2".
+    const html = renderPeHtml(info, { fileName: 'core.dll' });
+    expect(html).toContain('Showing 2 of 3 names. 1 could not be read.');
+    expect(html).not.toContain('Showing the first 2');
+  });
+
+  it('keeps the exports when only the library name they export under points nowhere', async () => {
+    const bytes = patched(
+      buildPe({ dll: true, exports: { dllName: 'core.dll', names: ['Alpha'] } }),
+      (image) => {
+        image.view.setUint32(image.directory(0) + 12, NOWHERE, true); // Name
+      },
+    );
+    const info = await readPe(bytesSource(bytes));
+    expect(info.exports?.name).toBe('');
+    expect(info.exports?.names).toEqual(['Alpha']);
+    expect(info.warnings).toEqual(['The name the library exports under could not be read.']);
+  });
+
+  it('keeps the export counts when the table of names itself points nowhere', async () => {
+    const bytes = patched(
+      buildPe({ dll: true, exports: { dllName: 'core.dll', names: ['Alpha', 'Beta'] } }),
+      (image) => {
+        image.view.setUint32(image.directory(0) + 32, NOWHERE, true); // AddressOfNames
+      },
+    );
+    const info = await readPe(bytesSource(bytes));
+    expect(info.exports?.name).toBe('core.dll');
+    expect(info.exports?.functions).toBe(2);
+    expect(info.exports?.named).toBe(2);
+    expect(info.exports?.names).toEqual([]);
+    expect(info.exports?.unreadNames).toBe(2);
+    expect(info.warnings).toEqual(['The table of exported names could not be read.']);
+    expect(renderPeHtml(info, { fileName: 'core.dll' })).toContain(
+      'The exported names could not be read.',
+    );
+  });
+
+  it('counts a function list that ends at its section’s data only when zero fill follows', async () => {
+    // The second library's lookup table is pointed at .text: 0x200 bytes of
+    // code with no zero entry, then (at the default 0x1000 alignment) zero
+    // fill, which is the terminator the loader sees.
+    const retarget = (image: ReturnType<typeof layout>): void => {
+      const text = image.view.getUint32(image.header('.text') + 12, true);
+      image.view.setUint32(image.directory(1) + 20, text, true); // OriginalFirstThunk
+    };
+    const filled = await readPe(bytesSource(patched(buildPe(threeLibraries), retarget)));
+    expect(filled.imports[1]).toMatchObject({ library: 'USER32.dll', functions: 0x200 / 4 });
+
+    // With the section alignment brought down to the file alignment, .text's
+    // data runs right up to its mapped end and no zero entry is known to follow.
+    const flush = await readPe(
+      bytesSource(
+        patched(buildPe(threeLibraries), (image) => {
+          retarget(image);
+          image.view.setUint32(image.optional + 32, 0x200, true); // SectionAlignment
+        }),
+      ),
+    );
+    expect(flush.imports.map((i) => [i.library, i.functions])).toEqual([
+      ['KERNEL32.dll', 3],
+      ['USER32.dll', undefined],
+      ['ADVAPI32.dll', 1],
+    ]);
+  });
+
+  it('charges the thunk budget for entries read before a read error', async () => {
+    let calls = 0;
+    const failing = {
+      view: async (_offset: number, length: number): Promise<DataView> => {
+        calls++;
+        if (calls > 1) {
+          throw new Error('the disk could not be read');
+        }
+        return new DataView(new Uint8Array(length).fill(1).buffer);
+      },
+      bytes: async (): Promise<Uint8Array> => new Uint8Array(0),
+    };
+    const budget = { left: 10000 };
+    await expect(
+      countThunks(
+        failing as unknown as Parameters<typeof countThunks>[0],
+        { offset: 0, length: 4 * 2000, cut: false, zeroFill: 0x1000 },
+        false,
+        budget,
+      ),
+    ).rejects.toThrow('the disk could not be read');
+    expect(budget.left).toBe(10000 - 512);
+  });
+
+  it('stops the import walk where its section’s file data ends, without reading on', async () => {
+    // The terminator is overwritten with a copy of the first descriptor, and
+    // .rdata's file data is cut to end just before it: what follows is not
+    // part of the table the loader sees, so the copy must not be listed.
+    const bytes = patched(buildPe(threeLibraries), (image) => {
+      const descriptors = image.directory(1);
+      const out = new Uint8Array(image.view.buffer, image.view.byteOffset);
+      out.copyWithin(descriptors + 60, descriptors, descriptors + 20);
+      const rdata = image.header('.rdata');
+      const raw = image.view.getUint32(rdata + 20, true);
+      image.view.setUint32(rdata + 16, descriptors + 60 - raw, true); // SizeOfRawData
+    });
+    const info = await readPe(bytesSource(bytes));
+    expect(info.imports.map((i) => i.library)).toEqual([
+      'KERNEL32.dll',
+      'USER32.dll',
+      'ADVAPI32.dll',
+    ]);
+    expect(info.warnings).toEqual([
+      'The import table runs to the end of its section without a closing entry: the entries before that are shown.',
+    ]);
+  });
+
+  // An image whose export address table (nonzero entries) is the last thing
+  // in the file, so a thunk list pointed at it runs into the end of the file.
+  const runsToEof = async (
+    spec: PeSpec,
+    retarget: (image: ReturnType<typeof layout>, functions: number) => void,
+    extra: number,
+  ): Promise<Awaited<ReturnType<typeof readPe>>> => {
+    const whole = buildPe(spec);
+    const image = layout(whole);
+    const functions = image.fileOf(image.view.getUint32(image.directory(0) + 28, true));
+    const bytes = patched(whole, (copy) => retarget(copy, functions));
+    // Three whole entries of the address table, then `extra` bytes of a fourth.
+    return readPe(bytesSource(bytes.slice(0, functions + 12 + extra)));
+  };
+  const exportsOf = { dllName: 'x.dll', names: ['A', 'B', 'C', 'D', 'E', 'F'] };
+
+  for (const extra of [0, 2]) {
+    it(`keeps the other imports when one function list runs into the end of the file (${extra} spare bytes)`, async () => {
+      const info = await runsToEof(
+        { ...threeLibraries, dll: true, exports: exportsOf },
+        (image, functions) => {
+          const rva = image.view.getUint32(image.directory(0) + 28, true);
+          expect(image.fileOf(rva)).toBe(functions);
+          image.view.setUint32(image.directory(1) + 20, rva, true); // second OriginalFirstThunk
+        },
+        extra,
+      );
+      expect(info.imports.map((i) => [i.library, i.functions])).toEqual([
+        ['KERNEL32.dll', 3],
+        ['USER32.dll', undefined],
+        ['ADVAPI32.dll', 1],
+      ]);
+    });
+
+    it(`keeps a delay-load import whose name list runs into the end of the file (${extra} spare bytes)`, async () => {
+      const info = await runsToEof(
+        {
+          delayImports: [
+            { library: 'WINHTTP.dll', functions: 2 },
+            { library: 'dbghelp.dll', functions: 4 },
+          ],
+          dll: true,
+          exports: exportsOf,
+        },
+        (image) => {
+          const rva = image.view.getUint32(image.directory(0) + 28, true);
+          image.view.setUint32(image.directory(13) + 16, rva, true); // first ImportNameTableRVA
+        },
+        extra,
+      );
+      expect(info.imports.map((i) => [i.library, i.functions])).toEqual([
+        ['WINHTTP.dll', undefined],
+        ['dbghelp.dll', 4],
+      ]);
+    });
+  }
+
+  it('still finds the REPRO entry after a CodeView entry whose record is outside the file', async () => {
+    const bytes = patched(
+      buildPe({
+        debug: { guid: '12345678-9abc-def0-1234-56789abcdef0', age: 1, pdbPath: 'C:\\x.pdb' },
+        repro: true,
+      }),
+      (image) => {
+        image.view.setUint32(image.directory(6) + 24, 0x7ffffff0, true); // PointerToRawData
+      },
+    );
+    const info = await readPe(bytesSource(bytes));
+    expect(info.debug).toBeUndefined();
+    expect(info.reproducible).toBe(true);
+    expect(info.warnings).toEqual([
+      '1 entry of the debug directory could not be read and is left out.',
+    ]);
+  });
+
+  it('shows the headers and the sections that fit when the file ends in the section table', async () => {
+    const whole = buildPe(threeLibraries);
+    const { table, count } = layout(whole);
+    expect(count).toBeGreaterThan(1);
+    const info = await readPe(bytesSource(whole.slice(0, table + 40 + 10)));
+    expect(info.format).toBe('PE32');
+    expect(info.sections.map((s) => s.name)).toEqual(['.text']);
+    expect(info.warnings).toContain(
+      `The file ends inside the section table: 1 of ${count} sections are shown.`,
+    );
+  });
+
+  it('does not read past a section’s virtual size into raw padding', async () => {
+    // With the section alignment brought down to the file alignment, .rdata
+    // claiming 16 bytes maps 0x200 of them, and the import descriptors, which
+    // the fixture writes after the names they point at, lie past that.
+    const many = { imports: [{ library: 'KERNEL32.dll', functions: 120 }] };
+    const whole = buildPe(many);
+    const { directory, view, optional, header } = layout(whole);
+    const rdataRva = view.getUint32(header('.rdata') + 12, true);
+    const importRva = view.getUint32(optional + 96 + 8, true);
+    expect(importRva - rdataRva).toBeGreaterThan(0x200);
+    expect(directory(1)).toBeGreaterThan(0);
+
+    const shrunk = patched(whole, (image) => {
+      image.view.setUint32(image.optional + 32, 0x200, true); // SectionAlignment
+      image.view.setUint32(image.header('.rdata') + 8, 16, true); // VirtualSize
+    });
+    const info = await readPe(bytesSource(shrunk));
+    expect(info.imports).toEqual([]);
+    expect(info.warnings).toContain('The import table could not be read.');
+
+    // A VirtualSize of 0, as old linkers left it, maps the whole raw size.
+    const zero = patched(whole, (image) => {
+      image.view.setUint32(image.header('.rdata') + 8, 0, true);
+    });
+    expect((await readPe(bytesSource(zero))).imports).toEqual([
+      { library: 'KERNEL32.dll', functions: 120, delayLoaded: false },
+    ]);
   });
 
   it('resolves or rejects with PeError at every truncation of a rich image', async () => {
