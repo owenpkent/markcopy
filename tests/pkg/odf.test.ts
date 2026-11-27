@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildZip, readZip } from './zipFixture';
-import { scanManifest } from '../../src/pkg/odf';
+import { encryptionRows, scanManifest } from '../../src/pkg/odf';
 
 const NS = 'xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"';
 const plain = (path: string, type = 'text/xml') =>
@@ -92,5 +92,45 @@ describe('OpenDocument files', () => {
       '<manifest:file-entry manifest:full-path="content.xml"><manifest:encryption-data/></manifest:file-entry>',
     );
     expect(scanManifest(xml).algorithms).toEqual(['cipher not determined']);
+  });
+
+  it('does not take a comment after a self-closing entry for its child', () => {
+    const xml = manifest(
+      plain('content.xml'),
+      '<!-- The preceding file has no <manifest:encryption-data> child. -->',
+    );
+    const out = scanManifest(xml);
+    expect(out.total).toBe(1);
+    expect(out.encrypted).toBe(0);
+    expect(encryptionRows(out)).toBeUndefined();
+  });
+
+  it('skips long quoted values in linear time and still reads the entries around them', () => {
+    const long = 'a'.repeat(20_000);
+    const xml = manifest(...Array.from({ length: 8 }, () => plain(long)), locked('content.xml'));
+    const started = performance.now();
+    const out = scanManifest(xml);
+    expect(performance.now() - started).toBeLessThan(1000);
+    // The long paths are dropped as attributes, so only the readable entry counts.
+    expect(out.total).toBe(1);
+    expect(out.encrypted).toBe(1);
+    expect(out.algorithms).toEqual(['AES-256-CBC']);
+  });
+
+  it('keeps a generic zip whose mimetype member cannot be read as a zip', async () => {
+    const info = await readZip(
+      buildZip([
+        { name: 'mimetype', data: 'x', methodNumber: 12 },
+        { name: 'readme.txt', data: 'hello' },
+      ]),
+    );
+    expect(info.format).toBe('Zip archive');
+  });
+
+  it('treats an inherited property name as an unknown kind', async () => {
+    for (const kind of ['constructor', '__proto__', 'toString']) {
+      const info = await readZip(odf(`application/vnd.oasis.opendocument.${kind}`));
+      expect(info.format).toBe('OpenDocument file');
+    }
   });
 });

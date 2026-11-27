@@ -8,9 +8,10 @@
 // key or decrypts anything, and says nothing about strength beyond naming
 // Blowfish as legacy.
 //
-// The manifest is scanned with a tolerant pattern match over its first 1 MiB,
-// not parsed as XML, so a manifest that is cut short still yields the entries
-// before the cut. Attribute names are matched without regard to their prefix.
+// The manifest is scanned by one linear tokenizer over its first 1 MiB, not
+// parsed as XML (comments and text are skipped, only elements are read), so a
+// manifest that is cut short still yields the entries before the cut. Attribute names are matched without regard to their prefix.
+import { own } from '../binary/own';
 import { printable } from '../binary/text';
 import type { ZipArchive, ZipFlavour } from './zipRange';
 
@@ -43,20 +44,127 @@ export async function odfFormat(zip: ZipArchive): Promise<string | undefined> {
   if (!entry || entry.encrypted) {
     return undefined;
   }
-  const text = new TextDecoder().decode(await zip.readEntryHead(entry, MAX_MIMETYPE_BYTES)).trim();
+  let text: string;
+  try {
+    text = new TextDecoder().decode(await zip.readEntryHead(entry, MAX_MIMETYPE_BYTES)).trim();
+  } catch {
+    // Only a probe: an unreadable member (an unsupported method, say) leaves a
+    // generic zip to be listed as one.
+    return undefined;
+  }
   if (!text.startsWith(MIME_PREFIX)) {
     return undefined;
   }
-  return KINDS[text.slice(MIME_PREFIX.length)] ?? 'OpenDocument file';
+  return own(KINDS, text.slice(MIME_PREFIX.length)) ?? 'OpenDocument file';
 }
 
-function attributes(tag: string): Map<string, string> {
-  const out = new Map<string, string>();
-  const re = /(?:[\w.-]+:)?([\w.-]+)\s*=\s*(?:"([^"]{0,200})"|'([^']{0,200})')/g;
-  for (let m = re.exec(tag); m; m = re.exec(tag)) {
-    out.set(m[1], (m[2] ?? m[3] ?? '').slice(0, MAX_ATTRIBUTE));
+/** One start tag of the manifest: its local name and its attributes (prefixes dropped). */
+interface Tag {
+  name: string;
+  attrs: Map<string, string>;
+  selfClosing: boolean;
+}
+
+const isSpace = (c: string | undefined): boolean =>
+  c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+
+/**
+ * Walks the manifest once, left to right, calling `onOpen` for each start tag and
+ * `onClose` for each end tag with its local name. Comments, processing
+ * instructions, CDATA and text are skipped, so only real elements are seen. A
+ * quoted attribute value longer than MAX_ATTRIBUTE is skipped in one step
+ * (the attribute is dropped), so the cost is linear in the text however long a
+ * value is. Text that ends inside a tag yields the tag with the attributes
+ * completed so far.
+ */
+function walk(
+  xml: string,
+  onOpen: (tag: Tag) => boolean | void,
+  onClose: (name: string) => void,
+): void {
+  const n = xml.length;
+  let i = xml.indexOf('<');
+  while (i >= 0 && i < n) {
+    if (xml.startsWith('<!--', i)) {
+      const end = xml.indexOf('-->', i + 4);
+      i = end < 0 ? -1 : xml.indexOf('<', end + 3);
+      continue;
+    }
+    if (xml.startsWith('<![CDATA[', i) || xml.startsWith('<?', i) || xml.startsWith('<!', i)) {
+      const close = xml.startsWith('<![CDATA[', i) ? ']]>' : xml.startsWith('<?', i) ? '?>' : '>';
+      const end = xml.indexOf(close, i + 2);
+      i = end < 0 ? -1 : xml.indexOf('<', end + close.length);
+      continue;
+    }
+    const closing = xml[i + 1] === '/';
+    let j = i + (closing ? 2 : 1);
+    const nameStart = j;
+    while (j < n && !isSpace(xml[j]) && xml[j] !== '>' && xml[j] !== '/') {
+      j++;
+    }
+    const name = xml.slice(nameStart, j).replace(/^.*:/, '');
+    if (closing) {
+      onClose(name);
+      const end = xml.indexOf('>', j);
+      i = end < 0 ? -1 : xml.indexOf('<', end + 1);
+      continue;
+    }
+    const attrs = new Map<string, string>();
+    let selfClosing = false;
+    let ended = false;
+    while (j < n && !ended) {
+      const c = xml[j];
+      if (isSpace(c)) {
+        j++;
+      } else if (c === '>') {
+        j++;
+        ended = true;
+      } else if (c === '/') {
+        selfClosing = xml[j + 1] === '>';
+        j += selfClosing ? 2 : 1;
+        ended = selfClosing;
+      } else if (c === '<') {
+        // A tag that never closed: the next element starts here.
+        ended = true;
+      } else {
+        const keyStart = j;
+        while (j < n && !isSpace(xml[j]) && !'=/>'.includes(xml[j])) {
+          j++;
+        }
+        const key = xml.slice(keyStart, j).replace(/^.*:/, '');
+        while (isSpace(xml[j])) {
+          j++;
+        }
+        if (xml[j] !== '=') {
+          continue;
+        }
+        j++;
+        while (isSpace(xml[j])) {
+          j++;
+        }
+        const quote = xml[j];
+        if (quote === '"' || quote === "'") {
+          const end = xml.indexOf(quote, j + 1);
+          if (end < 0) {
+            j = n;
+            break;
+          }
+          if (end - j - 1 <= MAX_ATTRIBUTE && key) {
+            attrs.set(key, xml.slice(j + 1, end));
+          }
+          j = end + 1;
+        } else {
+          while (j < n && !isSpace(xml[j]) && xml[j] !== '>') {
+            j++;
+          }
+        }
+      }
+    }
+    if (onOpen({ name, attrs, selfClosing }) === false) {
+      return;
+    }
+    i = xml.indexOf('<', j);
   }
-  return out;
 }
 
 const ALGORITHMS: Array<[RegExp, string]> = [
@@ -74,11 +182,10 @@ function algorithmLabel(name: string | undefined): string {
   return ALGORITHMS.find(([re]) => re.test(name))?.[1] ?? `cipher ${printable(name).slice(0, 80)}`;
 }
 
-function derivationLabel(tag: string | undefined): string | undefined {
-  if (!tag) {
+function derivationLabel(a: Map<string, string> | undefined): string | undefined {
+  if (!a) {
     return undefined;
   }
-  const a = attributes(tag);
   const name = a.get('key-derivation-name') ?? '';
   const count = (key: string): string | undefined => {
     const n = Number(a.get(key));
@@ -119,28 +226,52 @@ export function scanManifest(xml: string): OdfEncryption {
   };
   const algorithms = new Set<string>();
   const derivations = new Set<string>();
-  // Each file-entry runs from its opening tag to the next file-entry, so a
-  // self-closing one and a cut one are both handled.
-  const parts = xml.split(/<(?:[\w.-]+:)?file-entry\b/);
-  for (const part of parts.slice(1, MAX_ENTRIES + 1)) {
-    const path = attributes(
-      part.slice(0, part.indexOf('>') < 0 ? undefined : part.indexOf('>')),
-    ).get('full-path');
-    if (path === undefined || path.endsWith('/')) {
-      continue;
+  // An entry is the file-entry element and the elements inside it. A cut one is
+  // closed by the next file-entry or the end of the text, and a self-closing
+  // one has no children, so a comment or text after it belongs to nothing.
+  let entries = 0;
+  let open: { encrypted: boolean; algorithm?: string; kdf?: string } | undefined;
+  const finish = (): void => {
+    if (open?.encrypted) {
+      out.encrypted++;
+      algorithms.add(algorithmLabel(open.algorithm));
+      if (open.kdf) {
+        derivations.add(open.kdf);
+      }
     }
-    out.total++;
-    if (!/<(?:[\w.-]+:)?encryption-data\b/.test(part)) {
-      continue;
-    }
-    out.encrypted++;
-    const alg = /<(?:[\w.-]+:)?algorithm\b[^>]*/.exec(part)?.[0];
-    algorithms.add(algorithmLabel(alg ? attributes(alg).get('algorithm-name') : undefined));
-    const kdf = derivationLabel(/<(?:[\w.-]+:)?key-derivation\b[^>]*/.exec(part)?.[0]);
-    if (kdf) {
-      derivations.add(kdf);
-    }
-  }
+    open = undefined;
+  };
+  walk(
+    xml,
+    (tag) => {
+      if (tag.name === 'file-entry') {
+        finish();
+        if (entries++ >= MAX_ENTRIES) {
+          return false;
+        }
+        const path = tag.attrs.get('full-path');
+        if (path === undefined || path.endsWith('/')) {
+          return;
+        }
+        out.total++;
+        if (!tag.selfClosing) {
+          open = { encrypted: false };
+        }
+      } else if (open && tag.name === 'encryption-data') {
+        open.encrypted = true;
+      } else if (open?.encrypted && tag.name === 'algorithm' && open.algorithm === undefined) {
+        open.algorithm = tag.attrs.get('algorithm-name') ?? '';
+      } else if (open?.encrypted && tag.name === 'key-derivation' && open.kdf === undefined) {
+        open.kdf = derivationLabel(tag.attrs) ?? '';
+      }
+    },
+    (name) => {
+      if (name === 'file-entry') {
+        finish();
+      }
+    },
+  );
+  finish();
   out.algorithms = [...algorithms];
   out.derivations = [...derivations];
   out.cut = !/<\/(?:[\w.-]+:)?manifest\s*>\s*$/.test(xml);
