@@ -1097,6 +1097,15 @@ body.mc-mode-hand .mc-link {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* A live region that is always in the page but never seen. */
+.mc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 #mc-toolbar #mc-autoscroll-toggle svg {
   display: block;
 }

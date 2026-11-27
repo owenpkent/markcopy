@@ -79,8 +79,11 @@ function readAll(memento: PositionMemento): Map<string, Entry> {
       continue;
     }
     const position = validatePosition(value);
+    if (!position) {
+      continue;
+    }
     const at = (value as Record<string, unknown>).at;
-    if (position && typeof at === 'number' && Number.isFinite(at)) {
+    if (typeof at === 'number' && Number.isFinite(at)) {
       entries.set(key, { ...position, at });
     }
   }

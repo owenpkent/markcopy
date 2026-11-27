@@ -26,8 +26,12 @@ import {
 } from './pdfAutoScroll';
 import { hasImageOps, imageCoverageOps, recolourKeepingImages } from './pdfRecolour';
 import {
-  linkBox,
+  destinationOffsetY,
+  linkRegions,
   linkTargetOf,
+  linkText,
+  regionsContain,
+  unionBox,
   namedActionPage,
   resolveDestination,
   type Destination,
@@ -187,6 +191,26 @@ function showFatal(err: unknown): void {
   root.innerHTML = `<pre class="mc-error">PDF preview error: ${escapeHtml(String(err))}</pre>`;
 }
 
+// A persistent live region outside the auto-scroll puck, so a message still
+// reaches a screen reader after the puck hides itself (at the top or end of the
+// document). The toast div is hidden when idle, which makes it a poor live
+// region, so this one is a separate node that is always in the page.
+const statusEl = document.createElement('div');
+statusEl.id = 'mc-status';
+statusEl.className = 'mc-sr-only';
+statusEl.setAttribute('role', 'status');
+statusEl.setAttribute('aria-live', 'polite');
+document.body.appendChild(statusEl);
+let statusTimer = 0;
+function announce(text: string): void {
+  // Clear first so repeating the same text is announced again.
+  statusEl.textContent = '';
+  window.clearTimeout(statusTimer);
+  statusTimer = window.setTimeout(() => {
+    statusEl.textContent = text;
+  }, 30);
+}
+
 let toastTimer = 0;
 function toast(text: string, ms = 1600): void {
   toastEl.textContent = text;
@@ -198,12 +222,28 @@ function toast(text: string, ms = 1600): void {
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------
+// True while a document is being (re)built: the pages are placeholders in the
+// making and the scroll position is not the reader's, so auto-scroll holds still.
+let loadingDoc = false;
 async function load(data: Uint8Array): Promise<void> {
+  loadingDoc = true;
+  try {
+    await loadDocument(data);
+  } finally {
+    loadingDoc = false;
+    // Restoration moved the page; carry on from where it landed.
+    autoPos = scroller().scrollTop;
+    autoLast = 0;
+  }
+}
+
+async function loadDocument(data: Uint8Array): Promise<void> {
   // Where the reader was, so a recompile can put them back. Only meaningful on a
   // reload, and `resetViewer` is about to throw the page list away, so it has to
   // be read first.
   const wasAt = wrappers.length ? pageAtViewportCenter() : 0;
   resetViewer();
+  jumpedWhileLoading = false;
 
   // Run pdf.js off the main thread. The worker script is a webview-resource URI
   // (cross-origin to the vscode-webview:// document), so `new Worker(workerSrc)`
@@ -257,13 +297,24 @@ async function load(data: Uint8Array): Promise<void> {
     wrappers.push(wrap);
     layoutPage(n);
     observer.observe(wrap);
+    if (pendingJump && wrappers.length >= pendingJump.page) {
+      const job = pendingJump;
+      pendingJump = null;
+      job.run();
+      jumpedWhileLoading = true;
+    }
   }
 
   updateZoomLabel();
   updatePageLabel();
   const resume = pendingResume;
   pendingResume = null;
-  if (resume && wasAt === 0) {
+  const jumped = jumpedWhileLoading;
+  jumpedWhileLoading = false;
+  if (jumped) {
+    // The reader followed a link while the pages were still being laid out; that
+    // is where they asked to be.
+  } else if (resume && wasAt === 0) {
     resumeAt(resume);
   } else if (wasAt > 1) {
     // A LaTeX preview reloads on every save. Landing back at page 1 each time
@@ -291,6 +342,12 @@ let positionTracked = false;
 let pendingResume: PdfPosition | null = null;
 let positionTimer = 0;
 const POSITION_DEBOUNCE_MS = 600;
+// While the view keeps moving (a long drag, auto-scroll) the debounce never
+// fires, so a checkpoint goes out at most this often as well. Closing the editor
+// then loses at most this much reading.
+const POSITION_CHECKPOINT_MS = 2000;
+let positionMoving = false;
+let lastCheckpoint = 0;
 
 function resumeAt(p: PdfPosition): void {
   // A page past the end means the file is a different one now: ignore, do not clamp.
@@ -326,18 +383,30 @@ function currentPosition(): PdfPosition | null {
   return null;
 }
 
+function postPosition(): void {
+  const position = positionTracked ? currentPosition() : null;
+  if (position) {
+    lastCheckpoint = Date.now();
+    vscode.postMessage({ type: 'savePosition', ...position });
+  }
+}
+
 function flushPosition(): void {
   window.clearTimeout(positionTimer);
   positionTimer = 0;
-  const position = positionTracked ? currentPosition() : null;
-  if (position) {
-    vscode.postMessage({ type: 'savePosition', ...position });
-  }
+  positionMoving = false;
+  postPosition();
 }
 
 function queuePosition(): void {
   if (!positionTracked) {
     return;
+  }
+  // One update on the first movement, a checkpoint every couple of seconds while
+  // it goes on, and the settled position once it stops.
+  if (!positionMoving || Date.now() - lastCheckpoint >= POSITION_CHECKPOINT_MS) {
+    positionMoving = true;
+    postPosition();
   }
   window.clearTimeout(positionTimer);
   positionTimer = window.setTimeout(flushPosition, POSITION_DEBOUNCE_MS);
@@ -369,6 +438,7 @@ function resetViewer(): void {
   }
   renderTasks.clear();
   positionTracked = false;
+  pendingJump = null;
   observer?.disconnect();
   observer = null;
   // The worker holds the old document open until this resolves; a long editing
@@ -555,8 +625,29 @@ function teardown(n: number): void {
 // selectable text; a drag or a selection is never taken for a click.
 const MAX_LINKS_PER_PAGE = 500;
 const CLICK_SLOP = 4; // px of pointer travel after which a press was a drag
-const pageLinks = new Map<number, { target: LinkTarget; box: PercentBox }[]>();
+interface PageLink {
+  target: LinkTarget;
+  /** Every region that reacts to a click. */
+  regions: PercentBox[];
+  /** The keyboard stop: one box around all the regions. */
+  box: PercentBox;
+  label: string;
+}
+const pageLinks = new Map<number, PageLink[]>();
 const linkTargets = new WeakMap<HTMLElement, LinkTarget>();
+const linkRegionsOf = new WeakMap<HTMLElement, PercentBox[]>();
+
+// A jump to a page whose placeholder does not exist yet (a link followed while a
+// long document is still being laid out) waits here, and runs as soon as it does.
+let pendingJump: { page: number; run: () => void } | null = null;
+let jumpedWhileLoading = false;
+function whenPageExists(page: number, run: () => void): void {
+  if (wrappers.length >= page) {
+    run();
+  } else {
+    pendingJump = { page, run };
+  }
+}
 
 async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
   const layer = wrappers[n - 1]?.querySelector('.mc-link-layer') as HTMLElement | null;
@@ -565,17 +656,25 @@ async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
   }
   let entries = pageLinks.get(n);
   if (!entries) {
-    entries = [];
     try {
       const viewport = page.getViewport({ scale: 1 });
       const annots = (await page.getAnnotations({ intent: 'display' })) as LinkAnnotation[];
+      const pending: Promise<PageLink>[] = [];
       for (const annot of annots) {
         const target = linkTargetOf(annot);
-        const box = target ? linkBox(viewport, annot.rect) : null;
-        if (target && box && entries.length < MAX_LINKS_PER_PAGE) {
-          entries.push({ target, box });
+        const regions = target ? linkRegions(viewport, annot) : [];
+        if (target && regions.length > 0 && pending.length < MAX_LINKS_PER_PAGE) {
+          pending.push(
+            linkLabel(target, annot).then((label) => ({
+              target,
+              regions,
+              box: unionBox(regions),
+              label,
+            })),
+          );
         }
       }
+      entries = await Promise.all(pending);
     } catch {
       entries = []; // no links beats no page
     }
@@ -585,7 +684,7 @@ async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
     pageLinks.set(n, entries);
   }
   layer.textContent = '';
-  for (const { target, box } of entries) {
+  for (const { target, regions, box, label } of entries) {
     const el = document.createElement('div');
     el.className = 'mc-link';
     el.setAttribute('role', 'link');
@@ -594,26 +693,53 @@ async function placeLinks(n: number, page: PDFPageProxy): Promise<void> {
     el.style.top = `${box.top}%`;
     el.style.width = `${box.width}%`;
     el.style.height = `${box.height}%`;
-    const label = linkLabel(target);
     el.title = label;
     el.setAttribute('aria-label', label);
     linkTargets.set(el, target);
+    linkRegionsOf.set(el, regions);
     layer.appendChild(el);
   }
 }
 
-function linkLabel(target: LinkTarget): string {
+// What a screen reader announces for a link: the text it covers when pdf.js has
+// it (the visible text sits in another layer with no tie to these boxes), else
+// the page an internal link leads to, else a plain description.
+async function linkLabel(target: LinkTarget, annot: LinkAnnotation): Promise<string> {
+  const text = linkText(annot.overlaidText);
+  if (text) {
+    return text;
+  }
   if (target.kind === 'url') {
     return target.url;
   }
-  return target.kind === 'named' ? 'Go to page' : 'Go to destination';
+  if (target.kind === 'named') {
+    return {
+      NextPage: 'Go to next page',
+      PrevPage: 'Go to previous page',
+      FirstPage: 'Go to first page',
+      LastPage: 'Go to last page',
+    }[target.action];
+  }
+  const current = doc;
+  if (current) {
+    const d = await resolveDestination(current, target.dest, current.numPages);
+    if (d) {
+      return `Go to page ${d.pageIndex + 1}`;
+    }
+  }
+  return 'Go to destination';
 }
 
 function linkAt(x: number, y: number): LinkTarget | null {
   for (const el of document.querySelectorAll<HTMLElement>('.mc-link')) {
-    const r = el.getBoundingClientRect();
-    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-      return linkTargets.get(el) ?? null;
+    const r = el.closest('.mc-page')?.getBoundingClientRect();
+    const regions = linkRegionsOf.get(el);
+    if (r && regions && r.width > 0 && r.height > 0) {
+      const px = ((x - r.left) / r.width) * 100;
+      const py = ((y - r.top) / r.height) * 100;
+      if (regionsContain(regions, px, py)) {
+        return linkTargets.get(el) ?? null;
+      }
     }
   }
   return null;
@@ -625,7 +751,8 @@ function followLink(target: LinkTarget): void {
     vscode.postMessage({ type: 'openLink', url: target.url });
   } else if (target.kind === 'named') {
     if (doc) {
-      goToPage(namedActionPage(target.action, currentPage, doc.numPages));
+      const page = namedActionPage(target.action, currentPage, doc.numPages);
+      whenPageExists(page, () => goToPage(page));
     }
   } else {
     void goToDestination(target.dest);
@@ -641,21 +768,25 @@ async function goToDestination(dest: string | unknown[]): Promise<void> {
   if (!d || doc !== current) {
     return;
   }
-  goToPage(d.pageIndex + 1);
-  if (d.top === null) {
-    return;
-  }
-  // Land on the destination's top edge, not only its page. The page was just
-  // scrolled to the top of the view, so its offset is the page-space point.
-  const [, y] = pages[d.pageIndex]
-    .getViewport({ scale: 1 })
-    .convertToViewportPoint(d.left ?? 0, d.top);
-  const s = scroller();
-  const before = s.scrollTop;
-  s.scrollTop += Math.max(0, Math.min(y, baseSize[d.pageIndex].h)) * scale;
-  pageJumpScrollPending = pageJumpScrollPending || s.scrollTop !== before;
+  whenPageExists(d.pageIndex + 1, () => {
+    if (doc !== current) {
+      return;
+    }
+    goToPage(d.pageIndex + 1);
+    // Land on the destination's top edge, not only its page. The page was just
+    // scrolled to the top of the view, so its offset is the page-space point.
+    const y = destinationOffsetY(pages[d.pageIndex].getViewport({ scale: 1 }), d.left, d.top);
+    if (y === null) {
+      return;
+    }
+    const s = scroller();
+    const before = s.scrollTop;
+    s.scrollTop += Math.max(0, Math.min(y, baseSize[d.pageIndex].h)) * scale;
+    pageJumpScrollPending = pageJumpScrollPending || s.scrollTop !== before;
+  });
 }
 
+const VIEWER_CONTROLS = '.mc-menu, .mc-pin, .mc-note, #mc-toolbar, #mc-autoscroll, .mc-tex-card';
 let pressX = 0;
 let pressY = 0;
 document.addEventListener(
@@ -679,11 +810,12 @@ document.addEventListener('click', (e) => {
     return;
   }
   // A control stacked over the page (toolbar, menu, comment pin or note) wins.
+  // Judge it by where the click started as well as by what is under the pointer
+  // now: Save and Delete remove their note before the click reaches here, which
+  // uncovers the link beneath.
   const top = document.elementFromPoint?.(e.clientX, e.clientY) ?? e.target;
-  if (
-    top instanceof Element &&
-    top.closest('.mc-menu, .mc-pin, .mc-note, #mc-toolbar, #mc-autoscroll, .mc-tex-card')
-  ) {
+  const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
+  if ([top, ...path].some((n) => n instanceof Element && n.closest(VIEWER_CONTROLS) !== null)) {
     return;
   }
   e.preventDefault();
@@ -1610,6 +1742,9 @@ function goToPage(n: number): void {
     return;
   }
   const clamped = Math.min(doc.numPages, Math.max(1, n));
+  if (!wrappers[clamped - 1]) {
+    return; // the page is not laid out yet
+  }
   const s = scroller();
   const { scrollTop, scrollLeft } = s;
   wrappers[clamped - 1].scrollIntoView({ block: 'start' });
@@ -1932,8 +2067,9 @@ function stopAutoScroll(message: string): void {
   stopHold();
   saveAutoSettings();
   applyAutoUi();
-  // The puck is hidden now, so its live region would not be read; the toast
-  // carries the message instead.
+  // The puck is hidden now, so its own live region would not be read; the
+  // persistent status region carries the message, and the toast shows it.
+  announce(message);
   toast(message);
   // The reading position is only reported once scrolling settles; do it now.
   flushPosition();
@@ -1948,8 +2084,9 @@ function autoFrame(ts: number): void {
   autoLast = ts;
   const s = scroller();
   const maxTop = s.scrollHeight - s.clientHeight;
-  if (autoPaused || panning) {
-    // Hold still (paused, or a hand drag is moving the page) but keep the
+  if (autoPaused || panning || loadingDoc) {
+    // Hold still (paused, a hand drag is moving the page, or the pages are being
+    // rebuilt and the scroll position is only transient) but keep the
     // position current so resuming continues from wherever the page is.
     autoPos = s.scrollTop;
   } else {
@@ -1994,14 +2131,22 @@ function autoKey(e: KeyboardEvent): boolean {
     }
     return true;
   }
+  // A held key repeats, and like a held button it stops at the slowest speed
+  // instead of passing through zero into the other direction; a fresh press
+  // may reverse.
+  const step = (factor: number): void => {
+    if (!e.repeat || canHoldStep(autoSettings.speed, factor)) {
+      adjustAutoSpeed(factor);
+    }
+  };
   if (e.key === 'ArrowUp' || e.key === '+' || e.key === '=') {
     e.preventDefault();
-    adjustAutoSpeed(SPEED_STEP);
+    step(SPEED_STEP);
     return true;
   }
   if (e.key === 'ArrowDown' || e.key === '-' || e.key === '_') {
     e.preventDefault();
-    adjustAutoSpeed(1 / SPEED_STEP);
+    step(1 / SPEED_STEP);
     return true;
   }
   return false;

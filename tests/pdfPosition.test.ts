@@ -115,9 +115,10 @@ describe('savePosition and findPosition', () => {
       badZoom: { ...at(5), zoom: 1e9, at: 1 },
       noTime: at(5),
       junk: 'x',
+      nothing: null,
     });
     expect(findPosition(m, 'good')).toEqual(at(5));
-    for (const key of ['badPage', 'badZoom', 'noTime', 'junk']) {
+    for (const key of ['badPage', 'badZoom', 'noTime', 'junk', 'nothing']) {
       expect(findPosition(m, key)).toBeUndefined();
     }
     for (const root of ['nope', 5, [], null]) {

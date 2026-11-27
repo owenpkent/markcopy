@@ -3,10 +3,15 @@
 // stands between a webview message and vscode.env.openExternal.
 import { describe, expect, it, vi } from 'vitest';
 import {
+  destinationOffsetY,
   linkBox,
+  linkRegions,
   linkTargetOf,
+  linkText,
   namedActionPage,
+  regionsContain,
   resolveDestination,
+  unionBox,
 } from '../src/webview/pdfLinks';
 import { MAX_LINK_URL_LENGTH, parseLinkUrl } from '../src/pdfLinkUrl';
 import { parsePdfMessage } from '../src/messages/pdf';
@@ -225,5 +230,84 @@ describe('the openLink message', () => {
     expect(parsePdfMessage({ type: 'openExternal', url: 'https://example.com/' })).toEqual({
       type: 'openExternal',
     });
+  });
+});
+
+describe('linkRegions', () => {
+  // A 100 x 100 page at scale 1, PDF y running up.
+  const viewport = {
+    width: 100,
+    height: 100,
+    rotation: 0,
+    convertToViewportPoint: (x: number, y: number) => [x, 100 - y],
+  };
+  // Two lines of one wrapped link: a wide quad above a short one, with a gap
+  // between them that the enclosing rect also covers.
+  const wrapped = {
+    rect: [10, 60, 90, 90],
+    quadPoints: [10, 90, 90, 90, 10, 80, 90, 80, 10, 70, 40, 70, 10, 60, 40, 60],
+  };
+
+  it('gives one region per quad, not the rectangle around them', () => {
+    const regions = linkRegions(viewport, wrapped);
+    expect(regions).toHaveLength(2);
+    expect(regionsContain(regions, 50, 15)).toBe(true); // first line
+    expect(regionsContain(regions, 20, 35)).toBe(true); // second line
+    expect(regionsContain(regions, 50, 25)).toBe(false); // the gap
+    expect(regionsContain(regions, 80, 35)).toBe(false); // right of the short line
+  });
+
+  it('keeps one keyboard box around all the regions', () => {
+    expect(unionBox(linkRegions(viewport, wrapped))).toEqual({
+      left: 10,
+      top: 10,
+      width: 80,
+      height: 30,
+    });
+  });
+
+  it('falls back to the rectangle without usable quads', () => {
+    for (const quadPoints of [undefined, [], [1, 2, 3], [NaN, 0, 0, 0, 0, 0, 0, 0]]) {
+      const regions = linkRegions(viewport, { rect: wrapped.rect, quadPoints });
+      expect(regions).toEqual([{ left: 10, top: 10, width: 80, height: 30 }]);
+    }
+    expect(linkRegions(viewport, {})).toEqual([]);
+  });
+});
+
+describe('linkText', () => {
+  it('tidies and bounds the covered text', () => {
+    expect(linkText('  Chapter\n One \t')).toBe('Chapter One');
+    expect(linkText(undefined)).toBe('');
+    expect(linkText('   ')).toBe('');
+    const long = linkText('word '.repeat(100));
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long.endsWith('...')).toBe(true);
+  });
+});
+
+describe('destinationOffsetY', () => {
+  // A page turned 90 degrees at scale 1: PDF x runs down the screen.
+  const rotated = {
+    width: 100,
+    height: 100,
+    rotation: 90,
+    convertToViewportPoint: (x: number, y: number) => [y, x],
+  };
+  const upright = {
+    width: 100,
+    height: 100,
+    rotation: 0,
+    convertToViewportPoint: (x: number, y: number) => [x, 100 - y],
+  };
+
+  it('uses the left coordinate on a rotated page, where a missing top is no offset', () => {
+    expect(destinationOffsetY(rotated, 260, null)).toBe(260);
+    expect(destinationOffsetY(rotated, null, 40)).toBeNull();
+  });
+
+  it('uses the top coordinate on an upright page', () => {
+    expect(destinationOffsetY(upright, null, 70)).toBe(30);
+    expect(destinationOffsetY(upright, 260, null)).toBeNull();
   });
 });
