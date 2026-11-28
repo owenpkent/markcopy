@@ -11,10 +11,17 @@
 import { RangeReader, ReadError, type ByteSource } from '../binary/reader';
 import { findZipEnd, looksLikePdf, looksLikePe } from '../binary/signatures';
 import { clip } from '../binary/text';
+import { AGE_ARMOR_BEGIN, AGE_MAGIC, readAge } from './age';
 import { readAlpineApk } from './alpine';
 import { readDeb } from './deb';
 import { looksLikeDmg, readDmg } from './dmg';
 import { readElf } from './elf';
+import { looksLikePem, looksLikePkcs12, readPem, readPkcs12 } from './keyFiles';
+import { KDBX_SIGNATURE_1, KDBX_SIGNATURE_2, readKeePass } from './keepass';
+import { LUKS_MAGIC, readLuks } from './luks';
+import { looksArmored, looksLikePacket, readOpenPgp } from './openpgp';
+import { RAR4_SIGNATURE, RAR5_SIGNATURE, readRar } from './rar';
+import { SEVEN_ZIP_SIGNATURE, readSevenZip } from './sevenZip';
 import { looksLikeMachO, readMachO } from './macho';
 import type { AlsoReading, InfoSection, PackageInfo } from './model';
 import { readMsi } from './msi';
@@ -236,6 +243,60 @@ const PROBES: Probe[] = [
     fact: 'it has a disk image signature at its start or end',
     matches: ({ reader }) => looksLikeDmg(reader),
     read: (reader) => readDmg(reader),
+  },
+  {
+    name: '7-Zip archive',
+    fact: 'it starts with the 7-Zip signature',
+    matches: ({ head }) => startsWith(head, SEVEN_ZIP_SIGNATURE),
+    read: (reader) => readSevenZip(reader),
+  },
+  {
+    name: 'RAR archive',
+    fact: 'it starts with the RAR signature',
+    matches: ({ head }) =>
+      startsWith(head, RAR5_SIGNATURE) || (startsWith(head, RAR4_SIGNATURE) && head[6] === 0x00),
+    read: (reader) => readRar(reader),
+  },
+  {
+    name: 'LUKS volume',
+    fact: 'it starts with the LUKS signature',
+    matches: ({ head }) => startsWith(head, LUKS_MAGIC),
+    read: (reader) => readLuks(reader),
+  },
+  {
+    name: 'KeePass database',
+    fact: 'it starts with the KeePass database signatures',
+    matches: ({ head }) =>
+      startsWith(head, KDBX_SIGNATURE_1) && KDBX_SIGNATURE_2.every((b, i) => head[4 + i] === b),
+    read: (reader) => readKeePass(reader),
+  },
+  {
+    name: 'age encrypted file',
+    fact: 'it starts with the age header or armor line',
+    matches: ({ head }) =>
+      startsWithText(head, `${AGE_MAGIC}\n`) || startsWithText(head, AGE_ARMOR_BEGIN),
+    read: (reader) => readAge(reader),
+  },
+  {
+    // A binary OpenPGP file has no signature, so its name has to vouch for it
+    // as well as the first packet header; an armored one is recognised by its line.
+    name: 'OpenPGP file',
+    fact: 'it starts with an OpenPGP armor line, or with an OpenPGP packet and is named .gpg or .pgp',
+    matches: ({ head, fileName, reader }) =>
+      looksArmored(head) || (/\.(gpg|pgp)$/i.test(fileName) && looksLikePacket(head, reader.size)),
+    read: (reader) => readOpenPgp(reader),
+  },
+  {
+    name: 'PKCS#12 file',
+    fact: 'it starts with a DER sequence holding the version 3 and a second sequence',
+    matches: ({ head }) => looksLikePkcs12(head),
+    read: (reader) => readPkcs12(reader),
+  },
+  {
+    name: 'PEM file',
+    fact: 'it is text with a PEM boundary line in its first 4 KiB',
+    matches: ({ head }) => looksLikePem(head),
+    read: (reader) => readPem(reader),
   },
   {
     name: 'Windows executable',

@@ -20,6 +20,13 @@ import { readMsi } from '../../src/pkg/msi';
 import { readRpm } from '../../src/pkg/rpm';
 import { readXar } from '../../src/pkg/xar';
 import { readZipPackage } from '../../src/pkg/zipFormats';
+import { readAge } from '../../src/pkg/age';
+import { readKeePass } from '../../src/pkg/keepass';
+import { readPem, readPkcs12 } from '../../src/pkg/keyFiles';
+import { readLuks } from '../../src/pkg/luks';
+import { readOpenPgp } from '../../src/pkg/openpgp';
+import { readRar } from '../../src/pkg/rar';
+import { readSevenZip } from '../../src/pkg/sevenZip';
 import { checkPage, startCost } from './binaryOracle';
 import { withHeader } from './pe.fuzz';
 import { shaped } from './pkg.fuzz';
@@ -70,6 +77,14 @@ const DIRECT = new Map<string, Reader>([
   ['zip archive', readZipPackage],
   ['Alpine package', (reader) => readAlpineApk(reader)],
   ['disk image', (reader) => readDmg(reader)],
+  ['7-Zip archive', (reader) => readSevenZip(reader)],
+  ['RAR archive', (reader) => readRar(reader)],
+  ['LUKS volume', (reader) => readLuks(reader)],
+  ['KeePass database', (reader) => readKeePass(reader)],
+  ['age encrypted file', (reader) => readAge(reader)],
+  ['OpenPGP file', (reader) => readOpenPgp(reader)],
+  ['PKCS#12 file', (reader) => readPkcs12(reader)],
+  ['PEM file', (reader) => readPem(reader)],
 ]);
 const LIMITS = { maxPages: 512, maxRead: 16 * 1024 * 1024 };
 

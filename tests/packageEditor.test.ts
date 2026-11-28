@@ -46,6 +46,7 @@ vi.mock('vscode', () => ({
 
 import { formatBytes } from '../src/binary/html';
 import { runFileInfoTask } from '../src/fileInfoTask';
+import { KeyFileEditorProvider } from '../src/keyFileEditor';
 import { PackageEditorProvider } from '../src/packageEditor';
 import { buildElf } from './pkg/elfFixture';
 import type * as vscode from 'vscode';
@@ -136,6 +137,14 @@ describe('package.json: markcopy.packagePreview', () => {
       'dylib',
       'elf',
       'ko',
+      '7z',
+      'rar',
+      'gpg',
+      'pgp',
+      'age',
+      'kdbx',
+      'p12',
+      'pfx',
     ];
     const expected = [
       ...extensions.flatMap((ext) => [`*.${ext}`, `*.${ext.toUpperCase()}`]),
@@ -162,6 +171,50 @@ describe('package.json: markcopy.packagePreview', () => {
 
   it('matches the view type the provider registers', () => {
     expect(PackageEditorProvider.viewType).toBe('markcopy.packagePreview');
+  });
+});
+
+describe('package.json: markcopy.keyFilePreview', () => {
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+  const editors = pkg.contributes.customEditors as {
+    viewType: string;
+    priority: string;
+    selector: { filenamePattern: string }[];
+  }[];
+  const editor = editors.find((e) => e.viewType === 'markcopy.keyFilePreview')!;
+
+  it('is offered, not the default, so key and signature text files still open as text', () => {
+    expect(editor).toBeDefined();
+    expect(editor.priority).toBe('option');
+  });
+
+  it('claims .pem, .key and .asc in both cases, and no pattern another editor claims', () => {
+    const patterns = editor.selector.map((s) => s.filenamePattern);
+    expect([...patterns].sort()).toEqual(
+      ['*.pem', '*.PEM', '*.key', '*.KEY', '*.asc', '*.ASC'].sort(),
+    );
+    for (const other of editors.filter((e) => e.viewType !== editor.viewType)) {
+      const mine = new Set(patterns);
+      const clash = other.selector.map((s) => s.filenamePattern).filter((p) => mine.has(p));
+      expect(clash, `${other.viewType} also claims ${clash.join(', ')}`).toEqual([]);
+    }
+  });
+
+  it('is not registered for the package types, which open by default', () => {
+    const packagePatterns = editors
+      .find((e) => e.viewType === 'markcopy.packagePreview')!
+      .selector.map((s) => s.filenamePattern);
+    for (const pattern of ['*.pem', '*.key', '*.asc']) {
+      expect(packagePatterns).not.toContain(pattern);
+    }
+    expect(KeyFileEditorProvider.keyFileViewType).toBe('markcopy.keyFilePreview');
+  });
+
+  it('turns on Read This File for its pages', () => {
+    const command = pkg.contributes.commands.find(
+      (c: { command: string }) => c.command === 'markcopy.fileInfo.read',
+    );
+    expect(command.enablement).toContain('markcopy.keyFilePreview');
   });
 });
 
