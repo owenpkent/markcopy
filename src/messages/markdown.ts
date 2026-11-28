@@ -16,7 +16,11 @@ export type MarkdownMessage =
   | { type: 'ready' }
   | { type: 'revealInOS' }
   | { type: 'openExternal' }
-  | { type: 'revealLine'; line: number }
+  // docKey: the document the report was measured in, so the host can drop one
+  // that was still in flight when the preview switched to another document.
+  | { type: 'revealLine'; line: number; docKey: string }
+  // Whether this document's preview is auto-scrolling right now.
+  | { type: 'autoScroll'; playing: boolean; docKey: string }
   | ToastMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
@@ -63,8 +67,14 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
       return { type: msg.type };
     case 'revealLine':
       // revealEditorLine ignores anything that is not a finite number.
-      return typeof msg.line === 'number' && Number.isFinite(msg.line)
-        ? { type: 'revealLine', line: msg.line }
+      return typeof msg.line === 'number' &&
+        Number.isFinite(msg.line) &&
+        typeof msg.docKey === 'string'
+        ? { type: 'revealLine', line: msg.line, docKey: msg.docKey }
+        : undefined;
+    case 'autoScroll':
+      return typeof msg.playing === 'boolean' && typeof msg.docKey === 'string'
+        ? { type: 'autoScroll', playing: msg.playing, docKey: msg.docKey }
         : undefined;
     case 'toast':
       return toastMessage(msg);
