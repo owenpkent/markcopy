@@ -92,6 +92,8 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
   // The flagged set the user dismissed. A different set shows the bar again.
   let dismissed: string | undefined;
   let detailsOpen = false;
+  // The document the notice last drew. Scroll position and focus belong to it.
+  let shownKey: string | undefined;
 
   const button = (label: string, onClick: () => void, className?: string): HTMLButtonElement => {
     const b = document.createElement('button');
@@ -130,17 +132,23 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         publishHeight();
         return;
       }
-      // A redraw replaces every control; remember which one had the focus.
+      // A redraw of the same document replaces every control; remember which one
+      // had the focus and where the list was scrolled. Another document starts at
+      // the top with nothing focused.
+      const same = shownKey === docKey;
+      shownKey = docKey;
       const focused = document.activeElement;
       const focusId =
-        focused instanceof HTMLElement && bar.contains(focused) ? focused.dataset.focus : undefined;
+        same && focused instanceof HTMLElement && bar.contains(focused)
+          ? focused.dataset.focus
+          : undefined;
       const old = bar.querySelector('details');
       if (old) {
         detailsOpen = old.open;
       }
       // The list scrolls inside the notice. Rebuilding it would reset it to the
       // top and leave the focused link far out of view, so put the offset back.
-      const listScroll = bar.querySelector('.mc-hidden-list')?.scrollTop ?? 0;
+      const listScroll = same ? (bar.querySelector('.mc-hidden-list')?.scrollTop ?? 0) : 0;
       const runs = scan.runs.filter(isRun);
 
       bar.hidden = false;
@@ -223,6 +231,18 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
           (el) => el.dataset.focus === focusId,
         );
         again?.focus({ preventScroll: true });
+        // Earlier results may be gone, so the offset can put the link above or
+        // below the visible part of the list: move the list the least that
+        // shows it. A list with no height (details closed) has nothing to show.
+        if (again && list.contains(again) && list.clientHeight > 0) {
+          const area = list.getBoundingClientRect();
+          const item = (again.closest('li') ?? again).getBoundingClientRect();
+          if (item.top < area.top) {
+            list.scrollTop += item.top - area.top;
+          } else if (item.bottom > area.bottom) {
+            list.scrollTop += item.bottom - area.bottom;
+          }
+        }
       }
       publishHeight();
     },

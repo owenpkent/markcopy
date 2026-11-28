@@ -248,20 +248,28 @@ function explained(cps: number[], around: Around): boolean[] {
     } else if (cp >= 0x2061 && cp <= 0x2064) {
       // An invisible function application, times, separator or plus between
       // the parts of a mathematical expression: deleting it changes the maths.
-      // Each side must be an operand: a number, an operator or a bracket, or a
-      // letter standing as a variable. A letter is a variable when it is not
-      // part of a longer word (the next one out is no letter: the m and the c of
-      // `mc²`, the f of `f(x)`) or when a number or operator follows it. A word
-      // of prose with a stray operator inside it is still flagged, and so is an
-      // operator in a row of invisible characters, whose neighbours are not
-      // visible.
+      // Both sides must be visible (a row of them is still flagged). A side is an
+      // operand when it is a number, an operator or a bracket, or a letter
+      // standing as a variable: a letter that is not part of a longer word (the
+      // next one out is no letter: the m and the c of `mc²`) or that has a
+      // number or operator beyond it.
       const operand = (cp: number | undefined, outer: number | undefined): boolean =>
         test(MATHY, cp) || (letter(cp) && (!letter(outer) || test(MATHY, outer)));
-      ok[i] =
-        visible(left) &&
-        visible(right) &&
-        operand(left, i === 0 ? around.prev2 : undefined) &&
-        operand(right, i === cps.length - 1 ? around.next2 : undefined);
+      const rightOk = operand(right, i === cps.length - 1 ? around.next2 : undefined);
+      if (cp === 0x2061) {
+        // Function application sits between a function name, a run of letters of
+        // any length (`sin`, `f`), or a closing bracket or number, and its
+        // argument. The name needs no further test: it is what the marker marks.
+        // The argument is what must look like one (an operand or an opening
+        // bracket), so `say` then `hello` is still flagged: `hello` is a word.
+        ok[i] = visible(left) && visible(right) && (letter(left) || test(MATHY, left)) && rightOk;
+      } else {
+        ok[i] =
+          visible(left) &&
+          visible(right) &&
+          operand(left, i === 0 ? around.prev2 : undefined) &&
+          rightOk;
+      }
     } else if (cp === 0x115f) {
       // The choseong filler that stands in for a missing leading consonant,
       // before a vowel: how Unicode spells an isolated vowel jamo.
@@ -314,6 +322,23 @@ function settled(cps: number[], around: Around): boolean[] {
   }
 }
 
+// The position of the first visible code point at or after `pos`, or the length.
+function visibleFrom(text: string, pos: number): number {
+  while (pos < text.length) {
+    const c = text.codePointAt(pos) as number;
+    if (kindOf(c) === undefined) {
+      return pos;
+    }
+    pos += c > 0xffff ? 2 : 1;
+  }
+  return pos;
+}
+
+function codePointAtVisible(text: string, pos: number): number | undefined {
+  const at = visibleFrom(text, pos);
+  return at < text.length ? text.codePointAt(at) : undefined;
+}
+
 interface Found {
   start: number;
   end: number;
@@ -331,10 +356,15 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
   const n = text.length;
   let line = 1;
   let lineStart = 0;
+  // The visible code points behind the current position, never reset by a run:
+  // context is read from the text with every invisible character taken out, so
+  // it does not change when a strip removes some of them. Judging each code
+  // point by the visible text around it is what keeps a clean copy stable: what
+  // it keeps is judged the same way when it is scanned again.
   let prev: number | undefined;
   let prev2: number | undefined;
-  // The nearest code point before the current one that is no emphasis delimiter,
-  // and how many delimiters sit between it and the current position.
+  // The nearest visible code point before the current one that is no emphasis
+  // delimiter, and how many delimiters sit between it and the current position.
   let prevText: number | undefined;
   let delimiters = 0;
   let i = 0;
@@ -376,12 +406,13 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     // A byte order mark leads the file; what follows it is judged on its own.
     const skip = start === 0 && cps[0] === 0xfeff ? 1 : 0;
     const next = end < n ? text.codePointAt(end) : undefined;
-    const next2 = next === undefined ? undefined : text.codePointAt(end + (next > 0xffff ? 2 : 1));
+    const next2 =
+      next === undefined ? undefined : codePointAtVisible(text, end + (next > 0xffff ? 2 : 1));
     let after = end;
-    while (after < n && after - end < 3 && isEmphasis(text.charCodeAt(after))) {
-      after++;
+    for (let d = 0; d < 3 && after < n && isEmphasis(text.charCodeAt(after)); d++) {
+      after = visibleFrom(text, after + 1);
     }
-    const nextText = after === end || after >= n ? next : text.codePointAt(after);
+    const nextText = after >= n ? next : text.codePointAt(after);
     const leading = skip ? undefined : prev;
     const around: Around = {
       prev: leading,
@@ -406,11 +437,6 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
         from = -1;
       }
     }
-    // The next code point is visible, so it sets prev before anything reads it.
-    prev = undefined;
-    prev2 = undefined;
-    prevText = undefined;
-    delimiters = 0;
     i = end;
   }
 }
