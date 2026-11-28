@@ -173,12 +173,12 @@ let pendingRender: Record<string, unknown> | undefined;
 // Renders started and not yet finished, and the latest one's number, for
 // auto-scroll (see applyRenderMessage).
 let rendersInFlight = 0;
-let renderSeq = 0;
 // Where the reader was when the first of a run of overlapping renders began, to
-// put back once the last one settles. A later render must not recapture it: by
-// then the placeholders of the earlier one may have clamped the page. Null when
-// there is nothing to restore (auto-scroll off, a different document, or the
-// reader moved the page meanwhile).
+// put back once the last one has finished (not just the latest to start: an older
+// one may still be about to change the page height). A later render in the run
+// must not recapture it: by then placeholders may have clamped the page. Null
+// when there is nothing to restore (auto-scroll off, a different document, or
+// the reader navigated meanwhile), in which case the next render captures afresh.
 let heldTop: number | null = null;
 
 function applyRenderMessage(msg: Record<string, any>): void {
@@ -197,12 +197,12 @@ function applyRenderMessage(msg: Record<string, any>): void {
   // position clamped by a shorter page is not the reader's. Where the page was is
   // put back afterwards, so a live edit does not set the reader back or look
   // like reaching the end.
-  if (rendersInFlight === 0) {
+  if (heldTop === null) {
     heldTop = auto.isOn() && !docChanged ? scrollTop() : null;
-  } else if (docChanged || msg.revealFragment) {
+  }
+  if (docChanged || msg.revealFragment) {
     heldTop = null;
   }
-  const seq = ++renderSeq;
   rendersInFlight++;
   void render(
     msg.html as string,
@@ -221,10 +221,10 @@ function applyRenderMessage(msg: Record<string, any>): void {
     msg.revealFragment as string | undefined,
   ).finally(() => {
     rendersInFlight--;
-    if (seq === renderSeq) {
+    if (rendersInFlight === 0) {
       const keepTop = heldTop;
       heldTop = null;
-      if (keepTop !== null && !msg.revealFragment && auto.isOn()) {
+      if (keepTop !== null && auto.isOn()) {
         suppressSyncTo(Math.min(keepTop, maxScroll()));
         setScrollTop(keepTop);
       }
@@ -241,12 +241,32 @@ function applyRenderMessage(msg: Record<string, any>): void {
 // put back the position it began at, and a scroll caused by the auto-scroll loop
 // is told apart from this by `readerInputAt`.
 let readerInputAt = 0;
+// The vertical offset when the last input arrived. Input only counts as moving the
+// page if the offset then changes: a sideways wheel over a wide code block does
+// not, and a clamp by a shorter page (the render's own doing) arrives with no
+// input at all.
+let readerInputTop = 0;
 function noteReaderInput(): void {
   readerInputAt = Date.now();
-  if (rendersInFlight > 0) {
-    heldTop = null;
-  }
+  readerInputTop = scrollTop();
 }
+/** The reader or a link or the editor took the page somewhere: do not restore. */
+function navigated(): void {
+  heldTop = null;
+}
+window.addEventListener(
+  'scroll',
+  () => {
+    if (
+      heldTop !== null &&
+      Date.now() - readerInputAt < 1000 &&
+      Math.abs(scrollTop() - readerInputTop) >= 1
+    ) {
+      navigated();
+    }
+  },
+  { passive: true },
+);
 for (const type of ['wheel', 'touchmove']) {
   window.addEventListener(type, noteReaderInput, { passive: true, capture: true });
 }
@@ -603,13 +623,25 @@ const auto = createAutoScroll({
   toggleButton: () => autoToggle,
   // An image still loading can change the page's height, so the end it shows is
   // not final: wait, and carry on if the page grows.
-  deferEdge: () => imagesLoading(),
+  deferEdge: (edge) => edge === 'end' && imagesLoading(),
 });
 
+// An image that is still loading below the viewport (or across it) can lengthen
+// the page and so move the end. One above the viewport does not stand between the
+// reader and the bottom, and the top is always known. A lazy image counts once it
+// is in or near the viewport, where the browser has started to fetch it.
 function imagesLoading(): boolean {
-  return Array.from(content.querySelectorAll('img')).some(
-    (img) => !img.complete && img.loading !== 'lazy',
-  );
+  const view = window.innerHeight || document.documentElement.clientHeight;
+  return Array.from(content.querySelectorAll('img')).some((img) => {
+    if (img.complete) {
+      return false;
+    }
+    const box = img.getBoundingClientRect();
+    if (box.bottom < 0 && box.height > 0) {
+      return false;
+    }
+    return img.getAttribute('loading') !== 'lazy' || box.top < view * 2;
+  });
 }
 
 function offersAutoScroll(): boolean {
@@ -724,6 +756,7 @@ function scrollToLine(line: number): void {
   if (target === undefined || Math.abs(target - scrollTop()) < 1) {
     return;
   }
+  navigated();
   suppressSyncTo(target);
   setScrollTop(target);
 }
@@ -748,6 +781,7 @@ function scrollToAnchor(rawId: string): void {
     document.getElementById(rawId) ??
     content.querySelector<HTMLElement>(`a[name="${escaped}"]`);
   if (el) {
+    navigated();
     suppressSync();
     el.scrollIntoView({ block: 'start' });
     // scrollIntoView picks the offset itself, and it is synchronous, so this is

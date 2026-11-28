@@ -49,11 +49,12 @@ export interface AutoScrollHost {
    */
   toggleButton?(): HTMLElement | null;
   /**
-   * True while the end of the content is not yet known (a replacement image is
-   * still loading): reaching the apparent end then keeps the loop armed instead
-   * of switching off, and it carries on if the page grows.
+   * True while this edge is not yet known (a replacement image is still loading
+   * and may extend the bottom): reaching the apparent edge then keeps the loop
+   * armed instead of switching off, and it carries on if the page grows. The top
+   * is always known, so a host usually defers only 'end'.
    */
-  deferEdge?(): boolean;
+  deferEdge?(edge: 'end' | 'top'): boolean;
 }
 
 export interface AutoScroll {
@@ -343,7 +344,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
         wroteTop = s.scrollTop;
         writes++;
       }
-      if (result.edge && !host.deferEdge?.()) {
+      if (result.edge && !host.deferEdge?.(result.edge)) {
         stop(result.edge === 'end' ? 'Auto-scroll reached the end' : 'Auto-scroll reached the top');
         return;
       }

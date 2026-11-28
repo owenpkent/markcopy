@@ -537,10 +537,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
-      if (!syncScrollEnabled() || reveals.isEcho(e.textEditor.document.uri.toString())) {
+      if (!syncScrollEnabled()) {
         return;
       }
       const line = e.visibleRanges[0]?.start.line ?? 0;
+      // Only the echo of our own reveal (same document, same line) is dropped: a
+      // reader scrolling the source of a playing preview elsewhere still goes through.
+      if (reveals.isEcho(e.textEditor.document.uri.toString(), line)) {
+        return;
+      }
       for (const state of previewsOf(e.textEditor.document.uri)) {
         state.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
@@ -1450,7 +1455,7 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
   // The webview measures against the render it has, which a fast edit can leave a
   // line or two behind the document; clamp rather than throw on an out-of-range line.
   const clamped = Math.min(Math.max(0, Math.floor(line)), editor.document.lineCount - 1);
-  reveals.mark(docUri.toString());
+  reveals.mark(docUri.toString(), clamped);
   editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 

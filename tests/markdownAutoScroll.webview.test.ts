@@ -8,6 +8,8 @@ const VIEW = 1000;
 
 let scrollTop = 0;
 let docHeight = HEIGHT;
+// When set, window.scrollTo is clamped by the page height like a real browser.
+let clampWrites = false;
 let frames: Array<(ts: number) => void> = [];
 let saved: unknown;
 let posted: Array<Record<string, unknown>> = [];
@@ -97,6 +99,7 @@ beforeEach(() => {
   }) as typeof document.addEventListener;
   scrollTop = 0;
   docHeight = HEIGHT;
+  clampWrites = false;
   frames = [];
   saved = undefined;
   posted = [];
@@ -116,7 +119,7 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
   Element.prototype.scrollIntoView = vi.fn();
   window.scrollTo = ((_x: number, y: number) => {
-    scrollTop = y;
+    scrollTop = clampWrites ? Math.max(0, Math.min(docHeight - VIEW, y)) : y;
   }) as typeof window.scrollTo;
   const root = document.documentElement;
   Object.defineProperty(window, 'scrollY', { configurable: true, get: () => scrollTop });
@@ -291,6 +294,7 @@ describe('auto-scroll in the Markdown preview', () => {
       window.dispatchEvent(new Event('wheel'));
       docHeight = HEIGHT;
       scrollTop = 1882; // the reader's wheel
+      window.dispatchEvent(new Event('scroll'));
     });
     runFrames(48);
     runFrames(64);
@@ -414,6 +418,203 @@ describe('auto-scroll in the Markdown preview', () => {
     } finally {
       rect.mockRestore();
     }
+  });
+
+  // A render that is slow (its KaTeX import is held) while a later, plain one has
+  // settled. Returns the function that lets the slow one finish.
+  function holdKatex(): () => void {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    vi.doMock('katex', async () => {
+      await gate;
+      return { default: { render: () => undefined } };
+    });
+    return release;
+  }
+  afterEach(() => vi.doUnmock('katex'));
+  const SLOW = '<p data-source-line="0"><span class="mc-math">x</span></p>';
+
+  it('waits for an older, slower redraw before putting the position back', async () => {
+    const release = holdKatex();
+    await boot();
+    await render();
+    scrollTop = 3000;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    const before = scrollTop;
+    clampWrites = true;
+    send(SLOW);
+    docHeight = 3100; // placeholders clamp the page
+    scrollTop = 2100;
+    send('<p data-source-line="0">Two</p>');
+    for (let i = 0; i < 3; i++) await tick();
+    docHeight = HEIGHT; // the slow render's diagram arrives and the page is tall again
+    release();
+    for (let i = 0; i < 6; i++) await tick();
+    runFrames(48);
+    runFrames(64);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    expect(scrollTop).toBeGreaterThanOrEqual(before);
+    expect(scrollTop).toBeLessThan(before + 3);
+  });
+
+  it('keeps an editor jump made during a redraw', async () => {
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      const line = Number((this as HTMLElement).dataset?.sourceLine);
+      const top = Number.isFinite(line) ? line * 100 - scrollTop : 0;
+      return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20 } as DOMRect;
+    });
+    try {
+      await boot();
+      const html = [0, 10, 20, 30].map((n) => `<p data-source-line="${n}">p${n}</p>`).join('');
+      await render(html, 'markdown', undefined, { syncScroll: true });
+      await new Promise((r) => setTimeout(r, 300));
+      scrollTop = 1000;
+      toggle().click();
+      runFrames(16);
+      runFrames(32);
+      await render(
+        html,
+        'markdown',
+        () => {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              origin: window.origin,
+              data: { type: 'scrollToLine', line: 30 },
+            }),
+          );
+        },
+        { syncScroll: true },
+      );
+      expect(scrollTop).toBeGreaterThanOrEqual(3000);
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it('keeps a heading jump made during a redraw', async () => {
+    await boot();
+    await render();
+    scrollTop = 1000;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    await render(
+      '<p><a id="lnk" href="#there">go</a></p><h2 id="there">There</h2>',
+      'markdown',
+      () => {
+        Element.prototype.scrollIntoView = vi.fn(() => {
+          scrollTop = 4108;
+        });
+        document.getElementById('lnk')!.click();
+      },
+    );
+    expect(scrollTop).toBeGreaterThanOrEqual(4000);
+  });
+
+  it("captures the reader's new position for a third edit while an old render lingers", async () => {
+    const release = holdKatex();
+    await boot();
+    await render();
+    scrollTop = 3000;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    clampWrites = true;
+    send(SLOW); // lingers
+    send('<p data-source-line="0">Two</p>'); // settles at once
+    for (let i = 0; i < 3; i++) await tick();
+    window.dispatchEvent(new Event('wheel'));
+    scrollTop = 1202; // the reader chooses a new place
+    window.dispatchEvent(new Event('scroll'));
+    send('<p data-source-line="0">Three</p>');
+    docHeight = 1500;
+    scrollTop = 500; // clamped by the third edit's placeholders
+    docHeight = HEIGHT;
+    release();
+    for (let i = 0; i < 6; i++) await tick();
+    runFrames(48);
+    runFrames(64);
+    expect(scrollTop).toBeGreaterThanOrEqual(1202);
+    expect(scrollTop).toBeLessThan(1205);
+  });
+
+  it('keeps the vertical position when a code block is wheeled sideways', async () => {
+    await boot();
+    await render();
+    scrollTop = 1212;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    await render('<p data-source-line="0">Edited</p>', 'markdown', () => {
+      docHeight = 1500;
+      scrollTop = 500;
+      window.dispatchEvent(new Event('wheel')); // sideways: the page does not move after it
+      window.dispatchEvent(new Event('scroll'));
+      docHeight = HEIGHT;
+    });
+    runFrames(48);
+    runFrames(64);
+    expect(scrollTop).toBeGreaterThanOrEqual(1212);
+    expect(scrollTop).toBeLessThan(1215);
+  });
+
+  describe('with images still loading', () => {
+    beforeEach(() => {
+      Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+        configurable: true,
+        get: () => false,
+      });
+      // jsdom has no `loading` reflection; give it the browser's.
+      Object.defineProperty(HTMLImageElement.prototype, 'loading', {
+        configurable: true,
+        get(this: HTMLImageElement) {
+          return this.getAttribute('loading') === 'lazy' ? 'lazy' : 'eager';
+        },
+      });
+    });
+    afterEach(() => {
+      delete (HTMLImageElement.prototype as { complete?: boolean }).complete;
+      delete (HTMLImageElement.prototype as { loading?: string }).loading;
+    });
+
+    it('waits for a lazy image that is in the viewport', async () => {
+      await boot();
+      await render('<p data-source-line="0"><img loading="lazy" src="x.png" alt="x"></p>');
+      scrollTop = HEIGHT - VIEW - 0.6;
+      toggle().click();
+      for (let i = 1; i <= 4; i++) runFrames(i * 16);
+      expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('does not wait for a lazy image far below that was never requested', async () => {
+      const rect = vi
+        .spyOn(HTMLImageElement.prototype, 'getBoundingClientRect')
+        .mockReturnValue({ top: 90000, bottom: 90100, height: 100 } as DOMRect);
+      try {
+        await boot();
+        await render('<p data-source-line="0"><img loading="lazy" src="x.png" alt="x"></p>');
+        scrollTop = HEIGHT - VIEW - 0.6;
+        toggle().click();
+        for (let i = 1; i <= 4; i++) runFrames(i * 16);
+        expect(toggle().getAttribute('aria-pressed')).toBe('false');
+      } finally {
+        rect.mockRestore();
+      }
+    });
+
+    it('stops at the top at once while an image farther down is loading', async () => {
+      saved = { autoScroll: { speed: -12, size: 1 } };
+      await boot();
+      await render('<p data-source-line="0"><img src="x.png" alt="x"></p>');
+      scrollTop = 1;
+      toggle().click();
+      for (let i = 1; i <= 5; i++) runFrames(i * 16);
+      expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    });
   });
 
   it('is not offered on a preview that does not take it, and switches off', async () => {

@@ -221,7 +221,7 @@ describe('createAutoScroll', () => {
 
   it('keeps going at an apparent end while the host defers the edge, then stops', () => {
     let defer = true;
-    const s = setup({ deferEdge: () => defer }, makeScroller(3999.4));
+    const s = setup({ deferEdge: (edge) => edge === 'end' && defer }, makeScroller(3999.4));
     s.auto.start();
     run(0);
     run(16);
@@ -229,6 +229,27 @@ describe('createAutoScroll', () => {
     expect(s.auto.isOn()).toBe(true);
     defer = false;
     run(48);
+    expect(s.auto.isOn()).toBe(false);
+  });
+
+  it('asks the host about the edge it reached, and stops at the top at once', () => {
+    const asked: string[] = [];
+    const s = setup(
+      {
+        deferEdge: (edge) => {
+          asked.push(edge);
+          return edge === 'end';
+        },
+      },
+      makeScroller(0.6),
+    );
+    s.auto.start();
+    for (let i = 0; i < 8; i++) s.auto.key(key('-')); // reverse to upward
+    run(0);
+    run(16);
+    run(32);
+    run(48);
+    expect(asked).toContain('top');
     expect(s.auto.isOn()).toBe(false);
   });
 
