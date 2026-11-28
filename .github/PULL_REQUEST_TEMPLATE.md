@@ -24,6 +24,7 @@
 - [ ] For preview behavior changes, I tested in the Extension Development Host (F5) with the relevant sample files.
 - [ ] If I added or changed a copy action, I updated [docs/COPY-MATRIX.md](../docs/COPY-MATRIX.md).
 - [ ] If behavior changed, I updated the README and [CHANGELOG.md](../CHANGELOG.md).
+- [ ] Parser added or changed? Fuzz target or seeds, dictionary tokens and `fuzz/coverage.json` updated.
 - [ ] No em dashes in text or comments.
 
 ## Testing notes

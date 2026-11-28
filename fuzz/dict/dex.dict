@@ -1,0 +1,18 @@
+# Tokens for the dex target (fuzz/targets/dex.fuzz.ts): the DEX header.
+
+# DEX magic and header values
+kw1="dex\x0a035\x00"
+kw2="dex\x0a037\x00"
+kw3="dex\x0a038\x00"
+kw4="dex\x0a039\x00"
+kw5="dex\x0a040\x00"
+kw6="p\x00\x00\x00"
+kw7="\x78\x56\x34\x12"
+kw8="\x12\x34\x56\x78"
+kw9="\x00\x00\x01\x00"
+kw10="\xff\xff\xff\xff"
+
+# APK members
+kw11="classes.dex"
+kw12="classes2.dex"
+kw13="AndroidManifest.xml"
