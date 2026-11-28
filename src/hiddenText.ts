@@ -326,11 +326,65 @@ function isMathOp(cp: number | undefined): cp is number {
   return cp !== undefined && cp >= 0x2061 && cp <= 0x2064;
 }
 
+// A number: digits with at most one decimal point between them (`12`, `3.5`).
+const NUMBER = /^\p{N}+(?:\.\p{N}+)?$/u;
+// A function name: a run of letters, which only U+2061 after it makes a name.
+const NAME = /^[\p{L}\p{M}]+$/u;
+
+// A bracketed group (`(a+b)`): an opening bracket, a matching closing bracket
+// at the end, and nothing that closes the first one early.
+function bracketGroup(seg: string): boolean {
+  const open = '([{';
+  const close = ')]}';
+  if (!open.includes(seg[0]) || !close.includes(seg[seg.length - 1]) || seg.length < 2) {
+    return false;
+  }
+  let depth = 0;
+  for (let k = 0; k < seg.length; k++) {
+    if (open.includes(seg[k])) {
+      depth++;
+    } else if (close.includes(seg[k])) {
+      depth--;
+      if (depth === 0 && k < seg.length - 1) {
+        return false;
+      }
+    }
+  }
+  return depth === 0;
+}
+
+// An operand strictly between two operators: a number, a single letter, one
+// math symbol or bracket, or a bracketed group. A letter run of two or more is
+// a word, not an operand, unless a function application follows it (see below).
+function chainOperand(seg: string): boolean {
+  if ([...seg].length === 1) {
+    return MATHY.test(seg) || LETTER_OR_MARK.test(seg);
+  }
+  return NUMBER.test(seg) || bracketGroup(seg);
+}
+
 // A maximal chain of invisible math operators, each alone between two visible
-// operands (`a` U+2062 `b` U+2062 `c`), judged as one unit. Between two
-// operators an operand is one code point, so letters joined only by operators
-// are not a word. The ends use the operand rule on the visible text around the
-// chain; the whole chain is kept or flagged, so a clean copy never leaves half.
+// stretches (`a` U+2062 `b` U+2062 `c`), judged as one unit. Operand grammar,
+// for what lies between two operators of the chain:
+//   operand  = number | letter | symbol | group | function-term
+//   number   = digits, optionally one decimal point (`12`, `3.5`)
+//   letter   = a single letter (so `a`, `b`, not the word `ab`)
+//   symbol   = one math symbol or bracket (`+`, `(`)
+//   group    = a bracketed group (`(a+b)`)
+//   function-term = a run of letters that U+2061 follows (`sin`, `log`); its
+//                    argument is the next operand. Elsewhere a run of letters
+//                    is a word, so `say` U+2062 `hel` U+2062 `lo` is flagged.
+// A stretch that is none of these ends the chain: it is judged as the last
+// operand by its first code point and the one after it (the end rule below),
+// and the operator after it starts a chain of its own. The ends use the operand
+// rule on the visible text around the chain: at the start the letter before the
+// first operator is a variable if no letter stands before it (the m of `mc²`);
+// at the end the letter after the last operator is one if no letter stands
+// after it. The whole chain is kept or every operator in it is flagged, so a
+// clean copy never leaves half of it. A flagged chain does lose its operators
+// between operands that would merge when written together (`2`, `3`), but it
+// is flagged because something in it is not mathematics, and what stays is the
+// visible text the author wrote.
 // `start` is the first operator; `prev` and `prev2` are the visible code points
 // before it. Returns the position past the last operator and the verdict.
 function judgeChain(
@@ -341,57 +395,42 @@ function judgeChain(
 ): { end: number; ok: boolean } {
   const n = text.length;
   const ops: number[] = [];
-  const operands: number[] = prev === undefined ? [] : [prev];
   let pos = start;
-  let lastOperand: number | undefined;
-  let afterLast = pos + 1;
+  let lastFrom: number;
   for (;;) {
     ops.push(text.charCodeAt(pos));
-    const r = pos + 1 < n ? text.codePointAt(pos + 1) : undefined;
-    if (r === undefined || !visible(r)) {
-      lastOperand = undefined;
-      afterLast = pos + 1;
+    lastFrom = pos + 1;
+    let to = lastFrom;
+    while (to < n && visible(text.codePointAt(to))) {
+      to += (text.codePointAt(to) as number) > 0xffff ? 2 : 1;
+    }
+    if (to >= n || to === lastFrom || !isMathOp(text.charCodeAt(to))) {
       break;
     }
-    const width = r > 0xffff ? 2 : 1;
-    const nextPos = pos + 1 + width;
-    lastOperand = r;
-    afterLast = nextPos;
-    const nextCp = nextPos < n ? text.charCodeAt(nextPos) : undefined;
-    const loneNext =
-      isMathOp(nextCp) && (nextPos + 1 >= n || visible(text.codePointAt(nextPos + 1)));
-    if (!loneNext) {
+    const nextCp = to + 1 < n ? text.codePointAt(to + 1) : undefined;
+    if (nextCp !== undefined && !visible(nextCp)) {
       break;
     }
-    operands.push(r);
-    pos = nextPos;
+    const seg = text.slice(lastFrom, to);
+    const functionTerm = text.charCodeAt(to) === 0x2061 && NAME.test(seg);
+    if (!functionTerm && !chainOperand(seg)) {
+      break;
+    }
+    pos = to;
   }
   const end = pos + 1;
-  if (prev === undefined || lastOperand === undefined) {
+  const last = text.codePointAt(lastFrom);
+  if (prev === undefined || !visible(last)) {
     return { end, ok: false };
   }
-  operands.push(lastOperand);
-  const last = ops.length;
-  const operandAt = (j: number): boolean => {
-    const cp = operands[j];
-    if (j === 0) {
-      return test(MATHY, cp) || (letter(cp) && (!letter(prev2) || test(MATHY, prev2)));
-    }
-    if (j === last) {
-      const outer = codePointAtVisible(text, afterLast);
-      return test(MATHY, cp) || (letter(cp) && (!letter(outer) || test(MATHY, outer)));
-    }
-    return test(MATHY, cp) || letter(cp);
-  };
-  let ok = true;
-  for (let j = 0; j < last && ok; j++) {
-    if (ops[j] === 0x2061) {
-      ok = (letter(operands[j]) || test(MATHY, operands[j])) && operandAt(j + 1);
-    } else {
-      ok = operandAt(j) && operandAt(j + 1);
-    }
-  }
-  return { end, ok };
+  const first = ops[0];
+  const leftOk =
+    first === 0x2061
+      ? letter(prev) || test(MATHY, prev)
+      : test(MATHY, prev) || (letter(prev) && (!letter(prev2) || test(MATHY, prev2)));
+  const outer = codePointAtVisible(text, lastFrom + (last > 0xffff ? 2 : 1));
+  const rightOk = test(MATHY, last) || (letter(last) && (!letter(outer) || test(MATHY, outer)));
+  return { end, ok: leftOk && rightOk };
 }
 
 // The position of the first visible code point at or after `pos`, or the length.

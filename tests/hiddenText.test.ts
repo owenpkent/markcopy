@@ -537,6 +537,13 @@ describe('clean copy is stable', () => {
     `a${times}b${cp(0x2064)}c${times}d`,
     `ab${times}c${times}d`,
     `a${times}b${times}`,
+    `2${times}3${times}sin${cp(0x2061)}(x)`,
+    `12${times}x`,
+    `3.5${times}r`,
+    `2${times}(a+b)`,
+    `a${times}sin${cp(0x2061)}x${times}cos${cp(0x2061)}y`,
+    `log${cp(0x2061)}2${times}x`,
+    `hello${cp(0x2061)}world`,
   ];
   // Every fixture string in this file, plus the reviewer's case and more.
   const fixtures: string[] = [
@@ -603,6 +610,13 @@ describe('clean copy is stable', () => {
     'x',
     'sin',
     '2',
+    '12',
+    '3.5',
+    '(a+b)',
+    '.',
+    `2${times}3${times}sin${cp(0x2061)}(x)`,
+    `a${times}sin${cp(0x2061)}x${times}cos${cp(0x2061)}y`,
+    `log${cp(0x2061)}2${times}x`,
     '(',
     ')',
     cp(0x2061),
@@ -667,6 +681,13 @@ describe('clean copy is stable', () => {
     keep(`x${times}y${times}z = 1`);
     keep(`2${times}a${times}b`);
     keep(`sin${cp(0x2061)}x${times}y`);
+    keep(`2${times}3${times}sin${cp(0x2061)}(x)`);
+    keep(`12${times}x`);
+    keep(`3.5${times}r`);
+    keep(`2${times}(a+b)`);
+    keep(`a${times}sin${cp(0x2061)}x${times}cos${cp(0x2061)}y`);
+    keep(`log${cp(0x2061)}2${times}x`);
+    expect(scanHiddenText(`hello${cp(0x2061)}world`).totalRuns).toBe(1);
     // A chain that fails anywhere is flagged at every operator.
     expect(scanHiddenText(`say${times}hel${times}lo`).totalRuns).toBe(2);
     expect(stripHiddenText(`say${times}hel${times}lo`)).toBe('sayhello');
