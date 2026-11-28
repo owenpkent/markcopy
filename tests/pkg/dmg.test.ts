@@ -10,6 +10,8 @@ import {
   buildSuperBlob,
   buildDmg,
   buildEncryptedDmg,
+  buildEncryptedV1,
+  buildEncryptedV2,
   buildMish,
   type DmgSpec,
 } from './dmgFixture';
@@ -216,6 +218,64 @@ describe('readDmg: disk image', () => {
       expect(rowsOf(info, 'Disk image')['Stored size']).toContain('4,096 bytes');
       expect(section(info, 'Partitions')).toBeUndefined();
     }
+  });
+});
+
+describe('readDmg: encryption labels', () => {
+  const disk = async (bytes: Uint8Array) => rowsOf(await read(bytes), 'Disk image');
+
+  it('labels a version 2 image with one password slot', async () => {
+    const rows = await disk(buildEncryptedV2());
+    expect(rows['Encrypted']).toBe('Yes');
+    expect(rows['Encryption']).toBe('AES-128');
+    expect(rows['Format version']).toBe('2');
+    expect(rows['Block size']).toContain('512 bytes');
+    expect(rows['Key slot 1']).toBe('Password (PBKDF2, 250,000 iterations)');
+    expect(rows['Key slot 2']).toBeUndefined();
+  });
+
+  it('lists a password slot and public-key slots, and AES-256', async () => {
+    const rows = await disk(
+      buildEncryptedV2({
+        keyBits: 256,
+        slots: [{ type: 1, iterations: 1000 }, { type: 2 }, { type: 2 }],
+      }),
+    );
+    expect(rows['Encryption']).toBe('AES-256');
+    expect(rows['Key slot 1']).toBe('Password (PBKDF2, 1,000 iterations)');
+    expect(rows['Key slot 2']).toBe('Public key');
+    expect(rows['Key slot 3']).toBe('Public key');
+  });
+
+  it('says not determined for an unknown cipher and a header cut short', async () => {
+    const odd = await disk(buildEncryptedV2({ algorithm: 7 }));
+    expect(odd['Encryption']).toBe('not determined');
+    const cut = await disk(
+      buildEncryptedV2({ slots: [{ type: 1 }, { type: 2 }], length: 0x4c + 20 }),
+    );
+    expect(cut['Encrypted']).toBe('Yes');
+    expect(cut['Key slot 1']).toContain('not determined');
+    const tiny = await disk(buildEncryptedV2({ length: 20 }));
+    expect(tiny['Encryption']).toBe('not determined');
+    expect(tiny['Encrypted']).toBe('Yes');
+  });
+
+  it('caps the key slots it lists', async () => {
+    const slots = Array.from({ length: 40 }, () => ({ type: 2 }));
+    const rows = await disk(buildEncryptedV2({ slots: slots.slice(0, 16), declaredCount: 40 }));
+    expect(rows['Key slot 16']).toBe('Public key');
+    expect(rows['Key slot 17']).toBeUndefined();
+    expect(rows['More key slots']).toBe('24 not shown');
+    const huge = await disk(buildEncryptedV2({ slots: [], declaredCount: 0xffffffff }));
+    expect(huge['Key slot 17']).toBeUndefined();
+    expect(huge['More key slots']).toContain('not shown');
+  });
+
+  it('labels a version 1 image from its trailer', async () => {
+    const rows = await disk(buildEncryptedV1({ keyBits: 256, iterations: 1000 }));
+    expect(rows['Encryption']).toBe('AES-256');
+    expect(rows['Format version']).toBe('1');
+    expect(rows['Key slot 1']).toBe('Password (PBKDF2, 1,000 iterations)');
   });
 });
 

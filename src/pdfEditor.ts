@@ -6,6 +6,7 @@ import { openExternalLink } from './externalLink';
 import { parsePdfMessage } from './messages/pdf';
 import { MAX_PDF_BYTES, readDocument } from './documentFile';
 import { MAX_COMMENTS_BYTES, parseComments, parseCommentsLenient } from './pdfComments';
+import { readPdfEncryption } from './pdfEncryption';
 import { findPosition, savePosition } from './pdfPosition';
 import { missing, replaceSidecar } from './sidecarFile';
 
@@ -73,6 +74,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             type: 'load',
             data: Buffer.from(bytes).toString('base64'),
             comments: await readComments(commentsUri),
+            // What the trailer declares, as two plain sentences (or absent). Label only.
+            encryption: readPdfEncryption(bytes),
             // Present on the PDF preview only (the LaTeX preview keeps the
             // reader's place across recompiles itself). Its presence turns on
             // position reports; the value is where to resume, or null.

@@ -1,0 +1,16 @@
+# Tokens for the dmg-encryption target (fuzz/targets/dmg-encryption.fuzz.ts):
+# the version 2 header and the version 1 trailer, as big-endian fields.
+
+kw1="encrcdsa"
+kw2="cdsaencr"
+kw3="\x00\x00\x00\x02"
+kw4="\x00\x00\x00\x01"
+kw5="\x80\x00\x00\x01"
+kw6="\x00\x00\x00\x80"
+kw7="\x00\x00\x00\xc0"
+kw8="\x00\x00\x01\x00"
+kw9="\x00\x00\x00g"
+kw10="\x00\x00\x02\x00"
+kw11="\x00\x00\x10\x00"
+kw12="\xff\xff\xff\xff"
+kw13="\x00\x00\x00\x10"

@@ -10,6 +10,7 @@ import { readApk } from './androidApk';
 import { isJarManifestName } from './ascii';
 import { readJar } from './jar';
 import { tableSection, type PackageInfo } from './model';
+import { readOdf } from './odf';
 import { readNupkg } from './nupkg';
 import { readVsix } from './vsix';
 import { readWheel } from './wheel';
@@ -56,6 +57,10 @@ async function flavour(zip: ZipArchive, fileName: string): Promise<ZipFlavour> {
   if (zip.exactEntries.some((e) => isJarManifestName(e.name))) {
     return readJar(zip);
   }
+  const odf = await readOdf(zip);
+  if (odf) {
+    return odf;
+  }
   return {
     format: 'Zip archive',
     summary: zip.complete
@@ -81,12 +86,16 @@ export async function readZipPackage(reader: RangeReader, fileName: string): Pro
   }
   // Only a label: MarkCopy never asks for a password or decrypts an entry.
   const encryption = summariseEncryption(zip.entries, zip.complete);
+  const fileRows: [string, string][] = [
+    ...(encryption === undefined ? [] : [['Encryption', encryption] as [string, string]]),
+    ...(kind.fileRows ?? []),
+  ];
   return {
     format: kind.format,
     title: kind.title,
     summary: kind.summary,
     sections: [...kind.before, ...contents(zip), ...kind.after],
-    fileRows: encryption === undefined ? undefined : [['Encryption', encryption]],
+    fileRows: fileRows.length === 0 ? undefined : fileRows,
     warnings,
   };
 }

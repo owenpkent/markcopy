@@ -8,7 +8,7 @@
 // before use, every loop has a cap, and a damaged load command ends the walk
 // with a warning instead of a failed page.
 import { printable } from '../binary/text';
-import { formatBytes } from '../binary/html';
+import { formatBytes, formatBytesShort } from '../binary/html';
 import { PackageError, propertySection, tableSection, type InfoSection } from './model';
 import type { PackageInfo } from './model';
 import type { RangeReader } from '../binary/reader';
@@ -251,7 +251,8 @@ interface Thin {
   /** The slice's size, which a declared signature range must lie inside. */
   sliceSize: number;
   codeSignature?: { offset: number; size: number };
-  encrypted?: boolean;
+  /** The slice's LC_ENCRYPTION_INFO fields, as the file declares them. */
+  encryption?: { cryptoff: number; cryptsize: number; cryptid: number };
   /** False when a cap, a damaged command or the end of the file stopped the walk early. */
   complete: boolean;
   dependencies: Dependency[];
@@ -548,7 +549,11 @@ async function readThin(slice: Slice): Promise<Thin> {
         break;
       case LC_ENCRYPTION_INFO:
       case LC_ENCRYPTION_INFO_64:
-        out.encrypted ??= c.getUint32(16, le) !== 0;
+        out.encryption ??= {
+          cryptoff: c.getUint32(8, le),
+          cryptsize: c.getUint32(12, le),
+          cryptid: c.getUint32(16, le),
+        };
         break;
       case LC_BUILD_VERSION: {
         const platform = c.getUint32(8, le);
@@ -687,6 +692,20 @@ function perPlatform(t: Thin, pick: (b: Build) => string | undefined): string | 
   return parts.length === 0 ? undefined : parts.join(', ');
 }
 
+/**
+ * The declared state of LC_ENCRYPTION_INFO(_64): what the fields say, nothing
+ * about where the file came from. Per Apple's loader, cryptid 1 is FairPlay.
+ */
+function encryptionLabel(e: { cryptoff: number; cryptsize: number; cryptid: number }): string {
+  if (e.cryptid === 0) {
+    return 'No (cryptid 0)';
+  }
+  const where = `${formatBytesShort(e.cryptsize)} from offset 0x${e.cryptoff.toString(16)}`;
+  return e.cryptid === 1
+    ? `Yes (FairPlay, cryptid 1, ${where})`
+    : `Yes (cryptid ${e.cryptid}, ${where})`;
+}
+
 const UNKNOWN = 'Unknown (the load commands were not all read)';
 
 type SignatureState = 'none' | 'unknown' | 'present' | 'empty' | 'outside';
@@ -773,13 +792,11 @@ function sectionsOf(t: Thin, note?: string): InfoSection[] {
         ],
         [
           'Encrypted',
-          t.encrypted === undefined
+          t.encryption === undefined
             ? t.complete
               ? undefined
               : UNKNOWN
-            : t.encrypted
-              ? 'Yes'
-              : 'No',
+            : encryptionLabel(t.encryption),
         ],
       ],
       note,

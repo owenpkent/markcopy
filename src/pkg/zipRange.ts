@@ -115,6 +115,8 @@ export interface ZipFlavour {
   before: InfoSection[];
   /** Sections after Contents, such as the signature. */
   after: InfoSection[];
+  /** Extra rows for the File section, such as how an OpenDocument file's parts are encrypted. */
+  fileRows?: [string, string][];
   warnings: string[];
 }
 
