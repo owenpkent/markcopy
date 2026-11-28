@@ -22,6 +22,7 @@
 //     key bits at 0x64, KDF iteration count u64 at 0x2C).
 import { formatBytes } from '../binary/html';
 import type { RangeReader } from '../binary/reader';
+import { NOT_DETERMINED } from './labels';
 
 /** The key items sit within the first 64 KiB of the file. */
 const MAX_HEADER_BYTES = 0x10000;
@@ -32,7 +33,6 @@ const V1_HEADER = 0x4e8;
 const V1_TRAILER = 20;
 const ALG_AES = 0x80000001;
 const ALG_PBKDF2 = 0x67;
-const NOT_DETERMINED = 'not determined';
 
 export interface DmgEncryption {
   version: 1 | 2;

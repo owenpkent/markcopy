@@ -2,10 +2,12 @@ import * as vscode from 'vscode';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { applyMarkcopySetting } from './settingsScope';
 import { getNonce } from './previewShell';
+import { openExternalLink } from './externalLink';
 import { parsePdfMessage } from './messages/pdf';
 import { MAX_PDF_BYTES, readDocument } from './documentFile';
 import { MAX_COMMENTS_BYTES, parseComments, parseCommentsLenient } from './pdfComments';
 import { readPdfEncryption } from './pdfEncryption';
+import { findPosition, savePosition } from './pdfPosition';
 import { missing, replaceSidecar } from './sidecarFile';
 
 // A read-only custom editor that renders PDF files with pdf.js in a webview,
@@ -49,6 +51,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // stays untouched (this is a read-only editor).
     const commentsUri = document.uri.with({ path: document.uri.path + '.mccomments.json' });
     let loading = false;
+    // Keyed by the document's URI, so a moved file starts over and nothing about
+    // the file's contents is read to remember where the reader was.
+    const positionKey = document.uri.toString();
 
     webview.onDidReceiveMessage(async (raw) => {
       const msg = parsePdfMessage(raw);
@@ -71,14 +76,27 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             comments: await readComments(commentsUri),
             // What the trailer declares, as two plain sentences (or absent). Label only.
             encryption: readPdfEncryption(bytes),
+            // Present on the PDF preview only (the LaTeX preview keeps the
+            // reader's place across recompiles itself). Its presence turns on
+            // position reports; the value is where to resume, or null.
+            resume: findPosition(this.context.globalState, positionKey) ?? null,
           });
         } catch (err) {
           void webview.postMessage({ type: 'loadError', message: String(err) });
         } finally {
           loading = false;
         }
+      } else if (msg.type === 'savePosition') {
+        // Validated by parsePdfMessage; the store checks it again. The webview
+        // clamps the page to the document it has open, which the host cannot know.
+        const position = { page: msg.page, y: msg.y, zoom: msg.zoom, fitWidth: msg.fitWidth };
+        await savePosition(this.context.globalState, positionKey, position);
       } else if (msg.type === 'openExternal') {
         await openInDefaultApp(document.uri);
+      } else if (msg.type === 'openLink') {
+        // Validated by parsePdfMessage (http, https, mailto, length cap) and
+        // checked again by openExternalLink before it reaches the OS.
+        openExternalLink(msg.url);
       } else if (msg.type === 'revealInOS') {
         revealInOs(document.uri);
       } else if (msg.type === 'saveComments') {

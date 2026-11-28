@@ -799,6 +799,33 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
   background: transparent;
 }
 
+/* Link boxes from the PDF's link annotations, placed in percent of the page so
+   they hold at every zoom. Inert in pointer mode so the text underneath can be
+   selected; a click there is still followed (see pdf.ts). */
+.mc-link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.mc-link {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  pointer-events: none;
+}
+body.mc-mode-hand .mc-link {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.mc-link:hover {
+  background: color-mix(in srgb, var(--mc-accent, #0969da) 14%, transparent);
+}
+.mc-link:focus-visible {
+  outline: 2px solid var(--mc-accent, #0969da);
+  outline-offset: 1px;
+}
+
 /* Comment pins and their annotation overlay. The overlay ignores pointer events
    so it never blocks the page; only the pins themselves are interactive. */
 .mc-annot-layer {
@@ -976,6 +1003,131 @@ body[data-mc-theme='green']:not(.mc-pages-normal) .mc-page {
 #mc-page-input::-webkit-outer-spin-button,
 #mc-page-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
+}
+
+/* Auto-scroll puck (src/webview/autoScroll.ts, shared by the PDF viewer and the
+   Markdown preview): a play/pause button with small - and + under it, fixed above
+   the floating toolbar. Sized as pointer targets (the play
+   button 64px, the small ones 44px at Medium), scaled by the size choice via
+   data-size so no inline style is needed. It sits below menus and notes, so it
+   never covers or takes clicks from an open one. Colours are the toolbar's own,
+   so it reads in light, dark and green.
+
+   In a narrow pane the buttons give way before the panel runs off the edge: each
+   size is capped by the width the pane has (100vw less the right inset, a
+   scrollbar's width and the panel's padding and gaps), never below 44px, and the
+   row wraps if even 44px buttons cannot sit side by side. */
+#mc-autoscroll {
+  --mc-as-scale: 1;
+  --mc-as-room: calc(100vw - 56px - 12px * var(--mc-as-scale));
+  --mc-as-small: min(
+    calc(44px * var(--mc-as-scale)),
+    max(44px, calc((var(--mc-as-room) - 6px) / 2))
+  );
+  --mc-as-play: min(calc(64px * var(--mc-as-scale)), max(44px, var(--mc-as-room)));
+  box-sizing: border-box;
+  max-width: calc(100vw - 36px);
+  position: fixed;
+  right: 18px;
+  bottom: 62px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: calc(6px * var(--mc-as-scale));
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, #24292f);
+  color: var(--vscode-editorWidget-foreground, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+#mc-autoscroll[hidden] {
+  display: none;
+}
+#mc-autoscroll[data-size='0'] {
+  --mc-as-scale: 0.75;
+}
+#mc-autoscroll[data-size='2'] {
+  --mc-as-scale: 1.5;
+}
+#mc-autoscroll[data-size='3'] {
+  --mc-as-scale: 2;
+}
+#mc-autoscroll .mc-as-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+#mc-autoscroll .mc-as-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.2));
+  border-radius: 8px;
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
+  color: inherit;
+  cursor: pointer;
+}
+#mc-autoscroll .mc-as-play {
+  width: var(--mc-as-play);
+  height: var(--mc-as-play);
+  align-self: center;
+  border-radius: 50%;
+  background: var(--vscode-button-background, #0969da);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+#mc-autoscroll .mc-as-small {
+  width: var(--mc-as-small);
+  height: var(--mc-as-small);
+}
+#mc-autoscroll .mc-as-play svg {
+  width: calc(var(--mc-as-play) * 0.5625);
+  height: calc(var(--mc-as-play) * 0.5625);
+}
+#mc-autoscroll .mc-as-small svg {
+  width: calc(var(--mc-as-small) * 0.59);
+  height: calc(var(--mc-as-small) * 0.59);
+}
+#mc-autoscroll .mc-as-btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+#mc-autoscroll .mc-as-btn:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+}
+#mc-autoscroll .mc-as-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The live region is for screen readers only. */
+#mc-autoscroll .mc-as-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* A live region that is always in the page but never seen. */
+.mc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+#mc-toolbar #mc-autoscroll-toggle svg {
+  display: block;
+}
+/* The Markdown preview has no toolbar under the puck, so it sits in the corner. */
+body[data-mc-kind='markdown'] #mc-autoscroll {
+  bottom: 18px;
 }
 
 /* Dark-mode page inversion is applied to the canvas bitmap in pdf.ts (see
@@ -2733,6 +2885,28 @@ body[data-mc-kind='package'] .markdown-body {
   background: none;
 }
 
+/* A file with the structure of more than one format: seen before anything else. */
+.mc-info-alert {
+  margin: 12px 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--mc-border);
+  border-left: 4px solid var(--mc-accent);
+  border-radius: 6px;
+  background: var(--mc-pre-bg);
+  color: var(--mc-fg);
+}
+
+.mc-info-alert p {
+  margin: 0 0 4px;
+}
+
+.mc-info-alert ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--mc-quote-fg);
+}
+
 .mc-exe-note {
   margin: 6px 2px 0;
   font-size: 12px;
@@ -2756,6 +2930,12 @@ body[data-mc-kind='package'] .markdown-body {
 }
 .mc-modepill[hidden] {
   display: none;
+}
+.mc-modepill-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 2px;
+  background: var(--vscode-editorWidget-border, var(--mc-border));
 }
 .mc-modepill button {
   display: inline-flex;

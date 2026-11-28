@@ -98,6 +98,12 @@ export interface ZipArchive {
   readEntryHead(entry: ZipEntry, maxBytes: number): Promise<Uint8Array>;
   /** The APK Signing Block's pair IDs, or undefined when the archive has none. */
   signingBlockIds(): Promise<number[] | undefined>;
+  /**
+   * The value of the first Signing Block pair with this ID, or undefined when
+   * there is none or its value is longer than `maxBytes` (the caller knows from
+   * signingBlockIds whether the pair exists, so it can tell the two apart).
+   */
+  signingBlockValue(id: number, maxBytes: number): Promise<Uint8Array | undefined>;
 }
 
 /** What one kind of zip-based package contributes to the page. */
@@ -567,6 +573,45 @@ export async function openZip(reader: RangeReader): Promise<ZipArchive> {
       }
       return ids;
     },
+    async signingBlockValue(id, maxBytes) {
+      // The same walk as signingBlockIds, stopping at the first pair with this ID.
+      const end = where.directoryOffset;
+      if (end < 24) {
+        return undefined;
+      }
+      const trailer = await reader.view(end - 24, 24);
+      const magic = String.fromCharCode(...new Uint8Array(trailer.buffer, 8, 16));
+      const blockSize = u64(trailer, 0);
+      if (
+        magic !== SIGNING_MAGIC ||
+        !(blockSize >= 24 && blockSize <= MAX_SIGNING_BLOCK) ||
+        blockSize + 8 > end
+      ) {
+        return undefined;
+      }
+      let at = end - blockSize - 8 + 8;
+      const pairsEnd = end - 24;
+      for (let seen = 0; at + 12 <= pairsEnd && seen < MAX_SIGNING_PAIRS; seen++) {
+        const pair = await reader.view(at, 12);
+        const length = u64(pair, 0);
+        if (!(length >= 4) || at + 8 + length > pairsEnd) {
+          return undefined;
+        }
+        if (pair.getUint32(8, true) === id) {
+          const size = length - 4;
+          if (size > maxBytes) {
+            return undefined;
+          }
+          if (size === 0) {
+            return new Uint8Array(0);
+          }
+          const value = await reader.view(at + 12, size);
+          return new Uint8Array(value.buffer, value.byteOffset, size);
+        }
+        at += 8 + length;
+      }
+      return undefined;
+    },
   };
 }
 
@@ -924,8 +969,13 @@ export async function readV1Signatures(
 }
 
 /** The section for v1 signatures that were found: the first signer, and a count and names when there are several. */
-export function v1Section(scheme: string, v1: V1Signatures): PropertySection {
-  const section = signatureSection(scheme, v1.signed[0]?.signer);
+export function v1Section(
+  scheme: string,
+  v1: V1Signatures,
+  /** A signer to show in place of the first v1 one, such as an APK's v2 or v3 signer. */
+  signer: Signer | undefined = v1.signed[0]?.signer,
+): PropertySection {
+  const section = signatureSection(scheme, signer);
   if (v1.signed.length > 1) {
     const names = v1.signed
       .slice(0, MAX_V1_NAMES)

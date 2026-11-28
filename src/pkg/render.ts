@@ -13,7 +13,7 @@ import {
   type Row,
 } from '../binary/html';
 import { printable } from '../binary/text';
-import type { InfoSection, PackageInfo } from './model';
+import type { AlsoReading, InfoSection, PackageInfo } from './model';
 
 export interface RenderOptions {
   fileName: string;
@@ -52,6 +52,82 @@ const isWide = (part: InfoSection): boolean =>
 
 const section = (part: InfoSection): string => block(part.heading, body(part), isWide(part));
 
+const NUMBERS = ['two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
+
+/** The sentence at the top of a page whose file has more than one structure. */
+export function alsoNotice(also: AlsoReading): string {
+  const names = [also.primary, ...also.matches.map((m) => m.format)];
+  const count = NUMBERS[names.length - 2] ?? String(names.length);
+  const list =
+    names.length === 2
+      ? names.join(' and ')
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  let tail = '';
+  if (also.matches.length > 1) {
+    tail = also.read
+      ? ` Only one other format, ${also.read}, is read below.`
+      : ' None of the other formats is read.';
+  } else if (also.info) {
+    tail = ' Both readings are shown below.';
+  }
+  return `This file has the structure of ${count} formats: ${list}.${tail}`;
+}
+
+/**
+ * The notice at the top of a page whose file has more than one structure: the
+ * formats, then where each other structure sits. A statement of structure,
+ * with no judgement about why the file is built that way.
+ */
+export function renderAlsoAlert(also: AlsoReading): string {
+  const facts = also.matches
+    .map((m) => `<li>${escapeHtml(m.format)}: ${escapeHtml(m.fact)}.</li>`)
+    .join('');
+  return (
+    '<div class="mc-info-alert" role="note">' +
+    `<p><strong>${escapeHtml(alsoNotice(also))}</strong></p><ul>${facts}</ul></div>`
+  );
+}
+
+/** The second reading, below the first: its own heading, then its sections. */
+export function renderAlsoReading(also: AlsoReading): string {
+  if (!also.read) {
+    return '';
+  }
+  const heading = `Also read as: ${also.read}`;
+  if (!also.info) {
+    return block(
+      heading,
+      note(`It could not be read as ${also.read}: ${also.error ?? 'unknown error'}`),
+      true,
+    );
+  }
+  const info = also.info;
+  const lines = [
+    info.title
+      ? `<p><strong>${escapeHtml(info.title)}</strong><br>${escapeHtml(info.format)}</p>`
+      : `<p>${escapeHtml(info.format)}</p>`,
+  ];
+  if (info.summary) {
+    lines.push(`<p>${escapeHtml(info.summary)}</p>`);
+  }
+  for (const warning of info.warnings) {
+    lines.push(note(warning));
+  }
+  const parts = [block(heading, lines.join(''), true)];
+  // The reading's own file facts, such as a zip's encryption. The host rows
+  // (size, hash) belong to the whole file and are on the first reading.
+  if (info.fileRows?.length) {
+    parts.push(block('File', properties(info.fileRows)));
+  }
+  for (const part of [
+    ...info.sections.filter((p) => !isWide(p)),
+    ...info.sections.filter(isWide),
+  ]) {
+    parts.push(section(part));
+  }
+  return parts.join('');
+}
+
 export function renderPackageHtml(info: PackageInfo, options: RenderOptions): string {
   const lines = [
     info.title
@@ -62,6 +138,9 @@ export function renderPackageHtml(info: PackageInfo, options: RenderOptions): st
     lines.push(`<p>${escapeHtml(info.summary)}</p>`);
   }
   const parts: string[] = [pageHead(printable(options.fileName), lines)];
+  if (info.also) {
+    parts.push(renderAlsoAlert(info.also));
+  }
   for (const warning of info.warnings) {
     parts.push(note(warning));
   }
@@ -89,6 +168,9 @@ export function renderPackageHtml(info: PackageInfo, options: RenderOptions): st
   // after one (a signature under a file list) would sit alone in half a page.
   for (const part of [...rest.filter((p) => !isWide(p)), ...rest.filter(isWide)]) {
     parts.push(section(part));
+  }
+  if (info.also) {
+    parts.push(renderAlsoReading(info.also));
   }
   // .mc-exe carries the layout the executable page already has: wrapping for
   // long values and the small print. .mc-pkg is there for anything this page

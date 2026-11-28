@@ -1,0 +1,24 @@
+# Tokens for the cpio target (fuzz/targets/cpio.fuzz.ts): cpio headers and the compressed streams around them.
+
+# magics
+kw1="070701"
+kw2="070702"
+kw3="070707"
+kw4="TRAILER!!!"
+kw5="\x1f\x8b\x08"
+kw6="(\xb5/\xfd"
+kw7="P*M\x18"
+kw8="\xfd7zXZ\x00"
+kw9="YZ"
+
+# header fields as hexadecimal text, member names
+kw10="00000000"
+kw11="000081A4"
+kw12="000041ED"
+kw13="00000001"
+kw14="0000000B"
+kw15="FFFFFFFF"
+kw16="00001000"
+kw17="./"
+kw18="/usr/bin/"
+kw19="\x00"

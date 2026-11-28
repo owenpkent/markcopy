@@ -211,8 +211,10 @@ describe('ImageReviewSession', () => {
     await session.enable();
     await session.add({ type: 'reviewAdd', text: 'Dust here', point: [0.25, 0.5] });
     const yaml = files.get(SIDECAR)!;
+    // The id is random hex, and one that reads as a number (all digits, or
+    // digits around an "e") is written quoted, so the quotes are optional here.
     expect(yaml).toMatch(
-      /^version: 1\nid: [0-9a-f]{12}\nsource: photo\.png\nmedia: image\nnext_note_id: 2\n/,
+      /^version: 1\nid: '?[0-9a-f]{12}'?\nsource: photo\.png\nmedia: image\nnext_note_id: 2\n/,
     );
     expect(yaml).not.toContain('fps');
     expect(yaml).toContain('  text: Dust here\n');

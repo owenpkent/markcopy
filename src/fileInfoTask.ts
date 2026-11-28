@@ -9,7 +9,7 @@ import { open } from 'node:fs/promises';
 import { digestBytes, digestHandle, fileSource, type Digest } from './binary/file';
 import { bytesSource, ReadError } from './binary/reader';
 import { readPe, type PeInfo } from './pe';
-import { readPackage, type PackageInfo } from './pkg';
+import { readAppended, readPackage, type PackageInfo } from './pkg';
 
 export interface FileInfoRequest {
   kind: 'exe' | 'package';
@@ -72,6 +72,21 @@ async function read(
   source: Parameters<typeof readPe>[0],
 ): Promise<Found> {
   return request.kind === 'exe'
-    ? { ok: true, kind: 'exe', info: await readPe(source) }
+    ? { ok: true, kind: 'exe', info: await readExe(source, request.fileName) }
     : { ok: true, kind: 'package', info: await readPackage(source, request.fileName) };
+}
+
+// The executable's own reading, then what its appended data reads as. The
+// second step never fails the first: a file that cannot be told is left as the
+// executable reading alone.
+async function readExe(source: Parameters<typeof readPe>[0], fileName: string): Promise<PeInfo> {
+  const info = await readPe(source);
+  if (info.overlay) {
+    try {
+      info.appended = await readAppended(source, fileName, info.overlay.offset);
+    } catch {
+      // Not read.
+    }
+  }
+  return info;
 }
