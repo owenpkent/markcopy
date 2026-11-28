@@ -11,6 +11,8 @@ How MarkCopy gets verified, from the automated suites to the manual checklist th
 | Integration (VS Code)  | `npm run test:integration`, CI                       | Activation, command registration, configuration defaults, the preview panel opening, and which editor claims a `.xlsx`/`.xlsm`/`.pdf`/`.stl`/`.3mf`/`.glb`/`.step`/`.stp`/`.mov`/`.mp4`, inside a real downloaded VS Code.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Manual (this document) | Before every release, by a human                     | What none of the above can see: rendering fidelity, theme legibility, the PDF viewer's canvas, the STL viewer's WebGL output and orbit feel, whether a video actually plays and yields a frame, and how the clipboard flavors actually paste into Word or Gmail.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
+The integration command also runs `test-integration/restricted/launch.mjs`, a second run in Restricted Mode. `@vscode/test-electron` always passes `--disable-workspace-trust`, so that script starts VS Code itself without it, in a fresh copy of `test-integration/restricted/fixture/` with a fresh user-data directory (trust enabled, `security.workspace.trust.startupPrompt` set to `never`). Its suites end in `.suite.ts` so the main run does not pick them up. `npm run test:integration:restricted` runs it alone. The LaTeX state is read through `markcopy.tex.status`, a read-only command that is registered but not contributed. Its counterpart is the `trusted-control` run in `.vscode-test.mjs`, which opens `test-integration/trusted/fixture/` in a trusted workspace. Both fixtures set the restricted, workspace-settable `markcopy.tex.rootFile` to the same value: the trusted control checks that it applies, and the Restricted Mode run checks that it is filtered out.
+
 The manual layer is smaller than it was. What keeps a row in it is needing a real browser or a real human eye: canvas rasterisation (PNG copy, the PDF viewer), a real media pipeline (playback and the frame grab, which jsdom cannot reach at all), text-layer selection, whether a palette is legible rather than merely applied, and the paste targets outside VS Code. The automated webview coverage is limited to the menu, clipboard, sheet-grid, and scroll-sync surfaces listed above.
 
 ### Security hardening checks (2026-11-24)
@@ -45,7 +47,7 @@ The `pe`, `pkg` and `file-source` seeds are generated, not collected: `node scri
 
 The binary targets share their checks (`fuzz/targets/binaryOracle.ts`). Per input: the documented error or a page; at most 3 s; at most 256 MB of growth in the JavaScript heap and array buffers together (`heapUsed` alone does not count the `Uint8Array`s a reader or decompressor allocates, and was all the `pkg` target measured before); a page of at most 4 MB; only the tags and attributes the renderers write; and no `[native code]`, `[object `, `undefined`, `NaN` or `Infinity` in the page unless the file holds that text. The last check found a file's text reaching `Object.prototype` through lookup tables: an executable requesting `level="constructor"` showed `function Object() { [native code] }`. Tables keyed by file text are now read through `own()` (`src/binary/own.ts`).
 
-`pkg-<format>` (`elf`, `rpm`, `deb`, `msi`, `xar`, `zip`, `alpine`, `dmg`) runs the `pkg` target with `FUZZ_PKG_FORMAT` set, the way `image-<format>` works: every input is shaped as that format, and the run is seeded from the `pkg` seeds whose names start with `<format>-`. The catch-all `pkg` stays, because routing between readers is code too.
+`pkg-<format>` (`elf`, `rpm`, `deb`, `msi`, `xar`, `zip`, `alpine`, `macho`, `dmg`) runs the `pkg` target with `FUZZ_PKG_FORMAT` set, the way `image-<format>` works: every input is shaped as that format, and the run is seeded from the `pkg` seeds whose names start with `<format>-`. The catch-all `pkg` stays, because routing between readers is code too.
 
 The `file-source` target (`fuzz/targets/file-source.fuzz.ts`) reads each input four ways and fails when they disagree: `runFileInfoTask` from memory and from the same bytes written to a real file (the path the preview's worker takes, through `fileSource` and the digest), through a `fileSource` whose reads come back in pieces as a network share's may, and from memory a second time. It was checked against a planted bug (a `readRange` that passed a short read through): the target reported it at once.
 
@@ -166,6 +168,19 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Edit a block so it gets shorter or longer, then immediately click the next block: its box opens on the right text (never a later block) once the preview updates, and committing it changes the right lines.
 - [ ] With the preview open beside a second Markdown file, commit an edit and at once retarget the side preview to the other file: the other file is not modified.
 
+### Auto-scroll
+
+- [ ] ★ In a long Markdown preview, press the auto-scroll button in the pill at the top right (after the lock and pencil): the button lights, the page glides down and the puck appears bottom-right. Right-click the page: the menu says Stop Auto-scroll. The button and the row are absent in a CSV, spreadsheet, Word, PowerPoint, executable and package preview.
+- [ ] ★ Pause, speed keys, the puck's Small to Extra large sizes and the held +/- behave as in the PDF checks (see PDF viewer, Auto-scroll). Check the puck and the pill button are legible in light, dark and green themes, and at a 760 px pane.
+- [ ] ★ With the preview and the Markdown source side by side, let it run and type in the source: the preview updates and keeps gliding from wherever the page is, with no premature "reached the end" announcement (the page is not put back to an earlier offset). Do it with a Mermaid diagram near the bottom, which briefly changes the page height: the browser may move the page while the diagram is replaced (a short page, or one that fits in a single viewport, can clamp to the top). Check that playback stays on and carries on from the position the layout left, not from an earlier offset.
+- [ ] Scroll with the wheel or drag the scrollbar while it runs: it carries on from where you put the page. With scroll sync on, the editor follows. While a preview plays, scrolling that document's own source does not move the preview (it leads). With two Markdown documents open side by side, scrolling the other document's source while one preview plays still moves its preview.
+- [ ] With auto-scroll off, a live edit with a Mermaid diagram or equation leaves the page where the browser puts it, as before.
+- [ ] A Markdown page with an image that never loads (a broken URL, or a lazy image in a closed disclosure) near the end: auto-scroll stops at the end within about 2 seconds.
+- [ ] In a document with a `<details><summary>`, Tab to the summary while it runs: Space opens and closes it and playback continues. Escape on a focused puck button returns focus to the toolbar button.
+- [ ] Let it reach the end: it stops with a toast and an announcement; start it again at the end: it goes up. Escape stops it; with the right-click menu open or a block editor open, Escape closes only that.
+- [ ] Open a block editor in edit mode while it runs: the page holds still, and carries on after the editor closes. Typing Space, + or - in the editor does not change the speed.
+- [ ] Hide and show the tab (do not close it): speed and size are kept for that preview. A PDF preview has its own, and a closed and reopened preview starts from the defaults.
+
 ### Where the preview opens
 
 - [ ] ★ In `sample.md`'s editor title bar, the **Show Preview** button (`$(open-preview)`, leftmost) swaps that same tab to the preview, full width, titled `sample.md` (not `Preview sample.md`). No new editor group, and no second tab left open on the file. **Reopen Editor With...** > **MarkCopy Markdown Preview** gets to the same place.
@@ -274,6 +289,7 @@ Open [sample.xlsx](../sample.xlsx) (repo root). It has three sheets (one hidden)
 Open [sample.docx](../sample.docx) (repo root), then a real document of your own from Word that has headings, nested lists, tables with merged cells, images, tracked changes, and links.
 
 - [ ] The document opens in the preview, not as binary or in a "cannot open" error. A `.docm` and an uppercase `.DOCX` do too.
+- [ ] A `.docx` saved with **Encrypt with Password** shows the password-protected notice with its method, never a password prompt. The same for a `.xlsx` and a `.pptx`.
 - [ ] The sample shows a title and headings at distinct sizes, a nested bullet list, a numbered list with a lettered sub-item, and a footnote with a back arrow at the end.
 - [ ] Tracked changes read as the final text: in the sample, "is approved" shows and "was drafted" does not. Turn tracking on in a real document, delete and insert some text, and check the same.
 - [ ] A table with a vertically merged cell and a spanning cell draws the merge, and the header row is marked. In a real document, a nested table renders inside its cell.
@@ -308,9 +324,10 @@ Measured so far, manually on Windows 11 on 2026-11-22 with a script over the par
 - [ ] The file's icon is above its name and matches the one Explorer shows, with a transparent background in every theme. `kernel32.dll` shows no icon and no gap. An old program with only small bitmap icons (`hh.exe`, `winhlp32.exe`) shows its icon at natural size, not blurred.
 - [ ] The Version table matches Explorer's Properties > Details for the same file: description, product, company, file and product versions, copyright, original file name.
 - [ ] The SHA-256 matches `Get-FileHash -Algorithm SHA256 <file>`. A file over 256 MB shows "Not computed" and still opens at once.
-- [ ] A signed file shows its signer, organization, issuer and validity dates matching `Get-AuthenticodeSignature <file>`, and the page says nothing is verified. A catalog-signed file (many Windows components) shows no embedded signature, which is expected.
+- [ ] A signed file shows its signer, organization, issuer and validity dates, public key size and SHA-1 thumbprint matching `Get-AuthenticodeSignature <file>` (`SignerCertificate`), and the page says nothing is verified. A catalog-signed file (many Windows components) shows no embedded signature, which is expected.
 - [ ] The File table is plausible: architecture ("Any CPU" for the .NET assembly), PE32 or PE32+, subsystem, build time (or "not recorded" for a reproducible build), minimum Windows version, entry point, appended data on an installer.
-- [ ] Permissions and protections shows the manifest's execution level and the loader mitigations (ASLR, DEP, Control Flow Guard) for a modern executable, and large address aware for the 32-bit one.
+- [ ] Permissions and protections shows the manifest's execution level and the loader mitigations (ASLR, DEP, Control Flow Guard with its count of CFG target-table entries) for a modern executable, the stack cookie, EH continuation and CET rows for a 64-bit one, SafeSEH for a 32-bit x86 one, and large address aware for that one. Compare `kernel32.dll` against `python -I -c "import pefile"` (`DIRECTORY_ENTRY_LOAD_CONFIG`) if in doubt.
+- [ ] A Visual C++ build (for example `notepad.exe`) shows a Build tools block with its linker and compiler versions and no checksum warning; a MinGW build shows real section names such as `.text` and `.debug_info` instead of `/4`; a program with no linker record shows no Build tools block.
 - [ ] Sections, Imports (loaded at start or on first use) and Exports are present; `kernel32.dll` lists its export count and only the first 100 names. `shell32.dll`, whose ordinals have gaps, shows 843 functions and says its ordinals run to 2,001.
 - [ ] No row, link or menu item launches the file. Right-click: there is **no Open in Default App**; **Reveal in file manager** works.
 - [ ] A text file renamed to `.exe` shows a notice in the panel, not a crash and not a blank page. So does a truncated copy of a real executable and a 16-bit or DOS executable.
@@ -327,8 +344,10 @@ Measured so far, manually on Windows 11 on 2026-11-23 with scripts over the read
 - Windows Installer: 7 real `.msi` files from 45 KB to 906 MB compared with Windows Installer's own database API (property count, product name, version, install scope, language and the row counts of eight tables). All matched, and each was read in under 25 ms.
 - Debian: a Debian `hello` package (xz control archive) and an Ubuntu one (zstd) compared with an independent extraction of the control file. RPM: a Fedora `hello` package compared with an independent header parse. Alpine: the `musl` package.
 - ELF: three real shared libraries (x86-64 and AArch64) and one statically linked Go executable compared with `file` and an independent header reader. No real kernel module or AppImage was checked.
+- ELF CET, BTI and PAC rows: six clang and lld shared libraries (x86-64, i386, AArch64) read by script, with the bits as expected. No independent reader (`llvm-readelf` is not installed), no GCC build and no executable was checked.
 - macOS installer: two real signed packages (one product archive, one flat component package), file lists and signer names compared with an independent read of the table of contents.
 - Disk image: one real image; sector count, partitions, checksum and signature location compared with an independent read of the trailer. No encrypted or multi-segment image was checked.
+- Encryption labels: zips made with 7-Zip `-mem=AES128`, `-mem=AES256` and `-mem=ZipCrypto` (and an AES-256 copy named .jar) compared with `7z l -slt`; the labels matched its Method column. A .xlsx and a .docx encrypted with msoffcrypto-tool (Agile, AES-256, SHA512) gave the password-protected notice with that method. Not checked: Standard (2007) or Extensible encryption from a real Office, PKWARE strong encryption, a mixed zip from a real tool, a real `.pptx`, and the notice on screen in the Extension Development Host.
 - Zip-based: a real VS Code extension (entry count and totals against Python's `zipfile`), a JRE's `jrt-fs.jar`, the `six` wheel, and one real Android debug build (package, versions, SDK levels, permissions and components against `aapt2`). No real NuGet package was checked.
 
 Memory audit, 2026-11-23: an adversarial pass over the readers, with generated files run one at a time in a separate process under a 4 GB heap limit, found six that aborted the process and several that held it for seconds. The same files were run again after the fixes, each in its own process under a 1 GB limit:
@@ -401,11 +420,13 @@ Windows Installer (`.msi`):
 macOS (`.dmg`, `.pkg`):
 
 - [ ] A disk image shows its size, compression, checksum type and partitions, says whether it is encrypted and signed, and does not show the app's name or version, which it cannot read.
+- [ ] A zip made with a password (7-Zip AES-256, and ZipCrypto) shows an **Encryption** row in the File section naming the method and how many entries use it, and never asks for a password.
 - [ ] An installer package shows its title, identifiers, versions, install location, components, which components run scripts, the file list and the signing certificate names.
 
 Linux binaries (`.so`, `*.so.*`, `.elf`, `.ko`, `.AppImage`):
 
 - [ ] Type, architecture, SONAME, build ID, interpreter, stripped or not, protections and needed libraries match `readelf` or `file` for the same file.
+- [ ] On an x86-64 or AArch64 library, the CET (IBT, SHSTK) or BTI and PAC rows match `readelf -n` (the `x86 feature` or `aarch64 feature` line of the GNU property note); a file with no such note shows No.
 - [ ] A kernel module shows its module information; an AppImage shows its payload size and is not run.
 
 Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):
@@ -413,7 +434,7 @@ Zip-based (`.jar`, `.vsix`, `.whl`, `.nupkg`, `.apk`):
 - [ ] A Java archive shows its manifest, Maven coordinates when there are some, the class count and Java version; a signed one shows its signer.
 - [ ] A VS Code extension shows its identity, engine, activation events and contribution counts.
 - [ ] A wheel shows its metadata, requirements and entry points; a NuGet package its dependencies by framework and whether it carries build or install scripts.
-- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed only with scheme v2 or later shows the scheme without a signer. Its label and icon are not shown.
+- [ ] An Android package shows its package name, versions, SDK levels, permissions, components and how many are exported, native ABIs and the signing schemes present. One signed with scheme v2 or later shows the signer, key size and thumbprint, which match `apksigner verify --print-certs`. Its label and icon are not shown.
 - [ ] A `.zip` renamed to `.jar` with none of these inside shows its contents only.
 
 ## CSV / TSV grid
@@ -512,6 +533,51 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] ★ The fit-width button (rightmost, a page with a double-headed arrow) sizes the page to the pane (a percentage between the presets is fine) and stays lit; dragging the pane's edge re-fits it. Its tooltip and screen-reader name both read "Fit page width", and the icon is centred in its button and follows the toolbar's foreground colour in every theme.
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
+
+### Auto-scroll
+
+(The Markdown preview has the same puck; see Auto-scroll under Markdown preview.)
+
+- [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
+- [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
+- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up, and the Play/Pause name says which way it is scrolling.
+- [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
+- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar. At Extra large, split the editor so the pane is about 760 px, then 300 px and 240 px wide: all three small buttons stay fully on screen (they shrink toward 44 px as the pane narrows).
+- [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.
+- [ ] Let it reach the end: it stops with a toast, and a screen reader says it stopped even though the controls have gone. Start it again at the end: it goes up. Scroll up to the top while it runs up: it stops.
+- [ ] Escape stops it; with the right-click menu open, Escape closes only the menu.
+- [ ] Tab reaches every puck button; Enter/Space steps with the keyboard; a screen reader announces pause, speed and size changes.
+- [ ] Stop it mid-document and reopen the PDF: the reading position is where it stopped (see Reading position). Hide and show the tab: speed and size are kept.
+- [ ] In the LaTeX preview it works the same, and a recompile does not break it.
+
+### Reading position
+
+- [ ] ★ Scroll a multi-page PDF to the middle of a page, close the tab, reopen it: the same page and spot are at the top of the view.
+- [ ] ★ Zoom to 200 percent first: it reopens at 200 percent. Turn on fit width: it reopens in fit width, re-fitted to the pane.
+- [ ] Restart VS Code with the PDF open: it comes back at the same place.
+- [ ] Scroll back to the very top at 100 percent and reopen: it opens at page 1, as for a PDF never opened.
+- [ ] Replace the PDF with a shorter one of the same name (so the saved page no longer exists) and reopen: it opens at page 1 and does not error.
+- [ ] Open a second, different PDF: it has its own position and does not inherit the first one's.
+- [ ] In the LaTeX preview, a recompile still keeps your place (this feature adds no storage for it).
+
+### Links
+
+Use a PDF that has a table of contents or cross-references and a web link (a LaTeX document built with `hyperref`, or a paper from arXiv).
+
+- [ ] ★ Click a contents entry or cross-reference: the view jumps to the target page (and to the spot on it when the link names one) and the page indicator follows.
+- [ ] ★ Click an external link: the default browser opens that address, and the viewer is unchanged. A `mailto:` link opens the mail client.
+- [ ] Hover a link in the Hand tool: the pointer becomes a hand and a tooltip shows the address.
+- [ ] ★ Zoom in and out several steps, and use fit width: the link boxes (hover to find them) still sit on the linked text on every page, including after scrolling away and back.
+- [ ] With dark or green pages, links still work and sit on the right text.
+- [ ] Switch to the Pointer tool: dragging across linked text selects it without following the link; a plain click on the link follows it.
+- [ ] Tab to a link and press Enter: it is followed.
+- [ ] After a pan with the Hand tool that starts or ends over a link, the link is not followed.
+- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action naming a local file) does nothing. A link to another PDF given as an `https` address, or a Launch action naming an `https` address, opens in the browser. Hovering an external link in the Hand tool shows its address.
+- [ ] A link that wraps over two lines does nothing when clicked in the blank gap between the lines.
+- [ ] With a screen reader, a table of contents reads as one named link per chapter, not "Go to destination" repeatedly.
+- [ ] Open a long PDF and click a first-page contents link to a late page before it finishes loading: no error, and the view jumps once the page appears.
+- [ ] A comment's Save or Delete button placed over a link does not also follow the link.
+- [ ] In the LaTeX preview, links in the compiled PDF behave the same.
 
 ### Tools, selection, and copy
 
@@ -1041,7 +1107,7 @@ Open [sample.tex](../sample.tex) (repo root). It cross-references a labelled equ
 
 - [ ] Close and reopen a preview with `markcopy.tex.compile` set to `ask`. The new preview waits for a deliberate compile again. Set `auto` in user settings and check that a new trusted preview compiles on open.
 - [ ] While a compile runs, switch `markcopy.tex.compile` to `off`. Check that the active run stops and that saves, the toolbar, and the Command Palette leave compilation disabled.
-- [ ] Open a disposable workspace in Restricted Mode. Documents preview, the LaTeX preview says compiling needs a trusted workspace, video and audio do not start ffmpeg, and PDF export offers the browser print page instead of a headless render. Trusting the workspace enables them.
+- [ ] Open a disposable workspace in Restricted Mode. CI covers part of this: `test-integration/restricted/` runs a real VS Code in Restricted Mode and checks that the workspace is untrusted, the extension activates, a Markdown file previews, a workspace value for `markcopy.tex.rootFile` is filtered out (while the trusted control run shows the same value applying in a trusted workspace), and the LaTeX preview refuses to compile, both on open and freshly after a manual Compile. Still manual: check that video and audio do not start ffmpeg, that PDF export offers the browser print page instead of a headless render, and that trusting the workspace enables both.
 - [ ] `markcopy.tex.engine` set to a specific engine (`pdflatex`, `xelatex`, `lualatex`, `tectonic`, or `latexmk`) is used instead of the auto-detected one; picking one your machine does not have shows the missing-engine message.
 - [ ] `markcopy.tex.enginePath` pointed at a real engine's executable is used even when it is not on PATH; pointed at something that is not a LaTeX engine, the compile fails naming that path rather than silently trying another engine.
 - [ ] `markcopy.tex.rootFile` and `markcopy.tex.recompileOnSave` are covered above.
