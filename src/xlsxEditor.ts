@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { readDocument } from './documentFile';
 import { escapeAttr } from './escape';
+import { refuseProtectedFile } from './ooxml/encrypted';
 import { renderWorkbookHtml, WorkbookError } from './xlsx';
 import {
   OoxmlEditorProvider,
@@ -60,6 +61,8 @@ export class XlsxEditorProvider extends OoxmlEditorProvider {
   private async renderWorkbook(uri: vscode.Uri, sheetIndex: number): Promise<RenderResult> {
     const cfg = vscode.workspace.getConfiguration('markcopy', uri);
     const bytes = await readDocument(uri);
+    // A password-protected file is not a zip; say so rather than call it damaged.
+    await refuseProtectedFile(bytes);
     const html = renderWorkbookHtml(bytes, {
       sheetIndex,
       maxRows: cfg.get<number>('xlsx.maxRows', 5000),

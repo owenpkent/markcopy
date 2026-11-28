@@ -45,6 +45,8 @@ export interface PackageInfo {
   /** One line saying what it is, from the package's summary or description. */
   summary?: string;
   sections: InfoSection[];
+  /** Extra rows for the page's File section, such as how a zip's entries are encrypted. */
+  fileRows?: Row[];
   /** Parts of the file that were present but could not be read. */
   warnings: string[];
 }

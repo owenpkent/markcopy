@@ -43,6 +43,7 @@ import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
 import { ExeEditorProvider } from './exeEditor';
 import { readFileInfo } from './fileInfoEditor';
+import { resolveFileTarget } from './fileInfoTarget';
 import { PackageEditorProvider } from './packageEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
@@ -53,6 +54,7 @@ import { sweepProxyDir } from './videoProxy';
 import {
   disposeTexPreviews,
   TexEditorProvider,
+  texStatusFor,
   recompileActiveTex,
   texPanelFor,
 } from './texEditor';
@@ -396,6 +398,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // What the LaTeX preview for a file last reported, for the integration
+    // tests. Read only and not contributed, so it is not in the palette.
+    vscode.commands.registerCommand('markcopy.tex.status', (uri?: vscode.Uri) =>
+      uri ? texStatusFor(uri) : undefined,
+    ),
+
     // Open the MarkCopy settings (also reachable from the preview's title-bar gear
     // and the in-preview right-click menu).
     // The keyboard's way to press "Read this file" on a file-information
@@ -406,6 +414,21 @@ export function activate(context: vscode.ExtensionContext): void {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
       const target = uri ?? (input instanceof vscode.TabInputCustom ? input.uri : undefined);
       return target ? readFileInfo(target) : undefined;
+    }),
+
+    // Open Mach-O and ELF files that have no extension (so no selector matches
+    // them and Open With does not list this editor) as package info. It only
+    // opens the confirmation page; nothing is read until the reader asks.
+    vscode.commands.registerCommand('markcopy.fileInfo.openAsPackage', (uri?: vscode.Uri) => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const active =
+        input instanceof vscode.TabInputCustom || input instanceof vscode.TabInputText
+          ? input.uri
+          : undefined;
+      const target = resolveFileTarget(uri, active);
+      return target
+        ? vscode.commands.executeCommand('vscode.openWith', target, PackageEditorProvider.viewType)
+        : undefined;
     }),
 
     vscode.commands.registerCommand('markcopy.openSettings', () => {

@@ -23,6 +23,8 @@ CSV and TSV files get the same hidden characters notice as Markdown: invisible U
 
 Open an `.xlsx` or `.xlsm` and it renders as a grid, with sheet tabs along the top and the column letters and row numbers a spreadsheet shows. Values appear the way the workbook formats them, so a date is a date and not `45000`, a percentage is `15.3%` and not `0.153`, and a formula shows its stored result. Merged cells stay merged, and anything the author hid (rows, columns, or whole sheets) stays hidden. Then right-click and take the whole sheet out as rich text, Markdown, CSV, TSV, or PNG.
 
+A password-protected workbook cannot be shown: the preview says so, and names the encryption method when it can read it, but never asks for a password or decrypts anything. A pre-2007 `.xls` is reported as an older format.
+
 The preview is **read-only by design**: MarkCopy never writes to your workbook, so it cannot corrupt one. See [Settings](settings.md#settings) for `markcopy.xlsx.*`.
 
 [Back to the user guide](README.md)
