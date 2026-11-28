@@ -16,7 +16,7 @@ import {
   speedLabels,
   startingSpeed,
   stepSpeed,
-} from '../src/webview/pdfAutoScroll';
+} from '../src/webview/autoScrollMath';
 
 describe('clampSpeed', () => {
   it('keeps direction and clamps the size', () => {

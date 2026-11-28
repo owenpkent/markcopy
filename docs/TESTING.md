@@ -168,6 +168,19 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Edit a block so it gets shorter or longer, then immediately click the next block: its box opens on the right text (never a later block) once the preview updates, and committing it changes the right lines.
 - [ ] With the preview open beside a second Markdown file, commit an edit and at once retarget the side preview to the other file: the other file is not modified.
 
+### Auto-scroll
+
+- [ ] ★ In a long Markdown preview, press the auto-scroll button in the pill at the top right (after the lock and pencil): the button lights, the page glides down and the puck appears bottom-right. Right-click the page: the menu says Stop Auto-scroll. The button and the row are absent in a CSV, spreadsheet, Word, PowerPoint, executable and package preview.
+- [ ] ★ Pause, speed keys, the puck's Small to Extra large sizes and the held +/- behave as in the PDF checks (see PDF viewer, Auto-scroll). Check the puck and the pill button are legible in light, dark and green themes, and at a 760 px pane.
+- [ ] ★ With the preview and the Markdown source side by side, let it run and type in the source: the preview updates and keeps gliding from wherever the page is, with no premature "reached the end" announcement (the page is not put back to an earlier offset). Do it with a Mermaid diagram near the bottom, which briefly changes the page height: the browser may move the page while the diagram is replaced (a short page, or one that fits in a single viewport, can clamp to the top). Check that playback stays on and carries on from the position the layout left, not from an earlier offset.
+- [ ] Scroll with the wheel or drag the scrollbar while it runs: it carries on from where you put the page. With scroll sync on, the editor follows. While a preview plays, scrolling that document's own source does not move the preview (it leads). With two Markdown documents open side by side, scrolling the other document's source while one preview plays still moves its preview.
+- [ ] With auto-scroll off, a live edit with a Mermaid diagram or equation leaves the page where the browser puts it, as before.
+- [ ] A Markdown page with an image that never loads (a broken URL, or a lazy image in a closed disclosure) near the end: auto-scroll stops at the end within about 2 seconds.
+- [ ] In a document with a `<details><summary>`, Tab to the summary while it runs: Space opens and closes it and playback continues. Escape on a focused puck button returns focus to the toolbar button.
+- [ ] Let it reach the end: it stops with a toast and an announcement; start it again at the end: it goes up. Escape stops it; with the right-click menu open or a block editor open, Escape closes only that.
+- [ ] Open a block editor in edit mode while it runs: the page holds still, and carries on after the editor closes. Typing Space, + or - in the editor does not change the speed.
+- [ ] Hide and show the tab (do not close it): speed and size are kept for that preview. A PDF preview has its own, and a closed and reopened preview starts from the defaults.
+
 ### Where the preview opens
 
 - [ ] ★ In `sample.md`'s editor title bar, the **Show Preview** button (`$(open-preview)`, leftmost) swaps that same tab to the preview, full width, titled `sample.md` (not `Preview sample.md`). No new editor group, and no second tab left open on the file. **Reopen Editor With...** > **MarkCopy Markdown Preview** gets to the same place.
@@ -522,6 +535,8 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
 
 ### Auto-scroll
+
+(The Markdown preview has the same puck; see Auto-scroll under Markdown preview.)
 
 - [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
 - [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
