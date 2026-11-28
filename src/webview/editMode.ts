@@ -28,6 +28,8 @@ export interface EditModeOptions {
 export interface EditMode {
   /** Show the pill for Markdown, hide it and leave edit mode for any other kind. */
   setKind(kind: string): void;
+  /** Add another control to the pill, after the read and edit buttons. */
+  addTool(button: HTMLButtonElement): void;
   /** True while a block editor is open (renders must wait). */
   isEditing(): boolean;
   /** Commit (or drop) an open editor, if any. */
@@ -87,7 +89,7 @@ export function createEditMode(opts: EditModeOptions): EditMode {
   pill.className = 'mc-modepill';
   pill.hidden = true;
   pill.setAttribute('role', 'group');
-  pill.setAttribute('aria-label', 'Preview mode');
+  pill.setAttribute('aria-label', 'Preview controls');
 
   function button(label: string, paths: string[], target: EditModeName): HTMLButtonElement {
     const b = document.createElement('button');
@@ -362,6 +364,12 @@ export function createEditMode(opts: EditModeOptions): EditMode {
       if (!ok) closeEditor(false);
       kindOk = ok;
       refresh();
+    },
+    addTool(tool: HTMLButtonElement): void {
+      const sep = document.createElement('span');
+      sep.className = 'mc-modepill-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      pill.append(sep, tool);
     },
     isEditing: () => session !== undefined,
     close: (commit: boolean) => closeEditor(commit),
