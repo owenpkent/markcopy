@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { revealInOs, openInDefaultApp } from './revealInOs';
+import { openExternalLink } from './externalLink';
 import { basename, dirname, extname } from 'node:path';
 import { getNonce } from './previewShell';
 import { MAX_PDF_BYTES, readDocument } from './documentFile';
@@ -98,6 +99,9 @@ export class TexEditorProvider implements vscode.CustomTextEditorProvider {
         if (pdf) {
           await openInDefaultApp(pdf);
         }
+      } else if (msg.type === 'openLink') {
+        // A link inside the compiled PDF; validated by parseTexMessage.
+        openExternalLink(msg.url);
       } else if (msg.type === 'revealInOS') {
         // The .tex source, not the temp PDF it compiles to.
         revealInOs(document.uri);
