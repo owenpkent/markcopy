@@ -568,6 +568,9 @@ describe('clean copy is stable', () => {
     `log${cp(0x2061)}2${times}x`,
     `hello${cp(0x2061)}world`,
     `x${cp(0x2061, 0x2062)}y`,
+    `2${FE0F}${cp(0x20e3)}${times}3`,
+    `3${times}2${FE0F}${cp(0x20e3)}`,
+    `${FE0F}${cp(0x20e3)}${times}3`,
   ];
   // Every fixture string in this file, plus the reviewer's case and more.
   const fixtures: string[] = [
@@ -621,6 +624,9 @@ describe('clean copy is stable', () => {
   // Generated mixes of the exemption cases.
   const parts = [
     cp(0x2764, 0xfe0f),
+    cp(0x32, 0xfe0f, 0x20e3),
+    cp(0x23, 0xfe0f, 0x20e3),
+    cp(0xfe0f, 0x20e3),
     cp(0x1f468, 0x200d, 0x1f469),
     cp(0x1f3f4, 0xe0067, 0xe0062, 0xe007f),
     cp(0x0915, 0x094d, 0x200d, 0x0937),
@@ -721,6 +727,29 @@ describe('clean copy is stable', () => {
     // A row, or an operator at an edge, is flagged and stripped.
     expect(stripHiddenText(`x${times}${times}y`)).toBe('xy');
     expect(stripHiddenText(`a${times}b${times}`)).toBe(`a${times}b`);
+  });
+
+  it('keeps an operator beside a keycap digit, and not after a bare selector', () => {
+    const keycap = (base: string): string => `${base}${FE0F}${cp(0x20e3)}`;
+    // Keycap on the left (the selector is stepped over) and on the right.
+    for (const [text, clean] of [
+      [`${keycap('2')}${times}3`, `${keycap('2')}${times}3`],
+      [`3${times}${keycap('2')}`, `3${times}${keycap('2')}`],
+      [`${keycap('#')}${times}${keycap('*')}`, `${keycap('#')}${times}${keycap('*')}`],
+    ]) {
+      expect(scanHiddenText(text).totalRuns).toBe(0);
+      expect(stripHiddenText(text)).toBe(clean);
+    }
+    // A selector before U+20E3 with no keycap base is not a free pass.
+    for (const text of [
+      `${FE0F}${cp(0x20e3)}${times}3`,
+      `a${FE0F}${cp(0x20e3)}${times}3`,
+      `${cp(0x2764)}${FE0F}${cp(0x20e3)}${times}3`,
+    ]) {
+      const once = stripHiddenText(text);
+      expect(once).not.toContain(times);
+      expect(stripHiddenText(once)).toBe(once);
+    }
   });
 
   it('skips combining marks back to the base before an operator', () => {

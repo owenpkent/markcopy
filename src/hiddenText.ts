@@ -303,7 +303,7 @@ function settled(cps: number[], around: Around): boolean[] {
 // other path), at the start or end of the text or a line, or next to whitespace.
 // Finding the left base walks back over k combining marks, so one decision takes
 // O(k + 1) time and constant extra space; the whole scan stays linear, since each
-// run of marks is walked back over at most once. Trade-off: one operator between
+// run of marks (and a keycap's selector) is walked back over at most once. Trade-off: one operator between
 // letters (`say` U+2062 `hello`) is kept, since it cannot be told from `x` U+2062
 // `y`; the choice of which operator stands there carries 2 bits.
 function isMathOp(cp: number | undefined): cp is number {
@@ -314,10 +314,15 @@ function isMark(cp: number): boolean {
   return cp >= 0x300 && MARK.test(String.fromCodePoint(cp));
 }
 
+function isKeycapBase(c: number): boolean {
+  return (c >= 0x30 && c <= 0x39) || c === 0x23 || c === 0x2a;
+}
+
 // The code point before `pos`, skipping combining marks back to their base, or
 // undefined at the start of the text or when an invisible character is met.
 function baseBefore(text: string, pos: number): number | undefined {
   let j = pos;
+  let prev = 0;
   while (j > 0) {
     let c = text.charCodeAt(j - 1);
     let w = 1;
@@ -328,12 +333,16 @@ function baseBefore(text: string, pos: number): number | undefined {
         w = 2;
       }
     }
-    if (kindOf(c) !== undefined) {
+    // The selector of a keycap sequence (a digit, `#` or `*`, U+FE0F, U+20E3) is
+    // stepped over like the mark after it (UTS #51); any other one stops the walk.
+    const keycapSelector = c === 0xfe0f && prev === 0x20e3 && isKeycapBase(text.charCodeAt(j - 2));
+    if (!keycapSelector && kindOf(c) !== undefined) {
       return undefined;
     }
-    if (!isMark(c)) {
+    if (!keycapSelector && !isMark(c)) {
       return c;
     }
+    prev = c;
     j -= w;
   }
   return undefined;
