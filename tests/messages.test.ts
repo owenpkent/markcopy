@@ -89,6 +89,63 @@ describe('parseMarkdownMessage', () => {
     }
   });
 
+  it('accepts copyCleanSource with a document key and drops any other payload', () => {
+    const docKey = 'file:///a.md';
+    expect(parseMarkdownMessage({ type: 'copyCleanSource', docKey })).toEqual({
+      type: 'copyCleanSource',
+      docKey,
+    });
+    expect(parseMarkdownMessage({ type: 'copyCleanSource', docKey, text: 'x' })).toEqual({
+      type: 'copyCleanSource',
+      docKey,
+    });
+    for (const bad of [undefined, 3, null]) {
+      expect(parseMarkdownMessage({ type: 'copyCleanSource', docKey: bad })).toBeUndefined();
+    }
+    expect(parseMarkdownMessage({ type: 'copyCleanSource' })).toBeUndefined();
+  });
+
+  it('accepts revealHidden with 1-based integer positions and a document version only', () => {
+    const docKey = 'file:///a.md';
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey, docVersion: 3 }),
+    ).toEqual({ type: 'revealHidden', line: 12, column: 4, docKey, docVersion: 3 });
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey }),
+    ).toBeUndefined();
+    for (const docVersion of ['3', 1.5, NaN, null]) {
+      expect(
+        parseMarkdownMessage({ type: 'revealHidden', line: 1, column: 1, docKey, docVersion }),
+      ).toBeUndefined();
+    }
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docVersion: 1 }),
+    ).toBeUndefined();
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey: 7, docVersion: 1 }),
+    ).toBeUndefined();
+    for (const [line, column] of [
+      [0, 1],
+      [1, 0],
+      [-1, 3],
+      [1.5, 1],
+      [1, NaN],
+      [Infinity, 1],
+      ['1', 1],
+      [1, null],
+      [undefined, 1],
+    ]) {
+      expect(
+        parseMarkdownMessage({
+          type: 'revealHidden',
+          line,
+          column,
+          docKey: 'file:///a.md',
+          docVersion: 1,
+        }),
+      ).toBeUndefined();
+    }
+  });
   it('accepts toast, updateSetting and openLink with their string fields', () => {
     expect(parseMarkdownMessage({ type: 'toast', text: 'Copied' })).toEqual({
       type: 'toast',

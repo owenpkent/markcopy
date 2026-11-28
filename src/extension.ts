@@ -33,6 +33,7 @@ import {
   renderCsvHtml,
   sniffDelimiter,
 } from './csv';
+import { scanHiddenText, stripHiddenText, type HiddenScan } from './hiddenText';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseMarkdownMessage, type MarkdownMessage } from './messages/markdown';
 import { ALLOW_REMOTE_IMAGES, allowRemoteImages, htmlShell } from './previewShell';
@@ -114,6 +115,8 @@ let mdFootnotes = true;
 // Documents whose preview the user closed this session. Auto-preview skips these
 // so a dismissed preview does not spring back open on the next focus change.
 const dismissedPreviews = new Set<string>();
+// Documents a hidden-character notice is opening in the source editor right now.
+const revealingSource = new Set<string>();
 
 // LaTeX previews whose `openWith` is in flight. See `openTexPreview`.
 const openingTex = new Set<string>();
@@ -592,6 +595,9 @@ function maybeAutoPreview(
     return;
   }
   const doc = editor.document;
+  if (revealingSource.has(doc.uri.toString())) {
+    return;
+  }
   const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
   if (isTexDocument(doc.languageId, doc.uri.path)) {
     // LaTeX gets the same auto-preview bargain as Markdown and CSV, but keeps the
@@ -1004,6 +1010,18 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
             state.docUri.toString(),
           );
           break;
+        // Both name the document whose notice was clicked. A render of another
+        // document may be in flight, so a click on the old notice is dropped.
+        case 'revealHidden':
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void revealHiddenRun(state.docUri, msg.line, msg.column, msg.docVersion);
+          }
+          break;
+        case 'copyCleanSource':
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void copyCleanSource(state);
+          }
+          break;
         case 'toast':
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
           break;
@@ -1158,6 +1176,77 @@ function update(state: PreviewState, ackEdit?: number): void {
     math,
     footnotes,
     wrapCode: cfg.get<boolean>('wrapCode', true),
+    // Computed from the document, never from the rendered HTML: the scan is of
+    // what a copy of the source would carry. Omitted when off or when clean.
+    hidden: hiddenFor(doc.uri, source),
+  });
+}
+
+// The hidden-character scan to send with a render, or undefined when the setting
+// is off or nothing is flagged.
+function hiddenFor(uri: vscode.Uri, source: string): HiddenScan | undefined {
+  const warn = vscode.workspace
+    .getConfiguration('markcopy', uri)
+    .get<boolean>('hiddenText.warn', true);
+  if (!warn) {
+    return undefined;
+  }
+  const scan = scanHiddenText(source);
+  return scan.totalRuns > 0 ? scan : undefined;
+}
+
+// Put the cursor on a run the hidden-character notice lists. Line and column
+// are 1-based, as the scan reports them. `version` is the document version the
+// scan was made from: after an edit the run may have moved, so a click on the
+// old position is dropped and the redraw already on its way lists the new one.
+async function revealHiddenRun(
+  docUri: vscode.Uri,
+  line: number,
+  column: number,
+  version: number,
+): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === docUri.toString());
+  if (!doc || doc.version !== version) {
+    return;
+  }
+  const row = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);
+  const col = Math.min(Math.max(column - 1, 0), doc.lineAt(row).text.length);
+  const at = new vscode.Position(row, col);
+  const visible = vscode.window.visibleTextEditors.find(
+    (e) => e.document.uri.toString() === docUri.toString(),
+  );
+  const range = new vscode.Range(at, at);
+  if (visible) {
+    visible.selection = new vscode.Selection(at, at);
+    visible.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return;
+  }
+  // The reader asked for the source, so the focus change this causes must not
+  // swap the tab straight back to the preview (a first-line run is a collapsed
+  // selection at the top, which auto-preview treats as untouched).
+  const key = docUri.toString();
+  revealingSource.add(key);
+  try {
+    await vscode.window.showTextDocument(doc, { selection: range, preserveFocus: false });
+  } finally {
+    // The focus event fires before the promise settles; clear after it ran.
+    setTimeout(() => revealingSource.delete(key), 250);
+  }
+}
+
+// Copy the document's text, as it is now, without the characters the notice
+// flags. Plain text: the source, not the rendered preview.
+async function copyCleanSource(state: PreviewState): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc) {
+    return;
+  }
+  await vscode.env.clipboard.writeText(stripHiddenText(doc.getText()));
+  void state.panel.webview.postMessage({
+    type: 'notice',
+    text: 'Copied without hidden characters',
   });
 }
 

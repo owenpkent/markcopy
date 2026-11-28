@@ -213,6 +213,15 @@ Spot-check one row per clipboard flavor; the full table is the [Copy Matrix](COP
 - [ ] Select a sentence containing an inline equation, then search it: the query has the equation once, not its hidden MathML twin as well. In a CSV grid, a selection across rows searches the cell text without the row numbers.
 - [ ] In an Excel sheet and a PowerPoint deck, **Search Google** opens the browser too. Selecting a slide title that wraps onto a second line with a manual line break searches its words with a space between the lines, not run together.
 
+### Hidden characters
+
+- [ ] Open a Markdown file whose text contains tag-smuggled ASCII (a run of characters from U+E0020 to U+E007F after a visible word) and zero-width characters. A notice appears above the preview with the run count and character count, a warn tone, and "spells out hidden text" when a run decodes. Legible in light, dark and a high-contrast theme.
+- [ ] Open **Show the runs**: each run lists its line and column, its kind and code points, and the decoded text in a monospace block. A payload such as `<img src=x onerror=alert(1)>` shows as literal text. Click a line and column: the source editor's cursor lands there.
+- [ ] Click **Copy without hidden characters** and paste into a plain-text target (a new untitled editor, a chat box): the visible text arrives and the hidden characters are gone (paste into an editor with "Render Control Characters" on, or check the length). A toast says "Copied without hidden characters".
+- [ ] Ordinary **Copy Whole Document** still carries the hidden characters (it is unchanged).
+- [ ] **Dismiss** hides the notice; adding or removing a hidden character brings it back. A file with only emoji, a leading BOM, Persian or Hindi joiners and a heart emoji followed by a right-to-left mark shows no notice.
+- [ ] Set `markcopy.hiddenText.warn` to false: no notice. Repeat with a CSV file: the notice appears above the grid and the grid still fills the rest of the window.
+
 ### Settings, themes, and sync
 
 - [ ] Right-click -> **Preferences** -> **Theme**: Auto, Light, Dark, and Green on black all apply immediately and persist to `markcopy.theme`.

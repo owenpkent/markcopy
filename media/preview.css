@@ -119,6 +119,113 @@ body {
   cursor: pointer;
 }
 
+/* Invisible characters in the file (src/webview/hiddenNotice.ts). Outside
+   #content, so no copy action carries it. Warn tone when the characters spell
+   something or could mislead; a quieter tone otherwise. */
+aside.mc-hidden-text {
+  box-sizing: border-box;
+  padding: 10px 16px;
+  color: var(--mc-fg);
+  background: var(--mc-pre-bg);
+  border-bottom: 1px solid var(--mc-border);
+  border-inline-start: 4px solid var(--mc-accent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+aside.mc-hidden-text[hidden] {
+  display: none;
+}
+aside.mc-hidden-text.mc-hidden-warn {
+  background: var(--mc-error-bg);
+  border-inline-start-color: var(--mc-error-fg);
+}
+body.vscode-high-contrast aside.mc-hidden-text {
+  border: 1px solid var(--vscode-contrastBorder, var(--mc-fg));
+  border-inline-start-width: 4px;
+}
+aside.mc-hidden-text .mc-hidden-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+/* Keep the headline clear of the fixed read/edit pill (.mc-modepill), which
+   sits over the top-right corner of a Markdown preview. */
+body[data-mc-kind='markdown'] aside.mc-hidden-text .mc-hidden-top {
+  padding-inline-end: 96px;
+}
+aside.mc-hidden-text .mc-hidden-message {
+  flex: 1 1 260px;
+  font-weight: 600;
+}
+aside.mc-hidden-text .mc-hidden-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+aside.mc-hidden-text button {
+  font: inherit;
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, var(--mc-accent));
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+aside.mc-hidden-text .mc-hidden-actions button:last-child {
+  color: var(--mc-fg);
+  background: transparent;
+  border-color: var(--mc-border);
+}
+aside.mc-hidden-text button.mc-hidden-link {
+  padding: 0;
+  color: var(--mc-link);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+}
+aside.mc-hidden-text button:focus-visible,
+aside.mc-hidden-text summary:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--mc-accent));
+  outline-offset: 2px;
+}
+aside.mc-hidden-text details {
+  margin-top: 6px;
+}
+aside.mc-hidden-text summary {
+  cursor: pointer;
+}
+aside.mc-hidden-text .mc-hidden-list {
+  margin: 6px 0 0;
+  padding-inline-start: 20px;
+  max-height: 40vh;
+  overflow: auto;
+}
+aside.mc-hidden-text .mc-hidden-list li + li {
+  margin-top: 6px;
+}
+aside.mc-hidden-text .mc-hidden-decoded-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+aside.mc-hidden-text .mc-hidden-decoded {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--mc-code-bg);
+  color: var(--mc-fg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+aside.mc-hidden-text .mc-hidden-more {
+  margin: 6px 0 0;
+  color: var(--mc-quote-fg);
+}
+/* A grid fills the window's height; make room for the notice above it. */
+body[data-mc-kind='csv'] .markdown-body {
+  height: calc(100vh - var(--mc-hidden-h, 0px));
+}
 .markdown-body {
   box-sizing: border-box;
   max-width: 900px;
@@ -220,7 +327,8 @@ body[data-mc-kind='csv'] .markdown-body,
 body[data-mc-kind='xlsx'] .markdown-body {
   max-width: none;
   padding: 16px 18px;
-  height: 100vh;
+  /* Less the hidden-characters notice above it, when there is one. */
+  height: calc(100vh - var(--mc-hidden-h, 0px));
   display: flex;
   flex-direction: column;
 }
