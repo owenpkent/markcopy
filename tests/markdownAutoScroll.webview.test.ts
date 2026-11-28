@@ -321,7 +321,7 @@ describe('auto-scroll in the Markdown preview', () => {
     expect(document.querySelector('h1')!.hasAttribute('aria-pressed')).toBe(false);
   });
 
-  it('does not count its own frames as the reader scrolling, so the editor can still move it', async () => {
+  it('ignores an editor scroll while playing, and takes one again once stopped', async () => {
     const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
@@ -345,12 +345,21 @@ describe('auto-scroll in the Markdown preview', () => {
       window.dispatchEvent(new Event('scroll'));
       runFrames(48);
       runFrames(64);
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          origin: window.origin,
-          data: { type: 'scrollToLine', line: 20 },
-        }),
-      );
+      const toLine20 = () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            origin: window.origin,
+            data: { type: 'scrollToLine', line: 20 },
+          }),
+        );
+      // One already in flight when Start was pressed: the playing preview leads.
+      const playingAt = scrollTop;
+      toLine20();
+      expect(scrollTop).toBe(playingAt);
+      toggle().click(); // stop
+      // Its own frames were not taken for the reader scrolling, so the editor
+      // can move it again.
+      toLine20();
       expect(scrollTop).toBeGreaterThanOrEqual(2000);
     } finally {
       rect.mockRestore();

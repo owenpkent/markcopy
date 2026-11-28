@@ -249,7 +249,12 @@ window.addEventListener('message', (e: MessageEvent) => {
       }
       break;
     case 'scrollToLine':
-      scrollToLine(msg.line as number);
+      // A playing preview leads. The host stops sending editor scrolls once told,
+      // but one already in flight (pressing Start, or a file switch while playing)
+      // would still pull the page away, so the preview checks for itself too.
+      if (!auto.isPlaying()) {
+        scrollToLine(msg.line as number);
+      }
       break;
     case 'copyAll':
       void copyRichText(content);
