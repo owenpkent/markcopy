@@ -313,6 +313,45 @@ describe('randomized', () => {
   });
 });
 
+describe('script and math uses of invisible characters', () => {
+  it('keeps the fillers that spell isolated Korean jamo apart', () => {
+    const apart = cp(0x1100, 0x1160, 0x115f, 0x1161);
+    expect(scanHiddenText(apart).totalRuns).toBe(0);
+    expect(stripHiddenText(apart)).toBe(apart);
+    expect(stripHiddenText(apart).normalize('NFC')).not.toBe(cp(0xac00));
+  });
+
+  it('still flags a Hangul filler that joins nothing', () => {
+    expect(scanHiddenText(`ab${cp(0x115f)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(`ab${cp(0x1160)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(cp(0x1161, 0x115f)).totalRuns).toBe(1);
+    expect(scanHiddenText(cp(0x1160, 0x1100)).totalRuns).toBe(1);
+  });
+
+  it('keeps an invisible plus in a mixed fraction, and the other operators', () => {
+    const mixed = cp(0x33, 0x2064, 0xbc);
+    expect(scanHiddenText(mixed).totalRuns).toBe(0);
+    expect(stripHiddenText(mixed)).toBe(mixed);
+    expect(scanHiddenText(`f${cp(0x2061)}(x) 2${cp(0x2062)}x`).totalRuns).toBe(0);
+  });
+
+  it('flags invisible operators in ordinary text or in a row', () => {
+    expect(scanHiddenText(`ab${cp(0x2064)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(`3${cp(0x2064, 0x2062)}${cp(0xbc)}`).totalRuns).toBe(1);
+    expect(scanHiddenText(`3${cp(0x2064)} x`).totalRuns).toBe(1);
+  });
+
+  it('keeps one word break between Thai words, and flags the rest', () => {
+    const thai = `${cp(0xe20, 0xe32, 0xe29, 0xe32)}${cp(0x200b)}${cp(0xe44, 0xe17, 0xe22)}`;
+    expect(scanHiddenText(thai).totalRuns).toBe(0);
+    expect(stripHiddenText(thai)).toBe(thai);
+    expect(scanHiddenText(`ab${cp(0x200b)}cd`).totalRuns).toBe(1);
+    const row = `${cp(0xe20)}${cp(0x200b, 0x200b)}${cp(0xe44)}`;
+    expect(scanHiddenText(row).totalRuns).toBe(1);
+    expect(scanHiddenText(`${cp(0xe20)}${cp(0x200b)} x`).totalRuns).toBe(1);
+  });
+});
+
 describe('the exemptions are narrow', () => {
   it('flags a Mongolian vowel separator outside its context', () => {
     expect(scanHiddenText(`ab${cp(0x180e)}cd`).totalRuns).toBe(1);

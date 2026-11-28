@@ -5,7 +5,7 @@ import { boot, type Harness } from '../webview/harness';
 const tags = (ascii: string): string =>
   String.fromCodePoint(...[...ascii].map((c) => 0xe0000 + (c.codePointAt(0) as number)));
 
-const bar = (): HTMLElement => document.getElementById('mc-hidden-text') as HTMLElement;
+const bar = (): HTMLElement => document.querySelector('aside.mc-hidden-text') as HTMLElement;
 
 // The harness render has no field for the scan, so post the message the host does.
 async function renderWith(h: Harness, hidden: unknown, docKey = 'file:///a.md'): Promise<void> {
@@ -98,12 +98,40 @@ describe('the hidden characters notice', () => {
   it('posts revealHidden from a run and copyCleanSource from the button', async () => {
     await renderWith(h, scanHiddenText(`one\ntwo ${tags('hi')}`));
     (bar().querySelector('.mc-hidden-link') as HTMLButtonElement).click();
-    expect(h.posted.at(-1)).toEqual({ type: 'revealHidden', line: 2, column: 5 });
+    expect(h.posted.at(-1)).toEqual({
+      type: 'revealHidden',
+      line: 2,
+      column: 5,
+      docKey: 'file:///a.md',
+    });
     const copy = [...bar().querySelectorAll('button')].find((b) =>
       /Copy without hidden/.test(b.textContent ?? ''),
     ) as HTMLButtonElement;
     copy.click();
-    expect(h.posted.at(-1)).toEqual({ type: 'copyCleanSource' });
+    expect(h.posted.at(-1)).toEqual({ type: 'copyCleanSource', docKey: 'file:///a.md' });
+  });
+
+  it('has no id a Markdown heading link could resolve to', async () => {
+    await renderWith(h, scanHiddenText(`a ${tags('hello')}`));
+    expect(bar().id).toBe('');
+    expect(document.getElementById('mc-hidden-text')).toBeNull();
+  });
+
+  it('keeps the keyboard focus on the same control across a redraw', async () => {
+    const scan = scanHiddenText(`one
+two ${tags('hi')}`);
+    await renderWith(h, scan);
+    const link = bar().querySelector('.mc-hidden-link') as HTMLButtonElement;
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    await renderWith(h, { ...scan });
+    const again = bar().querySelector('.mc-hidden-link') as HTMLButtonElement;
+    expect(again).not.toBe(link);
+    expect(document.activeElement).toBe(again);
+    const copy = bar().querySelector('.mc-hidden-actions button') as HTMLButtonElement;
+    copy.focus();
+    await renderWith(h, { ...scan });
+    expect(document.activeElement).toBe(bar().querySelector('.mc-hidden-actions button'));
   });
 
   it('stays dismissed until the flagged set changes', async () => {

@@ -113,6 +113,23 @@ const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
 const LATIN = /^\p{Script=Latin}$/u;
 const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
 const MONGOLIAN = /^\p{Script=Mongolian}$/u;
+// Scripts written without spaces, where U+200B marks a word break.
+const SPACELESS = /^[\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]$/u;
+// Characters a mathematical expression is made of, for the invisible operators.
+const MATHY = /^[\p{N}\p{Sm}()[\]{}\u{1D400}-\u{1D7FF}]$/u;
+
+function visible(cp: number | undefined): cp is number {
+  return cp !== undefined && kindOf(cp) === undefined;
+}
+
+// A leading consonant jamo (not the filler) and a vowel jamo, in Hangul Jamo
+// and its extensions.
+function isChoseong(cp: number | undefined): boolean {
+  return cp !== undefined && ((cp >= 0x1100 && cp <= 0x115e) || (cp >= 0xa960 && cp <= 0xa97c));
+}
+function isJungseong(cp: number | undefined): boolean {
+  return cp !== undefined && ((cp >= 0x1161 && cp <= 0x11a7) || (cp >= 0xd7b0 && cp <= 0xd7c6));
+}
 
 function visibleBase(cp: number | undefined): boolean {
   return cp !== undefined && !WHITESPACE.test(String.fromCodePoint(cp));
@@ -196,6 +213,29 @@ function explained(cps: number[], prev: number | undefined, next: number | undef
       ok[i] =
         (shapingLetter(left) && (shapingLetter(right) || !letter(right))) ||
         (!letter(left) && shapingLetter(right));
+    } else if (cp === 0x200b) {
+      // A lone word break between two words of a script written without
+      // spaces. Both neighbours are visible, so a row of them is still flagged.
+      ok[i] = visible(left) && visible(right) && test(SPACELESS, left) && test(SPACELESS, right);
+    } else if (cp >= 0x2061 && cp <= 0x2064) {
+      // An invisible function application, times, separator or plus between
+      // the parts of a mathematical expression: deleting it changes the maths.
+      // One side must be a number, an operator or a bracket, so ordinary text
+      // with a stray operator in it is still flagged.
+      ok[i] =
+        visible(left) &&
+        visible(right) &&
+        (test(MATHY, left) || test(MATHY, right)) &&
+        (test(MATHY, left) || letter(left)) &&
+        (test(MATHY, right) || letter(right));
+    } else if (cp === 0x115f) {
+      // The choseong filler that stands in for a missing leading consonant,
+      // before a vowel: how Unicode spells an isolated vowel jamo.
+      ok[i] = isJungseong(right);
+    } else if (cp === 0x1160) {
+      // The jungseong filler that stands in for a missing vowel, after a
+      // leading consonant: an isolated consonant jamo.
+      ok[i] = isChoseong(left);
     } else if (cp === 0x180e) {
       // The Mongolian vowel separator, before a final A or E.
       ok[i] = test(MONGOLIAN, left) && (right === 0x1820 || right === 0x1821);

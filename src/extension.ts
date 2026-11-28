@@ -114,6 +114,8 @@ let mdFootnotes = true;
 // Documents whose preview the user closed this session. Auto-preview skips these
 // so a dismissed preview does not spring back open on the next focus change.
 const dismissedPreviews = new Set<string>();
+// Documents a hidden-character notice is opening in the source editor right now.
+const revealingSource = new Set<string>();
 
 // LaTeX previews whose `openWith` is in flight. See `openTexPreview`.
 const openingTex = new Set<string>();
@@ -576,6 +578,9 @@ function maybeAutoPreview(
     return;
   }
   const doc = editor.document;
+  if (revealingSource.has(doc.uri.toString())) {
+    return;
+  }
   const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
   if (isTexDocument(doc.languageId, doc.uri.path)) {
     // LaTeX gets the same auto-preview bargain as Markdown and CSV, but keeps the
@@ -988,11 +993,17 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
             state.docUri.toString(),
           );
           break;
+        // Both name the document whose notice was clicked. A render of another
+        // document may be in flight, so a click on the old notice is dropped.
         case 'revealHidden':
-          void revealHiddenRun(state.docUri, msg.line, msg.column);
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void revealHiddenRun(state.docUri, msg.line, msg.column);
+          }
           break;
         case 'copyCleanSource':
-          void copyCleanSource(state);
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void copyCleanSource(state);
+          }
           break;
         case 'toast':
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
@@ -1187,7 +1198,17 @@ async function revealHiddenRun(docUri: vscode.Uri, line: number, column: number)
     visible.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     return;
   }
-  await vscode.window.showTextDocument(doc, { selection: range, preserveFocus: false });
+  // The reader asked for the source, so the focus change this causes must not
+  // swap the tab straight back to the preview (a first-line run is a collapsed
+  // selection at the top, which auto-preview treats as untouched).
+  const key = docUri.toString();
+  revealingSource.add(key);
+  try {
+    await vscode.window.showTextDocument(doc, { selection: range, preserveFocus: false });
+  } finally {
+    // The focus event fires before the promise settles; clear after it ran.
+    setTimeout(() => revealingSource.delete(key), 250);
+  }
 }
 
 // Copy the document's text, as it is now, without the characters the notice

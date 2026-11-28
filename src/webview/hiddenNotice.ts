@@ -73,7 +73,8 @@ export interface HiddenNotice {
 
 export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost): HiddenNotice {
   const bar = document.createElement('aside');
-  bar.id = 'mc-hidden-text';
+  // No id: a Markdown heading's slug could equal it, and a fragment link would
+  // then resolve to the notice, not the heading.
   bar.className = 'mc-hidden-text';
   bar.hidden = true;
   anchor.before(bar);
@@ -129,6 +130,10 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         publishHeight();
         return;
       }
+      // A redraw replaces every control; remember which one had the focus.
+      const focused = document.activeElement;
+      const focusId =
+        focused instanceof HTMLElement && bar.contains(focused) ? focused.dataset.focus : undefined;
       const old = bar.querySelector('details');
       if (old) {
         detailsOpen = old.open;
@@ -148,19 +153,24 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
       const actions = document.createElement('span');
       actions.className = 'mc-hidden-actions';
       actions.append(
-        button('Copy without hidden characters', () => host.post({ type: 'copyCleanSource' })),
+        button('Copy without hidden characters', () =>
+          host.post({ type: 'copyCleanSource', docKey }),
+        ),
         button('Dismiss', () => {
           dismissed = key;
           bar.hidden = true;
           publishHeight();
         }),
       );
+      actions.firstElementChild?.setAttribute('data-focus', 'copy');
+      actions.lastElementChild?.setAttribute('data-focus', 'dismiss');
       actions.lastElementChild?.setAttribute('aria-label', 'Dismiss the hidden characters notice');
       top.append(message, actions);
 
       const details = document.createElement('details');
       details.open = detailsOpen;
       const summary = document.createElement('summary');
+      summary.dataset.focus = 'summary';
       summary.textContent = plural(runs.length, 'Show the run', 'Show the runs');
       const list = document.createElement('ul');
       list.className = 'mc-hidden-list';
@@ -168,10 +178,11 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         const item = document.createElement('li');
         const where = button(
           `Line ${run.line}, column ${run.column}`,
-          () => host.post({ type: 'revealHidden', line: run.line, column: run.column }),
+          () => host.post({ type: 'revealHidden', line: run.line, column: run.column, docKey }),
           'mc-hidden-link',
         );
         where.title = 'Go to this run in the editor';
+        where.dataset.focus = `run:${run.line}:${run.column}`;
         const what = document.createElement('span');
         what.textContent = `: ${describeRun(run)}`;
         item.append(where, what);
@@ -196,6 +207,12 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         details.append(more);
       }
       bar.replaceChildren(top, details);
+      if (focusId !== undefined) {
+        const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-focus]')).find(
+          (el) => el.dataset.focus === focusId,
+        );
+        again?.focus({ preventScroll: true });
+      }
       publishHeight();
     },
   };

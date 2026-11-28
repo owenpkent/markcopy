@@ -122,7 +122,7 @@ body {
 /* Invisible characters in the file (src/webview/hiddenNotice.ts). Outside
    #content, so no copy action carries it. Warn tone when the characters spell
    something or could mislead; a quieter tone otherwise. */
-#mc-hidden-text {
+aside.mc-hidden-text {
   box-sizing: border-box;
   padding: 10px 16px;
   color: var(--mc-fg);
@@ -132,18 +132,18 @@ body {
   font-size: 13px;
   line-height: 1.5;
 }
-#mc-hidden-text[hidden] {
+aside.mc-hidden-text[hidden] {
   display: none;
 }
-#mc-hidden-text.mc-hidden-warn {
+aside.mc-hidden-text.mc-hidden-warn {
   background: var(--mc-error-bg);
   border-inline-start-color: var(--mc-error-fg);
 }
-body.vscode-high-contrast #mc-hidden-text {
+body.vscode-high-contrast aside.mc-hidden-text {
   border: 1px solid var(--vscode-contrastBorder, var(--mc-fg));
   border-inline-start-width: 4px;
 }
-#mc-hidden-text .mc-hidden-top {
+aside.mc-hidden-text .mc-hidden-top {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -151,19 +151,19 @@ body.vscode-high-contrast #mc-hidden-text {
 }
 /* Keep the headline clear of the fixed read/edit pill (.mc-modepill), which
    sits over the top-right corner of a Markdown preview. */
-body[data-mc-kind='markdown'] #mc-hidden-text .mc-hidden-top {
+body[data-mc-kind='markdown'] aside.mc-hidden-text .mc-hidden-top {
   padding-inline-end: 96px;
 }
-#mc-hidden-text .mc-hidden-message {
+aside.mc-hidden-text .mc-hidden-message {
   flex: 1 1 260px;
   font-weight: 600;
 }
-#mc-hidden-text .mc-hidden-actions {
+aside.mc-hidden-text .mc-hidden-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
-#mc-hidden-text button {
+aside.mc-hidden-text button {
   font: inherit;
   color: var(--vscode-button-foreground, #fff);
   background: var(--vscode-button-background, var(--mc-accent));
@@ -171,45 +171,45 @@ body[data-mc-kind='markdown'] #mc-hidden-text .mc-hidden-top {
   padding: 3px 10px;
   cursor: pointer;
 }
-#mc-hidden-text .mc-hidden-actions button:last-child {
+aside.mc-hidden-text .mc-hidden-actions button:last-child {
   color: var(--mc-fg);
   background: transparent;
   border-color: var(--mc-border);
 }
-#mc-hidden-text button.mc-hidden-link {
+aside.mc-hidden-text button.mc-hidden-link {
   padding: 0;
   color: var(--mc-link);
   background: none;
   border: 0;
   text-decoration: underline;
 }
-#mc-hidden-text button:focus-visible,
-#mc-hidden-text summary:focus-visible {
+aside.mc-hidden-text button:focus-visible,
+aside.mc-hidden-text summary:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, var(--mc-accent));
   outline-offset: 2px;
 }
-#mc-hidden-text details {
+aside.mc-hidden-text details {
   margin-top: 6px;
 }
-#mc-hidden-text summary {
+aside.mc-hidden-text summary {
   cursor: pointer;
 }
-#mc-hidden-text .mc-hidden-list {
+aside.mc-hidden-text .mc-hidden-list {
   margin: 6px 0 0;
   padding-inline-start: 20px;
   max-height: 40vh;
   overflow: auto;
 }
-#mc-hidden-text .mc-hidden-list li + li {
+aside.mc-hidden-text .mc-hidden-list li + li {
   margin-top: 6px;
 }
-#mc-hidden-text .mc-hidden-decoded-row {
+aside.mc-hidden-text .mc-hidden-decoded-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
 }
-#mc-hidden-text .mc-hidden-decoded {
+aside.mc-hidden-text .mc-hidden-decoded {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: var(--mc-code-bg);
   color: var(--mc-fg);
@@ -218,7 +218,7 @@ body[data-mc-kind='markdown'] #mc-hidden-text .mc-hidden-top {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-#mc-hidden-text .mc-hidden-more {
+aside.mc-hidden-text .mc-hidden-more {
   margin: 6px 0 0;
   color: var(--mc-quote-fg);
 }

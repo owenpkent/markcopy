@@ -22,9 +22,9 @@ export type MarkdownMessage =
   // Whether this document's preview is auto-scrolling right now.
   | { type: 'autoScroll'; playing: boolean; docKey: string }
   // From the hidden-character notice: put the cursor on a flagged run (1-based).
-  | { type: 'revealHidden'; line: number; column: number }
+  | { type: 'revealHidden'; line: number; column: number; docKey: string }
   // Copy the document's text without the characters the notice flags.
-  | { type: 'copyCleanSource' }
+  | { type: 'copyCleanSource'; docKey: string }
   | ToastMessage
   | UpdateSettingMessage
   | { type: 'openSettings' }
@@ -68,8 +68,11 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     case 'revealInOS':
     case 'openExternal':
     case 'openSettings':
-    case 'copyCleanSource':
       return { type: msg.type };
+    case 'copyCleanSource':
+      return typeof msg.docKey === 'string'
+        ? { type: 'copyCleanSource', docKey: msg.docKey }
+        : undefined;
     case 'revealLine':
       // revealEditorLine ignores anything that is not a finite number.
       return typeof msg.line === 'number' &&
@@ -84,8 +87,12 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
     case 'revealHidden': {
       const line = numberField(msg.line);
       const column = numberField(msg.column);
-      return Number.isSafeInteger(line) && Number.isSafeInteger(column) && line >= 1 && column >= 1
-        ? { type: 'revealHidden', line, column }
+      return Number.isSafeInteger(line) &&
+        Number.isSafeInteger(column) &&
+        line >= 1 &&
+        column >= 1 &&
+        typeof msg.docKey === 'string'
+        ? { type: 'revealHidden', line, column, docKey: msg.docKey }
         : undefined;
     }
     case 'toast':
