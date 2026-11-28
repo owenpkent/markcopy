@@ -1243,6 +1243,24 @@ body[data-mc-kind='markdown'] #mc-autoscroll {
   opacity: 0.6;
 }
 
+/* ---- PDF encryption notice ------------------------------------------------
+   One small line (two with permissions) at the bottom left, opposite the toolbar.
+   Set by src/webview/pdf.ts from what the file declares; it never blocks the page. */
+.mc-pdf-notice {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 1040;
+  max-width: min(64ch, calc(100vw - 260px));
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--vscode-editorWidget-background, #24292f);
+  color: var(--vscode-editorWidget-foreground, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+}
+
 /* ---- Toast --------------------------------------------------------------- */
 .mc-toast {
   position: fixed;

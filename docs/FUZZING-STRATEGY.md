@@ -292,6 +292,27 @@ Unit coverage after the guard tests (v8, whole suite, 3,676 tests): 88.8% of lin
 90.0 to 93.4, `step.ts` 90.8 to 93.4, `audioProbe.ts` 92.7 to 95.2; `isolate.ts` gained
 the worker-start failures.
 
+## Encryption labels (PDF, disk image, OpenDocument, Mach-O)
+
+Readers that say what a file declares about its encryption, without asking for a password or decrypting, are fuzzed as
+parsers of untrusted text: what they print goes into the page. Three have a target of their own because each sits
+behind structure a random input does not have; the fourth is reached by a variant.
+
+| Reader                                          | Reached by                            | What it does                                                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/pdfEncryption.ts` (the host-side /Encrypt) | `pdf-encryption`                      | The input is a whole PDF, or the Encrypt dictionary text framed as object 9 of a classic PDF, as the dictionary of a cross-reference stream, or inline in the trailer. The label and permissions are checked as text. |
+| `src/pkg/dmgEncryption.ts`                      | `dmg-encryption`, and `pkg-dmg` seeds | Version 2 header and version 1 trailer, as they are or with the magic written over. At most 17 slot lines, a cipher label from a fixed set, a plausible block size, no control characters.                            |
+| `src/pkg/odf.ts`                                | `odf`, and `pkg-zip` seeds            | The manifest text goes to `scanManifest`, and the same text sits in an OpenDocument zip read through `readPackage` with the shared oracle. Counts bounded, labels short and clean.                                    |
+| Mach-O `LC_ENCRYPTION_INFO(_64)` rows           | `pkg-macho` seeds                     | FairPlay (cryptid 1), another cryptid, and not encrypted, in 32 and 64-bit images.                                                                                                                                    |
+
+The first run of `pdf-encryption` found, in under a second, a `/Filter` name with a `#00` escape that put a NUL into the
+label (and a name of any length into it). The handler name is now cleaned with `printable` and clipped to 60 characters;
+the input is a seed and the unit test is in `tests/pdfEncryption.test.ts`. `odf` and `dmg-encryption` found nothing.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each: `pdf-encryption` 124,927 runs, `cov: 269`, `ft: 928` (after the
+fix); `odf` 148,419 runs, `cov: 421`, `ft: 755`; `dmg-encryption` 215,737 runs, `cov: 139`, `ft: 316`; `pkg-macho` 127,312
+runs, `cov: 544`; `pkg-zip` 106,937 runs, `cov: 1274`; `pkg-dmg` 150,600 runs, `cov: 419`. No other findings.
+
 ## Files that are two formats (`polyglot`)
 
 `readPackage` tries a probe table in order, reads the first format that selects the file, then names the other
@@ -448,20 +469,20 @@ What the number means, so it is not read as more than it is:
 - Minimums were set from one local run on Windows, 5 points under the measurement (10 for
   files under 40 lines). The first Linux run may differ by a point or two.
 
-Measured, 132 parsers and 9 non-parsers; 16,635 of 21,756 lines (76.5%) overall:
+Measured, 135 parsers and 9 non-parsers; 17,212 of 22,447 lines (76.7%) overall:
 
 | Area                                 | Parsers | Lines covered | Lowest file (measured)      | Minimums |
 | ------------------------------------ | ------- | ------------- | --------------------------- | -------- |
-| `src/pkg/`                           | 39      | 81.0%         | `wheel.ts` 54.8             | 49 to 90 |
+| `src/pkg/`                           | 41      | 81.5%         | `wheel.ts` 54.8             | 49 to 90 |
 | `src/pe/`                            | 8       | 88.1%         | `signer.ts` 83.1            | 78 to 90 |
 | `src/binary/`                        | 9       | 82.9%         | `goBuildInfo.ts` 71.7       | 66 to 95 |
 | `src/xlsx/`                          | 5       | 88.9%         | `render.ts` 87.2            | 82 to 85 |
 | `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
 | `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |
 | `src/ooxml/`                         | 9       | 82.2%         | `zip.ts` 64.7               | 59 to 92 |
-| `src/messages/`                      | 12      | 91.6%         | `markdown.ts` 76.7          | 71 to 90 |
+| `src/messages/`                      | 12      | 90.4%         | `markdown.ts` 74.2          | 71 to 90 |
 | `src/review/`                        | 5       | 40.2%         | `markdown.ts` 6.7           | 0 to 53  |
-| `src/` and `src/webview/` standalone | 21      | 67.1%         | `webview/videoInfo.ts` 11.8 | 6 to 86  |
+| `src/` and `src/webview/` standalone | 22      | 67.8%         | `webview/videoInfo.ts` 11.8 | 6 to 86  |
 
 The weak spots are the review sidecar (`session.ts`, `markdown.ts`, `timecode.ts`: the
 `review` target reaches the YAML parser but little of what reads its output),

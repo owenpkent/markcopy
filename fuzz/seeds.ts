@@ -68,7 +68,12 @@ import { buildZip, type FixtureEntry } from '../tests/pkg/zipFixture';
 import { buildAxml, type AxmlAttr, type AxmlElement } from '../tests/pkg/axmlFixture';
 import { buildApk } from '../tests/pkg/alpineFixture';
 import * as fx from '../tests/pkg/encryptionFixture';
-import { buildDmg, buildEncryptedDmg } from '../tests/pkg/dmgFixture';
+import {
+  buildDmg,
+  buildEncryptedDmg,
+  buildEncryptedV1,
+  buildEncryptedV2,
+} from '../tests/pkg/dmgFixture';
 
 // fflate stamps gzip headers with the current time; pin it so a rerun gives identical bytes.
 Date.now = (): number => 1700000000000;
@@ -1620,6 +1625,179 @@ const lockedFile = (info: Uint8Array): Uint8Array =>
 only('ooxml-encrypted', 'file-agile', 1, lockedFile(agile));
 only('ooxml-encrypted', 'file-standard', 1, lockedFile(standard));
 only('ooxml-encrypted', 'file-short-info', 1, lockedFile(Uint8Array.of(4, 0)));
+// ---- Encryption labels: Mach-O, OpenDocument, disk images, PDF ---------------
+
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'encrypted-fairplay-32',
+  buildMacho({ wide: false, cputype: CPU.X86, commands: [encryption(LC.ENCRYPTION_INFO, 1)] }),
+);
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'encrypted-64',
+  buildMacho({ commands: [encryption(LC.ENCRYPTION_INFO_64, 1)] }),
+);
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'encrypted-other-cryptid',
+  buildMacho({ commands: [encryption(LC.ENCRYPTION_INFO_64, 7)] }),
+);
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'not-encrypted',
+  buildMacho({ commands: [encryption(LC.ENCRYPTION_INFO_64, 0)] }),
+);
+pkg(
+  'fuzz.dmg',
+  'dmg',
+  'encrypted-v2-slots',
+  buildEncryptedV2({
+    slots: [{ type: 1, iterations: 250000 }, { type: 2 }, { type: 3 }, { type: 9 }],
+  }),
+);
+pkg('fuzz.dmg', 'dmg', 'encrypted-v2-aes256', buildEncryptedV2({ keyBits: 256, blockSize: 4096 }));
+pkg('fuzz.dmg', 'dmg', 'encrypted-v1-info', buildEncryptedV1({ keyBits: 256, iterations: 100000 }));
+
+const MANIFEST_NS = 'xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"';
+const odfPlain = (path: string, type = 'text/xml'): string =>
+  `<manifest:file-entry manifest:full-path="${path}" manifest:media-type="${type}"/>`;
+const odfLocked = (
+  path: string,
+  algorithm = 'http://www.w3.org/2001/04/xmlenc#aes256-cbc',
+  kdf = '<manifest:key-derivation manifest:key-derivation-name="PBKDF2" manifest:key-size="32" manifest:iteration-count="100000" manifest:salt="AAAA"/>',
+): string =>
+  `<manifest:file-entry manifest:full-path="${path}" manifest:size="40">` +
+  `<manifest:encryption-data manifest:checksum-type="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0#sha256-1k" manifest:checksum="AAAA">` +
+  `<manifest:algorithm manifest:algorithm-name="${algorithm}" manifest:initialisation-vector="AAAA"/>` +
+  `${kdf}</manifest:encryption-data></manifest:file-entry>`;
+const odfManifest = (...entries: string[]): string =>
+  `<?xml version="1.0"?><manifest:manifest ${MANIFEST_NS} manifest:version="1.3">` +
+  `${odfPlain('/', 'application/vnd.oasis.opendocument.text')}${entries.join('')}</manifest:manifest>`;
+const ARGON2 =
+  '<manifest:key-derivation manifest:key-derivation-name="urn:org:documentfoundation:names:experimental:office:manifest:argon2id" manifest:argon2-iterations="3" manifest:argon2-memory="65536" manifest:argon2-lanes="4"/>';
+const odfFile = (mime: string, manifest?: string): Uint8Array =>
+  buildZip([
+    { name: 'mimetype', data: mime },
+    { name: 'content.xml', data: '<x/>' },
+    ...(manifest ? [{ name: 'META-INF/manifest.xml', data: manifest }] : []),
+  ]);
+const ODT = 'application/vnd.oasis.opendocument.text';
+pkg('fuzz.jar', 'zip', 'odf-plain', odfFile(ODT, odfManifest(odfPlain('content.xml'))));
+pkg(
+  'fuzz.jar',
+  'zip',
+  'odf-encrypted-aes',
+  odfFile(
+    ODT,
+    odfManifest(odfPlain('mimetype'), odfLocked('content.xml'), odfLocked('styles.xml')),
+  ),
+);
+pkg(
+  'fuzz.jar',
+  'zip',
+  'odf-encrypted-argon2-blowfish',
+  odfFile(
+    ODT,
+    odfManifest(
+      odfLocked(
+        'content.xml',
+        'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0#blowfish',
+        ARGON2,
+      ),
+      odfLocked('meta.xml', 'http://www.w3.org/2009/xmlenc11#aes256-gcm', ARGON2),
+    ),
+  ),
+);
+
+// odf target: stage 0 the manifest text, 1 a text document around it, 2 a kind byte then the manifest in a deflated entry.
+only('odf', 'manifest-aes', 0, ascii(odfManifest(odfLocked('content.xml'), odfPlain('mimetype'))));
+only(
+  'odf',
+  'manifest-argon2',
+  0,
+  ascii(odfManifest(odfLocked('content.xml', 'urn:x:blowfish', ARGON2))),
+);
+only('odf', 'manifest-cut', 0, ascii(odfManifest(odfLocked('content.xml')).slice(0, 360)));
+only('odf', 'manifest-plain', 0, ascii(odfManifest(odfPlain('a.xml'), odfPlain('dir/'))));
+only('odf', 'document-aes', 1, ascii(odfManifest(odfLocked('content.xml'))));
+only(
+  'odf',
+  'document-spreadsheet-deflated',
+  2,
+  cat(Uint8Array.of(1), ascii(odfManifest(odfLocked('content.xml', 'x#aes128-cbc')))),
+);
+
+// dmg-encryption target: stage 0 version 2 as is, 1 version 1 as is, 2 version 2 with the header written over, 3 version 1 with the trailer written over.
+const prefix3 = (bytes: Uint8Array, hint = 0): Uint8Array =>
+  cat(Uint8Array.of(hint >> 8, hint & 0xff), bytes);
+only('dmg-encryption', 'v2-passphrase', 0, prefix3(buildEncryptedV2()));
+only(
+  'dmg-encryption',
+  'v2-four-slots',
+  0,
+  prefix3(
+    buildEncryptedV2({
+      slots: [{ type: 1, iterations: 5 }, { type: 2 }, { type: 3 }, { type: 9 }],
+    }),
+  ),
+);
+only(
+  'dmg-encryption',
+  'v2-count-past-room',
+  0,
+  prefix3(buildEncryptedV2({ declaredCount: 12, length: 0x100 })),
+);
+only(
+  'dmg-encryption',
+  'v2-not-aes',
+  0,
+  prefix3(buildEncryptedV2({ algorithm: 0x80000003, keyBits: 0 })),
+);
+only('dmg-encryption', 'v1-info', 1, prefix3(buildEncryptedV1()));
+only('dmg-encryption', 'v2-written-over', 2, prefix3(buildEncryptedV2().subarray(0, 0x200)));
+only(
+  'dmg-encryption',
+  'v1-trailer-written-over',
+  3,
+  prefix3(buildEncryptedV1({ keyBits: 192 }), 100),
+);
+
+// pdf-encryption target: stage 0 a whole PDF, 1 the Encrypt dictionary in object 9, 2 the same with a cross-reference stream, 3 the dictionary inline.
+const OU = '/O <0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF> /U (a\\)>>b)';
+const encryptDicts: Record<string, string> = {
+  'rc4-40': `<< /Filter /Standard /V 1 /R 2 /P -44 ${OU} >>`,
+  'rc4-128': `<< /Filter /Standard /V 2 /R 3 /Length 128 /P -3904 ${OU} >>`,
+  'aes-128': `<< /Filter /Standard /V 4 /R 4 /Length 128 /CF << /StdCF << /CFM /AESV2 /Length 16 >> >> /StmF /StdCF /StrF /StdCF /P -1340 ${OU} >>`,
+  'aes-256': `<< /Filter /Standard /V 5 /R 6 /Length 256 /CF << /StdCF << /CFM /AESV3 /Length 32 >> >> /StmF /StdCF /StrF /StdCF /P -1 ${OU} >>`,
+  'custom-handler': '<< /Filter /Acme#20Lock /V 4 /SubFilter /x >>',
+  'identity-streams': '<< /Filter /Standard /V 4 /R 4 /StmF /Identity /StrF /Identity /P 0 >>',
+};
+const pdfWith = (mode: number, dict: string): string => {
+  let body = '%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n';
+  if (mode !== 3) {
+    body += `9 0 obj\n${dict}\nendobj\n`;
+  }
+  const ref = mode === 3 ? dict : '9 0 R';
+  const at = body.length;
+  body +=
+    mode === 2
+      ? `10 0 obj\n<< /Type /XRef /Size 11 /W [1 2 1] /Root 1 0 R /Encrypt ${ref} /Length 0 >>\nstream\n\nendstream\nendobj\n`
+      : `xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 10 /Root 1 0 R /Encrypt ${ref} >>\n`;
+  return `${body}startxref\n${at}\n%%EOF\n`;
+};
+for (const [name, dict] of Object.entries(encryptDicts)) {
+  only('pdf-encryption', `file-${name}`, 0, ascii(pdfWith(1, dict)));
+  only('pdf-encryption', `dict-${name}`, 1, ascii(dict));
+}
+// The input that put a NUL from a /Filter name into the label.
+only('pdf-encryption', 'handler-name-nul', 1, ascii('<< /Filter /Standar#00V /V 4 >>'));
+only('pdf-encryption', 'xref-stream', 2, ascii(encryptDicts['aes-256']));
+only('pdf-encryption', 'inline-dictionary', 3, ascii(encryptDicts['aes-128']));
+only('pdf-encryption', 'file-xref-stream', 0, ascii(pdfWith(2, encryptDicts['aes-128'])));
 if (skipped.length > 0) {
   console.log(`SKIPPED (over ${MAX_BYTES} bytes): ${skipped.join(', ')}`);
 }
