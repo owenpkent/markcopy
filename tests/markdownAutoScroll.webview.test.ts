@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const HEIGHT = 5000;
 const VIEW = 1000;
+// A little longer than the preview's post-render settle (RENDER_SETTLE_MS).
+const SETTLE = 230;
 
 let scrollTop = 0;
 let docHeight = HEIGHT;
@@ -58,6 +60,8 @@ async function render(
   // The page is replaced synchronously; this is the moment layout would clamp it.
   whileRendering?.();
   for (let i = 0; i < 6; i++) await tick();
+  // Past the settle after a render, during which auto-scroll does not trust an edge.
+  await new Promise((r) => setTimeout(r, SETTLE));
 }
 
 // By reference to the pill: a document heading may take the same id.
@@ -256,73 +260,6 @@ describe('auto-scroll in the Markdown preview', () => {
     expect(toggle().getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('stays on, and does not report the end, when the content re-renders and shrinks', async () => {
-    await boot();
-    await render();
-    scrollTop = 3000;
-    toggle().click();
-    runFrames(16);
-    runFrames(32);
-    const before = scrollTop;
-
-    // A live edit: the new page is shorter for a moment (a diagram placeholder),
-    // which clamps the scroll position to the new end.
-    await render('<p data-source-line="0">Hello again</p>', 'markdown', () => {
-      docHeight = 3100;
-      scrollTop = 2100;
-    });
-    docHeight = HEIGHT; // the diagram settled
-    runFrames(48);
-    runFrames(64);
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-    expect(document.getElementById('mc-status')!.textContent).toBe('');
-    // Put back where the reader was, then gliding on from there.
-    expect(scrollTop).toBeGreaterThanOrEqual(before);
-    expect(scrollTop).toBeLessThan(before + 3);
-  });
-
-  it('does not undo a wheel scroll made while a redraw was in flight', async () => {
-    await boot();
-    await render();
-    scrollTop = 1102;
-    toggle().click();
-    runFrames(16);
-    runFrames(32);
-    await render('<p data-source-line="0">Edited</p>', 'markdown', () => {
-      docHeight = 1500;
-      scrollTop = 500; // clamped by the shorter page
-      window.dispatchEvent(new Event('wheel'));
-      docHeight = HEIGHT;
-      scrollTop = 1882; // the reader's wheel
-      window.dispatchEvent(new Event('scroll'));
-    });
-    runFrames(48);
-    runFrames(64);
-    expect(scrollTop).toBeGreaterThanOrEqual(1882);
-    expect(scrollTop).toBeLessThan(1884);
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('restores the position from the first of two overlapping redraws', async () => {
-    await boot();
-    await render();
-    scrollTop = 3000;
-    toggle().click();
-    runFrames(16);
-    runFrames(32);
-    const before = scrollTop;
-    send('<p data-source-line="0">One</p>');
-    docHeight = 3100; // the first render's placeholder clamps the page
-    scrollTop = 2100;
-    send('<p data-source-line="0">Two</p>');
-    for (let i = 0; i < 6; i++) await tick();
-    docHeight = HEIGHT;
-    runFrames(48);
-    runFrames(64);
-    expect(scrollTop).toBeGreaterThanOrEqual(before);
-    expect(scrollTop).toBeLessThan(before + 3);
-  });
-
   describe('with an image still loading', () => {
     let loaded = false;
     beforeEach(() => {
@@ -434,7 +371,7 @@ describe('auto-scroll in the Markdown preview', () => {
   afterEach(() => vi.doUnmock('katex'));
   const SLOW = '<p data-source-line="0"><span class="mc-math">x</span></p>';
 
-  it('waits for an older, slower redraw before putting the position back', async () => {
+  it('holds during a redraw and carries on from where the page actually is', async () => {
     const release = holdKatex();
     await boot();
     await render();
@@ -442,126 +379,57 @@ describe('auto-scroll in the Markdown preview', () => {
     toggle().click();
     runFrames(16);
     runFrames(32);
-    const before = scrollTop;
     clampWrites = true;
-    send(SLOW);
+    send(SLOW); // in flight until released
     docHeight = 3100; // placeholders clamp the page
     scrollTop = 2100;
-    send('<p data-source-line="0">Two</p>');
     for (let i = 0; i < 3; i++) await tick();
-    docHeight = HEIGHT; // the slow render's diagram arrives and the page is tall again
-    release();
-    for (let i = 0; i < 6; i++) await tick();
     runFrames(48);
     runFrames(64);
-    expect(toggle().getAttribute('aria-pressed')).toBe('true');
-    expect(scrollTop).toBeGreaterThanOrEqual(before);
-    expect(scrollTop).toBeLessThan(before + 3);
-  });
-
-  it('keeps an editor jump made during a redraw', async () => {
-    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
-      this: Element,
-    ) {
-      const line = Number((this as HTMLElement).dataset?.sourceLine);
-      const top = Number.isFinite(line) ? line * 100 - scrollTop : 0;
-      return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20 } as DOMRect;
-    });
-    try {
-      await boot();
-      const html = [0, 10, 20, 30].map((n) => `<p data-source-line="${n}">p${n}</p>`).join('');
-      await render(html, 'markdown', undefined, { syncScroll: true });
-      await new Promise((r) => setTimeout(r, 300));
-      scrollTop = 1000;
-      toggle().click();
-      runFrames(16);
-      runFrames(32);
-      await render(
-        html,
-        'markdown',
-        () => {
-          window.dispatchEvent(
-            new MessageEvent('message', {
-              origin: window.origin,
-              data: { type: 'scrollToLine', line: 30 },
-            }),
-          );
-        },
-        { syncScroll: true },
-      );
-      expect(scrollTop).toBeGreaterThanOrEqual(3000);
-    } finally {
-      rect.mockRestore();
-    }
-  });
-
-  it('keeps a heading jump made during a redraw', async () => {
-    await boot();
-    await render();
-    scrollTop = 1000;
-    toggle().click();
-    runFrames(16);
-    runFrames(32);
-    await render(
-      '<p><a id="lnk" href="#there">go</a></p><h2 id="there">There</h2>',
-      'markdown',
-      () => {
-        Element.prototype.scrollIntoView = vi.fn(() => {
-          scrollTop = 4108;
-        });
-        document.getElementById('lnk')!.click();
-      },
-    );
-    expect(scrollTop).toBeGreaterThanOrEqual(4000);
-  });
-
-  it("captures the reader's new position for a third edit while an old render lingers", async () => {
-    const release = holdKatex();
-    await boot();
-    await render();
-    scrollTop = 3000;
-    toggle().click();
-    runFrames(16);
-    runFrames(32);
-    clampWrites = true;
-    send(SLOW); // lingers
-    send('<p data-source-line="0">Two</p>'); // settles at once
-    for (let i = 0; i < 3; i++) await tick();
-    window.dispatchEvent(new Event('wheel'));
-    scrollTop = 1202; // the reader chooses a new place
-    window.dispatchEvent(new Event('scroll'));
-    send('<p data-source-line="0">Three</p>');
-    docHeight = 1500;
-    scrollTop = 500; // clamped by the third edit's placeholders
+    expect(scrollTop).toBe(2100); // held: nothing written, nothing restored
     docHeight = HEIGHT;
     release();
     for (let i = 0; i < 6; i++) await tick();
-    runFrames(48);
-    runFrames(64);
-    expect(scrollTop).toBeGreaterThanOrEqual(1202);
-    expect(scrollTop).toBeLessThan(1205);
+    runFrames(80);
+    runFrames(96);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    // Resumed from 2100, not put back at 3000.
+    expect(scrollTop).toBeGreaterThanOrEqual(2100);
+    expect(scrollTop).toBeLessThan(2103);
   });
 
-  it('keeps the vertical position when a code block is wheeled sideways', async () => {
+  it('does not stop at an edge during a render or its settle, only after', async () => {
     await boot();
     await render();
-    scrollTop = 1212;
+    scrollTop = 2099;
     toggle().click();
     runFrames(16);
-    runFrames(32);
-    await render('<p data-source-line="0">Edited</p>', 'markdown', () => {
-      docHeight = 1500;
-      scrollTop = 500;
-      window.dispatchEvent(new Event('wheel')); // sideways: the page does not move after it
-      window.dispatchEvent(new Event('scroll'));
-      docHeight = HEIGHT;
-    });
-    runFrames(48);
-    runFrames(64);
-    expect(scrollTop).toBeGreaterThanOrEqual(1212);
-    expect(scrollTop).toBeLessThan(1215);
+    // A live edit: the page is shorter and stays so (the end is the real end).
+    send('<p data-source-line="0">Edited</p>');
+    docHeight = 3100;
+    scrollTop = 2100;
+    for (let i = 0; i < 6; i++) await tick();
+    for (let i = 1; i <= 4; i++) runFrames(32 + i * 16);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true'); // settling
+    await new Promise((r) => setTimeout(r, SETTLE));
+    for (let i = 1; i <= 4; i++) runFrames(100 + i * 16);
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('leaves the scroll position alone on a redraw when auto-scroll is off', async () => {
+    await boot();
+    await render();
+    scrollTop = 3000;
+    const write = vi.spyOn(window, 'scrollTo');
+    await render('<p data-source-line="0">Edited</p>', 'markdown', () => {
+      docHeight = 3100;
+      scrollTop = 2100; // clamped by the shorter page, as main would leave it
+    });
+    docHeight = HEIGHT;
+    expect(scrollTop).toBe(2100);
+    expect(write).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
   describe('with images still loading', () => {
     beforeEach(() => {
       Object.defineProperty(HTMLImageElement.prototype, 'complete', {
@@ -614,6 +482,26 @@ describe('auto-scroll in the Markdown preview', () => {
       toggle().click();
       for (let i = 1; i <= 5; i++) runFrames(i * 16);
       expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    });
+    it('gives up waiting for an image that never loads after about 2 seconds', async () => {
+      await boot();
+      await render('<p data-source-line="0"><img loading="lazy" src="x.png" alt="x"></p>');
+      scrollTop = HEIGHT - VIEW - 0.6;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        toggle().click();
+        let ts = 0;
+        const step = (ms: number) => {
+          vi.setSystemTime(Date.now() + ms);
+          runFrames((ts += ms));
+        };
+        for (let i = 0; i < 4; i++) step(400); // 1.6 s
+        expect(toggle().getAttribute('aria-pressed')).toBe('true');
+        for (let i = 0; i < 4; i++) step(400); // 3.2 s, over 2 s after the first wait
+        expect(toggle().getAttribute('aria-pressed')).toBe('false');
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

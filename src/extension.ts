@@ -540,17 +540,11 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!syncScrollEnabled()) {
         return;
       }
-      const line = e.visibleRanges[0]?.start.line ?? 0;
-      // Only the echo of our own reveal (same document, same line) is dropped: a
-      // reader scrolling the source of a playing preview elsewhere still goes through.
-      const key = e.textEditor.document.uri.toString();
-      const lastVisible = e.visibleRanges[0]?.end.line ?? line;
-      // At the end of the file VS Code cannot put the revealed line at the top, so
-      // there the echo is a reveal whose line is anywhere in view.
-      const atEnd = lastVisible >= e.textEditor.document.lineCount - 1;
-      if (reveals.isEcho(key, line) || (atEnd && reveals.isEcho(key, line, lastVisible))) {
+      // The echo of our own reveal is dropped, per document (see REVEAL_ECHO_MS).
+      if (reveals.isEcho(e.textEditor.document.uri.toString())) {
         return;
       }
+      const line = e.visibleRanges[0]?.start.line ?? 0;
       for (const state of previewsOf(e.textEditor.document.uri)) {
         state.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
@@ -1439,6 +1433,8 @@ async function openLink(
 // src/webview/main.ts).
 const REVEAL_ECHO_MS = 250;
 // Per document: a reveal in one must not mute the other direction for another.
+// While a preview auto-scrolls it reveals continuously, so that document's
+// editor-to-preview sync is muted for the duration (the preview leads).
 const reveals = createRevealEcho(REVEAL_ECHO_MS);
 
 function syncScrollEnabled(): boolean {
@@ -1460,7 +1456,7 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
   // The webview measures against the render it has, which a fast edit can leave a
   // line or two behind the document; clamp rather than throw on an out-of-range line.
   const clamped = Math.min(Math.max(0, Math.floor(line)), editor.document.lineCount - 1);
-  reveals.mark(docUri.toString(), clamped);
+  reveals.mark(docUri.toString());
   editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 

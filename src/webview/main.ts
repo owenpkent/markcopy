@@ -170,16 +170,11 @@ const editMode = createEditMode({
 
 // Only the latest render received while a block editor is open is kept.
 let pendingRender: Record<string, unknown> | undefined;
-// Renders started and not yet finished, and the latest one's number, for
-// auto-scroll (see applyRenderMessage).
+// Renders started and not yet finished, and when the last one finished, for\n// auto-scroll (see applyRenderMessage).
 let rendersInFlight = 0;
-// Where the reader was when the first of a run of overlapping renders began, to
-// put back once the last one has finished (not just the latest to start: an older
-// one may still be about to change the page height). A later render in the run
-// must not recapture it: by then placeholders may have clamped the page. Null
-// when there is nothing to restore (auto-scroll off, a different document, or
-// the reader navigated meanwhile), in which case the next render captures afresh.
-let heldTop: number | null = null;
+let renderSettledAt = 0;
+// How long after a render finishes the page may still be changing height.
+const RENDER_SETTLE_MS = 200;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
@@ -192,17 +187,7 @@ function applyRenderMessage(msg: Record<string, any>): void {
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
-  // Auto-scroll holds still while the content is being replaced: the page height
-  // is only transient until the math and diagrams have settled, and a scroll
-  // position clamped by a shorter page is not the reader's. Where the page was is
-  // put back afterwards, so a live edit does not set the reader back or look
-  // like reaching the end.
-  if (heldTop === null) {
-    heldTop = auto.isOn() && !docChanged ? scrollTop() : null;
-  }
-  if (docChanged || msg.revealFragment) {
-    heldTop = null;
-  }
+  // Auto-scroll holds still while the content is being replaced (isHeld) and for a\n  // short settle afterwards (deferEdge), and then carries on from wherever the page\n  // actually is: nothing here puts an earlier offset back.
   rendersInFlight++;
   void render(
     msg.html as string,
@@ -221,14 +206,7 @@ function applyRenderMessage(msg: Record<string, any>): void {
     msg.revealFragment as string | undefined,
   ).finally(() => {
     rendersInFlight--;
-    if (rendersInFlight === 0) {
-      const keepTop = heldTop;
-      heldTop = null;
-      if (keepTop !== null && auto.isOn()) {
-        suppressSyncTo(Math.min(keepTop, maxScroll()));
-        setScrollTop(keepTop);
-      }
-    }
+    renderSettledAt = Date.now();
     auto.resync();
   });
   editMode.afterRender(
@@ -236,59 +214,6 @@ function applyRenderMessage(msg: Record<string, any>): void {
     docChanged,
   );
 }
-
-// The reader moving the page by hand. A render that finishes afterwards must not
-// put back the position it began at, and a scroll caused by the auto-scroll loop
-// is told apart from this by `readerInputAt`.
-let readerInputAt = 0;
-// The vertical offset when the last input arrived. Input only counts as moving the
-// page if the offset then changes: a sideways wheel over a wide code block does
-// not, and a clamp by a shorter page (the render's own doing) arrives with no
-// input at all.
-let readerInputTop = 0;
-function noteReaderInput(): void {
-  readerInputAt = Date.now();
-  readerInputTop = scrollTop();
-}
-/** The reader or a link or the editor took the page somewhere: do not restore. */
-function navigated(): void {
-  heldTop = null;
-}
-window.addEventListener(
-  'scroll',
-  () => {
-    if (
-      heldTop !== null &&
-      Date.now() - readerInputAt < 1000 &&
-      Math.abs(scrollTop() - readerInputTop) >= 1
-    ) {
-      navigated();
-    }
-  },
-  { passive: true },
-);
-for (const type of ['wheel', 'touchmove']) {
-  window.addEventListener(type, noteReaderInput, { passive: true, capture: true });
-}
-document.addEventListener(
-  'keydown',
-  (e) => {
-    if (['PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
-      noteReaderInput();
-    }
-  },
-  true,
-);
-// A press on the page's own scrollbar (the root element) is a drag of the page.
-document.addEventListener(
-  'pointerdown',
-  (e) => {
-    if (e.target === document.documentElement) {
-      noteReaderInput();
-    }
-  },
-  true,
-);
 
 window.addEventListener('message', (e: MessageEvent) => {
   if (!fromHost(e)) {
@@ -621,15 +546,39 @@ const auto = createAutoScroll({
   isHeld: () => rendersInFlight > 0 || editMode.isEditing(),
   // The toggle by reference: a heading can take the id `mc-autoscroll-toggle`.
   toggleButton: () => autoToggle,
-  // An image still loading can change the page's height, so the end it shows is
-  // not final: wait, and carry on if the page grows.
-  deferEdge: (edge) => edge === 'end' && imagesLoading(),
+  // The edge is not trusted while a render is in flight or just settled (the page
+  // is briefly shorter), nor while an image near the end is still loading.
+  deferEdge: (edge) => renderPending() || (edge === 'end' && imageWait()),
 });
 
-// An image that is still loading below the viewport (or across it) can lengthen
-// the page and so move the end. One above the viewport does not stand between the
-// reader and the bottom, and the top is always known. A lazy image counts once it
-// is in or near the viewport, where the browser has started to fetch it.
+// A render is running, or finished a moment ago and the page may still change
+// height (diagrams and math land after the first paint).
+function renderPending(): boolean {
+  return rendersInFlight > 0 || Date.now() - renderSettledAt < RENDER_SETTLE_MS;
+}
+
+// An image still loading at or below the viewport (within two screens) can
+// lengthen the page and so move the end; one above it does not stand between the
+// reader and the bottom. The wait is capped, so a hidden lazy image that never
+// loads cannot keep the loop from stopping.
+const IMAGE_WAIT_MS = 2000;
+let imageWaitSince = 0;
+let imageWaitLastAsked = 0;
+function imageWait(): boolean {
+  const now = Date.now();
+  // A new approach to the edge starts a fresh wait.
+  if (now - imageWaitLastAsked > 500) {
+    imageWaitSince = 0;
+  }
+  imageWaitLastAsked = now;
+  if (!imagesLoading()) {
+    imageWaitSince = 0;
+    return false;
+  }
+  imageWaitSince ||= now;
+  return now - imageWaitSince < IMAGE_WAIT_MS;
+}
+
 function imagesLoading(): boolean {
   const view = window.innerHeight || document.documentElement.clientHeight;
   return Array.from(content.querySelectorAll('img')).some((img) => {
@@ -637,13 +586,9 @@ function imagesLoading(): boolean {
       return false;
     }
     const box = img.getBoundingClientRect();
-    if (box.bottom < 0 && box.height > 0) {
-      return false;
-    }
-    return img.getAttribute('loading') !== 'lazy' || box.top < view * 2;
+    return !(box.bottom < 0 && box.height > 0) && box.top < view * 2;
   });
 }
-
 function offersAutoScroll(): boolean {
   return (document.body.dataset.mcKind ?? 'markdown') === 'markdown';
 }
@@ -756,7 +701,6 @@ function scrollToLine(line: number): void {
   if (target === undefined || Math.abs(target - scrollTop()) < 1) {
     return;
   }
-  navigated();
   suppressSyncTo(target);
   setScrollTop(target);
 }
@@ -781,7 +725,6 @@ function scrollToAnchor(rawId: string): void {
     document.getElementById(rawId) ??
     content.querySelector<HTMLElement>(`a[name="${escaped}"]`);
   if (el) {
-    navigated();
     suppressSync();
     el.scrollIntoView({ block: 'start' });
     // scrollIntoView picks the offset itself, and it is synchronous, so this is
@@ -911,8 +854,7 @@ function syncEditorToPreview(): void {
     const automatic =
       writes !== syncSeenWrites &&
       auto.wroteTop !== null &&
-      Math.abs(scrollTop() - auto.wroteTop) < 1 &&
-      Date.now() - readerInputAt > SYNC_ECHO_MS;
+      Math.abs(scrollTop() - auto.wroteTop) < 1;
     syncSeenWrites = writes;
     if (!automatic) {
       userScrolledAt = Date.now();

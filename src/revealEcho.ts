@@ -1,47 +1,38 @@
 // Marks the editor reveals the extension caused itself, so the visible-range
-// change they fire is not echoed back to the preview. Kept per document and per
-// requested line: a reveal in one document, or of one line (an auto-scrolling
-// preview sends many), must not mute a genuine scroll of the source elsewhere.
-// Free of the `vscode` module so it can be tested directly.
+// change they fire is not echoed back to the preview. A time window kept per
+// document (by URI string): a reveal in one document must not mute scroll sync
+// for another. Consequence: while a preview auto-scrolls it reveals every few
+// frames, so editor-to-preview sync for that same document stays muted (the
+// preview leads). Free of the `vscode` module so it can be tested directly.
 export interface RevealEcho {
-  /** Record a reveal of this line in the document with this key (its URI string). */
-  mark(key: string, line: number): void;
-  /**
-   * Whether a visible-range change that now shows lines `start` to `end` of this
-   * document is the echo of a reveal we made recently: the same document, with the
-   * revealed line in view. With only `start` given, the revealed line must be at
-   * the top; the caller passes `end` only where VS Code cannot put it there (the
-   * editor already scrolled to the end of the file).
-   */
-  isEcho(key: string, start: number, end?: number): boolean;
+  /** Record a reveal in the document with this key (its URI string). */
+  mark(key: string): void;
+  /** Whether a reveal in this document happened within the window. */
+  isEcho(key: string): boolean;
 }
 
+// More documents than this are never revealed at once; the bound keeps the map
+// from growing over a long session.
+const MAX_TRACKED = 32;
+
 export function createRevealEcho(windowMs: number, now: () => number = Date.now): RevealEcho {
-  const recent = new Map<string, Array<{ line: number; at: number }>>();
-  const live = (key: string, t: number) => {
-    const list = (recent.get(key) ?? []).filter((r) => t - r.at < windowMs);
-    if (list.length > 0) {
-      recent.set(key, list);
-    } else {
-      recent.delete(key);
-    }
-    return list;
-  };
+  const at = new Map<string, number>();
   return {
-    mark(key, line) {
+    mark(key) {
       const t = now();
-      const list = live(key, t);
-      list.push({ line, at: t });
-      recent.set(key, list);
-      // Forget documents whose reveals have all expired, so the map stays small.
-      if (recent.size > 32) {
-        for (const k of [...recent.keys()]) {
-          live(k, t);
+      at.delete(key);
+      at.set(key, t);
+      if (at.size > MAX_TRACKED) {
+        for (const [k, v] of at) {
+          if (t - v >= windowMs || at.size > MAX_TRACKED) {
+            at.delete(k);
+          }
         }
       }
     },
-    isEcho(key, start, end = start) {
-      return live(key, now()).some((r) => r.line >= start && r.line <= end);
+    isEcho(key) {
+      const v = at.get(key);
+      return v !== undefined && now() - v < windowMs;
     },
   };
 }
