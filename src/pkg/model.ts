@@ -45,6 +45,10 @@ export interface PackageInfo {
   /** One line saying what it is, from the package's summary or description. */
   summary?: string;
   sections: InfoSection[];
+  /** Set when the file has the structure of more than one format. */
+  also?: AlsoReading;
+  /** Extra rows for the page's File section, such as how a zip's entries are encrypted. */
+  fileRows?: Row[];
   /** Parts of the file that were present but could not be read. */
   warnings: string[];
 }
@@ -104,4 +108,18 @@ export function tableSection(
           : undefined,
     },
   ];
+}
+
+/** A file that has the structure of more than one format: the others, and the reading of one. */
+export interface AlsoReading {
+  /** The format the page reads the file as. */
+  primary: string;
+  /** Every other format whose structure the file has, with where it sits. */
+  matches: { format: string; fact: string }[];
+  /** The format of the second reading, when one was made. */
+  read?: string;
+  /** The second reading, bounded like the first. */
+  info?: PackageInfo;
+  /** Why the second reading failed. */
+  error?: string;
 }

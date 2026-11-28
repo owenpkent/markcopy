@@ -55,11 +55,31 @@ jobs:
             pkg-xar,
             pkg-zip,
             pkg-alpine,
+            pkg-macho,
             pkg-dmg,
+            pkg-7z,
+            pkg-rar,
+            pkg-luks,
+            pkg-kdbx,
+            pkg-age,
+            pkg-pgp,
+            pkg-pkcs12,
+            pkg-pem,
+            key-encodings,
+            polyglot,
+            cpio,
+            dex,
+            go-buildinfo,
+            signer,
+            ooxml-encrypted,
+            pdf-encryption,
+            odf,
+            dmg-encryption,
             file-source,
             links,
             markdown-html,
             paste-export,
+            export-ooxml,
             image,
             image-png,
             image-jpeg,
@@ -204,3 +224,106 @@ jobs:
               gh issue create --title "$title" --body-file body.md
             fi
           done
+
+  # Line coverage of the parser modules from a replay of the committed seeds,
+  # against the minimums in fuzz/coverage.json. It runs the repository's code, so
+  # it holds no token that can write issues; the job after it does that, and never
+  # runs the repository's code. Not run on pull requests: this workflow is not.
+  coverage:
+    name: Measure parser coverage
+    needs: fuzz
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Writes the table to the job summary and fuzz/coverage-report/.
+      - name: Measure
+        run: node fuzz/coverage-report.js
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-coverage
+          path: fuzz/coverage-report/fuzz-coverage.*
+          if-no-files-found: ignore
+
+  # Opens or updates "Fuzz coverage below threshold" while any parser is under its
+  # minimum, and closes it when none is. Default branch only: the issue is shared by
+  # the repository, so a manual run on a feature branch reports and uploads the
+  # artifact but leaves the issue alone. A scheduled run is always on the default
+  # branch, so it does not depend on its event payload naming that branch.
+  coverage-issue:
+    name: Coverage issue
+    needs: coverage
+    if: >-
+      always() && needs.coverage.result == 'success' &&
+      (github.event_name == 'schedule' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITLE: Fuzz coverage below threshold
+      LABEL: fuzz-coverage
+    steps:
+      - name: Download report
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-coverage
+          path: report
+
+      - name: Open, update or close the issue
+        run: |
+          gh label create "$LABEL" --description "A parser is under its fuzz coverage minimum" \
+            --color D93F0B 2>/dev/null || true
+          number=$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')
+          files=$(jq -r '.below | sort | join(",")' report/fuzz-coverage.json)
+          if [ -z "$files" ]; then
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body "Every parser is back at or above its minimum in $RUN_URL. Closing."
+              gh issue close "$number"
+            fi
+            exit 0
+          fi
+          {
+            echo "These parsers are under their \`minLineCoverage\` in \`fuzz/coverage.json\` when the committed seeds are replayed."
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            jq -r '.rows[] | select(.below) | "- `\(.file)`: \(.percent)% of \(.total) lines, minimum \(.min)% (targets: \(.targets | join(", ")))"' report/fuzz-coverage.json
+            echo
+            echo "Add seeds or dictionary tokens for the lines a target does not reach (see docs/FUZZING-STRATEGY.md), or lower the minimum with a reason."
+            echo
+            echo "<!-- files: $files -->"
+          } > body.md
+          if [ -z "$number" ]; then
+            gh issue create --title "$TITLE" --label "$LABEL" --body-file body.md
+          else
+            current=$(gh issue view "$number" --json body --jq .body)
+            # Only when the set of files changed, so a steady state is not a nightly comment.
+            if [[ "$current" != *"<!-- files: $files -->"* ]]; then
+              gh issue edit "$number" --body-file body.md
+              gh issue comment "$number" --body-file body.md
+            fi
+          fi

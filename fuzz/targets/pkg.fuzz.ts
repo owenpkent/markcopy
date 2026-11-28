@@ -1,6 +1,6 @@
 import { bytesSource } from '../../src/binary/reader';
-import { PackageError, readPackage, renderPackageHtml } from '../../src/pkg';
-import { checkPage, startCost } from './binaryOracle';
+import { PackageError, readPackage, renderPackageHtml, type PackageInfo } from '../../src/pkg';
+import { checkNoSecrets, checkPage, startCost } from './binaryOracle';
 
 export { CostError, MAX_HEAP_GROWTH, MAX_HTML_CHARS, MAX_MILLISECONDS } from './binaryOracle';
 
@@ -23,6 +23,8 @@ interface Shape {
   magic?: number[];
   /** A UDIF trailer is written over the last 512 bytes instead. */
   trailer?: boolean;
+  /** A universal binary: the architecture count after the magic must be 1 to 4,096. */
+  fat?: boolean;
 }
 
 const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
@@ -42,7 +44,33 @@ export const SHAPES: Shape[] = [
   { name: 'fuzz.jar', format: 'zip', magic: [0x50, 0x4b, 0x05, 0x06] },
   // Alpine packages are gzip, which the dispatcher only trusts by name.
   { name: 'fuzz.apk', format: 'alpine', magic: [0x1f, 0x8b, 0x08] },
+  // The disk image shape keeps its place: committed seeds name a shape by its
+  // index, and the DMG seeds start with 12. New shapes go after it, never before.
   { name: 'fuzz.dmg', format: 'dmg', trailer: true },
+  { name: 'fuzz.dylib', format: 'macho', magic: [0xcf, 0xfa, 0xed, 0xfe] },
+  // A universal binary: big-endian 0xcafebabe, then a count that is kept when it is
+  // plausible, so the architecture table behind it reaches the fat reader.
+  { name: 'fuzz.universal', format: 'macho', magic: [0xca, 0xfe, 0xba, 0xbe], fat: true },
+  // Encrypted containers and key files. Each is chosen by content, so the magic is
+  // what the probe table tests; a binary OpenPGP file is also chosen by its name.
+  { name: 'fuzz.7z', format: '7z', magic: [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] },
+  { name: 'fuzz.rar', format: 'rar', magic: [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x01, 0x00] },
+  { name: 'fuzz.rar', format: 'rar', magic: [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00] },
+  { name: 'fuzz.luks', format: 'luks', magic: [0x4c, 0x55, 0x4b, 0x53, 0xba, 0xbe] },
+  { name: 'fuzz.kdbx', format: 'kdbx', magic: [0x03, 0xd9, 0xa2, 0x9a, 0x67, 0xfb, 0x4b, 0xb5] },
+  { name: 'fuzz.age', format: 'age', magic: ascii('age-encryption.org/v1\n') },
+  { name: 'fuzz.age', format: 'age', magic: ascii('-----BEGIN AGE ENCRYPTED FILE-----\n') },
+  { name: 'fuzz.asc', format: 'pgp', magic: ascii('-----BEGIN PGP MESSAGE-----\n') },
+  { name: 'fuzz.asc', format: 'pgp', magic: ascii('-----BEGIN PGP PUBLIC KEY BLOCK-----\n') },
+  // A new-format public-key encrypted session key packet (tag 1) of 29 bytes, version 3.
+  { name: 'fuzz.gpg', format: 'pgp', magic: [0xc1, 0x1d, 0x03] },
+  // A DER SEQUENCE in the long form. The INTEGER 3 and second SEQUENCE that make a PFX, and the
+  // length, are left to the seeds, since a length written here would be wrong for most files.
+  { name: 'fuzz.p12', format: 'pkcs12', magic: [0x30, 0x82] },
+  { name: 'fuzz.pem', format: 'pem', magic: ascii('-----BEGIN ENCRYPTED PRIVATE KEY-----\n') },
+  { name: 'fuzz.pem', format: 'pem', magic: ascii('-----BEGIN OPENSSH PRIVATE KEY-----\n') },
+  { name: 'fuzz.pem', format: 'pem', magic: ascii('-----BEGIN CERTIFICATE-----\n') },
+  { name: 'fuzz.pem', format: 'pem', magic: ascii('-----BEGIN RSA PRIVATE KEY-----\n') },
 ];
 
 export const PKG_FORMATS = [...new Set(SHAPES.map((s) => s.format))];
@@ -90,9 +118,15 @@ export function shaped(
     return { bytes: out, name: shape.name };
   }
   const magic = shape.magic ?? [];
-  const out = Buffer.alloc(Math.max(rest.length, magic.length));
+  const out = Buffer.alloc(Math.max(rest.length, magic.length, shape.fat ? 8 : 0));
   rest.copy(out);
   Buffer.from(magic).copy(out);
+  if (shape.fat) {
+    const count = out.readUInt32BE(4);
+    if (count < 1 || count > 0x1000) {
+      out.writeUInt32BE(1, 4);
+    }
+  }
   return { bytes: out, name: shape.name };
 }
 
@@ -100,7 +134,7 @@ export function shaped(
 export async function readAndCheck(input: Buffer, fileName: string): Promise<string> {
   const done = startCost(fileName, input.length);
   let html = '';
-  let info: unknown;
+  let info: PackageInfo | undefined;
   try {
     const read = await readPackage(bytesSource(input), fileName);
     info = read;
@@ -112,6 +146,9 @@ export async function readAndCheck(input: Buffer, fileName: string): Promise<str
   }
   done(html);
   checkPage(fileName, html, input, info);
+  if (info !== undefined) {
+    checkNoSecrets(fileName, info.format, html, input, info);
+  }
   return html;
 }
 

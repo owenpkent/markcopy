@@ -292,6 +292,220 @@ Unit coverage after the guard tests (v8, whole suite, 3,676 tests): 88.8% of lin
 90.0 to 93.4, `step.ts` 90.8 to 93.4, `audioProbe.ts` 92.7 to 95.2; `isolate.ts` gained
 the worker-start failures.
 
+## Encryption labels (PDF, disk image, OpenDocument, Mach-O)
+
+Readers that say what a file declares about its encryption, without asking for a password or decrypting, are fuzzed as
+parsers of untrusted text: what they print goes into the page. Three have a target of their own because each sits
+behind structure a random input does not have; the fourth is reached by a variant.
+
+| Reader                                          | Reached by                            | What it does                                                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/pdfEncryption.ts` (the host-side /Encrypt) | `pdf-encryption`                      | The input is a whole PDF, or the Encrypt dictionary text framed as object 9 of a classic PDF, as the dictionary of a cross-reference stream, or inline in the trailer. The label and permissions are checked as text. |
+| `src/pkg/dmgEncryption.ts`                      | `dmg-encryption`, and `pkg-dmg` seeds | Version 2 header and version 1 trailer, as they are or with the magic written over. At most 17 slot lines, a cipher label from a fixed set, a plausible block size, no control characters.                            |
+| `src/pkg/odf.ts`                                | `odf`, and `pkg-zip` seeds            | The manifest text goes to `scanManifest`, and the same text sits in an OpenDocument zip read through `readPackage` with the shared oracle. Counts bounded, labels short and clean.                                    |
+| Mach-O `LC_ENCRYPTION_INFO(_64)` rows           | `pkg-macho` seeds                     | FairPlay (cryptid 1), another cryptid, and not encrypted, in 32 and 64-bit images.                                                                                                                                    |
+
+The first run of `pdf-encryption` found, in under a second, a `/Filter` name with a `#00` escape that put a NUL into the
+label (and a name of any length into it). The handler name is now cleaned with `printable` and clipped to 60 characters;
+the input is a seed and the unit test is in `tests/pdfEncryption.test.ts`. `odf` and `dmg-encryption` found nothing.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each: `pdf-encryption` 124,927 runs, `cov: 269`, `ft: 928` (after the
+fix); `odf` 148,419 runs, `cov: 421`, `ft: 755`; `dmg-encryption` 215,737 runs, `cov: 139`, `ft: 316`; `pkg-macho` 127,312
+runs, `cov: 544`; `pkg-zip` 106,937 runs, `cov: 1274`; `pkg-dmg` 150,600 runs, `cov: 419`. No other findings.
+
+## Files that are two formats (`polyglot`)
+
+`readPackage` tries a probe table in order, reads the first format that selects the file, then names the other
+formats whose structure it also has and reads the first of those that has a reader. The `pkg` target writes one
+format's magic over every input, so it almost never makes a file that is two. The `polyglot` target
+(`fuzz/targets/polyglot.fuzz.ts`) builds them. Its first input byte picks a mode: a `pkg` shape with an empty zip
+end record appended; the bytes as they are under a name that picks `.apk`, `.jar`, `.exe`, `.pdf` or none; a PE
+image read as the executable preview reads it, with its appended data read through `readAppended`; or the
+structural tests in `src/binary/signatures.ts` on their own.
+
+Beyond the shared page and cost oracle, it asserts that the first reading is the one the same reader gives on its own
+(`bound` of the direct call, so the second step never changes it), that `also` names no format twice and never the
+primary, that it reads the first named format that has a reader, exactly one of a result and an error, with no
+second `also` inside and at most 40 sections, that `findZipEnd` returns a record that ends where the file does with
+its directory before it, that `looksLikePe` and `looksLikePdf` never say yes without the header they rest on, and
+that two readers over the same bytes agree. The shared oracle learned `ul`, `li` and `role` for the notice the page
+now writes. Seeds are polyglots built from the fixtures (an MSI, RPM, ELF, Debian package or PE followed by a zip or
+a PDF, a zip that holds a PDF and a `startxref` comment, a PE with a zip overlay), written by `fuzz/seeds.ts`.
+
+The `polyglot` target is listed for `src/binary/signatures.ts` (82.1% of its lines from the committed seeds, minimum 77) and added to `pkg/index.ts` (92.2%), `pkg/render.ts` (88.9%), `pkg/model.ts`, `pe/read.ts`, `pe/render.ts` and `binary/reader.ts`.
+
+Smoke run, 2026-11-26, Windows, one process: 25 s, 59,033 runs, `cov: 2805`, `ft: 6962`, no findings.
+
+## Encrypted containers and key files
+
+7-Zip, RAR, OpenPGP, age, KeePass, LUKS, PKCS #12 and PEM files are read by `src/pkg/sevenZip.ts`, `rar.ts`,
+`openpgp.ts`, `age.ts`, `keepass.ts`, `luks.ts` and `keyFiles.ts`, on the shared `der.ts`, `base64.ts` and `labels.ts`.
+Each is chosen by content, so each is reached through `readPackage` and the `pkg` target: eight new shapes (two or four
+for the formats whose first line or magic differs: RAR 5 and 4, age text and armor, OpenPGP messages, keys and a binary
+packet, and four PEM labels) and eight variants (`pkg-7z`, `pkg-rar`, `pkg-luks`, `pkg-kdbx`, `pkg-age`, `pkg-pgp`,
+`pkg-pkcs12`, `pkg-pem`), each seeded with files from `tests/pkg/encryptionFixture.ts`: encrypted and plain headers,
+every KDF and cipher the tests label, an odd version, a damaged LUKS2 JSON area, an indefinite-length PFX, a legacy PEM.
+`fuzz/dict/pkg.dict` gained each format's signature, UUIDs and OIDs, the LUKS JSON keys, and the PEM and armor lines.
+
+A new target, `key-encodings`, takes the encodings directly: DER and BER (`Der`: nodes inside their parent, only
+`Undetermined` escapes), the tolerant base64 decoder against Node's, PEM block splitting, OpenPGP armor and the age header.
+It has its own dictionary.
+
+These files are sensitive, and the rule in `labels.ts` is that salts, IVs, nonces, wrapped keys and stanza arguments are
+never read into a result. The fixtures fill all of them with the byte `0xab`, so the page oracle has a check for it
+(`checkNoSecrets` in `fuzz/targets/binaryOracle.ts`, called by the `pkg` target for these formats): when the input holds a
+run of 12 or more of that byte and the page shows ten of them as hex, or twelve as base64, it fails. Method IDs, KeePass
+cipher and KDF IDs and OpenPGP key IDs are public identifiers the readers print as hex on purpose, so those are removed
+from the page first. The check was run against a planted leak, and found two false alarms on the way (a mutated 7z coder
+ID and an Alpine digest of `abab...`), both now excluded. It cannot see a leak in a text format whose input holds the
+same text (a PEM's base64), so for those it only covers the hex form.
+
+The `polyglot` target on this branch also reads each new format's reader on its own to compare with the first reading.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each, no findings after the oracle changes above: `key-encodings`
+580,173 runs (`cov: 274`, `ft: 1514`); `pkg-7z` 126,352 (515, 986); `pkg-rar` 152,739 (490, 1026); `pkg-luks` 77,544 (540,
+1016); `pkg-kdbx` 134,802 (491, 953); `pkg-age` 118,398 (389, 1037); `pkg-pgp` 128,696 (581, 1224); `pkg-pkcs12` 127,197
+(500, 1054); `pkg-pem` 151,751 (514, 1320); `pkg` 59,552 (4642, 9893); `file-source` 14,358 (4846, 7924); `polyglot`
+53,474 (3262, 8199).
+
+## Readers added after 2026-11-23, covered 2026-11-26
+
+The binary readers that merged after the first fuzzing pass (Mach-O, Go build
+information, DEX, the RPM payload check, stored digests, the Authenticode image hash,
+signer detail, zip and Office encryption labels) were reached only by the general
+`pe` and `pkg` targets, with seeds that did not hold them. Each now has seeds that
+exercise it; five readers that sit behind a whole file whose structure does not
+survive mutation also have a target of their own, which takes the reader's own input
+directly. A focused target's first input byte picks the stage and the rest is the
+input, so one corpus covers every stage.
+
+| Reader                                                       | Reached by                                           | What the target or seeds do                                                                                                                                                               |
+| ------------------------------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mach-O and universal binaries (`macho.ts`)                   | `pkg-macho`                                          | Seeds with every load command the reader decodes, encrypted images, a wide fat header, and a Java class file that carries the fat magic. The universal shape keeps a plausible count.     |
+| Go build information (`goBuildInfo.ts`)                      | `go-buildinfo`, and `pkg-elf` and `pe` seeds         | Stage 0 parses module text; stages 1 and 2 read a section, as written or with the magic and a pointer width written over its start. Caps on rows and settings, no control characters.     |
+| DEX summary and digests (`dex.ts`)                           | `dex`, and `pkg-zip` seeds                           | The input is a `classes.dex` in a small stored or deflated zip (and a second file), read through `readPackage` with the shared oracle. Adler-32 is checked against a plain definition.    |
+| RPM payload walker and streaming decompressors               | `cpio`, and `pkg-rpm` seeds with real stored digests | Stage 0 walks a cpio stream whole, in pieces of the input's choosing and byte by byte, and the names, finish flag and refusal must be identical. Stages 1 to 3 run gzip, zstd and xz.     |
+| Stored digests (`storedDigest.ts`)                           | `pkg-rpm`, `pkg-alpine` and `pkg-zip` seeds          | Seeds whose digests match and whose digests do not.                                                                                                                                       |
+| PE: Rich header, long section names, load config, image hash | `pe` seeds                                           | A Rich header, a COFF string table behind `/4` names, 32 and 64-bit load configurations, and signed images whose digest is right, wrong, SHA-1 or SHA-256.                                |
+| Signer detail DER, APK signing block v2 and v3 (`signer.ts`) | `signer`, and `pe` and `pkg-zip` seeds               | Stage 0 PKCS #7, 1 a bare certificate, 2 and 3 the signing block value. Nothing may throw; the signer count is capped, a thumbprint is 40 hex digits, no field holds a control character. |
+| ELF extended counts, GNU property notes, Go notes            | `pkg-elf` seeds                                      | `PN_XNUM` and `SHT_NULL` counts, x86 and Arm property notes, a property that runs past its note, the Go build ID.                                                                         |
+| Zip encryption labels                                        | `pkg-zip` seeds                                      | WinZip AE-1 and AE-2 fields, ZipCrypto, and strong encryption.                                                                                                                            |
+| Office `EncryptionInfo` (`ooxml/encrypted.ts`)               | `ooxml-encrypted`                                    | Stage 0 the stream (agile, standard, extensible), stage 1 a whole compound file. The notice is one short line without control characters, and a refusal always comes with a notice.       |
+
+The first run of `ooxml-encrypted` found, in 2 seconds, an agile description whose
+`cipherAlgorithm` held a control character, which reached the message the preview shows.
+`describeEncryptionInfo` now runs the attribute values through `printable`; the input is a
+seed and the unit test is in `tests/ooxmlEncrypted.test.ts`. The first run of `signer` stopped
+on its own oracle (a `Signer` field present but undefined), which was a bug in the target.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each, straight through Jazzer.js
+(the nightly runs are 10 minutes). One run each; no findings after the fix above.
+
+| Target            | Runs    | cov  | ft   |
+| ----------------- | ------- | ---- | ---- |
+| `cpio`            | 293,904 | 230  | 838  |
+| `dex`             | 105,322 | 300  | 396  |
+| `go-buildinfo`    | 196,130 | 338  | 1320 |
+| `signer`          | 359,204 | 410  | 1042 |
+| `ooxml-encrypted` | 99,968  | 246  | 591  |
+| `pkg-macho`       | 133,899 | 563  | 1233 |
+| `pkg-elf`         | 115,506 | 756  | 1809 |
+| `pkg-rpm`         | 65,034  | 878  | 2407 |
+| `pkg-zip`         | 88,886  | 1529 | 3416 |
+| `pe`              | 70,747  | 1437 | 3052 |
+
+Dictionaries: `pkg.dict` and `pe.dict` gained the Mach-O magics and load command ids, the Go
+magic and module text keys, the DEX magics, cpio magics and `TRAILER!!!`, WinZip AES fields,
+the APK signing block ids, and the ELF property note markers; each focused target has a
+dictionary of its own.
+
+## Coverage manifest, measured 2026-11-26
+
+A fuzz target that nobody remembers to write for a new parser is the gap this closes.
+`fuzz/coverage.json` lists every parser module and the fuzz targets that reach it:
+
+- `parsers`: `{ "src/pkg/rpm.ts": { "targets": ["pkg-rpm"], "minLineCoverage": 70 } }`. A
+  target is any name in the nightly matrix, variants included.
+- `notParsers`: a file that sits in a parser folder (or is listed on purpose) but reads
+  no untrusted bytes or text, with a one-line reason: types only, output escaping, geometry
+  over already-validated data.
+- `folders`: the directories whose every `.ts` file must be in one of the two. Standalone
+  parsers elsewhere in `src/` (CSV, Markdown rendering, the 3D readers, the probes) are
+  listed by path and have no folder to catch a new one, so add them by hand.
+
+**The check** is `tests/fuzzCoverage.test.ts`, part of `npm test`. It fails when a file in
+a listed folder is in neither table, when a path no longer exists (a rename), when a
+target is not in the `fuzz.yml` matrix, and when a file in `fuzz/targets/` is not run
+nightly. The message says what to add. It reads files only; nothing is fuzzed.
+
+**The nightly report** is the `coverage` job in `fuzz.yml`, after the fuzz jobs, on
+schedule and `workflow_dispatch` only. `node fuzz/coverage-report.js` (`npm run
+fuzz:coverage`) replays each listed target's committed seeds in its own process with
+`NODE_V8_COVERAGE`, maps V8's ranges on the built `out/fuzz/` files back to the `.ts`
+lines through the source maps, unions the coverage over a parser's targets and compares it
+with `minLineCoverage`. The table goes to the job summary. A second job with `issues:
+write` (the first holds only `contents: read`, because it runs the repository's code)
+opens or updates the `Fuzz coverage below threshold` issue, label `fuzz-coverage`, and
+closes it when every parser is back above its minimum. Only a run on the default branch
+touches the issue; a manual run on another branch still writes the summary and the
+artifact. A listed parser that no fuzz target imports counts as 0% and below its
+minimum. That is read from `out/fuzz/reached.json`, which `fuzz/build.js` rewrites on
+every build with the sources the `*.fuzz.ts` files reach, directly or through other
+files. What sits in `out/fuzz/` does not decide it: esbuild leaves an earlier build's
+files there, and the build also compiles the support modules in `fuzz/targets/`, so a
+parser imported only by a helper that no target uses is compiled without being run.
+
+What the number means, so it is not read as more than it is:
+
+- It is the committed seeds replayed once. The nightly fuzzer mutates from them and from
+  its cached corpus, so it reaches at least this much. A threshold guards a regression in
+  the seeds and in the harness (a target that stops reaching a reader), not the fuzzer's
+  depth.
+- A variant (`pkg-rpm`, `image-png`) is replayed as its catch-all, which reads every
+  seed of every format, so the variants of one family measure the same.
+- A source line counts when the first token of any built line mapped to it ran (V8 block
+  coverage through a source map). It is close to what c8 would report on the `.ts` files,
+  not identical, and it is not branch coverage.
+- Minimums were set from one local run on Windows, 5 points under the measurement (10 for
+  files under 40 lines). The first Linux run may differ by a point or two.
+
+Measured, 135 parsers and 9 non-parsers; 17,212 of 22,447 lines (76.7%) overall:
+
+| Area                                 | Parsers | Lines covered | Lowest file (measured)      | Minimums |
+| ------------------------------------ | ------- | ------------- | --------------------------- | -------- |
+| `src/pkg/`                           | 41      | 81.5%         | `wheel.ts` 54.8             | 49 to 90 |
+| `src/pe/`                            | 8       | 88.1%         | `signer.ts` 83.1            | 78 to 90 |
+| `src/binary/`                        | 9       | 82.9%         | `goBuildInfo.ts` 71.7       | 66 to 95 |
+| `src/xlsx/`                          | 5       | 88.9%         | `render.ts` 87.2            | 82 to 85 |
+| `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
+| `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |
+| `src/ooxml/`                         | 9       | 82.2%         | `zip.ts` 64.7               | 59 to 92 |
+| `src/messages/`                      | 12      | 90.4%         | `markdown.ts` 74.2          | 71 to 90 |
+| `src/review/`                        | 5       | 40.2%         | `markdown.ts` 6.7           | 0 to 53  |
+| `src/` and `src/webview/` standalone | 22      | 67.8%         | `webview/videoInfo.ts` 11.8 | 6 to 86  |
+
+The weak spots are the review sidecar (`session.ts`, `markdown.ts`, `timecode.ts`: the
+`review` target reaches the YAML parser but little of what reads its output),
+`docx/read/extras.ts`, `webview/parts.ts`, `videoProxy.ts` and `webview/videoInfo.ts`.
+They are listed honestly with a low minimum; raising seeds there is the next step.
+
+The export writers (`ooxml/xhtml.ts`, `docx/build.ts`, `docx/package.ts`,
+`pptx/write/*`, `ooxml/write.ts`, `ooxml/tableLimits.ts`) had no target: they read the
+preview's serialized XHTML, whose text, `colspan`, `rowspan` and `style` values come from
+a document the user did not write. The `export-ooxml` target (seeds in
+`fuzz/corpus/export-ooxml/`, dictionary `fuzz/dict/export-ooxml.dict`) parses the input,
+builds both a .docx and a .pptx, checks each is a zip and that the same input gives the
+same report twice. Its first smoke run, 25 s on Windows, one process: 83,143 runs, cov
+845, ft 2864, no finding. The first version of its oracle compared the two docx byte for
+byte and failed within 5 seconds: `fflate` stamps each zip entry with the clock, so the
+bytes differ between runs a few seconds apart. That is the harness's mistake, not a
+finding, but exports are not byte-reproducible for that reason.
+
+Adding a parser: write its target (or seeds for an existing one) and dictionary tokens,
+add its path to `parsers` with the targets and a minimum a few points under what
+`npm run fuzz:coverage` prints, add the target to the `fuzz.yml` matrix, and add a row to
+the tables above, all in the same PR.
+
 ## Measuring progress
 
 Re-take, with the date, after each step: the unreached table (the esbuild metafile

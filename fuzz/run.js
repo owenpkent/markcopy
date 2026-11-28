@@ -4,7 +4,7 @@
 // FUZZ_IMAGE_FORMAT=<format>, so its inputs reach that format's header parser. Its
 // corpus is fuzz/.corpus/image-<format>/, seeded from the files in fuzz/corpus/image/
 // whose extension is that format's (.jpg and .jpeg for jpeg).
-// `pkg-<format>` (elf, rpm, deb, msi, xar, zip, alpine, dmg) runs the pkg target with
+// `pkg-<format>` (elf, rpm, deb, msi, xar, zip, alpine, dmg, macho) runs the pkg target with
 // FUZZ_PKG_FORMAT=<format>, so every input reaches that format's reader. Its corpus is
 // seeded from the files in fuzz/corpus/pkg/ whose names start with `<format>-`.
 // A dictionary at fuzz/dict/<target>.dict, when present, is passed with -dict.
@@ -37,7 +37,25 @@ const VARIANTS = {
       (format === 'jpeg' ? ['.jpg', '.jpeg'] : [`.${format}`]).includes(path.extname(file)),
   },
   pkg: {
-    formats: ['elf', 'rpm', 'deb', 'msi', 'xar', 'zip', 'alpine', 'dmg'],
+    formats: [
+      'elf',
+      'rpm',
+      'deb',
+      'msi',
+      'xar',
+      'zip',
+      'alpine',
+      'dmg',
+      'macho',
+      '7z',
+      'rar',
+      'luks',
+      'kdbx',
+      'age',
+      'pgp',
+      'pkcs12',
+      'pem',
+    ],
     env: 'FUZZ_PKG_FORMAT',
     seed: (file, format) => path.basename(file).startsWith(`${format}-`),
   },

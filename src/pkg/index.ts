@@ -9,19 +9,35 @@
 // Free of the `vscode` module, like src/pe, so every reader unit-tests and
 // fuzzes directly.
 import { RangeReader, ReadError, type ByteSource } from '../binary/reader';
+import { findZipEnd, looksLikePdf, looksLikePe } from '../binary/signatures';
 import { clip } from '../binary/text';
+import { AGE_ARMOR_BEGIN, AGE_MAGIC, readAge } from './age';
 import { readAlpineApk } from './alpine';
 import { readDeb } from './deb';
 import { looksLikeDmg, readDmg } from './dmg';
 import { readElf } from './elf';
-import type { InfoSection, PackageInfo } from './model';
+import { looksLikePem, looksLikePkcs12, readPem, readPkcs12 } from './keyFiles';
+import { KDBX_SIGNATURE_1, KDBX_SIGNATURE_2, readKeePass } from './keepass';
+import { LUKS_MAGIC, readLuks } from './luks';
+import { looksArmored, looksLikePacket, readOpenPgp } from './openpgp';
+import { RAR4_SIGNATURE, RAR5_SIGNATURE, readRar } from './rar';
+import { SEVEN_ZIP_SIGNATURE, readSevenZip } from './sevenZip';
+import { looksLikeMachO, readMachO } from './macho';
+import type { AlsoReading, InfoSection, PackageInfo } from './model';
 import { readMsi } from './msi';
 import { readRpm } from './rpm';
 import { readXar } from './xar';
 import { readZipPackage } from './zipFormats';
 
 export { PackageError, type PackageInfo, type InfoSection } from './model';
-export { renderPackageHtml, type RenderOptions } from './render';
+export {
+  renderPackageHtml,
+  renderAlsoAlert,
+  renderAlsoReading,
+  alsoNotice,
+  type RenderOptions,
+} from './render';
+export type { AlsoReading } from './model';
 
 // Twice the executable reader's budget: an RPM header or a zip's central
 // directory lists every file in the package, and for a large one that runs to
@@ -117,12 +133,194 @@ export function bound(info: PackageInfo): PackageInfo {
     title: info.title === undefined ? undefined : clip(info.title, MAX_HEADLINE_CHARS),
     summary: info.summary === undefined ? undefined : clip(info.summary, MAX_PARAGRAPH_CHARS),
     sections,
+    // Already bounded when the second reading was made.
+    also: info.also,
+    fileRows: info.fileRows
+      ?.slice(0, MAX_ROWS)
+      .map((row): [string, string] => [
+        take(row[0], MAX_HEADLINE_CHARS),
+        take(row[1], MAX_VALUE_CHARS),
+      ]),
     warnings,
   };
 }
 
-export async function readPackage(source: ByteSource, fileName: string): Promise<PackageInfo> {
-  return bound(await identify(source, fileName));
+/** What a probe is shown, and what it reads. */
+interface Context {
+  reader: RangeReader;
+  /** The first bytes of the file, as many as 4 KiB. */
+  head: Uint8Array;
+  fileName: string;
+}
+
+interface Probe {
+  /** The format as the page would call it. */
+  name: string;
+  /** The structural fact that makes this file match, for the notice: where the structure sits. */
+  fact: string;
+  /** Does the file have this format's structure? Cheap: the head and the last 64 KiB only. */
+  matches(ctx: Context): boolean | Promise<boolean>;
+  /**
+   * Is this the format the page reads the file as? Defaults to `matches`. It differs
+   * where the structure worth mentioning is not what has always chosen the reader.
+   */
+  selects?(ctx: Context): boolean | Promise<boolean>;
+  /** The reader. Absent for a format that is only recognised, such as a PE or a PDF. */
+  read?(reader: RangeReader, fileName: string): Promise<PackageInfo>;
+}
+
+const startsWith = (head: Uint8Array, expected: number[]): boolean =>
+  expected.every((b, i) => head[i] === b);
+const startsWithText = (head: Uint8Array, expected: string): boolean =>
+  startsWith(
+    head,
+    [...expected].map((c) => c.charCodeAt(0)),
+  );
+
+// The order is the order the checks have always run in: the first probe that
+// selects the file is the one read. A new format is one entry here, placed
+// where its check belongs among the others. The probes after the last reader
+// only recognise a structure, so a file that is also one of them says so.
+const PROBES: Probe[] = [
+  {
+    name: 'ELF file',
+    fact: 'it starts with the ELF signature',
+    matches: ({ head }) => startsWith(head, [0x7f, 0x45, 0x4c, 0x46]),
+    read: readElf,
+  },
+  {
+    // 0xcafebabe starts a universal binary and a Java class file alike, so a
+    // fat header is believed only when its table holds up.
+    name: 'Mach-O file',
+    fact: 'it starts with a Mach-O or universal binary header whose table holds up',
+    matches: ({ reader }) => looksLikeMachO(reader),
+    read: (reader) => readMachO(reader),
+  },
+  {
+    name: 'RPM package',
+    fact: 'it starts with the RPM signature',
+    matches: ({ head }) => startsWith(head, [0xed, 0xab, 0xee, 0xdb]),
+    read: readRpm,
+  },
+  {
+    name: 'Debian package',
+    fact: 'it starts with the ar archive signature',
+    matches: ({ head }) => startsWithText(head, '!<arch>\n'),
+    read: readDeb,
+  },
+  {
+    name: 'Windows Installer package',
+    fact: 'it starts with the compound file signature',
+    matches: ({ head }) => startsWith(head, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+    read: readMsi,
+  },
+  {
+    name: 'xar archive',
+    fact: 'it starts with the xar signature',
+    matches: ({ head }) => startsWithText(head, 'xar!'),
+    read: readXar,
+  },
+  {
+    name: 'zip archive',
+    fact: 'its central directory ends at the end of the file',
+    // A zip is chosen by its first bytes, as it always has been. As a second
+    // structure it is the end-of-central-directory record in the last 64 KiB.
+    selects: ({ head }) => startsWithText(head, 'PK\x03\x04') || startsWithText(head, 'PK\x05\x06'),
+    matches: async ({ reader }) => (await findZipEnd(reader)) !== undefined,
+    read: readZipPackage,
+  },
+  {
+    name: 'Alpine package',
+    fact: 'it starts with the gzip signature and is named .apk',
+    // An Alpine package is gzip, which says nothing about what is inside, so
+    // the name has to vouch for it before it is unpacked.
+    matches: ({ head, fileName }) => startsWith(head, [0x1f, 0x8b]) && /\.apk$/i.test(fileName),
+    read: (reader) => readAlpineApk(reader),
+  },
+  {
+    // A disk image is recognised by its trailer, not its first bytes.
+    name: 'disk image',
+    fact: 'it has a disk image signature at its start or end',
+    matches: ({ reader }) => looksLikeDmg(reader),
+    read: (reader) => readDmg(reader),
+  },
+  {
+    name: '7-Zip archive',
+    fact: 'it starts with the 7-Zip signature',
+    matches: ({ head }) => startsWith(head, SEVEN_ZIP_SIGNATURE),
+    read: (reader) => readSevenZip(reader),
+  },
+  {
+    name: 'RAR archive',
+    fact: 'it starts with the RAR signature',
+    matches: ({ head }) =>
+      startsWith(head, RAR5_SIGNATURE) || (startsWith(head, RAR4_SIGNATURE) && head[6] === 0x00),
+    read: (reader) => readRar(reader),
+  },
+  {
+    name: 'LUKS volume',
+    fact: 'it starts with the LUKS signature',
+    matches: ({ head }) => startsWith(head, LUKS_MAGIC),
+    read: (reader) => readLuks(reader),
+  },
+  {
+    name: 'KeePass database',
+    fact: 'it starts with the KeePass database signatures',
+    matches: ({ head }) =>
+      startsWith(head, KDBX_SIGNATURE_1) && KDBX_SIGNATURE_2.every((b, i) => head[4 + i] === b),
+    read: (reader) => readKeePass(reader),
+  },
+  {
+    name: 'age encrypted file',
+    fact: 'it starts with the age header or armor line',
+    matches: ({ head }) =>
+      startsWithText(head, `${AGE_MAGIC}\n`) || startsWithText(head, AGE_ARMOR_BEGIN),
+    read: (reader) => readAge(reader),
+  },
+  {
+    // A binary OpenPGP file has no signature, so its name has to vouch for it
+    // as well as the first packet header; an armored one is recognised by its line.
+    name: 'OpenPGP file',
+    fact: 'it starts with an OpenPGP armor line, or with an OpenPGP packet and is named .gpg or .pgp',
+    matches: ({ head, fileName, reader }) =>
+      looksArmored(head) || (/\.(gpg|pgp)$/i.test(fileName) && looksLikePacket(head, reader.size)),
+    read: (reader) => readOpenPgp(reader),
+  },
+  {
+    name: 'PKCS#12 file',
+    fact: 'it starts with a DER sequence holding the version 3 and a second sequence',
+    matches: ({ head }) => looksLikePkcs12(head),
+    read: (reader) => readPkcs12(reader),
+  },
+  {
+    name: 'PEM file',
+    fact: 'it is text with a PEM boundary line in its first 4 KiB',
+    matches: ({ head }) => looksLikePem(head),
+    read: (reader) => readPem(reader),
+  },
+  {
+    name: 'Windows executable',
+    fact: 'it starts with MZ and its header points at a PE signature',
+    matches: ({ reader }) => looksLikePe(reader),
+  },
+  {
+    name: 'PDF document',
+    fact: 'it has a PDF header in its first 1,024 bytes, and the last complete trailer record in its last 64 KiB gives the offset of a cross-reference table or object',
+    matches: ({ head, reader }) => looksLikePdf(reader, head),
+  },
+];
+
+/** A probe that throws does not match. */
+async function test(
+  probe: Probe,
+  ctx: Context,
+  which: 'selects' | 'matches' = 'matches',
+): Promise<boolean> {
+  try {
+    return await (probe[which] ?? probe.matches).call(probe, ctx);
+  } catch {
+    return false;
+  }
 }
 
 async function identify(source: ByteSource, fileName: string): Promise<PackageInfo> {
@@ -130,37 +328,77 @@ async function identify(source: ByteSource, fileName: string): Promise<PackageIn
   if (reader.size === 0) {
     throw new ReadError('it is empty.');
   }
-  const head = await reader.upTo(0, 16);
-  const bytes = (...expected: number[]): boolean => expected.every((b, i) => head[i] === b);
-  const text = (expected: string): boolean =>
-    [...expected].every((c, i) => head[i] === c.charCodeAt(0));
+  const ctx: Context = { reader, head: await reader.upTo(0, 4096), fileName };
+  let chosen = -1;
+  for (let i = 0; i < PROBES.length; i++) {
+    if (PROBES[i].read && (await test(PROBES[i], ctx, 'selects'))) {
+      chosen = i;
+      break;
+    }
+  }
+  if (chosen < 0) {
+    throw new ReadError('it is not a package format this preview reads.');
+  }
+  const primary = PROBES[chosen];
+  const info = await primary.read!(reader, fileName);
+  const others: Probe[] = [];
+  for (let i = 0; i < PROBES.length; i++) {
+    if (i !== chosen && (await test(PROBES[i], ctx))) {
+      others.push(PROBES[i]);
+    }
+  }
+  if (others.length === 0) {
+    return info;
+  }
+  return { ...info, also: await readAlso(source, fileName, primary.name, others) };
+}
 
-  if (bytes(0x7f, 0x45, 0x4c, 0x46)) {
-    return readElf(reader);
+/**
+ * The second reading: one format only, the first other match that has a
+ * reader, through a reader of its own so its page budget is separate from the
+ * first reading's. It runs after the first has finished, and whatever it does
+ * the page still shows.
+ */
+async function readAlso(
+  source: ByteSource,
+  fileName: string,
+  primary: string,
+  others: Probe[],
+): Promise<AlsoReading> {
+  const also: AlsoReading = {
+    primary,
+    matches: others.map((p) => ({ format: p.name, fact: p.fact })),
+  };
+  const next = others.find((p) => p.read);
+  if (next) {
+    also.read = next.name;
+    try {
+      also.info = bound(await next.read!(new RangeReader(source, LIMITS), fileName));
+    } catch (err) {
+      also.error = err instanceof Error ? err.message : String(err);
+    }
   }
-  if (bytes(0xed, 0xab, 0xee, 0xdb)) {
-    return readRpm(reader);
+  return also;
+}
+
+export async function readPackage(source: ByteSource, fileName: string): Promise<PackageInfo> {
+  return bound(await identify(source, fileName));
+}
+
+/**
+ * What the data appended to an executable reads as, for the executable
+ * preview: a zip whose central directory ends the file and starts inside the
+ * data. Undefined when it is not one.
+ */
+export async function readAppended(
+  source: ByteSource,
+  fileName: string,
+  overlayStart: number,
+): Promise<AlsoReading | undefined> {
+  const end = await findZipEnd(new RangeReader(source, LIMITS));
+  if (!end || (end.directoryStart ?? end.eocd) < overlayStart) {
+    return undefined;
   }
-  if (text('!<arch>\n')) {
-    return readDeb(reader);
-  }
-  if (bytes(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) {
-    return readMsi(reader);
-  }
-  if (text('xar!')) {
-    return readXar(reader);
-  }
-  if (text('PK\x03\x04') || text('PK\x05\x06')) {
-    return readZipPackage(reader, fileName);
-  }
-  // An Alpine package is gzip, which says nothing about what is inside, so the
-  // name has to vouch for it before it is unpacked.
-  if (bytes(0x1f, 0x8b) && /\.apk$/i.test(fileName)) {
-    return readAlpineApk(reader);
-  }
-  // A disk image is recognised by its trailer, not its first bytes.
-  if (await looksLikeDmg(reader)) {
-    return readDmg(reader);
-  }
-  throw new ReadError('it is not a package format this preview reads.');
+  const zip = PROBES.find((p) => p.name === 'zip archive')!;
+  return readAlso(source, fileName, 'Windows executable', [zip]);
 }

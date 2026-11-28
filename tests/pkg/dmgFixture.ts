@@ -190,3 +190,68 @@ export function buildEncryptedDmg(version: 1 | 2 = 2): Uint8Array {
   }
   return out;
 }
+
+export interface KeySlot {
+  type: number;
+  /** For a passphrase slot (type 1). */
+  iterations?: number;
+}
+
+export interface EncryptedV2Spec {
+  algorithm?: number;
+  keyBits?: number;
+  blockSize?: number;
+  slots?: KeySlot[];
+  /** Claim this many slots in the header regardless of how many are written. */
+  declaredCount?: number;
+  /** Cut the file to this many bytes. */
+  length?: number;
+}
+
+/** A version 2 `encrcdsa` header with a key-item list (layout as in src/pkg/dmgEncryption.ts). */
+export function buildEncryptedV2(spec: EncryptedV2Spec = {}): Uint8Array {
+  const slots = spec.slots ?? [{ type: 1, iterations: 250000 }];
+  const out = new Uint8Array(4096);
+  const v = new DataView(out.buffer);
+  out.set(utf8('encrcdsa'), 0);
+  v.setUint32(8, 2, false);
+  v.setUint32(12, 16, false);
+  v.setUint32(16, 5, false);
+  v.setUint32(20, spec.algorithm ?? 0x80000001, false);
+  v.setUint32(24, spec.keyBits ?? 128, false);
+  v.setUint32(0x34, spec.blockSize ?? 512, false);
+  v.setBigUint64(0x38, 1n << 20n, false);
+  v.setBigUint64(0x40, 0x1000n, false);
+  v.setUint32(0x48, spec.declaredCount ?? slots.length, false);
+  let blobAt = 0x4c + 20 * Math.max(slots.length, 0) + 16;
+  slots.forEach((slot, i) => {
+    const at = 0x4c + i * 20;
+    v.setUint32(at, slot.type, false);
+    v.setBigUint64(at + 4, BigInt(blobAt), false);
+    v.setBigUint64(at + 12, 0x68n, false);
+    if (slot.type === 1) {
+      v.setUint32(blobAt, 0x67, false);
+      v.setBigUint64(blobAt + 4, BigInt(slot.iterations ?? 1000), false);
+    }
+    blobAt += 0x70;
+  });
+  return spec.length === undefined ? out : out.subarray(0, spec.length);
+}
+
+/** A version 1 image: a header block, then the 20-byte `cdsaencr` trailer pointing at it. */
+export function buildEncryptedV1(
+  spec: { keyBits?: number; iterations?: number; blockSize?: number } = {},
+): Uint8Array {
+  const out = new Uint8Array(0x4e8 + 20 + 100);
+  const v = new DataView(out.buffer);
+  const header = 100;
+  v.setUint32(header + 0x10, spec.blockSize ?? 512, false);
+  v.setBigUint64(header + 0x2c, BigInt(spec.iterations ?? 1000), false);
+  v.setUint32(header + 0x60, 0x80000001, false);
+  v.setUint32(header + 0x64, spec.keyBits ?? 128, false);
+  const t = out.length - 20;
+  v.setBigUint64(t, BigInt(header), false);
+  v.setUint32(t + 8, 1, false);
+  out.set(utf8('cdsaencr'), t + 12);
+  return out;
+}

@@ -41,6 +41,7 @@ media/gif.js.map
 fuzz/.corpus/
 fuzz/.corpus-min/
 fuzz/crashes/
+fuzz/coverage-report/
 media/image.js
 media/image.js.map
 media/audio.js

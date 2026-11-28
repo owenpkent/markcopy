@@ -15,7 +15,7 @@ boundary.
   Word documents; `src/ooxml/` holds the container code they share. `src/pe/` reads
   Windows executables for the read-only `src/exeEditor.ts` preview. `src/pkg/` reads
   packages and installers (Debian, RPM, Alpine, Windows Installer, disk images, macOS
-  installers, ELF, and zip-based formats) for the read-only `src/packageEditor.ts` preview.
+  installers, ELF, Mach-O, and zip-based formats) for the read-only `src/packageEditor.ts` preview.
   `src/binary/` and `src/fileInspect.ts` hold the ranged reader, text cleaning, HTML
   helpers and SHA-256 that it and the executable preview share. Both previews sit on
   `src/fileInfoEditor.ts`, which shows a confirmation page and reads only when asked,
@@ -41,6 +41,10 @@ boundary.
 - `npm test` uses half the CPU cores (`maxWorkers` in `vitest.config.ts`). Keep
   that cap, run one test command at a time, and never start test runs in parallel
   agents or alongside another tool's tests.
+- A new or changed parser (a reader of bytes or text the user did not write) comes with its fuzz
+  target or seeds, dictionary tokens, a `fuzz/coverage.json` entry and its row in
+  [FUZZING-STRATEGY](docs/FUZZING-STRATEGY.md), in the same PR. `npm test` fails a file in
+  a parser folder that the manifest does not list.
 - For documentation-only changes, check formatting and local links; a manual
   extension-host run is unnecessary unless the change needs behavior verification.
 - Use [TESTING](docs/TESTING.md) for manual coverage of canvas, media playback,

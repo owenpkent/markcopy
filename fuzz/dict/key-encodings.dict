@@ -1,0 +1,36 @@
+# Tokens for the key-encodings target (fuzz/targets/key-encodings.fuzz.ts): DER and BER framing, base64, PEM, OpenPGP armor and the age header.
+
+# DER and BER framing
+kw1="\x30\x82"
+kw2="\x30\x81"
+kw3="\x30\x80"
+kw4="\x24\x80"
+kw5="\x00\x00"
+kw6="\x02\x01\x03"
+kw7="\x04\x82"
+kw8="\xa0\x80"
+
+# base64
+kw9="="
+kw10="=="
+kw11="QUJD"
+kw12="\x0a"
+kw13="\x0d\x0a"
+kw14=" "
+kw15="*"
+kw16="-----"
+
+# PEM, OpenPGP armor and age
+kw17="-----BEGIN "
+kw18="-----END "
+kw19="PGP MESSAGE"
+kw20="AGE ENCRYPTED FILE"
+kw21="PRIVATE KEY"
+kw22="Proc-Type: 4,ENCRYPTED"
+kw23="DEK-Info: "
+kw24="age-encryption.org/v1\x0a"
+kw25="-> scrypt "
+kw26="-> X25519 "
+kw27="--- "
+kw28="\x0a\x0a"
+kw29="=AAAA"

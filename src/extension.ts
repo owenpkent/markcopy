@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { createRevealEcho } from './revealEcho';
+import { playingAfterReport, pushesEditorScroll, reportIsCurrent } from './scrollGate';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
@@ -31,6 +33,7 @@ import {
   renderCsvHtml,
   sniffDelimiter,
 } from './csv';
+import { scanHiddenText, stripHiddenText, type HiddenScan } from './hiddenText';
 import { applyMarkcopySetting } from './settingsScope';
 import { parseMarkdownMessage, type MarkdownMessage } from './messages/markdown';
 import { ALLOW_REMOTE_IMAGES, allowRemoteImages, htmlShell } from './previewShell';
@@ -42,6 +45,8 @@ import { PptxEditorProvider } from './pptxEditor';
 import { DocxEditorProvider } from './docxEditor';
 import { ExeEditorProvider } from './exeEditor';
 import { readFileInfo } from './fileInfoEditor';
+import { KeyFileEditorProvider } from './keyFileEditor';
+import { resolveFileTarget } from './fileInfoTarget';
 import { PackageEditorProvider } from './packageEditor';
 import { StlEditorProvider } from './stlEditor';
 import { VideoEditorProvider } from './videoEditor';
@@ -52,6 +57,7 @@ import { sweepProxyDir } from './videoProxy';
 import {
   disposeTexPreviews,
   TexEditorProvider,
+  texStatusFor,
   recompileActiveTex,
   texPanelFor,
 } from './texEditor';
@@ -85,6 +91,10 @@ interface PreviewState {
   // typing in one document cannot cancel another preview's render.
   timer?: ReturnType<typeof setTimeout>;
   ready?: boolean;
+  // The webview says its document is auto-scrolling (see scrollGate.ts). While
+  // set, editor scrolls are not pushed to this preview. Cleared when the preview
+  // switches document or reloads; the webview reports again if still playing.
+  autoScrolling?: boolean;
 }
 
 // Every live preview: the side panel, plus one per document opened *as* a
@@ -105,6 +115,8 @@ let mdFootnotes = true;
 // Documents whose preview the user closed this session. Auto-preview skips these
 // so a dismissed preview does not spring back open on the next focus change.
 const dismissedPreviews = new Set<string>();
+// Documents a hidden-character notice is opening in the source editor right now.
+const revealingSource = new Set<string>();
 
 // LaTeX previews whose `openWith` is in flight. See `openTexPreview`.
 const openingTex = new Set<string>();
@@ -204,6 +216,22 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerCustomEditorProvider(
       PackageEditorProvider.viewType,
       new PackageEditorProvider(
+        context,
+        (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
+        (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
+        (docUri, bodyXhtml) => void exportPptx(docUri, bodyXhtml),
+      ),
+      {
+        supportsMultipleEditorsPerDocument: false,
+        webviewOptions: { retainContextWhenHidden: true },
+      },
+    ),
+
+    // Key and signature text files (.pem, .key, .asc) are offered the same
+    // page through Reopen Editor With, and still open as text by default.
+    vscode.window.registerCustomEditorProvider(
+      KeyFileEditorProvider.keyFileViewType,
+      new KeyFileEditorProvider(
         context,
         (docUri, bodyHtml) => void exportPdf(context, docUri, bodyHtml),
         (docUri, bodyXhtml) => void exportDocx(docUri, bodyXhtml),
@@ -395,6 +423,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
 
+    // What the LaTeX preview for a file last reported, for the integration
+    // tests. Read only and not contributed, so it is not in the palette.
+    vscode.commands.registerCommand('markcopy.tex.status', (uri?: vscode.Uri) =>
+      uri ? texStatusFor(uri) : undefined,
+    ),
+
     // Open the MarkCopy settings (also reachable from the preview's title-bar gear
     // and the in-preview right-click menu).
     // The keyboard's way to press "Read this file" on a file-information
@@ -405,6 +439,21 @@ export function activate(context: vscode.ExtensionContext): void {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
       const target = uri ?? (input instanceof vscode.TabInputCustom ? input.uri : undefined);
       return target ? readFileInfo(target) : undefined;
+    }),
+
+    // Open Mach-O and ELF files that have no extension (so no selector matches
+    // them and Open With does not list this editor) as package info. It only
+    // opens the confirmation page; nothing is read until the reader asks.
+    vscode.commands.registerCommand('markcopy.fileInfo.openAsPackage', (uri?: vscode.Uri) => {
+      const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      const active =
+        input instanceof vscode.TabInputCustom || input instanceof vscode.TabInputText
+          ? input.uri
+          : undefined;
+      const target = resolveFileTarget(uri, active);
+      return target
+        ? vscode.commands.executeCommand('vscode.openWith', target, PackageEditorProvider.viewType)
+        : undefined;
     }),
 
     vscode.commands.registerCommand('markcopy.openSettings', () => {
@@ -513,11 +562,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
-      if (!syncScrollEnabled() || revealEcho()) {
+      if (!syncScrollEnabled()) {
+        return;
+      }
+      // The echo of our own reveal is dropped, per document (see REVEAL_ECHO_MS).
+      if (reveals.isEcho(e.textEditor.document.uri.toString())) {
         return;
       }
       const line = e.visibleRanges[0]?.start.line ?? 0;
       for (const state of previewsOf(e.textEditor.document.uri)) {
+        if (!pushesEditorScroll(state.autoScrolling)) {
+          continue;
+        }
         state.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
     }),
@@ -539,6 +595,9 @@ function maybeAutoPreview(
     return;
   }
   const doc = editor.document;
+  if (revealingSource.has(doc.uri.toString())) {
+    return;
+  }
   const enabled = vscode.workspace.getConfiguration('markcopy').get<boolean>('autoPreview', true);
   if (isTexDocument(doc.languageId, doc.uri.path)) {
     // LaTeX gets the same auto-preview bargain as Markdown and CSV, but keeps the
@@ -881,6 +940,7 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         });
       }
       side.docUri = doc.uri;
+      side.autoScrolling = false;
       // Line tracking belongs to the document that just went away; the new one
       // gets its own baseline from the render below.
       side.lineCount = undefined;
@@ -929,6 +989,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
       switch (msg.type) {
         case 'ready':
           state.ready = true;
+          state.autoScrolling = false;
           update(state);
           break;
         case 'openExternal':
@@ -938,7 +999,28 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
           revealInOs(state.docUri);
           break;
         case 'revealLine':
-          revealEditorLine(state.docUri, msg.line);
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            revealEditorLine(state.docUri, msg.line);
+          }
+          break;
+        case 'autoScroll':
+          state.autoScrolling = playingAfterReport(
+            state.autoScrolling === true,
+            msg,
+            state.docUri.toString(),
+          );
+          break;
+        // Both name the document whose notice was clicked. A render of another
+        // document may be in flight, so a click on the old notice is dropped.
+        case 'revealHidden':
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void revealHiddenRun(state.docUri, msg.line, msg.column, msg.docVersion);
+          }
+          break;
+        case 'copyCleanSource':
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            void copyCleanSource(state);
+          }
           break;
         case 'toast':
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
@@ -976,6 +1058,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
 
   panel.onDidDispose(() => {
     disposables.forEach((d) => d.dispose());
+    state.autoScrolling = false;
     if (state.timer !== undefined) {
       clearTimeout(state.timer);
     }
@@ -1093,6 +1176,77 @@ function update(state: PreviewState, ackEdit?: number): void {
     math,
     footnotes,
     wrapCode: cfg.get<boolean>('wrapCode', true),
+    // Computed from the document, never from the rendered HTML: the scan is of
+    // what a copy of the source would carry. Omitted when off or when clean.
+    hidden: hiddenFor(doc.uri, source),
+  });
+}
+
+// The hidden-character scan to send with a render, or undefined when the setting
+// is off or nothing is flagged.
+function hiddenFor(uri: vscode.Uri, source: string): HiddenScan | undefined {
+  const warn = vscode.workspace
+    .getConfiguration('markcopy', uri)
+    .get<boolean>('hiddenText.warn', true);
+  if (!warn) {
+    return undefined;
+  }
+  const scan = scanHiddenText(source);
+  return scan.totalRuns > 0 ? scan : undefined;
+}
+
+// Put the cursor on a run the hidden-character notice lists. Line and column
+// are 1-based, as the scan reports them. `version` is the document version the
+// scan was made from: after an edit the run may have moved, so a click on the
+// old position is dropped and the redraw already on its way lists the new one.
+async function revealHiddenRun(
+  docUri: vscode.Uri,
+  line: number,
+  column: number,
+  version: number,
+): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === docUri.toString());
+  if (!doc || doc.version !== version) {
+    return;
+  }
+  const row = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);
+  const col = Math.min(Math.max(column - 1, 0), doc.lineAt(row).text.length);
+  const at = new vscode.Position(row, col);
+  const visible = vscode.window.visibleTextEditors.find(
+    (e) => e.document.uri.toString() === docUri.toString(),
+  );
+  const range = new vscode.Range(at, at);
+  if (visible) {
+    visible.selection = new vscode.Selection(at, at);
+    visible.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    return;
+  }
+  // The reader asked for the source, so the focus change this causes must not
+  // swap the tab straight back to the preview (a first-line run is a collapsed
+  // selection at the top, which auto-preview treats as untouched).
+  const key = docUri.toString();
+  revealingSource.add(key);
+  try {
+    await vscode.window.showTextDocument(doc, { selection: range, preserveFocus: false });
+  } finally {
+    // The focus event fires before the promise settles; clear after it ran.
+    setTimeout(() => revealingSource.delete(key), 250);
+  }
+}
+
+// Copy the document's text, as it is now, without the characters the notice
+// flags. Plain text: the source, not the rendered preview.
+async function copyCleanSource(state: PreviewState): Promise<void> {
+  const doc = vscode.workspace.textDocuments.find(
+    (d) => d.uri.toString() === state.docUri.toString(),
+  );
+  if (!doc) {
+    return;
+  }
+  await vscode.env.clipboard.writeText(stripHiddenText(doc.getText()));
+  void state.panel.webview.postMessage({
+    type: 'notice',
+    text: 'Copied without hidden characters',
   });
 }
 
@@ -1404,11 +1558,10 @@ async function openLink(
 // not echoed; the preview applies the mirror-image rule (see SYNC_ECHO_MS in
 // src/webview/main.ts).
 const REVEAL_ECHO_MS = 250;
-let revealedAt = 0;
-
-function revealEcho(): boolean {
-  return Date.now() - revealedAt < REVEAL_ECHO_MS;
-}
+// Per document: a reveal in one must not mute the other direction for another.
+// A preview that is auto-scrolling is muted separately and explicitly (see
+// PreviewState.autoScrolling), not through this window.
+const reveals = createRevealEcho(REVEAL_ECHO_MS);
 
 function syncScrollEnabled(): boolean {
   return vscode.workspace.getConfiguration('markcopy').get<boolean>('syncScroll', true);
@@ -1429,7 +1582,7 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
   // The webview measures against the render it has, which a fast edit can leave a
   // line or two behind the document; clamp rather than throw on an out-of-range line.
   const clamped = Math.min(Math.max(0, Math.floor(line)), editor.document.lineCount - 1);
-  revealedAt = Date.now();
+  reveals.mark(docUri.toString());
   editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 
