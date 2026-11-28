@@ -6,7 +6,7 @@
 // nights after src/webview/threeMf.ts gained an import the old build list
 // lacked (docs/FUZZING-STRATEGY.md).
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -28,6 +28,21 @@ describe('fuzz targets', () => {
     const targets = readdirSync(join(root, 'fuzz/targets')).filter((f) => f.endsWith('.fuzz.ts'));
     for (const file of targets) {
       expect(run.stdout).toContain(`${file.replace(/\.fuzz\.ts$/, '')}: `);
+    }
+    // The build records what the runnable targets reach, which is what the
+    // coverage report scores: an older build's output stays in out/fuzz/, and a
+    // support module no target uses is compiled too, and neither must count.
+    const reached = JSON.parse(
+      readFileSync(join(root, 'out/fuzz/reached.json'), 'utf8'),
+    ) as string[];
+    for (const file of targets) {
+      expect(reached).toContain(`fuzz/targets/${file}`);
+    }
+    const manifest = JSON.parse(readFileSync(join(root, 'fuzz/coverage.json'), 'utf8')) as {
+      parsers: Record<string, unknown>;
+    };
+    for (const parser of Object.keys(manifest.parsers)) {
+      expect(reached).toContain(parser);
     }
   }, 150_000);
 });

@@ -25,7 +25,7 @@ A background Edge 158.0.4370.33 check used temporary profiles and a local connec
 
 ### Fuzzing
 
-Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), GLB models (`glb`), OBJ models and their MTL files and `mtllib` names (`obj`), MarkCopy's handling of the STEP engine's output (`step`), Windows executables (`pe`), packages and installers (`pkg`, and `pkg-<format>` per format), the RPM payload walker and its decompressors (`cpio`), DEX headers in an APK (`dex`), Go build information (`go-buildinfo`), the signer and certificate DER walkers (`signer`), Office encryption descriptions (`ooxml-encrypted`), reading those from disk against reading them from memory (`file-source`), ffprobe/ffmpeg output (`video-probe`, `audio-probe`), link handling (`links`), the paste and export converters (`paste-export`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
+Parsers and converters that read data the user did not write are fuzzed with [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) (coverage-guided, in process): the zip container (`zip`), workbooks (`xlsx`), decks (`pptx`), Word documents (`docx`), XML (`xml`), CSV (`csv`), Video and Image Notes files (`review`), Markdown (`markdown`), GIF structure (`gif`), image headers (`image`), STL headers (`stl`), 3MF packages (`3mf`), G-code and slice info (`gcode`), GLB models (`glb`), OBJ models and their MTL files and `mtllib` names (`obj`), MarkCopy's handling of the STEP engine's output (`step`), Windows executables (`pe`), packages and installers (`pkg`, and `pkg-<format>` per format), the RPM payload walker and its decompressors (`cpio`), DEX headers in an APK (`dex`), Go build information (`go-buildinfo`), the signer and certificate DER walkers (`signer`), Office encryption descriptions (`ooxml-encrypted`), reading those from disk against reading them from memory (`file-source`), ffprobe/ffmpeg output (`video-probe`, `audio-probe`), link handling (`links`), the paste converters (`paste-export`), the Word and PowerPoint export writers (`export-ooxml`), sanitized Markdown output (`markdown-html`) and the webview-to-host message parsers (`messages`). The targets are `fuzz/targets/<name>.fuzz.ts`, seeded from `fuzz/corpus/<name>/`. The nightly [fuzz workflow](../.github/workflows/fuzz.yml) runs each for ten minutes, caches the evolved corpus, and on a crash uploads the input and opens (or comments on) a GitHub issue titled `Fuzz crash: <target>`, with the run link and the end of the fuzzer log. It is not part of `npm test`; before a release, check there is no open `Fuzz crash:` issue (see [RELEASING](RELEASING.md#pre-release-checklist)).
 
 ```bash
 npm run fuzz -- xlsx 60    # target, then whole seconds (default 60, or set FUZZ_SECONDS); each input may take up to 10 s
@@ -167,19 +167,6 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] Keyboard only: with the pencil active, Tab reaches each block in turn (a focus ring shows); Enter or F2 opens the focused block, Escape returns focus to it unchanged, and Ctrl/Cmd+Enter commits and leaves focus on the block once the preview re-renders. Switching to the lock removes the tab stops.
 - [ ] Edit a block so it gets shorter or longer, then immediately click the next block: its box opens on the right text (never a later block) once the preview updates, and committing it changes the right lines.
 - [ ] With the preview open beside a second Markdown file, commit an edit and at once retarget the side preview to the other file: the other file is not modified.
-
-### Auto-scroll
-
-- [ ] ★ In a long Markdown preview, press the auto-scroll button in the pill at the top right (after the lock and pencil): the button lights, the page glides down and the puck appears bottom-right. Right-click the page: the menu says Stop Auto-scroll. The button and the row are absent in a CSV, spreadsheet, Word, PowerPoint, executable and package preview.
-- [ ] ★ Pause, speed keys, the puck's Small to Extra large sizes and the held +/- behave as in the PDF checks (see PDF viewer, Auto-scroll). Check the puck and the pill button are legible in light, dark and green themes, and at a 760 px pane.
-- [ ] ★ With the preview and the Markdown source side by side, let it run and type in the source: the preview updates and keeps gliding from wherever the page is, with no premature "reached the end" announcement (the page is not put back to an earlier offset). Do it with a Mermaid diagram near the bottom, which briefly changes the page height: the browser may move the page while the diagram is replaced (a short page, or one that fits in a single viewport, can clamp to the top). Check that playback stays on and carries on from the position the layout left, not from an earlier offset.
-- [ ] Scroll with the wheel or drag the scrollbar while it runs: it carries on from where you put the page. With scroll sync on, the editor follows. While a preview plays, scrolling that document's own source does not move the preview (it leads). With two Markdown documents open side by side, scrolling the other document's source while one preview plays still moves its preview.
-- [ ] With auto-scroll off, a live edit with a Mermaid diagram or equation leaves the page where the browser puts it, as before.
-- [ ] A Markdown page with an image that never loads (a broken URL, or a lazy image in a closed disclosure) near the end: auto-scroll stops at the end within about 2 seconds.
-- [ ] In a document with a `<details><summary>`, Tab to the summary while it runs: Space opens and closes it and playback continues. Escape on a focused puck button returns focus to the toolbar button.
-- [ ] Let it reach the end: it stops with a toast and an announcement; start it again at the end: it goes up. Escape stops it; with the right-click menu open or a block editor open, Escape closes only that.
-- [ ] Open a block editor in edit mode while it runs: the page holds still, and carries on after the editor closes. Typing Space, + or - in the editor does not change the speed.
-- [ ] Hide and show the tab (do not close it): speed and size are kept for that preview. A PDF preview has its own, and a closed and reopened preview starts from the defaults.
 
 ### Where the preview opens
 
@@ -533,51 +520,6 @@ Open `sample.pdf` (generate it first; see [Setting up](#setting-up-a-manual-pass
 - [ ] ★ The fit-width button (rightmost, a page with a double-headed arrow) sizes the page to the pane (a percentage between the presets is fine) and stays lit; dragging the pane's edge re-fits it. Its tooltip and screen-reader name both read "Fit page width", and the icon is centred in its button and follows the toolbar's foreground colour in every theme.
 - [ ] Any manual zoom (buttons, keys, wheel, or clicking the percentage) unlights the fit-width button and stops the re-fitting.
 - [ ] From a fitted percentage, plus/minus step to the neighbouring preset level rather than jumping back to where the zoom was before the fit.
-
-### Auto-scroll
-
-(The Markdown preview has the same puck; see Auto-scroll under Markdown preview.)
-
-- [ ] ★ Right-click a multi-page PDF page and choose Start Auto-scroll: the page glides down smoothly, the puck appears bottom-right above the toolbar, and the toolbar button is lit. Right-clicking again offers Stop Auto-scroll.
-- [ ] ★ Click Pause (the puck, or Space): it holds still; Play (or Space) continues from the same spot.
-- [ ] ★ Press + a few times: faster; press - past the slowest speed: it turns and scrolls up. The button names (hover) read Slower, Faster, Reverse, scroll up, and the Play/Pause name says which way it is scrolling.
-- [ ] ★ Press and hold +: it steps once, again after half a second, then about five times a second, and stops at full speed. Hold - from a slow downward speed: it stops at the slowest speed without turning up.
-- [ ] ★ Right-click the puck: Small, Medium, Large, Extra large with the current one ticked; each resizes it. Check it is legible and every button is a comfortable target at Large, in light, dark and green themes, and clear of the toolbar. At Extra large, split the editor so the pane is about 760 px, then 300 px and 240 px wide: all three small buttons stay fully on screen (they shrink toward 44 px as the pane narrows).
-- [ ] Scroll with the wheel, or zoom with Ctrl plus the wheel, while it runs: it carries on from where you put the page, with no jump back. Pages keep rendering sharply ahead of it.
-- [ ] Let it reach the end: it stops with a toast, and a screen reader says it stopped even though the controls have gone. Start it again at the end: it goes up. Scroll up to the top while it runs up: it stops.
-- [ ] Escape stops it; with the right-click menu open, Escape closes only the menu.
-- [ ] Tab reaches every puck button; Enter/Space steps with the keyboard; a screen reader announces pause, speed and size changes.
-- [ ] Stop it mid-document and reopen the PDF: the reading position is where it stopped (see Reading position). Hide and show the tab: speed and size are kept.
-- [ ] In the LaTeX preview it works the same, and a recompile does not break it.
-
-### Reading position
-
-- [ ] ★ Scroll a multi-page PDF to the middle of a page, close the tab, reopen it: the same page and spot are at the top of the view.
-- [ ] ★ Zoom to 200 percent first: it reopens at 200 percent. Turn on fit width: it reopens in fit width, re-fitted to the pane.
-- [ ] Restart VS Code with the PDF open: it comes back at the same place.
-- [ ] Scroll back to the very top at 100 percent and reopen: it opens at page 1, as for a PDF never opened.
-- [ ] Replace the PDF with a shorter one of the same name (so the saved page no longer exists) and reopen: it opens at page 1 and does not error.
-- [ ] Open a second, different PDF: it has its own position and does not inherit the first one's.
-- [ ] In the LaTeX preview, a recompile still keeps your place (this feature adds no storage for it).
-
-### Links
-
-Use a PDF that has a table of contents or cross-references and a web link (a LaTeX document built with `hyperref`, or a paper from arXiv).
-
-- [ ] ★ Click a contents entry or cross-reference: the view jumps to the target page (and to the spot on it when the link names one) and the page indicator follows.
-- [ ] ★ Click an external link: the default browser opens that address, and the viewer is unchanged. A `mailto:` link opens the mail client.
-- [ ] Hover a link in the Hand tool: the pointer becomes a hand and a tooltip shows the address.
-- [ ] ★ Zoom in and out several steps, and use fit width: the link boxes (hover to find them) still sit on the linked text on every page, including after scrolling away and back.
-- [ ] With dark or green pages, links still work and sit on the right text.
-- [ ] Switch to the Pointer tool: dragging across linked text selects it without following the link; a plain click on the link follows it.
-- [ ] Tab to a link and press Enter: it is followed.
-- [ ] After a pan with the Hand tool that starts or ends over a link, the link is not followed.
-- [ ] A link that leaves the document or runs a program (`file:`, `javascript:`, a launch action naming a local file) does nothing. A link to another PDF given as an `https` address, or a Launch action naming an `https` address, opens in the browser. Hovering an external link in the Hand tool shows its address.
-- [ ] A link that wraps over two lines does nothing when clicked in the blank gap between the lines.
-- [ ] With a screen reader, a table of contents reads as one named link per chapter, not "Go to destination" repeatedly.
-- [ ] Open a long PDF and click a first-page contents link to a late page before it finishes loading: no error, and the view jumps once the page appears.
-- [ ] A comment's Save or Delete button placed over a link does not also follow the link.
-- [ ] In the LaTeX preview, links in the compiled PDF behave the same.
 
 ### Tools, selection, and copy
 
