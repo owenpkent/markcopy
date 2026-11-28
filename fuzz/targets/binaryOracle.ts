@@ -85,6 +85,8 @@ const TAGS = new Set([
   'th',
   'td',
   'img',
+  'ul',
+  'li',
 ]);
 const ATTRIBUTES: Record<string, RegExp> = {
   class: /^[a-z0-9 -]+$/,
@@ -92,6 +94,7 @@ const ATTRIBUTES: Record<string, RegExp> = {
   width: /^\d+$/,
   height: /^\d+$/,
   'data-mc-media': /^[a-z0-9-]+$/,
+  role: /^[a-z]+$/,
 };
 const TAG = /^<(\/?)([a-z0-9]+)((?:\s+[a-z-]+="[^"<>]*")*)\s*>$/;
 const ATTRIBUTE = /\s+([a-z-]+)="([^"]*)"/g;

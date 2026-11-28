@@ -116,10 +116,12 @@ describe('readPackage and the disk image trailer', () => {
     expect(looksLikeDmg).toHaveBeenCalledTimes(1);
   });
 
-  it('does not ask about a trailer for a file that has a leading magic', async () => {
-    await route([0x7f, 0x45, 0x4c, 0x46]);
-    await route(ascii('xar!'));
-    expect(looksLikeDmg).not.toHaveBeenCalled();
+  // The trailer is now asked about after the reader has run, to name a second
+  // structure, but it never decides which reader a leading magic reaches.
+  it('does not let a trailer change the reader a leading magic chose', async () => {
+    looksLikeDmg.mockResolvedValue(true);
+    expect(await route([0x7f, 0x45, 0x4c, 0x46])).toBe('elf');
+    expect(await route(ascii('xar!'))).toBe('xar');
   });
 });
 

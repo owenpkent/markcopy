@@ -1,0 +1,26 @@
+# Tokens for the polyglot target (fuzz/targets/polyglot.fuzz.ts): the structures
+# the probe table and src/binary/signatures.ts look for, so a mutated file can
+# gain a second format's structure.
+
+kw1="PK\x03\x04"
+kw2="PK\x01\x02"
+kw3="PK\x05\x06"
+kw4="PK\x06\x07"
+kw5="%PDF-1.4"
+kw6="%PDF-2.0"
+kw7="startxref"
+kw8="%%EOF"
+kw9="xref"
+kw10="trailer"
+kw11=" 0 obj"
+kw12="MZ"
+kw13="PE\x00\x00"
+kw14="\x7fELF"
+kw15="\xed\xab\xee\xdb"
+kw16="!<arch>\x0a"
+kw17="\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+kw18="xar!"
+kw19="\x1f\x8b\x08"
+kw20="koly"
+kw21="\xcf\xfa\xed\xfe"
+kw22="\xca\xfe\xba\xbe"
