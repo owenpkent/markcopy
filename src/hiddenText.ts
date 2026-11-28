@@ -322,6 +322,78 @@ function settled(cps: number[], around: Around): boolean[] {
   }
 }
 
+function isMathOp(cp: number | undefined): cp is number {
+  return cp !== undefined && cp >= 0x2061 && cp <= 0x2064;
+}
+
+// A maximal chain of invisible math operators, each alone between two visible
+// operands (`a` U+2062 `b` U+2062 `c`), judged as one unit. Between two
+// operators an operand is one code point, so letters joined only by operators
+// are not a word. The ends use the operand rule on the visible text around the
+// chain; the whole chain is kept or flagged, so a clean copy never leaves half.
+// `start` is the first operator; `prev` and `prev2` are the visible code points
+// before it. Returns the position past the last operator and the verdict.
+function judgeChain(
+  text: string,
+  start: number,
+  prev: number | undefined,
+  prev2: number | undefined,
+): { end: number; ok: boolean } {
+  const n = text.length;
+  const ops: number[] = [];
+  const operands: number[] = prev === undefined ? [] : [prev];
+  let pos = start;
+  let lastOperand: number | undefined;
+  let afterLast = pos + 1;
+  for (;;) {
+    ops.push(text.charCodeAt(pos));
+    const r = pos + 1 < n ? text.codePointAt(pos + 1) : undefined;
+    if (r === undefined || !visible(r)) {
+      lastOperand = undefined;
+      afterLast = pos + 1;
+      break;
+    }
+    const width = r > 0xffff ? 2 : 1;
+    const nextPos = pos + 1 + width;
+    lastOperand = r;
+    afterLast = nextPos;
+    const nextCp = nextPos < n ? text.charCodeAt(nextPos) : undefined;
+    const loneNext =
+      isMathOp(nextCp) && (nextPos + 1 >= n || visible(text.codePointAt(nextPos + 1)));
+    if (!loneNext) {
+      break;
+    }
+    operands.push(r);
+    pos = nextPos;
+  }
+  const end = pos + 1;
+  if (prev === undefined || lastOperand === undefined) {
+    return { end, ok: false };
+  }
+  operands.push(lastOperand);
+  const last = ops.length;
+  const operandAt = (j: number): boolean => {
+    const cp = operands[j];
+    if (j === 0) {
+      return test(MATHY, cp) || (letter(cp) && (!letter(prev2) || test(MATHY, prev2)));
+    }
+    if (j === last) {
+      const outer = codePointAtVisible(text, afterLast);
+      return test(MATHY, cp) || (letter(cp) && (!letter(outer) || test(MATHY, outer)));
+    }
+    return test(MATHY, cp) || letter(cp);
+  };
+  let ok = true;
+  for (let j = 0; j < last && ok; j++) {
+    if (ops[j] === 0x2061) {
+      ok = (letter(operands[j]) || test(MATHY, operands[j])) && operandAt(j + 1);
+    } else {
+      ok = operandAt(j) && operandAt(j + 1);
+    }
+  }
+  return { end, ok };
+}
+
 // The position of the first visible code point at or after `pos`, or the length.
 function visibleFrom(text: string, pos: number): number {
   while (pos < text.length) {
@@ -367,6 +439,9 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
   // delimiter, and how many delimiters sit between it and the current position.
   let prevText: number | undefined;
   let delimiters = 0;
+  // The end of the operator chain last judged, and its verdict.
+  let chainEnd = -1;
+  let chainOk = false;
   let i = 0;
   while (i < n) {
     const cp = text.codePointAt(i) as number;
@@ -424,7 +499,18 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     };
     // Every code point is judged, however long the run, so a payload's length
     // never decides whether the emoji or flag in front of it keeps its form.
-    const ok = settled(cps.slice(skip), around);
+    let ok: boolean[];
+    if (!skip && cps.length === 1 && isMathOp(cps[0])) {
+      // A lone operator belongs to a chain, judged once as a whole.
+      if (start >= chainEnd) {
+        const chain = judgeChain(text, start, prev, prev2);
+        chainEnd = chain.end;
+        chainOk = chain.ok;
+      }
+      ok = [chainOk];
+    } else {
+      ok = settled(cps.slice(skip), around);
+    }
     // Each stretch of unexplained code points is a flagged run of its own.
     let from = -1;
     for (let k = 0; k <= ok.length; k++) {

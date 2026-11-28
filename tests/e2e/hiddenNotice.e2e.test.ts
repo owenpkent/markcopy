@@ -157,7 +157,7 @@ two ${tags('hi')}`);
 
   // jsdom has no layout: give the list 200 px of height and every row 40 px, so
   // a row's position follows the list's scroll offset the way a browser's does.
-  function withLayout(): () => void {
+  function withLayout(rowHeight = 40, linkHeight = rowHeight): () => void {
     const rect = Element.prototype.getBoundingClientRect;
     const height = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight');
     Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
@@ -168,8 +168,8 @@ two ${tags('hi')}`);
       } else if (this.closest('.mc-hidden-list')) {
         const li = this.closest('li') as HTMLElement;
         const list = li.parentElement as HTMLElement;
-        top = Array.from(list.children).indexOf(li) * 40 - list.scrollTop;
-        bottom = top + 40;
+        top = Array.from(list.children).indexOf(li) * rowHeight - list.scrollTop;
+        bottom = top + (this === li ? rowHeight : linkHeight);
       }
       return { top, bottom, left: 0, right: 0, width: 0, height: bottom - top } as DOMRect;
     };
@@ -238,6 +238,46 @@ two ${tags('hi')}`);
       const top = linkTop(/^Line 41,/);
       expect(top).toBeGreaterThanOrEqual(0);
       expect(top + 40).toBeLessThanOrEqual(200);
+    } finally {
+      restore();
+    }
+  });
+
+  // A narrow pane wraps the description under the link, so a result row can be
+  // taller than the list. The link, not its row, is what must stay in view.
+  it('keeps the focused link in view when its row is taller than the list', async () => {
+    const restore = withLayout(300, 40);
+    try {
+      await renderWith(h, scanHiddenText(longFile(0)));
+      (bar().querySelector('details') as HTMLDetailsElement).open = true;
+      const list = bar().querySelector('.mc-hidden-list') as HTMLElement;
+      list.scrollTop = 0;
+      const link = bar().querySelectorAll<HTMLButtonElement>('.mc-hidden-link')[3];
+      link.focus();
+      await renderWith(h, scanHiddenText(longFile(0)));
+      const focused = document.activeElement as HTMLElement;
+      expect(focused.textContent).toMatch(/^Line 4,/);
+      const box = focused.getBoundingClientRect();
+      expect(box.top).toBeGreaterThanOrEqual(0);
+      expect(box.bottom).toBeLessThanOrEqual(200);
+    } finally {
+      restore();
+    }
+  });
+
+  it('aligns the top of a focused link that is taller than the list', async () => {
+    const restore = withLayout(400, 300);
+    try {
+      await renderWith(h, scanHiddenText(longFile(0)));
+      (bar().querySelector('details') as HTMLDetailsElement).open = true;
+      const list = bar().querySelector('.mc-hidden-list') as HTMLElement;
+      list.scrollTop = 1000;
+      const link = bar().querySelectorAll<HTMLButtonElement>('.mc-hidden-link')[1];
+      link.focus();
+      await renderWith(h, scanHiddenText(longFile(0)));
+      const focused = document.activeElement as HTMLElement;
+      expect(focused.textContent).toMatch(/^Line 2,/);
+      expect(focused.getBoundingClientRect().top).toBe(0);
     } finally {
       restore();
     }

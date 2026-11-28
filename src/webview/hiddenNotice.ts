@@ -233,14 +233,16 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         again?.focus({ preventScroll: true });
         // Earlier results may be gone, so the offset can put the link above or
         // below the visible part of the list: move the list the least that
-        // shows it. A list with no height (details closed) has nothing to show.
+        // shows it. The link itself is what must show, not its whole row, which
+        // can be taller than the list; a link taller than the list is aligned
+        // at its top. A list with no height (details closed) has nothing to show.
         if (again && list.contains(again) && list.clientHeight > 0) {
           const area = list.getBoundingClientRect();
-          const item = (again.closest('li') ?? again).getBoundingClientRect();
-          if (item.top < area.top) {
-            list.scrollTop += item.top - area.top;
-          } else if (item.bottom > area.bottom) {
-            list.scrollTop += item.bottom - area.bottom;
+          const box = again.getBoundingClientRect();
+          if (box.top < area.top || box.height > area.height) {
+            list.scrollTop += box.top - area.top;
+          } else if (box.bottom > area.bottom) {
+            list.scrollTop += box.bottom - area.bottom;
           }
         }
       }

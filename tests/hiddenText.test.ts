@@ -527,6 +527,17 @@ describe('clean copy is stable', () => {
   const b = cp(0xe44, 0xe17, 0xe22);
   const times = cp(0x2062);
   const zw = cp(0x200b);
+  const chains = [
+    `a${times}b${times}c`,
+    `x${times}y${times}z = 1`,
+    `2${times}a${times}b`,
+    `sin${cp(0x2061)}x${times}y`,
+    `say${times}hel${times}lo`,
+    `a${times}b${times}cd`,
+    `a${times}b${cp(0x2064)}c${times}d`,
+    `ab${times}c${times}d`,
+    `a${times}b${times}`,
+  ];
   // Every fixture string in this file, plus the reviewer's case and more.
   const fixtures: string[] = [
     ...Object.values(quiet),
@@ -556,6 +567,7 @@ describe('clean copy is stable', () => {
     `say${cp(0x2061)}hello`,
     `ab${cp(0x2064)}cd`,
     `3${cp(0x2064, 0x2062)}${cp(0xbc)}`,
+    ...chains,
     `${a}${zw}${b}`,
     `${a}${zw}**${b}**`,
     `${a}${zw}****${b}`,
@@ -598,6 +610,8 @@ describe('clean copy is stable', () => {
     cp(0x2063),
     cp(0x2064),
     cp(0xbc),
+    `a${times}b${times}c`,
+    `x${times}y${cp(0x2064)}2`,
     a,
     b,
     zw,
@@ -642,6 +656,22 @@ describe('clean copy is stable', () => {
       ).toBe(0);
       expect(stripHiddenText(once)).toBe(once);
     }
+  });
+
+  it('keeps or flags a whole chain of operators', () => {
+    const keep = (text: string): void => {
+      expect(scanHiddenText(text).totalRuns, text).toBe(0);
+      expect(stripHiddenText(text)).toBe(text);
+    };
+    keep(`a${times}b${times}c`);
+    keep(`x${times}y${times}z = 1`);
+    keep(`2${times}a${times}b`);
+    keep(`sin${cp(0x2061)}x${times}y`);
+    // A chain that fails anywhere is flagged at every operator.
+    expect(scanHiddenText(`say${times}hel${times}lo`).totalRuns).toBe(2);
+    expect(stripHiddenText(`say${times}hel${times}lo`)).toBe('sayhello');
+    expect(scanHiddenText(`a${times}b${times}cd`).totalRuns).toBe(2);
+    expect(stripHiddenText(`a${times}b${times}cd`)).toBe('abcd');
   });
 
   it('judges the multiplication as if the word break were already gone', () => {
