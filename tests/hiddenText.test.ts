@@ -328,6 +328,34 @@ describe('script and math uses of invisible characters', () => {
     expect(scanHiddenText(cp(0x1160, 0x1100)).totalRuns).toBe(1);
   });
 
+  it('keeps an isolated trailing consonant apart from the syllable before it', () => {
+    const apart = cp(0x1100, 0x1161, 0x115f, 0x1160, 0x11a8);
+    expect(scanHiddenText(apart).totalRuns).toBe(0);
+    expect(stripHiddenText(apart)).toBe(apart);
+    expect(stripHiddenText(apart).normalize('NFC')).not.toBe(cp(0xac01));
+    // Only the pair before a trailing consonant: other uses are still flagged.
+    expect(scanHiddenText(cp(0x1100, 0x1161, 0x115f, 0x1160, 0x1100)).totalRuns).toBe(1);
+    expect(scanHiddenText(cp(0x1100, 0x1161, 0x115f, 0x1160)).totalRuns).toBe(1);
+    expect(scanHiddenText(cp(0x1100, 0x1161, 0x115f, 0x1160, 0x1160, 0x11a8)).totalRuns).toBe(1);
+  });
+
+  it('keeps an invisible times between variables', () => {
+    const energy = `E = m${cp(0x2062)}c${cp(0xb2)}`;
+    expect(scanHiddenText(energy).totalRuns).toBe(0);
+    expect(stripHiddenText(energy)).toBe(energy);
+    const dollars = `$E = m${cp(0x2062)}c${cp(0xb2)}$`;
+    expect(stripHiddenText(dollars)).toBe(dollars);
+    const xy = `x${cp(0x2062)}y`;
+    expect(stripHiddenText(xy)).toBe(xy);
+  });
+
+  it('still flags an invisible operator inside a word of prose', () => {
+    expect(scanHiddenText(`say${cp(0x2062)}hello`).totalRuns).toBe(1);
+    expect(scanHiddenText(`m${cp(0x2062)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(`ab${cp(0x2062)}c`).totalRuns).toBe(1);
+    expect(scanHiddenText(`m${cp(0x2062, 0x2062)}c`).totalRuns).toBe(1);
+  });
+
   it('keeps an invisible plus in a mixed fraction, and the other operators', () => {
     const mixed = cp(0x33, 0x2064, 0xbc);
     expect(scanHiddenText(mixed).totalRuns).toBe(0);
@@ -349,6 +377,28 @@ describe('script and math uses of invisible characters', () => {
     const row = `${cp(0xe20)}${cp(0x200b, 0x200b)}${cp(0xe44)}`;
     expect(scanHiddenText(row).totalRuns).toBe(1);
     expect(scanHiddenText(`${cp(0xe20)}${cp(0x200b)} x`).totalRuns).toBe(1);
+  });
+
+  it('keeps a Thai word break beside Markdown emphasis, with or without it', () => {
+    const a = cp(0xe20, 0xe32, 0xe29, 0xe32);
+    const b = cp(0xe44, 0xe17, 0xe22);
+    const zw = cp(0x200b);
+    for (const text of [
+      `${a}${zw}**${b}**`,
+      `**${a}**${zw}${b}`,
+      `**${a}**${zw}__${b}__`,
+      `${a}${zw}*${b}*`,
+      `${a}${zw}${b}`,
+    ]) {
+      expect(scanHiddenText(text).totalRuns).toBe(0);
+      expect(stripHiddenText(text)).toBe(text);
+    }
+    // Narrow: not more than three delimiters, and only delimiters.
+    expect(scanHiddenText(`${a}${zw}****${b}`).totalRuns).toBe(1);
+    expect(scanHiddenText(`${a}${zw}-${b}`).totalRuns).toBe(1);
+    expect(scanHiddenText(`ab${zw}**cd**`).totalRuns).toBe(1);
+    expect(scanHiddenText(`${a}${zw}${zw}**${b}`).totalRuns).toBe(1);
+    expect(scanHiddenText(`${a}${zw}**`).totalRuns).toBe(1);
   });
 });
 

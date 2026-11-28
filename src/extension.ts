@@ -1014,7 +1014,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
         // document may be in flight, so a click on the old notice is dropped.
         case 'revealHidden':
           if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
-            void revealHiddenRun(state.docUri, msg.line, msg.column);
+            void revealHiddenRun(state.docUri, msg.line, msg.column, msg.docVersion);
           }
           break;
         case 'copyCleanSource':
@@ -1196,11 +1196,17 @@ function hiddenFor(uri: vscode.Uri, source: string): HiddenScan | undefined {
 }
 
 // Put the cursor on a run the hidden-character notice lists. Line and column
-// are 1-based, as the scan reports them; an edit since the render can move the
-// run, so both are clamped.
-async function revealHiddenRun(docUri: vscode.Uri, line: number, column: number): Promise<void> {
+// are 1-based, as the scan reports them. `version` is the document version the
+// scan was made from: after an edit the run may have moved, so a click on the
+// old position is dropped and the redraw already on its way lists the new one.
+async function revealHiddenRun(
+  docUri: vscode.Uri,
+  line: number,
+  column: number,
+  version: number,
+): Promise<void> {
   const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === docUri.toString());
-  if (!doc) {
+  if (!doc || doc.version !== version) {
     return;
   }
   const row = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);

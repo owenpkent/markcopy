@@ -22,7 +22,8 @@ export type MarkdownMessage =
   // Whether this document's preview is auto-scrolling right now.
   | { type: 'autoScroll'; playing: boolean; docKey: string }
   // From the hidden-character notice: put the cursor on a flagged run (1-based).
-  | { type: 'revealHidden'; line: number; column: number; docKey: string }
+  // `docVersion` is the version the scan was made from; a later one moved the run.
+  | { type: 'revealHidden'; line: number; column: number; docKey: string; docVersion: number }
   // Copy the document's text without the characters the notice flags.
   | { type: 'copyCleanSource'; docKey: string }
   | ToastMessage
@@ -91,8 +92,10 @@ export function parseMarkdownMessage(raw: unknown): MarkdownMessage | undefined 
         Number.isSafeInteger(column) &&
         line >= 1 &&
         column >= 1 &&
-        typeof msg.docKey === 'string'
-        ? { type: 'revealHidden', line, column, docKey: msg.docKey }
+        typeof msg.docKey === 'string' &&
+        typeof msg.docVersion === 'number' &&
+        Number.isSafeInteger(msg.docVersion)
+        ? { type: 'revealHidden', line, column, docKey: msg.docKey, docVersion: msg.docVersion }
         : undefined;
     }
     case 'toast':

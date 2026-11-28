@@ -105,17 +105,24 @@ describe('parseMarkdownMessage', () => {
     expect(parseMarkdownMessage({ type: 'copyCleanSource' })).toBeUndefined();
   });
 
-  it('accepts revealHidden with 1-based integer positions only', () => {
+  it('accepts revealHidden with 1-based integer positions and a document version only', () => {
     const docKey = 'file:///a.md';
-    expect(parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey })).toEqual({
-      type: 'revealHidden',
-      line: 12,
-      column: 4,
-      docKey,
-    });
-    expect(parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4 })).toBeUndefined();
     expect(
-      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey: 7 }),
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey, docVersion: 3 }),
+    ).toEqual({ type: 'revealHidden', line: 12, column: 4, docKey, docVersion: 3 });
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey }),
+    ).toBeUndefined();
+    for (const docVersion of ['3', 1.5, NaN, null]) {
+      expect(
+        parseMarkdownMessage({ type: 'revealHidden', line: 1, column: 1, docKey, docVersion }),
+      ).toBeUndefined();
+    }
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docVersion: 1 }),
+    ).toBeUndefined();
+    expect(
+      parseMarkdownMessage({ type: 'revealHidden', line: 12, column: 4, docKey: 7, docVersion: 1 }),
     ).toBeUndefined();
     for (const [line, column] of [
       [0, 1],
@@ -129,7 +136,13 @@ describe('parseMarkdownMessage', () => {
       [undefined, 1],
     ]) {
       expect(
-        parseMarkdownMessage({ type: 'revealHidden', line, column, docKey: 'file:///a.md' }),
+        parseMarkdownMessage({
+          type: 'revealHidden',
+          line,
+          column,
+          docKey: 'file:///a.md',
+          docVersion: 1,
+        }),
       ).toBeUndefined();
     }
   });

@@ -130,6 +130,16 @@ function isChoseong(cp: number | undefined): boolean {
 function isJungseong(cp: number | undefined): boolean {
   return cp !== undefined && ((cp >= 0x1161 && cp <= 0x11a7) || (cp >= 0xd7b0 && cp <= 0xd7c6));
 }
+// A trailing consonant jamo.
+function isJongseong(cp: number | undefined): boolean {
+  return cp !== undefined && ((cp >= 0x11a8 && cp <= 0x11ff) || (cp >= 0xd7cb && cp <= 0xd7fb));
+}
+
+// Markdown emphasis delimiters (`*`, `_`), at most three in a row. They draw
+// nothing, so for a word break beside one the letter behind it is what counts.
+function isEmphasis(cp: number | undefined): boolean {
+  return cp === 0x2a || cp === 0x5f;
+}
 
 function visibleBase(cp: number | undefined): boolean {
   return cp !== undefined && !WHITESPACE.test(String.fromCodePoint(cp));
@@ -162,12 +172,25 @@ function isDirectionMark(cp: number | undefined): boolean {
   return cp === 0x200e || cp === 0x200f || cp === 0x061c;
 }
 
+// The visible code points around a run. `prev` and `next` touch it; `prev2` and
+// `next2` are one further out. `prevText` and `nextText` are the nearest ones
+// past up to three Markdown emphasis delimiters.
+interface Around {
+  prev?: number;
+  next?: number;
+  prev2?: number;
+  next2?: number;
+  prevText?: number;
+  nextText?: number;
+}
+
 // Which code points of a run text legitimately needs, one flag per code point.
-// `prev` and `next` are the visible code points around the run. Each benign
+// `around` holds the visible code points around the run. Each benign
 // pattern is matched where it stands, so a legitimate character beside a
 // suspicious one, or beside another legitimate one (an emoji's VS16 then a
 // right-to-left mark), keeps its exemption.
-function explained(cps: number[], prev: number | undefined, next: number | undefined): boolean[] {
+function explained(cps: number[], around: Around): boolean[] {
+  const { prev, next } = around;
   const ok = cps.map(() => false);
   const before = (k: number): number | undefined => (k === 0 ? prev : cps[k - 1]);
   const after = (k: number): number | undefined => (k + 1 < cps.length ? cps[k + 1] : next);
@@ -216,26 +239,41 @@ function explained(cps: number[], prev: number | undefined, next: number | undef
     } else if (cp === 0x200b) {
       // A lone word break between two words of a script written without
       // spaces. Both neighbours are visible, so a row of them is still flagged.
-      ok[i] = visible(left) && visible(right) && test(SPACELESS, left) && test(SPACELESS, right);
+      // Markdown emphasis delimiters between the break and a letter are skipped,
+      // since the preview draws the two words with the break between them.
+      const leftText = i === 0 ? around.prevText : left;
+      const rightText = i === cps.length - 1 ? around.nextText : right;
+      ok[i] =
+        visible(left) && visible(right) && test(SPACELESS, leftText) && test(SPACELESS, rightText);
     } else if (cp >= 0x2061 && cp <= 0x2064) {
       // An invisible function application, times, separator or plus between
       // the parts of a mathematical expression: deleting it changes the maths.
-      // One side must be a number, an operator or a bracket, so ordinary text
-      // with a stray operator in it is still flagged.
+      // Each side must be an operand: a number, an operator or a bracket, or a
+      // letter standing as a variable. A letter is a variable when it is not
+      // part of a longer word (the next one out is no letter: the m and the c of
+      // `mc²`, the f of `f(x)`) or when a number or operator follows it. A word
+      // of prose with a stray operator inside it is still flagged, and so is an
+      // operator in a row of invisible characters, whose neighbours are not
+      // visible.
+      const operand = (cp: number | undefined, outer: number | undefined): boolean =>
+        test(MATHY, cp) || (letter(cp) && (!letter(outer) || test(MATHY, outer)));
       ok[i] =
         visible(left) &&
         visible(right) &&
-        (test(MATHY, left) || test(MATHY, right)) &&
-        (test(MATHY, left) || letter(left)) &&
-        (test(MATHY, right) || letter(right));
+        operand(left, i === 0 ? around.prev2 : undefined) &&
+        operand(right, i === cps.length - 1 ? around.next2 : undefined);
     } else if (cp === 0x115f) {
       // The choseong filler that stands in for a missing leading consonant,
       // before a vowel: how Unicode spells an isolated vowel jamo.
-      ok[i] = isJungseong(right);
+      // With the vowel filler behind it, before a trailing consonant, it spells
+      // an isolated trailing consonant, which would otherwise join the syllable
+      // before it.
+      ok[i] = isJungseong(right) || (right === 0x1160 && isJongseong(cps[i + 2] ?? next));
     } else if (cp === 0x1160) {
       // The jungseong filler that stands in for a missing vowel, after a
-      // leading consonant: an isolated consonant jamo.
-      ok[i] = isChoseong(left);
+      // leading consonant: an isolated consonant jamo. After the choseong filler
+      // and before a trailing consonant: an isolated trailing consonant.
+      ok[i] = isChoseong(left) || (left === 0x115f && isJongseong(right));
     } else if (cp === 0x180e) {
       // The Mongolian vowel separator, before a final A or E.
       ok[i] = test(MONGOLIAN, left) && (right === 0x1820 || right === 0x1821);
@@ -249,8 +287,8 @@ function explained(cps: number[], prev: number | undefined, next: number | undef
 // marks that a payload separated end up side by side), so a kept character is
 // only benign if it is still benign once its flagged neighbours are gone. That
 // makes a strip final: stripping its output again changes nothing.
-function settled(cps: number[], prev: number | undefined, next: number | undefined): boolean[] {
-  const ok = explained(cps, prev, next);
+function settled(cps: number[], around: Around): boolean[] {
+  const ok = explained(cps, around);
   for (let round = 0; ; round++) {
     if (round === MAX_ROUNDS) {
       // Not expected to happen; flag everything rather than keep an unsettled set.
@@ -267,8 +305,7 @@ function settled(cps: number[], prev: number | undefined, next: number | undefin
     }
     const again = explained(
       kept.map((k) => cps[k]),
-      prev,
-      next,
+      around,
     );
     if (again.every(Boolean)) {
       return ok;
@@ -295,6 +332,11 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
   let line = 1;
   let lineStart = 0;
   let prev: number | undefined;
+  let prev2: number | undefined;
+  // The nearest code point before the current one that is no emphasis delimiter,
+  // and how many delimiters sit between it and the current position.
+  let prevText: number | undefined;
+  let delimiters = 0;
   let i = 0;
   while (i < n) {
     const cp = text.codePointAt(i) as number;
@@ -304,7 +346,14 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
         line++;
         lineStart = i + width;
       }
+      prev2 = prev;
       prev = cp;
+      if (isEmphasis(cp)) {
+        delimiters++;
+      } else {
+        prevText = cp;
+        delimiters = 0;
+      }
       i += width;
       continue;
     }
@@ -327,9 +376,24 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     // A byte order mark leads the file; what follows it is judged on its own.
     const skip = start === 0 && cps[0] === 0xfeff ? 1 : 0;
     const next = end < n ? text.codePointAt(end) : undefined;
+    const next2 = next === undefined ? undefined : text.codePointAt(end + (next > 0xffff ? 2 : 1));
+    let after = end;
+    while (after < n && after - end < 3 && isEmphasis(text.charCodeAt(after))) {
+      after++;
+    }
+    const nextText = after === end || after >= n ? next : text.codePointAt(after);
+    const leading = skip ? undefined : prev;
+    const around: Around = {
+      prev: leading,
+      prev2: skip ? undefined : prev2,
+      prevText: skip ? undefined : delimiters > 0 && delimiters <= 3 ? prevText : prev,
+      next,
+      next2,
+      nextText,
+    };
     // Every code point is judged, however long the run, so a payload's length
     // never decides whether the emoji or flag in front of it keeps its form.
-    const ok = settled(cps.slice(skip), skip ? undefined : prev, next);
+    const ok = settled(cps.slice(skip), around);
     // Each stretch of unexplained code points is a flagged run of its own.
     let from = -1;
     for (let k = 0; k <= ok.length; k++) {
@@ -344,6 +408,9 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     }
     // The next code point is visible, so it sets prev before anything reads it.
     prev = undefined;
+    prev2 = undefined;
+    prevText = undefined;
+    delimiters = 0;
     i = end;
   }
 }

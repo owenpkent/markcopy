@@ -68,7 +68,7 @@ export function headline(scan: HiddenScan): string {
 
 export interface HiddenNotice {
   /** Show, update or hide the notice for a render. `scan` is what the host sent. */
-  update(scan: unknown, docKey: string): void;
+  update(scan: unknown, docKey: string, docVersion: number): void;
 }
 
 export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost): HiddenNotice {
@@ -105,7 +105,7 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
   };
 
   return {
-    update(raw: unknown, docKey: string): void {
+    update(raw: unknown, docKey: string, docVersion: number): void {
       const scan = raw as HiddenScan | undefined;
       if (
         !scan ||
@@ -138,6 +138,9 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
       if (old) {
         detailsOpen = old.open;
       }
+      // The list scrolls inside the notice. Rebuilding it would reset it to the
+      // top and leave the focused link far out of view, so put the offset back.
+      const listScroll = bar.querySelector('.mc-hidden-list')?.scrollTop ?? 0;
       const runs = scan.runs.filter(isRun);
 
       bar.hidden = false;
@@ -178,7 +181,14 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         const item = document.createElement('li');
         const where = button(
           `Line ${run.line}, column ${run.column}`,
-          () => host.post({ type: 'revealHidden', line: run.line, column: run.column, docKey }),
+          () =>
+            host.post({
+              type: 'revealHidden',
+              line: run.line,
+              column: run.column,
+              docKey,
+              docVersion,
+            }),
           'mc-hidden-link',
         );
         where.title = 'Go to this run in the editor';
@@ -207,6 +217,7 @@ export function createHiddenNotice(anchor: HTMLElement, host: HiddenNoticeHost):
         details.append(more);
       }
       bar.replaceChildren(top, details);
+      list.scrollTop = listScroll;
       if (focusId !== undefined) {
         const again = Array.from(bar.querySelectorAll<HTMLElement>('[data-focus]')).find(
           (el) => el.dataset.focus === focusId,

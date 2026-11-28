@@ -103,6 +103,7 @@ describe('the hidden characters notice', () => {
       line: 2,
       column: 5,
       docKey: 'file:///a.md',
+      docVersion: 1,
     });
     const copy = [...bar().querySelectorAll('button')].find((b) =>
       /Copy without hidden/.test(b.textContent ?? ''),
@@ -132,6 +133,26 @@ two ${tags('hi')}`);
     copy.focus();
     await renderWith(h, { ...scan });
     expect(document.activeElement).toBe(bar().querySelector('.mc-hidden-actions button'));
+  });
+
+  it('keeps the list scrolled where it was, so the focused link stays in view', async () => {
+    const text = Array.from({ length: 55 }, (_, n) => `l${n} ${tags('x')}`).join(
+      String.fromCharCode(10),
+    );
+    const scan = scanHiddenText(text);
+    await renderWith(h, scan);
+    const details = bar().querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+    const list = bar().querySelector('.mc-hidden-list') as HTMLElement;
+    list.scrollTop = 628;
+    expect(list.scrollTop).toBe(628);
+    const link = bar().querySelectorAll<HTMLButtonElement>('.mc-hidden-link')[40];
+    link.focus();
+    await renderWith(h, { ...scan });
+    const again = bar().querySelector('.mc-hidden-list') as HTMLElement;
+    expect(again).not.toBe(list);
+    expect(again.scrollTop).toBe(628);
+    expect(document.activeElement).toBe(bar().querySelectorAll('.mc-hidden-link')[40]);
   });
 
   it('stays dismissed until the flagged set changes', async () => {
