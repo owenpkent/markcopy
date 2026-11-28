@@ -170,7 +170,8 @@ const editMode = createEditMode({
 
 // Only the latest render received while a block editor is open is kept.
 let pendingRender: Record<string, unknown> | undefined;
-// Renders started and not yet finished, and when the last one finished, for\n// auto-scroll (see applyRenderMessage).
+// Renders started and not yet finished, and when the last one finished, for
+// auto-scroll (see applyRenderMessage).
 let rendersInFlight = 0;
 let renderSettledAt = 0;
 // How long after a render finishes the page may still be changing height.
@@ -187,7 +188,9 @@ function applyRenderMessage(msg: Record<string, any>): void {
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
-  // Auto-scroll holds still while the content is being replaced (isHeld) and for a\n  // short settle afterwards (deferEdge), and then carries on from wherever the page\n  // actually is: nothing here puts an earlier offset back.
+  // Auto-scroll holds still while the content is being replaced (isHeld) and for a
+  // short settle afterwards (deferEdge), and then carries on from wherever the page
+  // actually is: nothing here puts an earlier offset back.
   rendersInFlight++;
   void render(
     msg.html as string,
