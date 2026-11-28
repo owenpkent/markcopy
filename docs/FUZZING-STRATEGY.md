@@ -315,6 +315,38 @@ The `polyglot` target is listed for `src/binary/signatures.ts` (82.1% of its lin
 
 Smoke run, 2026-11-26, Windows, one process: 25 s, 59,033 runs, `cov: 2805`, `ft: 6962`, no findings.
 
+## Encrypted containers and key files
+
+7-Zip, RAR, OpenPGP, age, KeePass, LUKS, PKCS #12 and PEM files are read by `src/pkg/sevenZip.ts`, `rar.ts`,
+`openpgp.ts`, `age.ts`, `keepass.ts`, `luks.ts` and `keyFiles.ts`, on the shared `der.ts`, `base64.ts` and `labels.ts`.
+Each is chosen by content, so each is reached through `readPackage` and the `pkg` target: eight new shapes (two or four
+for the formats whose first line or magic differs: RAR 5 and 4, age text and armor, OpenPGP messages, keys and a binary
+packet, and four PEM labels) and eight variants (`pkg-7z`, `pkg-rar`, `pkg-luks`, `pkg-kdbx`, `pkg-age`, `pkg-pgp`,
+`pkg-pkcs12`, `pkg-pem`), each seeded with files from `tests/pkg/encryptionFixture.ts`: encrypted and plain headers,
+every KDF and cipher the tests label, an odd version, a damaged LUKS2 JSON area, an indefinite-length PFX, a legacy PEM.
+`fuzz/dict/pkg.dict` gained each format's signature, UUIDs and OIDs, the LUKS JSON keys, and the PEM and armor lines.
+
+A new target, `key-encodings`, takes the encodings directly: DER and BER (`Der`: nodes inside their parent, only
+`Undetermined` escapes), the tolerant base64 decoder against Node's, PEM block splitting, OpenPGP armor and the age header.
+It has its own dictionary.
+
+These files are sensitive, and the rule in `labels.ts` is that salts, IVs, nonces, wrapped keys and stanza arguments are
+never read into a result. The fixtures fill all of them with the byte `0xab`, so the page oracle has a check for it
+(`checkNoSecrets` in `fuzz/targets/binaryOracle.ts`, called by the `pkg` target for these formats): when the input holds a
+run of 12 or more of that byte and the page shows ten of them as hex, or twelve as base64, it fails. Method IDs, KeePass
+cipher and KDF IDs and OpenPGP key IDs are public identifiers the readers print as hex on purpose, so those are removed
+from the page first. The check was run against a planted leak, and found two false alarms on the way (a mutated 7z coder
+ID and an Alpine digest of `abab...`), both now excluded. It cannot see a leak in a text format whose input holds the
+same text (a PEM's base64), so for those it only covers the hex form.
+
+The `polyglot` target on this branch also reads each new format's reader on its own to compare with the first reading.
+
+Smoke runs, 2026-11-26, Windows, one process, 25 s each, no findings after the oracle changes above: `key-encodings`
+580,173 runs (`cov: 274`, `ft: 1514`); `pkg-7z` 126,352 (515, 986); `pkg-rar` 152,739 (490, 1026); `pkg-luks` 77,544 (540,
+1016); `pkg-kdbx` 134,802 (491, 953); `pkg-age` 118,398 (389, 1037); `pkg-pgp` 128,696 (581, 1224); `pkg-pkcs12` 127,197
+(500, 1054); `pkg-pem` 151,751 (514, 1320); `pkg` 59,552 (4642, 9893); `file-source` 14,358 (4846, 7924); `polyglot`
+53,474 (3262, 8199).
+
 ## Readers added after 2026-11-23, covered 2026-11-26
 
 The binary readers that merged after the first fuzzing pass (Mach-O, Go build
@@ -416,13 +448,13 @@ What the number means, so it is not read as more than it is:
 - Minimums were set from one local run on Windows, 5 points under the measurement (10 for
   files under 40 lines). The first Linux run may differ by a point or two.
 
-Measured, 122 parsers and 9 non-parsers; 15,104 of 19,917 lines (75.8%) overall:
+Measured, 132 parsers and 9 non-parsers; 16,635 of 21,756 lines (76.5%) overall:
 
 | Area                                 | Parsers | Lines covered | Lowest file (measured)      | Minimums |
 | ------------------------------------ | ------- | ------------- | --------------------------- | -------- |
-| `src/pkg/`                           | 29      | 80.4%         | `wheel.ts` 54.8             | 49 to 90 |
+| `src/pkg/`                           | 39      | 81.0%         | `wheel.ts` 54.8             | 49 to 90 |
 | `src/pe/`                            | 8       | 88.1%         | `signer.ts` 83.1            | 78 to 90 |
-| `src/binary/`                        | 9       | 82.8%         | `goBuildInfo.ts` 71.4       | 66 to 95 |
+| `src/binary/`                        | 9       | 82.9%         | `goBuildInfo.ts` 71.7       | 66 to 95 |
 | `src/xlsx/`                          | 5       | 88.9%         | `render.ts` 87.2            | 82 to 85 |
 | `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
 | `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |

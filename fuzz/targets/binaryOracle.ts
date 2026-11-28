@@ -99,6 +99,25 @@ const ATTRIBUTES: Record<string, RegExp> = {
 const TAG = /^<(\/?)([a-z0-9]+)((?:\s+[a-z-]+="[^"<>]*")*)\s*>$/;
 const ATTRIBUTE = /\s+([a-z-]+)="([^"]*)"/g;
 
+// The encrypted-container readers (7z, RAR, OpenPGP, age, KeePass, LUKS, key files) show only what a
+// file states in the clear: algorithm names, parameters, counts. The seeds' salts, IVs, nonces and wrapped
+// keys are filled with one marker byte (tests/pkg/encryptionFixture.ts), so an input that holds a run of
+// it and a page that holds it, as hex or as base64, is key material that reached the page.
+const SECRET_BYTE = 0xab;
+const SECRET_RUN = 12;
+const SECRET_FORMS = ['abababababababababab', 'q6urq6urq6urq6ur'];
+
+function holdsSecretRun(input: Uint8Array): boolean {
+  let run = 0;
+  for (const byte of input) {
+    run = byte === SECRET_BYTE ? run + 1 : 0;
+    if (run >= SECRET_RUN) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const ENGINE_TEXT = ['[native code]', '[object ', 'undefined', 'NaN', 'Infinity'];
 
 /** Whether the file itself holds `text`, in a single-byte or a UTF-16 encoding. */
@@ -177,6 +196,42 @@ export function checkPage(
       throw new PageError(
         `${label}: the page says ${JSON.stringify(word)} and the file does not (${JSON.stringify(text.slice(Math.max(0, at - 60), at + 60))})`,
       );
+    }
+  }
+}
+
+/** The formats that show only what a file states in the clear (src/pkg/labels.ts). */
+const CONTAINER = /7-Zip|RAR|KeePass|LUKS|\bage\b|OpenPGP|PKCS#12|PEM/;
+
+/**
+ * Throws a PageError when the page of an encrypted container or key file shows the marker that
+ * stands in for a salt, IV or key in the seeds. `format` is the format the reader gave the file.
+ */
+export function checkNoSecrets(
+  label: string,
+  format: string,
+  html: string,
+  input: Uint8Array,
+  decoded: unknown = undefined,
+): void {
+  if (!CONTAINER.test(format)) {
+    return;
+  }
+  const readerText = decodedStrings(decoded);
+  if (holdsSecretRun(input)) {
+    // A method ID (7z), a cipher or KDF ID (KeePass) and a key ID (OpenPGP) are public identifiers the
+    // readers print as hex on purpose, and a mutated file can put the marker in one of those fields.
+    const shown = (html + '\n' + readerText)
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/method [0-9a-f]+|\(id [0-9a-f]+\)|key ID 0x[0-9A-Fa-f]+/g, ' ');
+    for (const form of SECRET_FORMS) {
+      const hex = form.startsWith('a');
+      const where = (hex ? shown.toLowerCase() : shown).indexOf(form);
+      if (where >= 0 && !fileHolds(input, form) && !fileHolds(input, form.toUpperCase())) {
+        throw new PageError(
+          `${label}: the page shows key-material marker bytes (${hex ? 'hex' : 'base64'})`,
+        );
+      }
     }
   }
 }
