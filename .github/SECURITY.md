@@ -66,7 +66,7 @@ build emits one KaTeX chunk instead of two. Remove this override when Mermaid's 
 
 ## Verifying a release
 
-Each GitHub Release is built by the `release.yml` workflow from the tagged commit. Its `.vsix` has a build provenance attestation (signed by GitHub's Sigstore, naming the workflow and commit that built it) and a `markcopy-<version>.vsix.sha256` file beside it. To check a download:
+Releases built by the `release.yml` workflow from the tagged commit carry a build provenance attestation on the `.vsix` (signed by GitHub's Sigstore, naming the workflow and commit that built it) and a `markcopy-<version>.vsix.sha256` file beside it. Earlier releases (up to 1.8.0) and any release cut by hand under the manual fallback were packaged on the maintainer's machine and uploaded as the `.vsix` alone: they have no checksum file and no attestation, so neither command below can verify them. The only check for those is the Marketplace and Open VSX listing for the same version. To check a workflow-built download:
 
 ```bash
 gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy

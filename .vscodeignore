@@ -27,6 +27,9 @@ sample-assembly.step
 sample.mov
 sample.tex
 *.vsix
+*.sha256
+release-check/**
+release-recovery/**
 .github/**
 AGENTS.md
 docs/**

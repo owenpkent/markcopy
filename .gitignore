@@ -50,3 +50,4 @@ media/audio.js.map
 # Release downloads checked by hand (docs/RELEASING.md)
 release-check/
 release-recovery/
+*.vsix.sha256

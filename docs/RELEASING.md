@@ -77,7 +77,7 @@ Then authenticate `vsce` with a **Personal Access Token (PAT)**. This publisher 
 
 ## Publishing secrets (`.env`)
 
-Both registries need a token (see [One-time setup](#one-time-setup) for how to mint them). The simplest, repeatable way to hold them is a local `.env` file: `vsce` reads `VSCE_PAT` and `ovsx` reads `OVSX_PAT` from the environment automatically, so once `.env` is loaded the publish commands take no extra flags.
+Both registries need a token (see [Manual fallback: tokens](#manual-fallback-tokens) for how to mint them). The simplest, repeatable way to hold them is a local `.env` file: `vsce` reads `VSCE_PAT` and `ovsx` reads `OVSX_PAT` from the environment automatically, so once `.env` is loaded the publish commands take no extra flags.
 
 1. Create your `.env` once from the template and paste in the two tokens:
 
@@ -168,11 +168,12 @@ Needs the [one-time setup](#one-time-setup-automated-release-github-actions) don
 1. Pushing the tag (step 6) starts **Release** in the repository's Actions tab. The `build` job fails if the tag differs from `package.json`'s version or the tagged commit is not on `main`, packages the `.vsix` with `vsce package`, writes `markcopy-<version>.vsix.sha256`, and attests the file. `github-release` then creates the GitHub Release with both files and that version's CHANGELOG section as its notes.
 2. Wait for the GitHub Release to appear. The registry jobs sit at **Waiting**; do not approve them yet. Smoke-test the exact file they will publish. Download it into a clean directory and verify it:
    ```bash
-   mkdir release-check && cd release-check
-   gh release download v<version> -R owenpkent/markcopy
-   sha256sum --check markcopy-<version>.vsix.sha256
-   gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy
+   check=$(mktemp -d)    # a fresh directory every time, never one left over from a past release
+   gh release download v<version> -R owenpkent/markcopy -D "$check"
+   (cd "$check" && sha256sum --check markcopy-<version>.vsix.sha256)
+   gh attestation verify "$check/markcopy-<version>.vsix" -R owenpkent/markcopy
    ```
+   Use `"$check/markcopy-<version>.vsix"` for the smoke test below, and `rm -r "$check"` when done.
 3. Run the packaged-extension smoke check from [step 7](#manual-fallback) on that file: install it into a throwaway profile, open a Markdown file, a CSV, and a PDF with the same flags, and confirm the preview, a couple of copy actions, one CSV cell edit, and light/dark. If anything is wrong, do not approve: reject the deployment and fix forward with a new version.
 4. Open the run and, when `publish-marketplace` and `publish-openvsx` show **Waiting**, click **Review deployments**, tick `release`, and **Approve and deploy**. One approval releases both. The two jobs are independent, so one registry failing does not stop the other; if one fails, see [A registry publish failed](#a-registry-publish-failed).
 5. Verify both registries:
@@ -182,6 +183,20 @@ Needs the [one-time setup](#one-time-setup-automated-release-github-actions) don
    ```
    Registry lag and a flapping version are normal for a few minutes; see [Troubleshooting Phase 2](#troubleshooting-phase-2).
 6. Step 13 below (the security advisory) still applies after both registries show the version.
+
+#### The GitHub Release failed but the build succeeded
+
+If `build` is green and `github-release` failed (creating the release or uploading its assets), the run already holds the attested `.vsix` and its checksum as the `markcopy-vsix` Actions artifact, and both registry jobs were skipped. Never package again for this tag: a local build is different bytes from the attested ones.
+
+1. On the workflow run page, click **Re-run failed jobs**. It re-runs only `github-release`, reusing the same artifact, and the registry jobs then wait for approval as usual. Carry on from step 2 above.
+2. If the re-run keeps failing, create the release by hand from that same artifact. Find the run, download the artifact, and verify it (artifacts are kept 90 days by default, so do this promptly):
+   ```bash
+   gh run list -R owenpkent/markcopy -w release.yml -b v<version> --json databaseId,conclusion
+   gh run download <run-id> -R owenpkent/markcopy -n markcopy-vsix -D release-recovery
+   (cd release-recovery && sha256sum --check markcopy-<version>.vsix.sha256)
+   gh attestation verify release-recovery/markcopy-<version>.vsix -R owenpkent/markcopy
+   ```
+3. Create the release with those verified files and the version's CHANGELOG section as notes, as in [step 11](#manual-fallback): `gh release create v<version> release-recovery/markcopy-<version>.vsix release-recovery/markcopy-<version>.vsix.sha256 --notes-file notes.md`. Smoke-test that file, then re-run the workflow's failed jobs again or approve the registry jobs if they are waiting. If the run can no longer be re-run, publish the verified file by hand as in the next section.
 
 #### A registry publish failed
 
@@ -202,7 +217,7 @@ The first tagged release is also the first test of the Marketplace policy (see t
 
 #### Manual fallback
 
-These are the steps used up to 1.8.0. Use them only for a release that has no built artifact, for example if the workflow's build job itself failed. If the GitHub Release exists, use [A registry publish failed](#a-registry-publish-failed) instead.
+These are the steps used up to 1.8.0. Use them only for a release that has no built artifact, for example if the workflow's build job itself failed. If the run holds the `markcopy-vsix` artifact, use [The GitHub Release failed but the build succeeded](#the-github-release-failed-but-the-build-succeeded); if the GitHub Release exists, use [A registry publish failed](#a-registry-publish-failed). A release made this way has no checksum file or attestation.
 
 7. Package and smoke-test:
 
