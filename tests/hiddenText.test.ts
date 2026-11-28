@@ -350,10 +350,13 @@ describe('script and math uses of invisible characters', () => {
     expect(stripHiddenText(xy)).toBe(xy);
   });
 
-  it('still flags an invisible operator inside a word of prose', () => {
-    expect(scanHiddenText(`say${cp(0x2062)}hello`).totalRuns).toBe(1);
-    expect(scanHiddenText(`m${cp(0x2062)}cd`).totalRuns).toBe(1);
-    expect(scanHiddenText(`ab${cp(0x2062)}c`).totalRuns).toBe(1);
+  it('keeps a lone operator between letters, and flags a row of them', () => {
+    // The accepted trade-off: one operator carries at most 2 bits and cannot be
+    // told from the times of `x` `y`, so a lone one between letters is kept.
+    for (const text of [`say${cp(0x2062)}hello`, `m${cp(0x2062)}cd`, `ab${cp(0x2062)}c`]) {
+      expect(scanHiddenText(text).totalRuns, text).toBe(0);
+      expect(stripHiddenText(text)).toBe(text);
+    }
     expect(scanHiddenText(`m${cp(0x2062, 0x2062)}c`).totalRuns).toBe(1);
   });
 
@@ -364,8 +367,20 @@ describe('script and math uses of invisible characters', () => {
     expect(scanHiddenText(`f${cp(0x2061)}(x) 2${cp(0x2062)}x`).totalRuns).toBe(0);
   });
 
-  it('flags invisible operators in ordinary text or in a row', () => {
-    expect(scanHiddenText(`ab${cp(0x2064)}cd`).totalRuns).toBe(1);
+  it('flags invisible operators in a row, at an edge or next to whitespace', () => {
+    expect(scanHiddenText(`ab${cp(0x2064, 0x2064)}cd`).totalRuns).toBe(1);
+    expect(scanHiddenText(`${cp(0x2062)}x`).totalRuns).toBe(1);
+    expect(scanHiddenText(`x${cp(0x2062)}`).totalRuns).toBe(1);
+    expect(
+      scanHiddenText(`x${cp(0x2062)}
+y`).totalRuns,
+    ).toBe(1);
+    expect(
+      scanHiddenText(`x
+${cp(0x2062)}y`).totalRuns,
+    ).toBe(1);
+    expect(scanHiddenText(`x ${cp(0x2062)}y`).totalRuns).toBe(1);
+    expect(scanHiddenText(`x${cp(0x2062)}${cp(0x200b)}y`).totalRuns).toBe(1);
     expect(scanHiddenText(`3${cp(0x2064, 0x2062)}${cp(0xbc)}`).totalRuns).toBe(1);
     expect(scanHiddenText(`3${cp(0x2064)} x`).totalRuns).toBe(1);
   });
@@ -513,12 +528,13 @@ describe('function application', () => {
     }
   });
 
-  it('still flags it in prose, in a row and with no argument', () => {
-    expect(scanHiddenText(`say${cp(0x2061)}hello`).totalRuns).toBe(1);
+  it('still flags it in a row, next to whitespace and at the start', () => {
+    // A lone one between letters is kept like the other operators.
+    expect(scanHiddenText(`say${cp(0x2061)}hello`).totalRuns).toBe(0);
     expect(scanHiddenText(`sin${cp(0x2061)} (x)`).totalRuns).toBe(1);
     expect(scanHiddenText(`sin${cp(0x2061, 0x2061)}(x)`).totalRuns).toBe(1);
     expect(scanHiddenText(`${cp(0x2061)}(x)`).totalRuns).toBe(1);
-    expect(stripHiddenText(`say${cp(0x2061)}hello`)).toBe('sayhello');
+    expect(stripHiddenText(`${cp(0x2061)}(x)`)).toBe('(x)');
   });
 });
 
@@ -534,6 +550,13 @@ describe('clean copy is stable', () => {
     `sin${cp(0x2061)}x${times}y`,
     `say${times}hel${times}lo`,
     `a${times}b${times}cd`,
+    `2${times}12${times}y${cp(0x302)}`,
+    `2${times}12${times}y${cp(0x302, 0x323)}${times}z`,
+    `${cp(0x302)}${times}x`,
+    `x${cp(0x302)}${times}${cp(0x302)}`,
+    `x${cp(0x200b, 0x302)}${times}y`,
+    `x ${cp(0x302)}${times}y`,
+    `2${times}3${times}hello`,
     `a${times}b${cp(0x2064)}c${times}d`,
     `ab${times}c${times}d`,
     `a${times}b${times}`,
@@ -544,6 +567,7 @@ describe('clean copy is stable', () => {
     `a${times}sin${cp(0x2061)}x${times}cos${cp(0x2061)}y`,
     `log${cp(0x2061)}2${times}x`,
     `hello${cp(0x2061)}world`,
+    `x${cp(0x2061, 0x2062)}y`,
   ];
   // Every fixture string in this file, plus the reviewer's case and more.
   const fixtures: string[] = [
@@ -619,6 +643,8 @@ describe('clean copy is stable', () => {
     `log${cp(0x2061)}2${times}x`,
     '(',
     ')',
+    cp(0x302),
+    cp(0x302, 0x323),
     cp(0x2061),
     cp(0x2062),
     cp(0x2063),
@@ -672,7 +698,7 @@ describe('clean copy is stable', () => {
     }
   });
 
-  it('keeps or flags a whole chain of operators', () => {
+  it('keeps a lone operator between visible characters, flags the rest', () => {
     const keep = (text: string): void => {
       expect(scanHiddenText(text).totalRuns, text).toBe(0);
       expect(stripHiddenText(text)).toBe(text);
@@ -687,21 +713,40 @@ describe('clean copy is stable', () => {
     keep(`2${times}(a+b)`);
     keep(`a${times}sin${cp(0x2061)}x${times}cos${cp(0x2061)}y`);
     keep(`log${cp(0x2061)}2${times}x`);
-    expect(scanHiddenText(`hello${cp(0x2061)}world`).totalRuns).toBe(1);
-    // A chain that fails anywhere is flagged at every operator.
-    expect(scanHiddenText(`say${times}hel${times}lo`).totalRuns).toBe(2);
-    expect(stripHiddenText(`say${times}hel${times}lo`)).toBe('sayhello');
-    expect(scanHiddenText(`a${times}b${times}cd`).totalRuns).toBe(2);
-    expect(stripHiddenText(`a${times}b${times}cd`)).toBe('abcd');
+    // Kept under the simple rule: each operator stands alone between visible text.
+    keep(`say${times}hel${times}lo`);
+    keep(`a${times}b${times}cd`);
+    keep(`hello${cp(0x2061)}world`);
+    keep(`2${times}3${times}hello`);
+    // A row, or an operator at an edge, is flagged and stripped.
+    expect(stripHiddenText(`x${times}${times}y`)).toBe('xy');
+    expect(stripHiddenText(`a${times}b${times}`)).toBe(`a${times}b`);
   });
 
-  it('judges the multiplication as if the word break were already gone', () => {
-    // Without the break, `b` and `c` are one word, so the times beside `b` is
-    // flagged now rather than after the first copy.
+  it('skips combining marks back to the base before an operator', () => {
+    // The reported case: a combining circumflex after the last operand.
+    const kept = `2${times}12${times}y${cp(0x302)}`;
+    expect(scanHiddenText(kept).totalRuns).toBe(0);
+    expect(stripHiddenText(kept)).toBe(kept);
+    const marked = `x${cp(0x302, 0x323)}${times}y`;
+    expect(scanHiddenText(marked).totalRuns).toBe(0);
+    // A mark whose base is whitespace, an edge or an invisible character.
+    for (const text of [
+      ` ${cp(0x302)}${times}y`,
+      `${cp(0x302)}${times}y`,
+      `x${cp(0x200b, 0x302)}${times}y`,
+    ]) {
+      const once = stripHiddenText(text);
+      expect(once).not.toContain(times);
+      expect(stripHiddenText(once)).toBe(once);
+    }
+  });
+
+  it('keeps the multiplication while the break beside it is removed', () => {
     const text = `a${times}b${zw}c`;
     const scan = scanHiddenText(text);
-    expect(scan.runs.map((r) => r.codePoints)).toEqual([['U+2062'], ['U+200B']]);
-    expect(stripHiddenText(text)).toBe('abc');
+    expect(scan.runs.map((r) => r.codePoints)).toEqual([['U+200B']]);
+    expect(stripHiddenText(text)).toBe(`a${times}bc`);
     // A visible gap keeps the multiplication, break or not.
     const spaced = `a${times}b${zw} c`;
     expect(stripHiddenText(spaced)).toBe(`a${times}b c`);

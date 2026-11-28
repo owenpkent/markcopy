@@ -115,8 +115,8 @@ const PICTOGRAPHIC = /^\p{Extended_Pictographic}$/u;
 const MONGOLIAN = /^\p{Script=Mongolian}$/u;
 // Scripts written without spaces, where U+200B marks a word break.
 const SPACELESS = /^[\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]$/u;
-// Characters a mathematical expression is made of, for the invisible operators.
-const MATHY = /^[\p{N}\p{Sm}()[\]{}\u{1D400}-\u{1D7FF}]$/u;
+// A combining mark, which an invisible operator's left neighbour skips back over.
+const MARK = /^\p{M}$/u;
 
 function visible(cp: number | undefined): cp is number {
   return cp !== undefined && kindOf(cp) === undefined;
@@ -172,14 +172,12 @@ function isDirectionMark(cp: number | undefined): boolean {
   return cp === 0x200e || cp === 0x200f || cp === 0x061c;
 }
 
-// The visible code points around a run. `prev` and `next` touch it; `prev2` and
-// `next2` are one further out. `prevText` and `nextText` are the nearest ones
-// past up to three Markdown emphasis delimiters.
+// The visible code points around a run. `prev` and `next` touch it. `prevText`
+// and `nextText` are the nearest ones past up to three Markdown emphasis
+// delimiters.
 interface Around {
   prev?: number;
   next?: number;
-  prev2?: number;
-  next2?: number;
   prevText?: number;
   nextText?: number;
 }
@@ -245,31 +243,6 @@ function explained(cps: number[], around: Around): boolean[] {
       const rightText = i === cps.length - 1 ? around.nextText : right;
       ok[i] =
         visible(left) && visible(right) && test(SPACELESS, leftText) && test(SPACELESS, rightText);
-    } else if (cp >= 0x2061 && cp <= 0x2064) {
-      // An invisible function application, times, separator or plus between
-      // the parts of a mathematical expression: deleting it changes the maths.
-      // Both sides must be visible (a row of them is still flagged). A side is an
-      // operand when it is a number, an operator or a bracket, or a letter
-      // standing as a variable: a letter that is not part of a longer word (the
-      // next one out is no letter: the m and the c of `mc²`) or that has a
-      // number or operator beyond it.
-      const operand = (cp: number | undefined, outer: number | undefined): boolean =>
-        test(MATHY, cp) || (letter(cp) && (!letter(outer) || test(MATHY, outer)));
-      const rightOk = operand(right, i === cps.length - 1 ? around.next2 : undefined);
-      if (cp === 0x2061) {
-        // Function application sits between a function name, a run of letters of
-        // any length (`sin`, `f`), or a closing bracket or number, and its
-        // argument. The name needs no further test: it is what the marker marks.
-        // The argument is what must look like one (an operand or an opening
-        // bracket), so `say` then `hello` is still flagged: `hello` is a word.
-        ok[i] = visible(left) && visible(right) && (letter(left) || test(MATHY, left)) && rightOk;
-      } else {
-        ok[i] =
-          visible(left) &&
-          visible(right) &&
-          operand(left, i === 0 ? around.prev2 : undefined) &&
-          rightOk;
-      }
     } else if (cp === 0x115f) {
       // The choseong filler that stands in for a missing leading consonant,
       // before a vowel: how Unicode spells an isolated vowel jamo.
@@ -322,115 +295,54 @@ function settled(cps: number[], around: Around): boolean[] {
   }
 }
 
+// An invisible math operator (U+2061 to U+2064: function application, times,
+// separator, plus) is kept when it stands alone between two visible characters:
+// the nearest code point on each side (on the left, past combining marks back to
+// their base) is not whitespace, not an invisible character and not the edge of
+// the text. It is flagged in a row of invisible characters (those take the
+// other path), at the start or end of the text or a line, or next to whitespace.
+// The decision looks at two code points, so it costs O(1) per operator and
+// allocates nothing per chain. Trade-off: one operator between letters
+// (`say` U+2062 `hello`) is kept, since it cannot be told from `x` U+2062 `y`;
+// a lone operator carries at most 2 bits, and a payload needs a row.
 function isMathOp(cp: number | undefined): cp is number {
   return cp !== undefined && cp >= 0x2061 && cp <= 0x2064;
 }
 
-// A number: digits with at most one decimal point between them (`12`, `3.5`).
-const NUMBER = /^\p{N}+(?:\.\p{N}+)?$/u;
-// A function name: a run of letters, which only U+2061 after it makes a name.
-const NAME = /^[\p{L}\p{M}]+$/u;
+function isMark(cp: number): boolean {
+  return cp >= 0x300 && MARK.test(String.fromCodePoint(cp));
+}
 
-// A bracketed group (`(a+b)`): an opening bracket, a matching closing bracket
-// at the end, and nothing that closes the first one early.
-function bracketGroup(seg: string): boolean {
-  const open = '([{';
-  const close = ')]}';
-  if (!open.includes(seg[0]) || !close.includes(seg[seg.length - 1]) || seg.length < 2) {
-    return false;
-  }
-  let depth = 0;
-  for (let k = 0; k < seg.length; k++) {
-    if (open.includes(seg[k])) {
-      depth++;
-    } else if (close.includes(seg[k])) {
-      depth--;
-      if (depth === 0 && k < seg.length - 1) {
-        return false;
+// The code point before `pos`, skipping combining marks back to their base, or
+// undefined at the start of the text or when an invisible character is met.
+function baseBefore(text: string, pos: number): number | undefined {
+  let j = pos;
+  while (j > 0) {
+    let c = text.charCodeAt(j - 1);
+    let w = 1;
+    if (c >= 0xdc00 && c <= 0xdfff && j >= 2) {
+      const high = text.charCodeAt(j - 2);
+      if (high >= 0xd800 && high <= 0xdbff) {
+        c = (high - 0xd800) * 0x400 + (c - 0xdc00) + 0x10000;
+        w = 2;
       }
     }
+    if (kindOf(c) !== undefined) {
+      return undefined;
+    }
+    if (!isMark(c)) {
+      return c;
+    }
+    j -= w;
   }
-  return depth === 0;
+  return undefined;
 }
 
-// An operand strictly between two operators: a number, a single letter, one
-// math symbol or bracket, or a bracketed group. A letter run of two or more is
-// a word, not an operand, unless a function application follows it (see below).
-function chainOperand(seg: string): boolean {
-  if ([...seg].length === 1) {
-    return MATHY.test(seg) || LETTER_OR_MARK.test(seg);
-  }
-  return NUMBER.test(seg) || bracketGroup(seg);
-}
-
-// A maximal chain of invisible math operators, each alone between two visible
-// stretches (`a` U+2062 `b` U+2062 `c`), judged as one unit. Operand grammar,
-// for what lies between two operators of the chain:
-//   operand  = number | letter | symbol | group | function-term
-//   number   = digits, optionally one decimal point (`12`, `3.5`)
-//   letter   = a single letter (so `a`, `b`, not the word `ab`)
-//   symbol   = one math symbol or bracket (`+`, `(`)
-//   group    = a bracketed group (`(a+b)`)
-//   function-term = a run of letters that U+2061 follows (`sin`, `log`); its
-//                    argument is the next operand. Elsewhere a run of letters
-//                    is a word, so `say` U+2062 `hel` U+2062 `lo` is flagged.
-// A stretch that is none of these ends the chain: it is judged as the last
-// operand by its first code point and the one after it (the end rule below),
-// and the operator after it starts a chain of its own. The ends use the operand
-// rule on the visible text around the chain: at the start the letter before the
-// first operator is a variable if no letter stands before it (the m of `mc²`);
-// at the end the letter after the last operator is one if no letter stands
-// after it. The whole chain is kept or every operator in it is flagged, so a
-// clean copy never leaves half of it. A flagged chain does lose its operators
-// between operands that would merge when written together (`2`, `3`), but it
-// is flagged because something in it is not mathematics, and what stays is the
-// visible text the author wrote.
-// `start` is the first operator; `prev` and `prev2` are the visible code points
-// before it. Returns the position past the last operator and the verdict.
-function judgeChain(
-  text: string,
-  start: number,
-  prev: number | undefined,
-  prev2: number | undefined,
-): { end: number; ok: boolean } {
-  const n = text.length;
-  const ops: number[] = [];
-  let pos = start;
-  let lastFrom: number;
-  for (;;) {
-    ops.push(text.charCodeAt(pos));
-    lastFrom = pos + 1;
-    let to = lastFrom;
-    while (to < n && visible(text.codePointAt(to))) {
-      to += (text.codePointAt(to) as number) > 0xffff ? 2 : 1;
-    }
-    if (to >= n || to === lastFrom || !isMathOp(text.charCodeAt(to))) {
-      break;
-    }
-    const nextCp = to + 1 < n ? text.codePointAt(to + 1) : undefined;
-    if (nextCp !== undefined && !visible(nextCp)) {
-      break;
-    }
-    const seg = text.slice(lastFrom, to);
-    const functionTerm = text.charCodeAt(to) === 0x2061 && NAME.test(seg);
-    if (!functionTerm && !chainOperand(seg)) {
-      break;
-    }
-    pos = to;
-  }
-  const end = pos + 1;
-  const last = text.codePointAt(lastFrom);
-  if (prev === undefined || !visible(last)) {
-    return { end, ok: false };
-  }
-  const first = ops[0];
-  const leftOk =
-    first === 0x2061
-      ? letter(prev) || test(MATHY, prev)
-      : test(MATHY, prev) || (letter(prev) && (!letter(prev2) || test(MATHY, prev2)));
-  const outer = codePointAtVisible(text, lastFrom + (last > 0xffff ? 2 : 1));
-  const rightOk = test(MATHY, last) || (letter(last) && (!letter(outer) || test(MATHY, outer)));
-  return { end, ok: leftOk && rightOk };
+// Whether the lone operator at `pos` (one UTF-16 unit) is kept. The caller has
+// checked that the code point after it is visible.
+function loneOperatorKept(text: string, pos: number, right: number): boolean {
+  const left = baseBefore(text, pos);
+  return left !== undefined && visibleBase(left) && visibleBase(right);
 }
 
 // The position of the first visible code point at or after `pos`, or the length.
@@ -443,11 +355,6 @@ function visibleFrom(text: string, pos: number): number {
     pos += c > 0xffff ? 2 : 1;
   }
   return pos;
-}
-
-function codePointAtVisible(text: string, pos: number): number | undefined {
-  const at = visibleFrom(text, pos);
-  return at < text.length ? text.codePointAt(at) : undefined;
 }
 
 interface Found {
@@ -473,14 +380,10 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
   // point by the visible text around it is what keeps a clean copy stable: what
   // it keeps is judged the same way when it is scanned again.
   let prev: number | undefined;
-  let prev2: number | undefined;
   // The nearest visible code point before the current one that is no emphasis
   // delimiter, and how many delimiters sit between it and the current position.
   let prevText: number | undefined;
   let delimiters = 0;
-  // The end of the operator chain last judged, and its verdict.
-  let chainEnd = -1;
-  let chainOk = false;
   let i = 0;
   while (i < n) {
     const cp = text.codePointAt(i) as number;
@@ -490,7 +393,6 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
         line++;
         lineStart = i + width;
       }
-      prev2 = prev;
       prev = cp;
       if (isEmphasis(cp)) {
         delimiters++;
@@ -500,6 +402,18 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
       }
       i += width;
       continue;
+    }
+    // A lone operator (visible code points on both sides) is judged in place,
+    // with no run built.
+    if (isMathOp(cp) && i > 0) {
+      const right = i + 1 < n ? text.codePointAt(i + 1) : undefined;
+      if (visible(right)) {
+        if (!loneOperatorKept(text, i, right)) {
+          found({ start: i, end: i + 1, line, column: i - lineStart + 1, count: 1 });
+        }
+        i++;
+        continue;
+      }
     }
     // The maximal run of invisible code points starting here.
     const start = i;
@@ -520,8 +434,6 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     // A byte order mark leads the file; what follows it is judged on its own.
     const skip = start === 0 && cps[0] === 0xfeff ? 1 : 0;
     const next = end < n ? text.codePointAt(end) : undefined;
-    const next2 =
-      next === undefined ? undefined : codePointAtVisible(text, end + (next > 0xffff ? 2 : 1));
     let after = end;
     for (let d = 0; d < 3 && after < n && isEmphasis(text.charCodeAt(after)); d++) {
       after = visibleFrom(text, after + 1);
@@ -530,26 +442,13 @@ function walk(text: string, lines: boolean, found: (run: Found) => void): void {
     const leading = skip ? undefined : prev;
     const around: Around = {
       prev: leading,
-      prev2: skip ? undefined : prev2,
       prevText: skip ? undefined : delimiters > 0 && delimiters <= 3 ? prevText : prev,
       next,
-      next2,
       nextText,
     };
     // Every code point is judged, however long the run, so a payload's length
     // never decides whether the emoji or flag in front of it keeps its form.
-    let ok: boolean[];
-    if (!skip && cps.length === 1 && isMathOp(cps[0])) {
-      // A lone operator belongs to a chain, judged once as a whole.
-      if (start >= chainEnd) {
-        const chain = judgeChain(text, start, prev, prev2);
-        chainEnd = chain.end;
-        chainOk = chain.ok;
-      }
-      ok = [chainOk];
-    } else {
-      ok = settled(cps.slice(skip), around);
-    }
+    const ok = settled(cps.slice(skip), around);
     // Each stretch of unexplained code points is a flagged run of its own.
     let from = -1;
     for (let k = 0; k <= ok.length; k++) {
