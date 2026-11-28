@@ -64,6 +64,17 @@ math labels use the same markup as the KaTeX CSS the preview loads, and the webv
 build emits one KaTeX chunk instead of two. Remove this override when Mermaid's own
 `katex` range includes the project's version.
 
+## Verifying a release
+
+Releases built by the `release.yml` workflow from the tagged commit carry a build provenance attestation on the `.vsix` (signed by GitHub's Sigstore, naming the workflow and commit that built it) and a `markcopy-<version>.vsix.sha256` file beside it. Earlier releases (up to 1.8.0) and any release cut by hand under the manual fallback were packaged on the maintainer's machine and uploaded as the `.vsix` alone: they have no checksum file and no attestation, so neither command below can verify them. The only check for those is the Marketplace and Open VSX listing for the same version. To check a workflow-built download:
+
+```bash
+gh attestation verify markcopy-<version>.vsix -R owenpkent/markcopy
+sha256sum --check markcopy-<version>.vsix.sha256
+```
+
+The same file is what is published to the Marketplace and Open VSX, using tokenless trusted publishing after a manual approval of the `release` environment. The Marketplace signs every extension it publishes, and VS Code checks that signature on install. Neither registry offers publisher signing yet, so there is no publisher key to verify.
+
 ## Threat model
 
 MarkCopy declares limited support in VS Code Restricted Mode (`capabilities.untrustedWorkspaces.supported: "limited"`). Previews work, but every code path that launches an external program (LaTeX compilers, ffmpeg and ffprobe, the Chromium PDF renderer) checks `workspace.isTrusted` and refuses in an untrusted workspace. `markcopy.allowRemoteImages`, `markcopy.video.ffmpegPath`, `markcopy.pdf.browserPath` and the `markcopy.tex.compile`, `engine`, `enginePath` and `rootFile` settings are listed as restricted configurations. Files opened in a trusted workspace are still treated as untrusted input.

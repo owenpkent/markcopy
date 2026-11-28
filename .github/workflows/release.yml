@@ -1,0 +1,207 @@
+name: Release
+
+# Push a tag vX.Y.Z (after the release pull request has merged) to build the
+# VSIX once, attest it, attach it to a GitHub Release, and, once the `release`
+# environment is approved, publish that same file to both registries with
+# tokenless (OIDC) trusted publishing. No secrets are used anywhere.
+# See docs/RELEASING.md for the one-time setup.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attest VSIX
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Check the tag matches package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "Tag $TAG does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      # A tag can be pushed on an unmerged branch. Only release commits that
+      # reached protected main.
+      - name: Check the tagged commit is on main
+        env:
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
+            echo "Tag $TAG points at $SHA, which is not on origin/main. Merge the release pull request first, then tag the merge commit." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Runs vscode:prepublish (a production build) before packaging.
+      - name: Package VSIX
+        run: npx vsce package
+
+      - name: Record SHA-256
+        run: |
+          set -e
+          vsix="$(ls -1 ./*.vsix)"
+          [ "$(printf '%s\n' "$vsix" | wc -l)" -eq 1 ] || { echo "Expected exactly one .vsix" >&2; exit 1; }
+          vsix="${vsix#./}"
+          sha256sum "$vsix" > "$vsix.sha256"
+          cat "$vsix.sha256"
+
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: '*.vsix'
+
+      - name: Upload VSIX and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: markcopy-vsix
+          path: |
+            *.vsix
+            *.vsix.sha256
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The changelog is the only thing read from the repository, and the tag
+      # is the only ref wanted, so a shallow checkout is enough.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download VSIX and checksum
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: markcopy-vsix
+          path: dist-release
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          version="${TAG#v}"
+          # The section of CHANGELOG.md under "## [<version>]", up to the next "## [".
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            /^## \[/ { found = 0 }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ -z "$(tr -d '[:space:]' < notes.md)" ]; then
+            echo "See [CHANGELOG.md](https://github.com/$GH_REPO/blob/$TAG/CHANGELOG.md) for what changed in $version." > notes.md
+          fi
+          gh release create "$TAG" dist-release/*.vsix dist-release/*.vsix.sha256 \
+            --verify-tag --title "$TAG" --notes-file notes.md
+
+  publish-marketplace:
+    name: Publish to the VS Code Marketplace
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      # No install scripts: this job can mint a publish token, and the CLIs
+      # it runs need none.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download VSIX and checksum
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: markcopy-vsix
+          path: dist-release
+
+      - name: Verify the checksum
+        working-directory: dist-release
+        run: sha256sum --check ./*.vsix.sha256
+
+      - name: Publish with trusted publishing
+        run: npx vsce publish --oidc --packagePath dist-release/*.vsix
+
+  publish-openvsx:
+    name: Publish to Open VSX
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      # No install scripts: this job can mint a publish token, and the CLIs
+      # it runs need none.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download VSIX and checksum
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: markcopy-vsix
+          path: dist-release
+
+      - name: Verify the checksum
+        working-directory: dist-release
+        run: sha256sum --check ./*.vsix.sha256
+
+      - name: Publish with trusted publishing
+        run: npx ovsx publish dist-release/*.vsix --trusted-publishing
