@@ -1,6 +1,7 @@
-// Auto-scroll for the PDF viewer: the speed steps, the per-frame arithmetic and
-// the remembered settings. Ported from folio's auto-scroll (viewerStore.ts and
-// autoScrollLayout.ts there). Free of the DOM so tests can drive it directly.
+// Auto-scroll arithmetic shared by the PDF viewer and the Markdown preview: the
+// speed steps, the per-frame advance and the remembered settings. Ported from
+// folio's auto-scroll (viewerStore.ts and autoScrollLayout.ts there). Free of
+// the DOM so tests can drive it directly; the puck and loop are in autoScroll.ts.
 
 // Pixels per second. Skewed slow: the floor is a gentle reading crawl and even
 // the top speed is a calm advance rather than a fling. The - and + buttons and

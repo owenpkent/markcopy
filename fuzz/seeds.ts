@@ -1,4 +1,4 @@
-// Writes the seed corpus for the pe and pkg fuzz targets from the unit tests'
+// Writes the seed corpus for the pe, pkg and focused reader fuzz targets from the unit tests'
 // fixture builders, so no binary of unknown origin is committed. Run through
 // scripts/make-fuzz-seeds.js (npm-free: it bundles this file with esbuild and
 // runs it with node); the output directory is the first command-line argument.
@@ -6,6 +6,9 @@
 //   fuzz/corpus/pe/<name>.exe          a raw PE image
 //   fuzz/corpus/pkg/<format>-<name>.seed   one byte choosing the SHAPES entry
 //                                          in fuzz/targets/pkg.fuzz.ts, then the file
+//   fuzz/corpus/cpio/, dex/, go-buildinfo/, signer/, ooxml-encrypted/
+//                                          one byte choosing the stage, then the input,
+//                                          as each of those targets reads it
 //   fuzz/corpus/file-source/               every seed above, as the file-source
 //                                          target reads it: a pkg seed as it is,
 //                                          a PE image after a 0xff byte
@@ -14,9 +17,42 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SHAPES } from './targets/pkg.fuzz';
-import { buildPe, buildSignedData, iconBitmap, pngStub, type PeSpec } from '../tests/pe/fixture';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'fflate';
+import {
+  buildLeafCertificate,
+  buildPe,
+  buildRichStub,
+  buildSignedData,
+  iconBitmap,
+  pngStub,
+  rsaSpki,
+  tlv,
+  type PeSpec,
+} from '../tests/pe/fixture';
+import { buildDex } from '../tests/pkg/dexFixture';
+import { buildCfb } from '../tests/pkg/cfbFixture';
+import { inlineBlock, pointerBlock, SAMPLE_LINES } from '../tests/binary/goFixture';
 import { buildElf } from '../tests/pkg/elfFixture';
-import { buildFat, buildMacho, CPU, dylib, LC, segment, uuid } from '../tests/pkg/machoFixture';
+import {
+  buildClassFileLike,
+  buildFat,
+  buildMacho,
+  buildVersion,
+  CPU,
+  dylib,
+  dylinker,
+  encryption,
+  linkedit,
+  LC,
+  main,
+  rpath,
+  segment,
+  sourceVersion,
+  uuid,
+  ver,
+  versionMin,
+} from '../tests/pkg/machoFixture';
 import {
   bin,
   buildRpm,
@@ -624,6 +660,529 @@ pkg('fuzz.dmg', 'dmg', 'default', buildDmg());
 pkg('fuzz.dmg', 'dmg', 'encrypted-v2', buildEncryptedDmg(2));
 pkg('fuzz.dmg', 'dmg', 'encrypted-v1', buildEncryptedDmg(1));
 
+// ---- Readers with a target of their own, and what the pe and pkg shapes reach ----
+
+const focusedDirs = new Map<string, string>();
+
+/** A seed for a target that has no file-source counterpart: a stage byte, then the input. */
+function only(target: string, name: string, stage: number, bytes: Uint8Array): void {
+  let dir = focusedDirs.get(target);
+  if (dir === undefined) {
+    dir = join(out, target);
+    mkdirSync(dir, { recursive: true });
+    focusedDirs.set(target, dir);
+  }
+  const seed = new Uint8Array(bytes.length + 1);
+  seed[0] = stage;
+  seed.set(bytes, 1);
+  if (seed.length > MAX_BYTES) {
+    skipped.push(`${target}/${name} (${seed.length} bytes)`);
+    return;
+  }
+  writeFileSync(join(dir, name), seed);
+  console.log(`${target}/${name}\t${seed.length}`);
+}
+
+const ascii = (text: string): Uint8Array => new TextEncoder().encode(text);
+const cat = (...parts: Uint8Array[]): Uint8Array => Buffer.concat(parts);
+const le32 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, n >>> 24];
+/** A little-endian length, then the bytes: the framing of the APK signing block. */
+const lp = (...parts: ArrayLike<number>[]): Uint8Array => {
+  const body = parts.flatMap((p) => [...p]);
+  return Uint8Array.from([...le32(body.length), ...body]);
+};
+
+// PE: a Rich header, long section names, a load configuration, the Go build
+// information in .data, and the Authenticode image hash.
+pe('rich-header', {
+  dosStub: buildRichStub({
+    entries: [
+      { productId: 0x0102, build: 33808, count: 3 },
+      { productId: 0x0105, build: 29913, count: 41 },
+      { productId: 0x0001, build: 0, count: 120 },
+    ],
+  }),
+});
+const richStray = buildRichStub({
+  entries: [{ productId: 0x0091, build: 30729, count: 1 }],
+  strayDword: true,
+});
+pe('rich-header-stray-dword', { dosStub: richStray });
+pe('long-section-names', {
+  symbols: { count: 3, strings: ['.debug_info_long', '.eh_frame_hdr'] },
+  sectionNames: ['/4', '/21'],
+});
+pe('load-config-guard', {
+  plus: true,
+  machine: 0x8664,
+  dllCharacteristics: 0x4160,
+  loadConfig: { cookie: 0x2b992ddfa232n, cfCount: 5n, guardFlags: 0x10500 },
+  exDllCharacteristics: 1,
+});
+pe('load-config-safeseh', {
+  loadConfig: { cookie: 0x4000n, seHandlerTable: 0x405000, seHandlerCount: 3, guardFlags: 0x100 },
+});
+pe('go-inline', { plus: true, data: inlineBlock({ info: SAMPLE_LINES }) });
+pe('go-pointers-64', {
+  plus: true,
+  data: (rva) => pointerBlock({ info: SAMPLE_LINES })(0x140000000 + rva),
+});
+pe('go-pointers-32', {
+  data: (rva) => pointerBlock({ pointerSize: 4, info: SAMPLE_LINES })(0x400000 + rva),
+});
+
+const oidOf = (...bytes: number[]): Uint8Array => tlv(0x06, Uint8Array.from(bytes));
+const SHA256_OID = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
+const SHA1_OID = [0x2b, 0x0e, 0x03, 0x02, 0x1a];
+const SPC_INDIRECT_DATA = [0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x04];
+const algorithmOf = (id: number[]): Uint8Array => tlv(0x30, oidOf(...id), tlv(0x05));
+
+/** A SignedData whose contentInfo stores `digest` under `algorithm`, with one signer (as tests/pe/imageHash.test.ts builds it). */
+function signedWith(algorithm: number[], digest: Uint8Array): Uint8Array {
+  const info = tlv(
+    0x30,
+    tlv(0x02, Uint8Array.of(1)),
+    tlv(0x30, tlv(0x30), tlv(0x02, Uint8Array.of(5))),
+    algorithmOf(SHA256_OID),
+    algorithmOf(SHA256_OID),
+    tlv(0x04, Uint8Array.of(1, 2, 3, 4)),
+  );
+  const indirect = tlv(
+    0x30,
+    tlv(0x30, oidOf(0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x0f)),
+    tlv(0x30, algorithmOf(algorithm), tlv(0x04, digest)),
+  );
+  return tlv(
+    0x30,
+    oidOf(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02),
+    tlv(
+      0xa0,
+      tlv(
+        0x30,
+        tlv(0x02, Uint8Array.of(1)),
+        tlv(0x31, algorithmOf(algorithm)),
+        tlv(0x30, oidOf(...SPC_INDIRECT_DATA), tlv(0xa0, indirect)),
+        tlv(0x31, info),
+      ),
+    ),
+  );
+}
+
+/** The Authenticode digest of a PE file: everything but the checksum, the security directory entry and the certificate table. */
+function imageDigest(file: Uint8Array, algorithm: string): Uint8Array {
+  const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
+  const optional = view.getUint32(0x3c, true) + 24;
+  const plus = view.getUint16(optional, true) === 0x20b;
+  const checksum = optional + 64;
+  const directory = optional + (plus ? 112 : 96) + 4 * 8;
+  const table = view.getUint32(directory, true);
+  const tableSize = view.getUint32(directory + 4, true);
+  return createHash(algorithm)
+    .update(file.subarray(0, checksum))
+    .update(file.subarray(checksum + 4, directory))
+    .update(file.subarray(directory + 8, table))
+    .update(file.subarray(table + tableSize))
+    .digest();
+}
+
+/** A signed image whose stored digest is right for its own bytes, or all zeros when `right` is false. */
+function signedImage(
+  algorithm: number[],
+  name: string,
+  right: boolean,
+  spec: PeSpec = {},
+): Uint8Array {
+  const length = createHash(name).update('').digest().length;
+  const first = buildPe({ ...spec, certificate: signedWith(algorithm, new Uint8Array(length)) });
+  const digest = right ? imageDigest(first, name) : new Uint8Array(length);
+  return buildPe({ ...spec, certificate: signedWith(algorithm, digest) });
+}
+
+emit(peDir, 'image-hash-match.exe', signedImage(SHA256_OID, 'sha256', true, { overlay: 300 }));
+emit(peDir, 'image-hash-differs.exe', signedImage(SHA256_OID, 'sha256', false));
+emit(peDir, 'image-hash-sha1.exe', signedImage(SHA1_OID, 'sha1', true, { plus: true }));
+
+// signer: PKCS #7 (stage 0), a bare certificate (1), an APK signing block value as v2 (2) and v3 (3).
+const leaf = (name: string, key = rsaSpki(2048)): Uint8Array =>
+  buildLeafCertificate({
+    subject: { commonName: name, organization: 'Acme' },
+    issuer: { commonName: `${name} CA` },
+    key,
+  });
+only('signer', 'pkcs7-signed-data', 0, buildSignedData(signer));
+only('signer', 'pkcs7-image-hash', 0, signedWith(SHA256_OID, new Uint8Array(32).fill(7)));
+only('signer', 'pkcs7-printable-strings', 0, buildSignedData({ ...signer, stringTag: 0x13 }));
+only('signer', 'certificate-rsa', 1, leaf('Acme'));
+only('signer', 'certificate-rsa-4096', 1, leaf('Acme 4096', rsaSpki(4096)));
+const apkSigner = (v3: boolean, certificate: Uint8Array, algorithm = 0x0103): Uint8Array => {
+  const digests = lp(lp(le32(algorithm), lp([1, 2, 3])));
+  const signedData = lp(digests, lp(lp(certificate)), v3 ? [...le32(24), ...le32(0x7fffffff)] : []);
+  const signatures = lp(lp(le32(algorithm), lp([9, 9, 9])));
+  return lp(signedData, v3 ? [...le32(24), ...le32(0x7fffffff)] : [], signatures, lp([7, 7]));
+};
+const apkBlock = (...signers: Uint8Array[]): Uint8Array => lp(...signers.map((s) => [...s]));
+only('signer', 'apk-v2', 2, apkBlock(apkSigner(false, leaf('Acme v2'))));
+only('signer', 'apk-v3-ecdsa', 3, apkBlock(apkSigner(true, leaf('Acme v3'), 0x0201)));
+only(
+  'signer',
+  'apk-v2-two-signers',
+  2,
+  apkBlock(apkSigner(false, leaf('A')), apkSigner(false, leaf('B'), 0x0421)),
+);
+
+// ELF: extended counts, GNU property notes, Go build information and the Go build ID.
+{
+  const wideField = { phnum: 56, shnum: 60, shstrndx: 62, shoff: 40 };
+  const withExtendedPhnum = buildElf({ interp: LD, needed: ['libc.so.6'] });
+  const view = new DataView(withExtendedPhnum.buffer);
+  const zero = Number(view.getBigUint64(wideField.shoff, true));
+  const real = view.getUint16(wideField.phnum, true);
+  view.setUint16(wideField.phnum, 0xffff, true);
+  view.setUint32(zero + 44, real, true);
+  pkg('fuzz.so', 'elf', 'extended-phnum', withExtendedPhnum);
+  const withExtendedShnum = buildElf({ interp: LD, needed: ['libc.so.6'] });
+  const view2 = new DataView(withExtendedShnum.buffer);
+  const zero2 = Number(view2.getBigUint64(wideField.shoff, true));
+  const total = view2.getUint16(wideField.shnum, true);
+  const names = view2.getUint16(wideField.shstrndx, true);
+  view2.setUint16(wideField.shnum, 0, true);
+  view2.setUint16(wideField.shstrndx, 0xffff, true);
+  view2.setBigUint64(zero2 + 32, BigInt(total), true);
+  view2.setUint32(zero2 + 40, names, true);
+  pkg('fuzz.so', 'elf', 'extended-shnum', withExtendedShnum);
+}
+{
+  const X86 = 0xc0000002;
+  const ARM = 0xc0000000;
+  pkg(
+    'fuzz.so',
+    'elf',
+    'gnu-property-x86',
+    buildElf({
+      needed: ['libc.so.6'],
+      propertySegment: true,
+      properties: [{ type: X86, data: le32(3) }],
+    }),
+  );
+  pkg(
+    'fuzz.so',
+    'elf',
+    'gnu-property-arm',
+    buildElf({
+      machine: 183,
+      needed: ['libc.so.6'],
+      properties: [
+        { type: ARM, data: le32(3) },
+        { type: 0x1, data: [1, 2, 3, 4], size: 0x10 },
+      ],
+    }),
+  );
+}
+const goSection = (data: Uint8Array) => ({ name: '.go.buildinfo', align: 16, data });
+pkg(
+  'fuzz.so',
+  'elf',
+  'go-inline',
+  buildElf({
+    type: 2,
+    goBuildId: 'abc/def',
+    sections: [goSection(inlineBlock({ info: SAMPLE_LINES }))],
+  }),
+);
+pkg(
+  'fuzz.so',
+  'elf',
+  'go-segment-no-sections',
+  buildElf({
+    type: 2,
+    loadFlags: 6,
+    noSections: true,
+    sections: [goSection(inlineBlock({ info: SAMPLE_LINES }))],
+  }),
+);
+
+// Mach-O: more load commands, encryption, and a Java class file that has the fat magic.
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'commands',
+  buildMacho({
+    cputype: CPU.ARM64,
+    flags: 0x200000,
+    commands: [
+      segment('__TEXT', { sections: ['__text'] }),
+      dylinker(),
+      uuid(MACHO_UUID),
+      buildVersion(1, ver(14), ver(14, 2), [[3, ver(1000)]]),
+      sourceVersion(1, 2, 3, 4, 5),
+      main(0x1000),
+      rpath('@executable_path/../Frameworks'),
+      dylib(LC.LOAD_WEAK_DYLIB, '/usr/lib/libz.1.dylib'),
+      dylib(LC.REEXPORT_DYLIB, '/usr/lib/libx.dylib'),
+      linkedit(LC.CODE_SIGNATURE, 0x3000, 0x400),
+    ],
+  }),
+);
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'legacy-version-min-encrypted',
+  buildMacho({
+    wide: false,
+    cputype: CPU.X86,
+    commands: [
+      versionMin(LC.VERSION_MIN_IPHONEOS, ver(9), ver(9, 3)),
+      encryption(LC.ENCRYPTION_INFO, 1),
+    ],
+  }),
+);
+pkg(
+  'fuzz.dylib',
+  'macho',
+  'encrypted-64',
+  buildMacho({ commands: [encryption(LC.ENCRYPTION_INFO_64, 1)] }),
+);
+pkg('fuzz.universal', 'macho', 'java-class', buildClassFileLike(52, 0, 2048));
+pkg('fuzz.universal', 'macho', 'java-class-small-count', buildClassFileLike(2, 0, 2048));
+pkg(
+  'fuzz.universal',
+  'macho',
+  'universal-wide',
+  buildFat([{ bytes: machoLibrary, cputype: CPU.ARM64 }], { wide: true, align: 0x400 }),
+);
+
+// RPM: a payload the check walks (gzip, then zstd), with the real digests stored.
+const hexField = (n: number): string => n.toString(16).toUpperCase().padStart(8, '0');
+const padTo4 = (n: number): number => (4 - (n % 4)) % 4;
+/** One "newc" cpio member: a 110-byte header, the NUL-ended name padded to 4, the data padded to 4. */
+function cpioMember(name: string, data = '', magic = '070701'): Uint8Array {
+  const nameBytes = ascii(`${name}\0`);
+  const body = ascii(data);
+  const fields = [1, 0o100644, 0, 0, 1, 0, body.length, 0, 0, 0, 0, nameBytes.length, 0];
+  const nameAt = 110 + nameBytes.length + padTo4(110 + nameBytes.length);
+  const member = new Uint8Array(nameAt + body.length + padTo4(body.length));
+  member.set(ascii(`${magic}${fields.map(hexField).join('')}`), 0);
+  member.set(nameBytes, 110);
+  member.set(body, nameAt);
+  return member;
+}
+const cpio = (names: string[], magic = '070701'): Uint8Array =>
+  cat(
+    ...names.map((n, i) => cpioMember(n, 'x'.repeat(i * 3 + 1), magic)),
+    cpioMember('TRAILER!!!', '', magic),
+  );
+/** A zstd frame of raw blocks, which any decoder accepts (as tests/pkg/rpmPayload.test.ts builds it). */
+function zstdRaw(data: Uint8Array): Uint8Array {
+  const head = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xa0, 0, 0, 0, 0]);
+  new DataView(head.buffer).setUint32(5, data.length, true);
+  const word = (data.length << 3) | 1;
+  return cat(head, Uint8Array.of(word & 0xff, (word >> 8) & 0xff, (word >> 16) & 0xff), data);
+}
+const PAYLOAD_PATHS = ['./usr/bin/tree', './usr/share/doc/tree', './usr/share/doc/tree/README'];
+const PAYLOAD_FILES = [
+  { dir: '/usr/bin/', name: 'tree', size: 100 },
+  { dir: '/usr/share/doc/', name: 'tree', size: 0, mode: 0o040755 },
+  { dir: '/usr/share/doc/tree/', name: 'README', size: 12 },
+];
+pkg(
+  'fuzz.rpm',
+  'rpm',
+  'payload-gzip',
+  buildRpm({
+    files: PAYLOAD_FILES,
+    payload: gzipSync(cpio(PAYLOAD_PATHS)),
+    main: [str(1125, 'gzip')],
+    digests: true,
+  }),
+);
+pkg(
+  'fuzz.rpm',
+  'rpm',
+  'payload-zstd-differs',
+  buildRpm({
+    files: PAYLOAD_FILES,
+    payload: zstdRaw(cpio(PAYLOAD_PATHS.slice(1))),
+    main: [str(1125, 'zstd')],
+    digests: true,
+  }),
+);
+
+// APK: DEX files (stored digests right and wrong), a signing block, and zip encryption labels.
+const apkWith = (entries: FixtureEntry[], options = {}): Uint8Array =>
+  buildZip(
+    [{ name: 'AndroidManifest.xml', data: buildAxml(androidManifest) }, ...entries],
+    options,
+  );
+pkg(
+  'fuzz.apk',
+  'zip',
+  'dex-two-files',
+  apkWith([
+    { name: 'classes.dex', data: buildDex({ classes: 10, methods: 65536, strings: 7 }) },
+    {
+      name: 'classes2.dex',
+      data: buildDex({ classes: 5, methods: 100, strings: 3, version: '039' }),
+    },
+  ]),
+);
+pkg(
+  'fuzz.apk',
+  'zip',
+  'dex-bad-digests',
+  apkWith([{ name: 'classes.dex', data: buildDex({ badChecksum: true, badSignature: true }) }]),
+);
+pkg(
+  'fuzz.apk',
+  'zip',
+  'dex-deflated-endian',
+  apkWith([
+    { name: 'classes.dex', data: buildDex({ endian: 0x78563412, size: 0x400 }), method: 8 },
+  ]),
+);
+pkg(
+  'fuzz.apk',
+  'zip',
+  'signing-block-v2-v3',
+  apkWith([{ name: 'classes.dex', data: buildDex() }], {
+    signingBlockPairs: [
+      { id: 0x7109871a, value: apkBlock(apkSigner(false, leaf('Acme v2'))) },
+      { id: 0xf05368c0, value: apkBlock(apkSigner(true, leaf('Acme v3'), 0x0201)) },
+    ],
+  }),
+);
+const aesField = (version: number, strength: number, method: number): Uint8Array =>
+  Uint8Array.from([0x01, 0x99, 0x07, 0x00, version, 0, 0x41, 0x45, strength, method, 0]);
+pkg(
+  'fuzz.jar',
+  'zip',
+  'aes-encrypted',
+  buildZip([
+    {
+      name: 'a.txt',
+      data: 'secret',
+      encrypted: true,
+      methodNumber: 99,
+      centralExtra: aesField(2, 3, 8),
+    },
+    {
+      name: 'b.txt',
+      data: 'secret',
+      encrypted: true,
+      methodNumber: 99,
+      centralExtra: aesField(1, 1, 0),
+    },
+    { name: 'c.txt', data: 'secret', encrypted: true },
+    { name: 'd.txt', data: 'secret', encrypted: true, flagBits: 0x40 },
+  ]),
+);
+
+// cpio target: stage 0 walks the bytes as cpio, 1 gzip, 2 zstd, 3 xz; the second byte is the piece size.
+const SPLIT = 7;
+const cpioNames = ['./usr/bin/tree', './etc/tree.conf', './usr/share/doc/tree/README', './a'];
+only('cpio', 'walk-newc', 0, cat(Uint8Array.of(SPLIT), cpio(cpioNames)));
+only('cpio', 'walk-crc', 0, cat(Uint8Array.of(SPLIT), cpio(cpioNames, '070702')));
+only('cpio', 'walk-no-trailer', 0, cat(Uint8Array.of(3), cpio(cpioNames).subarray(0, 300)));
+only('cpio', 'walk-odc-format', 0, cat(Uint8Array.of(SPLIT), cpio(cpioNames, '070707')));
+only('cpio', 'gzip', 1, cat(Uint8Array.of(SPLIT), gzipSync(cpio(cpioNames))));
+only('cpio', 'zstd', 2, cat(Uint8Array.of(SPLIT), zstdRaw(cpio(cpioNames))));
+only('cpio', 'zstd-vector', 2, cat(Uint8Array.of(SPLIT), b64(VECTOR_ZST)));
+only('cpio', 'xz-vector', 3, cat(Uint8Array.of(SPLIT), b64(VECTOR_XZ)));
+
+// dex target: stage 0 stored, 1 deflated, 2 stored with a second file.
+only('dex', 'valid', 0, buildDex({ classes: 3, methods: 20, strings: 9 }));
+only('dex', 'valid-deflated', 1, buildDex({ size: 0x400, classes: 1 }));
+only('dex', 'two-files', 2, buildDex({ size: 0x300, version: '038' }));
+only('dex', 'bad-checksum', 0, buildDex({ badChecksum: true }));
+only('dex', 'bad-signature', 0, buildDex({ badSignature: true }));
+only('dex', 'declared-size-lies', 0, buildDex({ declaredSize: 0x10000 }));
+only('dex', 'big-endian-tag', 0, buildDex({ endian: 0x78563412 }));
+only('dex', 'header-only', 0, buildDex({ size: 0x70 }));
+
+// go-buildinfo target: stage 0 module text, 1 the section as it is, 2 the section with the magic written over its start.
+const BASE_GO = 0x400000;
+only('go-buildinfo', 'modinfo-lines', 0, cat(ascii(SAMPLE_LINES.map((l) => `${l}\n`).join(''))));
+only(
+  'go-buildinfo',
+  'modinfo-quoted',
+  0,
+  ascii('path\tx\nbuild\t-ldflags="-s -w"\nbuild\tvcs.revision=abc\nmod\tm\t(devel)\t\n'),
+);
+only('go-buildinfo', 'inline', 1, inlineBlock({ info: SAMPLE_LINES }));
+only('go-buildinfo', 'inline-version-only', 1, inlineBlock());
+only('go-buildinfo', 'inline-big', 2, inlineBlock({ info: SAMPLE_LINES, big: true }));
+only('go-buildinfo', 'pointers-64', 1, pointerBlock({ info: SAMPLE_LINES })(BASE_GO));
+only(
+  'go-buildinfo',
+  'pointers-32',
+  1,
+  pointerBlock({ pointerSize: 4, info: SAMPLE_LINES })(BASE_GO),
+);
+// The longest "Module replaced by" row the reader assembles: a 512-character path, a space and a 512-character version.
+only(
+  'go-buildinfo',
+  'replacement-at-limit',
+  1,
+  inlineBlock({ info: ['mod	m	v1.0.0	', `=>	${'p'.repeat(512)}	v${'1'.repeat(511)}`] }),
+);
+only(
+  'go-buildinfo',
+  'long-length',
+  1,
+  inlineBlock({ info: SAMPLE_LINES, declaredInfoLength: 1 << 30 }),
+);
+
+// ooxml-encrypted target: stage 0 an EncryptionInfo stream, 1 a whole file.
+const encryptionInfo = (major: number, minor: number, body: Uint8Array): Uint8Array =>
+  cat(Uint8Array.of(major, 0, minor, 0), body);
+const agileXml = ascii(
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption" xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"><keyData saltSize="16" blockSize="16" keyBits="256" hashSize="64" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA512" saltValue="AAAAAAAAAAAAAAAAAAAAAA=="/></encryption>',
+);
+const agile = encryptionInfo(4, 4, cat(Uint8Array.of(0x40, 0, 0, 0), agileXml));
+const standardHeader = new Uint8Array(32);
+new DataView(standardHeader.buffer).setUint32(0, 20, true);
+new DataView(standardHeader.buffer).setUint32(12, 0x6610, true);
+const standard = encryptionInfo(3, 2, cat(Uint8Array.of(0x24, 0, 0, 0), standardHeader));
+const extensible = encryptionInfo(3, 3, Uint8Array.of(0, 0, 0, 0));
+only('ooxml-encrypted', 'info-agile', 0, agile);
+only('ooxml-encrypted', 'info-standard', 0, standard);
+only('ooxml-encrypted', 'info-extensible', 0, extensible);
+only(
+  'ooxml-encrypted',
+  'info-agile-single-quotes',
+  0,
+  encryptionInfo(
+    4,
+    4,
+    cat(
+      Uint8Array.of(0x40, 0, 0, 0),
+      ascii("<keyData keyBits = '128' cipherAlgorithm = 'AES' hashAlgorithm='SHA1'/>"),
+    ),
+  ),
+);
+// The input that made describeEncryptionInfo print a control character from a cipher name.
+only(
+  'ooxml-encrypted',
+  'control-char-in-cipher-name',
+  0,
+  encryptionInfo(
+    4,
+    4,
+    cat(
+      Uint8Array.of(0x40, 0, 0, 0),
+      ascii("<keyData keyBits = '128' cipherAlgorithm = 'A\u0012ES' hashAlgorithm='SHA'/>"),
+    ),
+  ),
+);
+const lockedFile = (info: Uint8Array): Uint8Array =>
+  buildCfb({
+    streams: [
+      { name: 'EncryptionInfo', data: info },
+      { name: 'EncryptedPackage', data: new Uint8Array(64).fill(0xaa) },
+    ],
+  });
+only('ooxml-encrypted', 'file-agile', 1, lockedFile(agile));
+only('ooxml-encrypted', 'file-standard', 1, lockedFile(standard));
+only('ooxml-encrypted', 'file-short-info', 1, lockedFile(Uint8Array.of(4, 0)));
 if (skipped.length > 0) {
   console.log(`SKIPPED (over ${MAX_BYTES} bytes): ${skipped.join(', ')}`);
 }

@@ -71,3 +71,19 @@ kw53="constructor"
 kw54="__proto__"
 kw55="hasOwnProperty"
 kw56="toString"
+
+# Rich header, Go build information, load configuration
+kw57="Rich"
+kw58="DanS"
+kw59="/4"
+kw60="/21"
+kw61="\xff Go buildinf:"
+kw62="_load_config_used"
+kw63="\x00\x05\x01\x00"
+
+# Authenticode: the digest OIDs and the indirect data type, as DER
+kw64="\x2b\x06\x01\x04\x01\x82\x37\x02\x01\x04"
+kw65="\x60\x86\x48\x01\x65\x03\x04\x02\x01"
+kw66="\x2b\x0e\x03\x02\x1a"
+kw67="\x2a\x86\x48\x86\xf7\x0d\x02\x05"
+kw68="\x2a\x86\x48\x86\xf7\x0d\x01\x07\x02"

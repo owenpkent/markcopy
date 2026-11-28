@@ -768,8 +768,10 @@ notes:
       send({ type: 'reviewAdd', at: 2, out: 3, text: 'two' }),
     ]);
     const loaded = files.get(YAML)!;
+    // The id is random hex, and one that reads as a number (all digits, or
+    // digits around an "e") is written quoted, so the quotes are optional here.
     expect(loaded).toMatch(
-      /^version: 1\nid: [0-9a-f]{12}\nsource: clip.mp4\nfps: 24.0\nnext_note_id: 3\n/,
+      /^version: 1\nid: '?[0-9a-f]{12}'?\nsource: clip.mp4\nfps: 24.0\nnext_note_id: 3\n/,
     );
     expect(loaded).toContain(
       "asset:\n  rating: 0\n  status: none\n  keywords: []\n  notes: ''\nnotes:\n- id: n1\n",

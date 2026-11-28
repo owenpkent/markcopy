@@ -59,13 +59,33 @@ describe('parseMarkdownMessage', () => {
     expect(parseMarkdownMessage({ type: 'openSettings' })).toEqual({ type: 'openSettings' });
   });
 
-  it('accepts revealLine with a finite number only', () => {
-    expect(parseMarkdownMessage({ type: 'revealLine', line: 12 })).toEqual({
+  it('accepts revealLine with a finite number and a document key only', () => {
+    expect(parseMarkdownMessage({ type: 'revealLine', line: 12, docKey: 'file:///a.md' })).toEqual({
       type: 'revealLine',
       line: 12,
+      docKey: 'file:///a.md',
     });
     for (const line of ['12', null, undefined, NaN, Infinity, {}, [1]]) {
-      expect(parseMarkdownMessage({ type: 'revealLine', line })).toBeUndefined();
+      expect(
+        parseMarkdownMessage({ type: 'revealLine', line, docKey: 'file:///a.md' }),
+      ).toBeUndefined();
+    }
+    for (const docKey of [undefined, null, 5, {}, ['a']]) {
+      expect(parseMarkdownMessage({ type: 'revealLine', line: 12, docKey })).toBeUndefined();
+    }
+  });
+
+  it('accepts autoScroll with a boolean and a document key only', () => {
+    expect(
+      parseMarkdownMessage({ type: 'autoScroll', playing: true, docKey: 'file:///a.md' }),
+    ).toEqual({ type: 'autoScroll', playing: true, docKey: 'file:///a.md' });
+    for (const playing of ['true', 1, null, undefined, {}]) {
+      expect(
+        parseMarkdownMessage({ type: 'autoScroll', playing, docKey: 'file:///a.md' }),
+      ).toBeUndefined();
+    }
+    for (const docKey of [undefined, null, 5, {}]) {
+      expect(parseMarkdownMessage({ type: 'autoScroll', playing: true, docKey })).toBeUndefined();
     }
   });
 

@@ -1113,8 +1113,9 @@ body.mc-mode-hand .mc-link {
   -webkit-appearance: none;
 }
 
-/* Auto-scroll puck (src/webview/pdf.ts): a play/pause button with small - and +
-   under it, fixed above the floating toolbar. Sized as pointer targets (the play
+/* Auto-scroll puck (src/webview/autoScroll.ts, shared by the PDF viewer and the
+   Markdown preview): a play/pause button with small - and + under it, fixed above
+   the floating toolbar. Sized as pointer targets (the play
    button 64px, the small ones 44px at Medium), scaled by the size choice via
    data-size so no inline style is needed. It sits below menus and notes, so it
    never covers or takes clicks from an open one. Colours are the toolbar's own,
@@ -1231,6 +1232,10 @@ body.mc-mode-hand .mc-link {
 }
 #mc-toolbar #mc-autoscroll-toggle svg {
   display: block;
+}
+/* The Markdown preview has no toolbar under the puck, so it sits in the corner. */
+body[data-mc-kind='markdown'] #mc-autoscroll {
+  bottom: 18px;
 }
 
 /* Dark-mode page inversion is applied to the canvas bitmap in pdf.ts (see
@@ -2993,6 +2998,12 @@ body[data-mc-kind='package'] .markdown-body {
 }
 .mc-modepill[hidden] {
   display: none;
+}
+.mc-modepill-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 2px;
+  background: var(--vscode-editorWidget-border, var(--mc-border));
 }
 .mc-modepill button {
   display: inline-flex;

@@ -10,6 +10,7 @@
 // anything about whether the file is safe. Free of the `vscode` module, so the
 // wording unit-tests directly.
 import { bytesSource, RangeReader } from '../binary/reader';
+import { printable } from '../binary/text';
 import { openCfb, STREAM } from '../pkg/cfb';
 import { OpcError } from './zip';
 
@@ -60,9 +61,14 @@ export function describeEncryptionInfo(info: Uint8Array): string | undefined {
         .exec(tag)
         ?.slice(1)
         .find(Boolean);
-    const cipher = attribute('cipherAlgorithm');
-    const bits = attribute('keyBits');
-    const hash = attribute('hashAlgorithm');
+    // The values come from the file and end up in a message: a control character in one is junk there.
+    const clean = (name: string): string | undefined => {
+      const value = attribute(name);
+      return value === undefined ? undefined : printable(value) || undefined;
+    };
+    const cipher = clean('cipherAlgorithm');
+    const bits = clean('keyBits');
+    const hash = clean('hashAlgorithm');
     const parts = ['Agile encryption'];
     if (cipher) {
       parts.push(bits ? `${cipher}-${bits}` : cipher);

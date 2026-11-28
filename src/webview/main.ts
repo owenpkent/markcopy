@@ -20,6 +20,7 @@ import { googleSearchUrl, searchLabel, selectionSearchText } from './search';
 import { createEditMode, type EditModeName } from './editMode';
 import { lineForOffset, offsetForLine, sample, type Anchor } from './scrollSync';
 import { fromHost } from './fromHost';
+import { autoScrollIcon, createAnnouncer, createAutoScroll } from './autoScroll';
 import { diagramHtml } from './diagramHtml';
 import { createHiddenNotice } from './hiddenNotice';
 // Type only: the host owns the grid operations, and naming them in one place
@@ -174,6 +175,12 @@ const editMode = createEditMode({
 
 // Only the latest render received while a block editor is open is kept.
 let pendingRender: Record<string, unknown> | undefined;
+// Renders started and not yet finished, and when the last one finished, for
+// auto-scroll (see applyRenderMessage).
+let rendersInFlight = 0;
+let renderSettledAt = 0;
+// How long after a render finishes the page may still be changing height.
+const RENDER_SETTLE_MS = 200;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
@@ -187,6 +194,11 @@ function applyRenderMessage(msg: Record<string, any>): void {
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
+  // Auto-scroll holds still only while the content is being replaced (isHeld). For
+  // a short settle afterwards (deferEdge) it does not stop at an edge, but it keeps
+  // moving, and it carries on from wherever the page actually is: nothing here puts
+  // an earlier offset back.
+  rendersInFlight++;
   void render(
     msg.html as string,
     msg.source as string,
@@ -202,7 +214,11 @@ function applyRenderMessage(msg: Record<string, any>): void {
     (msg.kind as string) ?? 'markdown',
     Number(msg.docVersion ?? -1),
     msg.revealFragment as string | undefined,
-  );
+  ).finally(() => {
+    rendersInFlight--;
+    renderSettledAt = Date.now();
+    auto.resync();
+  });
   editMode.afterRender(
     Number.isSafeInteger(msg.ackEdit) ? (msg.ackEdit as number) : undefined,
     docChanged,
@@ -239,7 +255,12 @@ window.addEventListener('message', (e: MessageEvent) => {
       }
       break;
     case 'scrollToLine':
-      scrollToLine(msg.line as number);
+      // A playing preview leads. The host stops sending editor scrolls once told,
+      // but one already in flight (pressing Start, or a file switch while playing)
+      // would still pull the page away, so the preview checks for itself too.
+      if (!auto.isPlaying()) {
+        scrollToLine(msg.line as number);
+      }
       break;
     case 'copyAll':
       void copyRichText(content);
@@ -292,9 +313,27 @@ async function render(
 ): Promise<void> {
   const docChanged = docKey !== currentDocKey;
   currentDocKey = docKey;
+  if (docChanged) {
+    // A scroll report still queued was measured in the previous document.
+    if (syncRaf) {
+      cancelAnimationFrame(syncRaf);
+      syncRaf = 0;
+    }
+    if (syncPending) {
+      window.clearTimeout(syncPending);
+      syncPending = 0;
+    }
+    // The host clears its playing flag on a switch: say again if still playing.
+    if (auto.isPlaying()) {
+      reportPlaying(true);
+    }
+  }
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.mcKind = kind || 'markdown';
   editMode.setKind(kind || 'markdown');
+  if (!offersAutoScroll()) {
+    auto.stop('Auto-scroll off');
+  }
   // 'auto' follows the VS Code theme (native `vscode-dark` class); 'light' and
   // 'dark' force the palette. See preview.css for how data-mc-theme is used.
   document.body.dataset.mcTheme = theme || 'auto';
@@ -513,6 +552,99 @@ function maxScroll(): number {
     : Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
 }
 
+// ---------------------------------------------------------------------------
+// Auto-scroll (Markdown only)
+// ---------------------------------------------------------------------------
+// The puck, loop and keys are shared with the PDF viewer (autoScroll.ts). The
+// Markdown page scrolls the document itself, so that is the scroller. The grid
+// and the Word, PowerPoint, executable and package previews do not offer it.
+const announceAuto = createAnnouncer();
+const auto = createAutoScroll({
+  scroller: () => (document.scrollingElement ?? document.documentElement) as HTMLElement,
+  getState: () => vscode.getState(),
+  setState: (state) => vscode.setState(state),
+  contextMenu,
+  announce: announceAuto,
+  // The toast only: unlike toast() above it is not echoed to the host's status bar.
+  toast: (text) => {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    window.setTimeout(() => (toastEl.hidden = true), 1600);
+  },
+  // Holds still while a render is replacing the page, and while a block editor
+  // is open (the reader is typing, not reading).
+  isHeld: () => rendersInFlight > 0 || editMode.isEditing(),
+  // The host skips editor-to-preview sync while this document auto-scrolls.
+  onPlayingChange: (playing) => reportPlaying(playing),
+  // The toggle by reference: a heading can take the id `mc-autoscroll-toggle`.
+  toggleButton: () => autoToggle,
+  // The edge is not trusted while a render is in flight or just settled (the page
+  // is briefly shorter), nor while an image near the end is still loading.
+  deferEdge: (edge) => renderPending() || (edge === 'end' && imageWait()),
+});
+
+// Tell the host whether this document is auto-scrolling, so it does not pull the
+// preview back to the editor's position meanwhile. Keyed by document: the host
+// ignores a report for one it no longer shows.
+function reportPlaying(playing: boolean): void {
+  vscode.postMessage({ type: 'autoScroll', playing, docKey: currentDocKey });
+}
+
+// A render is running, or finished a moment ago and the page may still change
+// height (diagrams and math land after the first paint).
+function renderPending(): boolean {
+  return rendersInFlight > 0 || Date.now() - renderSettledAt < RENDER_SETTLE_MS;
+}
+
+// An image still loading at or below the viewport (within two screens) can
+// lengthen the page and so move the end; one above it does not stand between the
+// reader and the bottom. The wait is capped, so a hidden lazy image that never
+// loads cannot keep the loop from stopping.
+const IMAGE_WAIT_MS = 2000;
+let imageWaitSince = 0;
+let imageWaitLastAsked = 0;
+function imageWait(): boolean {
+  const now = Date.now();
+  // A new approach to the edge starts a fresh wait.
+  if (now - imageWaitLastAsked > 500) {
+    imageWaitSince = 0;
+  }
+  imageWaitLastAsked = now;
+  if (!imagesLoading()) {
+    imageWaitSince = 0;
+    return false;
+  }
+  imageWaitSince ||= now;
+  return now - imageWaitSince < IMAGE_WAIT_MS;
+}
+
+function imagesLoading(): boolean {
+  const view = window.innerHeight || document.documentElement.clientHeight;
+  return Array.from(content.querySelectorAll('img')).some((img) => {
+    if (img.complete) {
+      return false;
+    }
+    const box = img.getBoundingClientRect();
+    return !(box.bottom < 0 && box.height > 0) && box.top < view * 2;
+  });
+}
+function offersAutoScroll(): boolean {
+  return (document.body.dataset.mcKind ?? 'markdown') === 'markdown';
+}
+
+// The toggle lives in the read/edit pill at the top right (see editMode.ts), which
+// is shown for Markdown and hidden for every other kind, so it is offered exactly
+// where auto-scroll is. The puck opens at the bottom right.
+const autoToggle = document.createElement('button');
+autoToggle.type = 'button';
+autoToggle.id = 'mc-autoscroll-toggle';
+autoToggle.setAttribute('aria-pressed', 'false');
+autoToggle.setAttribute('aria-label', 'Auto-scroll');
+autoToggle.title = 'Auto-scroll (right-click the page for the same)';
+autoToggle.innerHTML = autoScrollIcon('toggle', 14);
+autoToggle.addEventListener('click', () => auto.toggle());
+editMode.addTool(autoToggle);
+
 // Anchors are measured once and reused: a long document has hundreds of them, and
 // re-measuring on every scroll frame would cost a forced layout each time. The
 // cache is dropped on render, on resize, and whenever the content's height changes
@@ -720,13 +852,21 @@ let syncRaf = 0;
 // editor would sit on the old line until the reader scrolled again. Re-checked
 // once the window closes.
 let syncPending = 0;
+// The loop's write count when the last scroll was reported (see above).
+let syncSeenWrites = 0;
 
 function syncEditorToPreview(): void {
   if (syncRaf) {
     return;
   }
+  // The document this scroll happened in: a switch before the frame runs makes
+  // the measurement stale (and cancelAnimationFrame is not guaranteed to win).
+  const scrolledIn = currentDocKey;
   syncRaf = requestAnimationFrame(() => {
     syncRaf = 0;
+    if (scrolledIn !== currentDocKey) {
+      return;
+    }
     if (syncSuppressed()) {
       // Our own scroll, not the reader's, or at least indistinguishable from it.
       // Come back when the window has closed and decide then.
@@ -753,13 +893,27 @@ function syncEditorToPreview(): void {
       return;
     }
     suppressedOffset = -1;
-    userScrolledAt = Date.now();
+    // The auto-scroll loop's own frames still move the editor along, but they are
+    // not the reader scrolling: counting them would drop every editor request.
+    const writes = auto.writes;
+    const automatic =
+      writes !== syncSeenWrites &&
+      auto.wroteTop !== null &&
+      Math.abs(scrollTop() - auto.wroteTop) < 1;
+    syncSeenWrites = writes;
+    if (!automatic) {
+      userScrolledAt = Date.now();
+    }
     if (!currentSyncScroll || !surfaceSyncs) {
       return;
     }
     const line = lineForOffset(anchors(), scrollTop());
     if (line !== undefined) {
-      vscode.postMessage({ type: 'revealLine', line: Math.max(0, Math.floor(line)) });
+      vscode.postMessage({
+        type: 'revealLine',
+        line: Math.max(0, Math.floor(line)),
+        docKey: currentDocKey,
+      });
     }
   });
 }
@@ -771,6 +925,22 @@ window.addEventListener('resize', invalidateAnchors, { passive: true });
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
+// Auto-scroll keys. Fields and open menus are left to themselves; a bare Escape
+// stops it only when it is not closing something else.
+document.addEventListener('keydown', (e) => {
+  if (!auto.isOn()) {
+    return;
+  }
+  if (e.key === 'Escape') {
+    const inField = (e.target as Element | null)?.closest?.('input, textarea, select');
+    if (!contextMenu.isOpen() && !inField && !editMode.isEditing()) {
+      auto.stop('Auto-scroll off');
+    }
+    return;
+  }
+  auto.key(e);
+});
+
 document.addEventListener('contextmenu', (e) => {
   // The block editor keeps the native cut/copy/paste menu.
   if ((e.target as Element | null)?.closest?.('.mc-block-editor')) return;
@@ -1087,6 +1257,13 @@ function buildMenu(target: HTMLElement): MenuEntry[] {
   entries.push({ kind: 'item', label: 'Save as PDF…', run: () => exportPdf() });
   entries.push({ kind: 'item', label: 'Save as Word…', run: () => exportDocx() });
   entries.push({ kind: 'item', label: 'Save as PowerPoint…', run: () => exportPptx() });
+  if (offersAutoScroll()) {
+    entries.push({
+      kind: 'item',
+      label: auto.isOn() ? 'Stop Auto-scroll' : 'Start Auto-scroll',
+      run: () => auto.toggle(),
+    });
+  }
   entries.push({ kind: 'divider' });
   // The default app for an executable is the executable, and for a package it
   // is an installer: this row would run or install the file the reader opened a

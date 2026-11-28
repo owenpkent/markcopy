@@ -36,7 +36,10 @@ function seedsOf(target) {
 
 async function replay(names) {
   process.chdir(root);
-  await build();
+  // The coverage report builds once and replays each target in its own process.
+  if (!process.env.FUZZ_REPLAY_NO_BUILD) {
+    await build();
+  }
   const all = readdirSync(path.join(root, 'fuzz/targets'))
     .filter((f) => f.endsWith('.fuzz.ts'))
     .map((f) => f.replace(/\.fuzz\.ts$/, ''))

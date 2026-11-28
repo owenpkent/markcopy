@@ -60,6 +60,14 @@ describe('describeEncryptionInfo', () => {
     expect(describeEncryptionInfo(info)).toBe('Agile encryption, AES-256, SHA512');
   });
 
+  it('drops control characters from attribute values (found by the ooxml-encrypted fuzz target)', () => {
+    // 0x12 inside the cipher name, as the fuzzer's input had it.
+    expect(describeEncryptionInfo(agile('A\u0012ES', '128', 'SHA'))).toBe(
+      'Agile encryption, AES-128, SHA',
+    );
+    expect(describeEncryptionInfo(agile('\u0001', '128', 'SHA'))).toBe('Agile encryption, SHA');
+  });
+
   it('reads Agile encryption from its XML', () => {
     expect(describeEncryptionInfo(agile())).toBe('Agile encryption, AES-256, SHA512');
     expect(describeEncryptionInfo(agile('AES', '128', 'SHA1'))).toBe(
