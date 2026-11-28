@@ -174,6 +174,12 @@ let pendingRender: Record<string, unknown> | undefined;
 // auto-scroll (see applyRenderMessage).
 let rendersInFlight = 0;
 let renderSeq = 0;
+// Where the reader was when the first of a run of overlapping renders began, to
+// put back once the last one settles. A later render must not recapture it: by
+// then the placeholders of the earlier one may have clamped the page. Null when
+// there is nothing to restore (auto-scroll off, a different document, or the
+// reader moved the page meanwhile).
+let heldTop: number | null = null;
 
 function applyRenderMessage(msg: Record<string, any>): void {
   const docChanged = ((msg.docKey as string) ?? '') !== currentDocKey;
@@ -191,7 +197,11 @@ function applyRenderMessage(msg: Record<string, any>): void {
   // position clamped by a shorter page is not the reader's. Where the page was is
   // put back afterwards, so a live edit does not set the reader back or look
   // like reaching the end.
-  const keepTop = auto.isOn() && !docChanged ? scrollTop() : null;
+  if (rendersInFlight === 0) {
+    heldTop = auto.isOn() && !docChanged ? scrollTop() : null;
+  } else if (docChanged || msg.revealFragment) {
+    heldTop = null;
+  }
   const seq = ++renderSeq;
   rendersInFlight++;
   void render(
@@ -211,9 +221,13 @@ function applyRenderMessage(msg: Record<string, any>): void {
     msg.revealFragment as string | undefined,
   ).finally(() => {
     rendersInFlight--;
-    if (keepTop !== null && seq === renderSeq && !msg.revealFragment && auto.isOn()) {
-      suppressSyncTo(Math.min(keepTop, maxScroll()));
-      setScrollTop(keepTop);
+    if (seq === renderSeq) {
+      const keepTop = heldTop;
+      heldTop = null;
+      if (keepTop !== null && !msg.revealFragment && auto.isOn()) {
+        suppressSyncTo(Math.min(keepTop, maxScroll()));
+        setScrollTop(keepTop);
+      }
     }
     auto.resync();
   });
@@ -222,6 +236,39 @@ function applyRenderMessage(msg: Record<string, any>): void {
     docChanged,
   );
 }
+
+// The reader moving the page by hand. A render that finishes afterwards must not
+// put back the position it began at, and a scroll caused by the auto-scroll loop
+// is told apart from this by `readerInputAt`.
+let readerInputAt = 0;
+function noteReaderInput(): void {
+  readerInputAt = Date.now();
+  if (rendersInFlight > 0) {
+    heldTop = null;
+  }
+}
+for (const type of ['wheel', 'touchmove']) {
+  window.addEventListener(type, noteReaderInput, { passive: true, capture: true });
+}
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (['PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+      noteReaderInput();
+    }
+  },
+  true,
+);
+// A press on the page's own scrollbar (the root element) is a drag of the page.
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (e.target === document.documentElement) {
+      noteReaderInput();
+    }
+  },
+  true,
+);
 
 window.addEventListener('message', (e: MessageEvent) => {
   if (!fromHost(e)) {
@@ -552,7 +599,18 @@ const auto = createAutoScroll({
   // Holds still while a render is replacing the page, and while a block editor
   // is open (the reader is typing, not reading).
   isHeld: () => rendersInFlight > 0 || editMode.isEditing(),
+  // The toggle by reference: a heading can take the id `mc-autoscroll-toggle`.
+  toggleButton: () => autoToggle,
+  // An image still loading can change the page's height, so the end it shows is
+  // not final: wait, and carry on if the page grows.
+  deferEdge: () => imagesLoading(),
 });
+
+function imagesLoading(): boolean {
+  return Array.from(content.querySelectorAll('img')).some(
+    (img) => !img.complete && img.loading !== 'lazy',
+  );
+}
 
 function offersAutoScroll(): boolean {
   return (document.body.dataset.mcKind ?? 'markdown') === 'markdown';
@@ -778,6 +836,8 @@ let syncRaf = 0;
 // editor would sit on the old line until the reader scrolled again. Re-checked
 // once the window closes.
 let syncPending = 0;
+// The loop's write count when the last scroll was reported (see above).
+let syncSeenWrites = 0;
 
 function syncEditorToPreview(): void {
   if (syncRaf) {
@@ -811,7 +871,18 @@ function syncEditorToPreview(): void {
       return;
     }
     suppressedOffset = -1;
-    userScrolledAt = Date.now();
+    // The auto-scroll loop's own frames still move the editor along, but they are
+    // not the reader scrolling: counting them would drop every editor request.
+    const writes = auto.writes;
+    const automatic =
+      writes !== syncSeenWrites &&
+      auto.wroteTop !== null &&
+      Math.abs(scrollTop() - auto.wroteTop) < 1 &&
+      Date.now() - readerInputAt > SYNC_ECHO_MS;
+    syncSeenWrites = writes;
+    if (!automatic) {
+      userScrolledAt = Date.now();
+    }
     if (!currentSyncScroll || !surfaceSyncs) {
       return;
     }

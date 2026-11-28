@@ -20,11 +20,11 @@ function runFrames(ts: number): void {
   for (const f of queued) f(ts);
 }
 
-async function render(
+function send(
   html = '<p data-source-line="0">Hello</p>',
   kind = 'markdown',
-  whileRendering?: () => void,
-): Promise<void> {
+  extra: Record<string, unknown> = {},
+): void {
   window.dispatchEvent(
     new MessageEvent('message', {
       origin: window.origin,
@@ -40,15 +40,27 @@ async function render(
         styleProfile: 'github',
         mermaidConfig: {},
         math: false,
+        ...extra,
       },
     }),
   );
+}
+
+async function render(
+  html = '<p data-source-line="0">Hello</p>',
+  kind = 'markdown',
+  whileRendering?: () => void,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  send(html, kind, extra);
   // The page is replaced synchronously; this is the moment layout would clamp it.
   whileRendering?.();
   for (let i = 0; i < 6; i++) await tick();
 }
 
-const toggle = () => document.getElementById('mc-autoscroll-toggle') as HTMLButtonElement;
+// By reference to the pill: a document heading may take the same id.
+const toggle = () =>
+  document.querySelector<HTMLButtonElement>('.mc-modepill #mc-autoscroll-toggle')!;
 const puck = () => document.getElementById('mc-autoscroll') as HTMLElement;
 const playLabel = () =>
   document.querySelector<HTMLElement>('[data-as="play"]')!.getAttribute('aria-label');
@@ -264,6 +276,144 @@ describe('auto-scroll in the Markdown preview', () => {
     // Put back where the reader was, then gliding on from there.
     expect(scrollTop).toBeGreaterThanOrEqual(before);
     expect(scrollTop).toBeLessThan(before + 3);
+  });
+
+  it('does not undo a wheel scroll made while a redraw was in flight', async () => {
+    await boot();
+    await render();
+    scrollTop = 1102;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    await render('<p data-source-line="0">Edited</p>', 'markdown', () => {
+      docHeight = 1500;
+      scrollTop = 500; // clamped by the shorter page
+      window.dispatchEvent(new Event('wheel'));
+      docHeight = HEIGHT;
+      scrollTop = 1882; // the reader's wheel
+    });
+    runFrames(48);
+    runFrames(64);
+    expect(scrollTop).toBeGreaterThanOrEqual(1882);
+    expect(scrollTop).toBeLessThan(1884);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('restores the position from the first of two overlapping redraws', async () => {
+    await boot();
+    await render();
+    scrollTop = 3000;
+    toggle().click();
+    runFrames(16);
+    runFrames(32);
+    const before = scrollTop;
+    send('<p data-source-line="0">One</p>');
+    docHeight = 3100; // the first render's placeholder clamps the page
+    scrollTop = 2100;
+    send('<p data-source-line="0">Two</p>');
+    for (let i = 0; i < 6; i++) await tick();
+    docHeight = HEIGHT;
+    runFrames(48);
+    runFrames(64);
+    expect(scrollTop).toBeGreaterThanOrEqual(before);
+    expect(scrollTop).toBeLessThan(before + 3);
+  });
+
+  describe('with an image still loading', () => {
+    let loaded = false;
+    beforeEach(() => {
+      loaded = false;
+      Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+        configurable: true,
+        get: () => loaded,
+      });
+    });
+    afterEach(() => {
+      delete (HTMLImageElement.prototype as { complete?: boolean }).complete;
+    });
+
+    it('does not report the end until the image has settled the page height', async () => {
+      await boot();
+      await render('<p data-source-line="0"><img src="x.png" alt="x"></p>');
+      scrollTop = HEIGHT - VIEW - 0.6;
+      toggle().click();
+      for (let i = 1; i <= 4; i++) runFrames(i * 16);
+      // The temporary page ends here, but the image is not in yet.
+      expect(toggle().getAttribute('aria-pressed')).toBe('true');
+      loaded = true;
+      docHeight = HEIGHT + 2000;
+      for (let i = 5; i <= 12; i++) runFrames(i * 16);
+      expect(toggle().getAttribute('aria-pressed')).toBe('true');
+      expect(scrollTop).toBeGreaterThan(HEIGHT - VIEW);
+    });
+  });
+
+  it('leaves Space to a focused disclosure summary', async () => {
+    await boot();
+    await render('<details data-source-line="0"><summary>More</summary>Text</details>');
+    toggle().click();
+    const summary = document.querySelector('summary')!;
+    const e = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    summary.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(playLabel()).toBe('Pause (scrolling down)');
+  });
+
+  it('returns focus to the toggle when Escape dismisses the focused puck', async () => {
+    await boot();
+    await render();
+    scrollTop = 1400;
+    toggle().click();
+    const play = document.querySelector<HTMLElement>('[data-as="play"]')!;
+    play.focus();
+    play.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    expect(document.activeElement).toBe(toggle());
+    expect(scrollTop).toBe(1400);
+  });
+
+  it('updates the real toggle when a heading has the same id', async () => {
+    await boot();
+    await render('<h1 id="mc-autoscroll-toggle" data-source-line="0">MC Autoscroll Toggle</h1>');
+    toggle().click();
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('h1')!.hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('does not count its own frames as the reader scrolling, so the editor can still move it', async () => {
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      const line = Number((this as HTMLElement).dataset?.sourceLine);
+      const top = Number.isFinite(line) ? line * 100 - scrollTop : 0;
+      return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20 } as DOMRect;
+    });
+    try {
+      await boot();
+      await render(
+        [0, 10, 20, 30].map((n) => `<p data-source-line="${n}">p${n}</p>`).join(''),
+        'markdown',
+        undefined,
+        { syncScroll: true },
+      );
+      await new Promise((r) => setTimeout(r, 300)); // past the first render's echo window
+      scrollTop = 1000;
+      toggle().click();
+      runFrames(16);
+      runFrames(32);
+      window.dispatchEvent(new Event('scroll'));
+      runFrames(48);
+      runFrames(64);
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: window.origin,
+          data: { type: 'scrollToLine', line: 20 },
+        }),
+      );
+      expect(scrollTop).toBeGreaterThanOrEqual(2000);
+    } finally {
+      rect.mockRestore();
+    }
   });
 
   it('is not offered on a preview that does not take it, and switches off', async () => {

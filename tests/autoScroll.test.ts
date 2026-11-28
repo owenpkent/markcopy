@@ -184,6 +184,54 @@ describe('createAutoScroll', () => {
     expect(s.auto.key(key(' ', {}, play()))).toBe(false);
   });
 
+  it('leaves Space to a focused disclosure summary', () => {
+    const s = setup();
+    s.auto.start();
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    details.append(summary);
+    document.body.append(details);
+    const e = key(' ', {}, summary);
+    expect(s.auto.key(e)).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+    expect(play().getAttribute('aria-label')).toBe('Pause (scrolling down)');
+  });
+
+  it('returns focus to the host toggle when Escape-style stop hides the focused puck', () => {
+    const toggleBtn = document.createElement('button');
+    document.body.append(toggleBtn);
+    const s = setup({ toggleButton: () => toggleBtn });
+    s.auto.start();
+    play().focus();
+    expect(document.activeElement).toBe(play());
+    s.auto.stop('Auto-scroll off');
+    expect(document.activeElement).toBe(toggleBtn);
+  });
+
+  it('sets aria-pressed on the host toggle, not on a heading with the same id', () => {
+    const heading = document.createElement('h1');
+    heading.id = 'mc-autoscroll-toggle';
+    const toggleBtn = document.createElement('button');
+    document.body.append(heading, toggleBtn);
+    const s = setup({ toggleButton: () => toggleBtn });
+    s.auto.start();
+    expect(toggleBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(heading.hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('keeps going at an apparent end while the host defers the edge, then stops', () => {
+    let defer = true;
+    const s = setup({ deferEdge: () => defer }, makeScroller(3999.4));
+    s.auto.start();
+    run(0);
+    run(16);
+    run(32);
+    expect(s.auto.isOn()).toBe(true);
+    defer = false;
+    run(48);
+    expect(s.auto.isOn()).toBe(false);
+  });
+
   it('stops a held minus at the slowest speed, while a fresh press reverses', () => {
     const s = setup();
     s.auto.start(); // 12 down

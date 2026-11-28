@@ -173,10 +173,11 @@ Rows marked ☑ are covered by an automated layer and are worth a glance rather 
 - [ ] ★ In a long Markdown preview, press the auto-scroll button in the pill at the top right (after the lock and pencil): the button lights, the page glides down and the puck appears bottom-right. Right-click the page: the menu says Stop Auto-scroll. The button and the row are absent in a CSV, spreadsheet, Word, PowerPoint, executable and package preview.
 - [ ] ★ Pause, speed keys, the puck's Small to Extra large sizes and the held +/- behave as in the PDF checks (see PDF viewer, Auto-scroll). Check the puck and the pill button are legible in light, dark and green themes, and at a 760 px pane.
 - [ ] ★ With the preview and the Markdown source side by side, let it run and type in the source: the preview updates and keeps gliding from where it was, with no jump to the top and no "reached the end" announcement. Do it with a Mermaid diagram near the bottom, which briefly changes the page height.
-- [ ] Scroll with the wheel or drag the scrollbar while it runs: it carries on from where you put the page. With scroll sync on, the editor follows.
+- [ ] Scroll with the wheel or drag the scrollbar while it runs: it carries on from where you put the page, also when you do it while a live edit with a Mermaid diagram or equation is redrawing. With scroll sync on, the editor follows. With two Markdown documents open side by side, scrolling the other document's source while one preview plays still moves its preview.
+- [ ] In a document with a `<details><summary>`, Tab to the summary while it runs: Space opens and closes it and playback continues. Escape on a focused puck button returns focus to the toolbar button.
 - [ ] Let it reach the end: it stops with a toast and an announcement; start it again at the end: it goes up. Escape stops it; with the right-click menu open or a block editor open, Escape closes only that.
 - [ ] Open a block editor in edit mode while it runs: the page holds still, and carries on after the editor closes. Typing Space, + or - in the editor does not change the speed.
-- [ ] Hide and show the tab, then reopen the preview in the same window: speed and size are kept (and shared with the PDF preview).
+- [ ] Hide and show the tab (do not close it): speed and size are kept for that preview. A PDF preview has its own, and a closed and reopened preview starts from the defaults.
 
 ### Where the preview opens
 

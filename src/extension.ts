@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createRevealEcho } from './revealEcho';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
@@ -536,7 +537,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Editor -> preview scroll sync.
     vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
-      if (!syncScrollEnabled() || revealEcho()) {
+      if (!syncScrollEnabled() || reveals.isEcho(e.textEditor.document.uri.toString())) {
         return;
       }
       const line = e.visibleRanges[0]?.start.line ?? 0;
@@ -1427,11 +1428,8 @@ async function openLink(
 // not echoed; the preview applies the mirror-image rule (see SYNC_ECHO_MS in
 // src/webview/main.ts).
 const REVEAL_ECHO_MS = 250;
-let revealedAt = 0;
-
-function revealEcho(): boolean {
-  return Date.now() - revealedAt < REVEAL_ECHO_MS;
-}
+// Per document: a reveal in one must not mute the other direction for another.
+const reveals = createRevealEcho(REVEAL_ECHO_MS);
 
 function syncScrollEnabled(): boolean {
   return vscode.workspace.getConfiguration('markcopy').get<boolean>('syncScroll', true);
@@ -1452,7 +1450,7 @@ function revealEditorLine(docUri: vscode.Uri, line: number): void {
   // The webview measures against the render it has, which a fast edit can leave a
   // line or two behind the document; clamp rather than throw on an out-of-range line.
   const clamped = Math.min(Math.max(0, Math.floor(line)), editor.document.lineCount - 1);
-  revealedAt = Date.now();
+  reveals.mark(docUri.toString());
   editor.revealRange(new vscode.Range(clamped, 0, clamped, 0), vscode.TextEditorRevealType.AtTop);
 }
 

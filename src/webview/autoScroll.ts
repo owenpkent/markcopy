@@ -43,6 +43,17 @@ export interface AutoScrollHost {
   canStart?(): boolean;
   /** Auto-scroll just switched off (by the reader, or by reaching an end). */
   onStopped?(): void;
+  /**
+   * The host's own toggle button. Looked up by reference, not by id, since a
+   * document heading can take any id; focus returns to it when the puck closes.
+   */
+  toggleButton?(): HTMLElement | null;
+  /**
+   * True while the end of the content is not yet known (a replacement image is
+   * still loading): reaching the apparent end then keeps the loop armed instead
+   * of switching off, and it carries on if the page grows.
+   */
+  deferEdge?(): boolean;
 }
 
 export interface AutoScroll {
@@ -153,9 +164,12 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
     holdTimer = 0;
   };
 
+  const toggleEl = (): HTMLElement | null =>
+    host.toggleButton?.() ?? document.getElementById('mc-autoscroll-toggle');
+
   // Reflect the speed, the paused state and the size in the puck and the toggle.
   const applyUi = (): void => {
-    document.getElementById('mc-autoscroll-toggle')?.setAttribute('aria-pressed', String(on));
+    toggleEl()?.setAttribute('aria-pressed', String(on));
     if (!puck) {
       return;
     }
@@ -329,7 +343,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
         wroteTop = s.scrollTop;
         writes++;
       }
-      if (result.edge) {
+      if (result.edge && !host.deferEdge?.()) {
         stop(result.edge === 'end' ? 'Auto-scroll reached the end' : 'Auto-scroll reached the top');
         return;
       }
@@ -362,12 +376,17 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
     if (!on) {
       return;
     }
+    // The puck is about to hide: focus inside it would fall to the page body.
+    const refocus = !!puck && puck.contains(document.activeElement);
     on = false;
     cancelAnimationFrame(raf);
     raf = 0;
     stopHold();
     saveSettings();
     applyUi();
+    if (refocus) {
+      toggleEl()?.focus({ preventScroll: true });
+    }
     // The puck is hidden now, so its own live region would not be read; the
     // persistent status region carries the message, and the toast shows it.
     host.announce(message);
@@ -377,7 +396,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
 
   // Keys while on: Space pauses and resumes, the arrows and + / - step the speed.
   // Fields, open menus and modifier chords (Ctrl +/- is zoom) are left alone, and
-  // Space on a focused button is that button's own click.
+  // Space on a focused button, link or disclosure summary is that control's own.
   function key(e: KeyboardEvent): boolean {
     if (!on || e.ctrlKey || e.metaKey || e.altKey || host.contextMenu.isOpen()) {
       return false;
@@ -386,7 +405,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
     if (el?.closest('input, textarea, select, [contenteditable="true"], [role="menu"]')) {
       return false;
     }
-    if (e.key === ' ' && !el?.closest('button, a, [role="button"]')) {
+    if (e.key === ' ' && !el?.closest('button, a, summary, [role="button"]')) {
       e.preventDefault();
       // Holding Space repeats keydown: only the first press toggles.
       if (!e.repeat) {
