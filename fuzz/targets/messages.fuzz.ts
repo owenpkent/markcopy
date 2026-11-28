@@ -53,6 +53,9 @@ const TYPES = {
     'revealInOS',
     'openExternal',
     'revealLine',
+    'autoScroll',
+    'revealHidden',
+    'copyCleanSource',
     'toast',
     'updateSetting',
     'openSettings',
@@ -202,8 +205,34 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
   }
   switch (msg.type) {
     case 'revealLine':
-      if (typeof msg.line !== 'number' || !Number.isFinite(msg.line)) {
+      if (
+        typeof msg.line !== 'number' ||
+        !Number.isFinite(msg.line) ||
+        typeof msg.docKey !== 'string'
+      ) {
         fail(surface, 'revealLine.line is not a finite number', msg);
+      }
+      break;
+    case 'autoScroll':
+      if (typeof msg.playing !== 'boolean' || typeof msg.docKey !== 'string') {
+        fail(surface, 'autoScroll is not a flag and a document key', msg);
+      }
+      break;
+    case 'copyCleanSource':
+      if (typeof msg.docKey !== 'string') {
+        fail(surface, 'copyCleanSource.docKey is not a string', msg);
+      }
+      break;
+    case 'revealHidden':
+      if (
+        !Number.isSafeInteger(msg.line) ||
+        !Number.isSafeInteger(msg.column) ||
+        (msg.line as number) < 1 ||
+        (msg.column as number) < 1 ||
+        typeof msg.docKey !== 'string' ||
+        !Number.isSafeInteger(msg.docVersion)
+      ) {
+        fail(surface, 'revealHidden fields are not positive integers, a key and a version', msg);
       }
       break;
     case 'toast':
@@ -423,6 +452,7 @@ const FIELDS = [
   'point',
   'comments',
   'docKey',
+  'playing',
   'startLine',
   'endLine',
   'original',
