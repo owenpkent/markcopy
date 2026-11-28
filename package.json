@@ -1135,6 +1135,7 @@
     "fuzz": "node fuzz/run.js",
     "fuzz:merge": "node fuzz/run.js merge",
     "fuzz:replay": "node fuzz/replay.js",
+    "fuzz:coverage": "node fuzz/coverage-report.js",
     "compile:tests": "tsc -p tsconfig.integration.json",
     "test:integration": "npm run compile && npm run compile:tests && vscode-test && node test-integration/restricted/launch.mjs",
     "test:integration:restricted": "npm run compile && npm run compile:tests && node test-integration/restricted/launch.mjs",

@@ -1,0 +1,31 @@
+# Tokens for the go-buildinfo target (fuzz/targets/go-buildinfo.fuzz.ts): the build information header and the module text.
+
+# magic
+kw1="\xff Go buildinf:"
+kw2="\xff Go buildinf:\x08\x02"
+kw3="\xff Go buildinf:\x04\x02"
+kw4="\xff Go buildinf:\x08\x00"
+
+# toolchain versions and module text
+kw5="go1.22.1"
+kw6="go1.16.5"
+kw7="devel go1.23-abc"
+kw8="path\x09"
+kw9="mod\x09"
+kw10="dep\x09"
+kw11="=>\x09"
+kw12="build\x09"
+kw13="-buildmode=exe"
+kw14="-ldflags="-s -w""
+kw15="-trimpath=true"
+kw16="CGO_ENABLED=0"
+kw17="GOARCH=amd64"
+kw18="GOOS=linux"
+kw19="vcs.revision="
+kw20="vcs.modified=true"
+kw21="(devel)"
+kw22="h1:"
+kw23="\x0a"
+kw24="\x09"
+kw25="\""
+kw26="`"

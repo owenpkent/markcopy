@@ -125,9 +125,15 @@ describe('checkPage', () => {
 
 describe('startCost', () => {
   it('counts typed arrays, not only the JavaScript heap', () => {
-    const before = memoryInUse();
+    // Compared with the heap read just after, not with a reading taken before the
+    // allocation: garbage from earlier tests can be collected in between, which
+    // shrank a before/after delta below its margin in a loaded full run. While
+    // `held` is alive the typed-array share is at least its 64 MB whatever is
+    // collected, and a heap-only counter would leave a gap of about zero.
     const held = new Uint8Array(64 * 1024 * 1024).fill(1);
-    expect(memoryInUse() - before).toBeGreaterThan(60 * 1024 * 1024);
+    const total = memoryInUse();
+    const heap = process.memoryUsage().heapUsed;
+    expect(total - heap).toBeGreaterThan(60 * 1024 * 1024);
     expect(held[0]).toBe(1);
   });
 
