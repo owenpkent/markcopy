@@ -188,9 +188,10 @@ function applyRenderMessage(msg: Record<string, any>): void {
   document.body.classList.toggle('mc-wrap-code', currentWrapCode);
   // render() replaces #content before its first await, so the new blocks are in
   // place by the time afterRender looks for them.
-  // Auto-scroll holds still while the content is being replaced (isHeld) and for a
-  // short settle afterwards (deferEdge), and then carries on from wherever the page
-  // actually is: nothing here puts an earlier offset back.
+  // Auto-scroll holds still only while the content is being replaced (isHeld). For
+  // a short settle afterwards (deferEdge) it does not stop at an edge, but it keeps
+  // moving, and it carries on from wherever the page actually is: nothing here puts
+  // an earlier offset back.
   rendersInFlight++;
   void render(
     msg.html as string,
@@ -301,6 +302,21 @@ async function render(
 ): Promise<void> {
   const docChanged = docKey !== currentDocKey;
   currentDocKey = docKey;
+  if (docChanged) {
+    // A scroll report still queued was measured in the previous document.
+    if (syncRaf) {
+      cancelAnimationFrame(syncRaf);
+      syncRaf = 0;
+    }
+    if (syncPending) {
+      window.clearTimeout(syncPending);
+      syncPending = 0;
+    }
+    // The host clears its playing flag on a switch: say again if still playing.
+    if (auto.isPlaying()) {
+      reportPlaying(true);
+    }
+  }
   sourceLines = source.split(/\r?\n/);
   document.body.dataset.mcKind = kind || 'markdown';
   editMode.setKind(kind || 'markdown');
@@ -547,12 +563,21 @@ const auto = createAutoScroll({
   // Holds still while a render is replacing the page, and while a block editor
   // is open (the reader is typing, not reading).
   isHeld: () => rendersInFlight > 0 || editMode.isEditing(),
+  // The host skips editor-to-preview sync while this document auto-scrolls.
+  onPlayingChange: (playing) => reportPlaying(playing),
   // The toggle by reference: a heading can take the id `mc-autoscroll-toggle`.
   toggleButton: () => autoToggle,
   // The edge is not trusted while a render is in flight or just settled (the page
   // is briefly shorter), nor while an image near the end is still loading.
   deferEdge: (edge) => renderPending() || (edge === 'end' && imageWait()),
 });
+
+// Tell the host whether this document is auto-scrolling, so it does not pull the
+// preview back to the editor's position meanwhile. Keyed by document: the host
+// ignores a report for one it no longer shows.
+function reportPlaying(playing: boolean): void {
+  vscode.postMessage({ type: 'autoScroll', playing, docKey: currentDocKey });
+}
 
 // A render is running, or finished a moment ago and the page may still change
 // height (diagrams and math land after the first paint).
@@ -823,8 +848,14 @@ function syncEditorToPreview(): void {
   if (syncRaf) {
     return;
   }
+  // The document this scroll happened in: a switch before the frame runs makes
+  // the measurement stale (and cancelAnimationFrame is not guaranteed to win).
+  const scrolledIn = currentDocKey;
   syncRaf = requestAnimationFrame(() => {
     syncRaf = 0;
+    if (scrolledIn !== currentDocKey) {
+      return;
+    }
     if (syncSuppressed()) {
       // Our own scroll, not the reader's, or at least indistinguishable from it.
       // Come back when the window has closed and decide then.
@@ -867,7 +898,11 @@ function syncEditorToPreview(): void {
     }
     const line = lineForOffset(anchors(), scrollTop());
     if (line !== undefined) {
-      vscode.postMessage({ type: 'revealLine', line: Math.max(0, Math.floor(line)) });
+      vscode.postMessage({
+        type: 'revealLine',
+        line: Math.max(0, Math.floor(line)),
+        docKey: currentDocKey,
+      });
     }
   });
 }

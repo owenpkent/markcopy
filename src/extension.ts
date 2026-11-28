@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createRevealEcho } from './revealEcho';
+import { playingAfterReport, pushesEditorScroll, reportIsCurrent } from './scrollGate';
 import { revealInOs, openInDefaultApp } from './revealInOs';
 import { join } from 'node:path';
 import { createMarkdownIt } from './render';
@@ -88,6 +89,10 @@ interface PreviewState {
   // typing in one document cannot cancel another preview's render.
   timer?: ReturnType<typeof setTimeout>;
   ready?: boolean;
+  // The webview says its document is auto-scrolling (see scrollGate.ts). While
+  // set, editor scrolls are not pushed to this preview. Cleared when the preview
+  // switches document or reloads; the webview reports again if still playing.
+  autoScrolling?: boolean;
 }
 
 // Every live preview: the side panel, plus one per document opened *as* a
@@ -546,6 +551,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const line = e.visibleRanges[0]?.start.line ?? 0;
       for (const state of previewsOf(e.textEditor.document.uri)) {
+        if (!pushesEditorScroll(state.autoScrolling)) {
+          continue;
+        }
         state.panel.webview.postMessage({ type: 'scrollToLine', line });
       }
     }),
@@ -909,6 +917,7 @@ function openPreview(context: vscode.ExtensionContext, doc: vscode.TextDocument)
         });
       }
       side.docUri = doc.uri;
+      side.autoScrolling = false;
       // Line tracking belongs to the document that just went away; the new one
       // gets its own baseline from the render below.
       side.lineCount = undefined;
@@ -957,6 +966,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
       switch (msg.type) {
         case 'ready':
           state.ready = true;
+          state.autoScrolling = false;
           update(state);
           break;
         case 'openExternal':
@@ -966,7 +976,16 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
           revealInOs(state.docUri);
           break;
         case 'revealLine':
-          revealEditorLine(state.docUri, msg.line);
+          if (reportIsCurrent(msg.docKey, state.docUri.toString())) {
+            revealEditorLine(state.docUri, msg.line);
+          }
+          break;
+        case 'autoScroll':
+          state.autoScrolling = playingAfterReport(
+            state.autoScrolling === true,
+            msg,
+            state.docUri.toString(),
+          );
           break;
         case 'toast':
           vscode.window.setStatusBarMessage(`MarkCopy: ${msg.text}`, 2500);
@@ -1004,6 +1023,7 @@ function registerPreview(context: vscode.ExtensionContext, state: PreviewState):
 
   panel.onDidDispose(() => {
     disposables.forEach((d) => d.dispose());
+    state.autoScrolling = false;
     if (state.timer !== undefined) {
       clearTimeout(state.timer);
     }
@@ -1433,8 +1453,8 @@ async function openLink(
 // src/webview/main.ts).
 const REVEAL_ECHO_MS = 250;
 // Per document: a reveal in one must not mute the other direction for another.
-// While a preview auto-scrolls it reveals continuously, so that document's
-// editor-to-preview sync is muted for the duration (the preview leads).
+// A preview that is auto-scrolling is muted separately and explicitly (see
+// PreviewState.autoScrolling), not through this window.
 const reveals = createRevealEcho(REVEAL_ECHO_MS);
 
 function syncScrollEnabled(): boolean {

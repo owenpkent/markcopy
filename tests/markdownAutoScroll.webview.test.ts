@@ -515,4 +515,79 @@ describe('auto-scroll in the Markdown preview', () => {
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
     expect(puck().hidden).toBe(true);
   });
+
+  describe('reports to the host', () => {
+    const ofType = (type: string) => posted.filter((m) => m.type === type);
+    const rect = () =>
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: Element,
+      ) {
+        const line = Number((this as HTMLElement).dataset?.sourceLine);
+        const top = Number.isFinite(line) ? line * 100 - scrollTop : 0;
+        return { top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20 } as DOMRect;
+      });
+    const blocks = [0, 10, 20, 30].map((n) => `<p data-source-line="${n}">p${n}</p>`).join('');
+
+    it('says when auto-scroll plays, pauses, resumes and stops, keyed by document', async () => {
+      await boot();
+      await render();
+      toggle().click();
+      expect(ofType('autoScroll').pop()).toEqual({
+        type: 'autoScroll',
+        playing: true,
+        docKey: 'file:///a.md',
+      });
+      key(' ');
+      expect(ofType('autoScroll').pop()).toMatchObject({ playing: false });
+      key(' ');
+      expect(ofType('autoScroll').pop()).toMatchObject({ playing: true });
+      key('Escape');
+      expect(ofType('autoScroll').pop()).toMatchObject({ playing: false });
+    });
+
+    it('says again, for the new document, that it is still playing after a switch', async () => {
+      await boot();
+      await render();
+      toggle().click();
+      posted = [];
+      await render(undefined, 'markdown', undefined, { docKey: 'file:///b.md' });
+      expect(ofType('autoScroll')).toEqual([
+        { type: 'autoScroll', playing: true, docKey: 'file:///b.md' },
+      ]);
+    });
+
+    it('stamps a scroll report with its document', async () => {
+      const spy = rect();
+      try {
+        await boot();
+        await render(blocks, 'markdown', undefined, { syncScroll: true });
+        await new Promise((r) => setTimeout(r, 300));
+        scrollTop = 1000;
+        window.dispatchEvent(new Event('scroll'));
+        runFrames(16);
+        expect(ofType('revealLine').pop()).toMatchObject({ docKey: 'file:///a.md' });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('drops a queued scroll report when the preview switches document', async () => {
+      const spy = rect();
+      try {
+        await boot();
+        await render(blocks, 'markdown', undefined, { syncScroll: true });
+        await new Promise((r) => setTimeout(r, 300));
+        scrollTop = 1000;
+        window.dispatchEvent(new Event('scroll')); // queued for A, not yet reported
+        posted = [];
+        send(blocks, 'markdown', { syncScroll: true, docKey: 'file:///b.md' });
+        runFrames(16);
+        await new Promise((r) => setTimeout(r, SETTLE));
+        runFrames(32);
+        expect(ofType('revealLine')).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });

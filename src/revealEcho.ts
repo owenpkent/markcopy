@@ -1,9 +1,8 @@
 // Marks the editor reveals the extension caused itself, so the visible-range
 // change they fire is not echoed back to the preview. A time window kept per
 // document (by URI string): a reveal in one document must not mute scroll sync
-// for another. Consequence: while a preview auto-scrolls it reveals every few
-// frames, so editor-to-preview sync for that same document stays muted (the
-// preview leads). Free of the `vscode` module so it can be tested directly.
+// for another. A preview that auto-scrolls is muted explicitly instead (see
+// scrollGate.ts). Free of the `vscode` module so it can be tested directly.
 export interface RevealEcho {
   /** Record a reveal in the document with this key (its URI string). */
   mark(key: string): void;

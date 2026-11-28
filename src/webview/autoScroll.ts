@@ -44,6 +44,11 @@ export interface AutoScrollHost {
   /** Auto-scroll just switched off (by the reader, or by reaching an end). */
   onStopped?(): void;
   /**
+   * Whether the loop is now actually moving the view (on and not paused). Called
+   * on every change: start, pause, resume and stop.
+   */
+  onPlayingChange?(playing: boolean): void;
+  /**
    * The host's own toggle button. Looked up by reference, not by id, since a
    * document heading can take any id; focus returns to it when the puck closes.
    */
@@ -59,6 +64,8 @@ export interface AutoScrollHost {
 
 export interface AutoScroll {
   isOn(): boolean;
+  /** On and not paused: the loop is moving the view. */
+  isPlaying(): boolean;
   start(): void;
   stop(message: string): void;
   toggle(): void;
@@ -210,6 +217,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
   const togglePause = (): void => {
     paused = !paused;
     applyUi();
+    host.onPlayingChange?.(!paused);
     announceInPuck(paused ? 'Auto-scroll paused' : 'Auto-scroll playing');
   };
 
@@ -370,6 +378,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
     last = 0;
     applyUi();
     announceInPuck(`Auto-scroll on, ${describeSpeed(settings.speed)}`);
+    host.onPlayingChange?.(true);
     raf = requestAnimationFrame(frame);
   }
 
@@ -392,6 +401,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
     // persistent status region carries the message, and the toast shows it.
     host.announce(message);
     host.toast(message);
+    host.onPlayingChange?.(false);
     host.onStopped?.();
   }
 
@@ -437,6 +447,7 @@ export function createAutoScroll(host: AutoScrollHost): AutoScroll {
 
   return {
     isOn: () => on,
+    isPlaying: () => on && !paused,
     start,
     stop,
     toggle: () => (on ? stop('Auto-scroll off') : start()),
