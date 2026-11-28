@@ -45,4 +45,16 @@ describe('createRevealEcho', () => {
     expect(echo.isEcho('a', 19)).toBe(true);
     expect(echo.isEcho('a', 20)).toBe(true);
   });
+
+  it('matches a reveal anywhere in the range it is given, and only there', () => {
+    let t = 0;
+    const echo = createRevealEcho(250, () => t);
+    // Near the end of the file the editor stops short: line 95 shows below the top.
+    echo.mark('a', 95);
+    expect(echo.isEcho('a', 80)).toBe(false);
+    expect(echo.isEcho('a', 80, 100)).toBe(true);
+    expect(echo.isEcho('a', 60, 90)).toBe(false);
+    t += 250;
+    expect(echo.isEcho('a', 80, 100)).toBe(false);
+  });
 });

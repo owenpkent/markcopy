@@ -7,10 +7,13 @@ export interface RevealEcho {
   /** Record a reveal of this line in the document with this key (its URI string). */
   mark(key: string, line: number): void;
   /**
-   * Whether a visible-range change that now starts at `line` in this document is
-   * the echo of a reveal we made recently: the same document and the same line.
+   * Whether a visible-range change that now shows lines `start` to `end` of this
+   * document is the echo of a reveal we made recently: the same document, with the
+   * revealed line in view. With only `start` given, the revealed line must be at
+   * the top; the caller passes `end` only where VS Code cannot put it there (the
+   * editor already scrolled to the end of the file).
    */
-  isEcho(key: string, line: number): boolean;
+  isEcho(key: string, start: number, end?: number): boolean;
 }
 
 export function createRevealEcho(windowMs: number, now: () => number = Date.now): RevealEcho {
@@ -30,9 +33,15 @@ export function createRevealEcho(windowMs: number, now: () => number = Date.now)
       const list = live(key, t);
       list.push({ line, at: t });
       recent.set(key, list);
+      // Forget documents whose reveals have all expired, so the map stays small.
+      if (recent.size > 32) {
+        for (const k of [...recent.keys()]) {
+          live(k, t);
+        }
+      }
     },
-    isEcho(key, line) {
-      return live(key, now()).some((r) => r.line === line);
+    isEcho(key, start, end = start) {
+      return live(key, now()).some((r) => r.line >= start && r.line <= end);
     },
   };
 }

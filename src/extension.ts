@@ -543,7 +543,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const line = e.visibleRanges[0]?.start.line ?? 0;
       // Only the echo of our own reveal (same document, same line) is dropped: a
       // reader scrolling the source of a playing preview elsewhere still goes through.
-      if (reveals.isEcho(e.textEditor.document.uri.toString(), line)) {
+      const key = e.textEditor.document.uri.toString();
+      const lastVisible = e.visibleRanges[0]?.end.line ?? line;
+      // At the end of the file VS Code cannot put the revealed line at the top, so
+      // there the echo is a reveal whose line is anywhere in view.
+      const atEnd = lastVisible >= e.textEditor.document.lineCount - 1;
+      if (reveals.isEcho(key, line) || (atEnd && reveals.isEcho(key, line, lastVisible))) {
         return;
       }
       for (const state of previewsOf(e.textEditor.document.uri)) {
