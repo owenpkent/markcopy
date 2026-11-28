@@ -480,7 +480,7 @@ Measured, 135 parsers and 9 non-parsers; 17,212 of 22,447 lines (76.7%) overall:
 | `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
 | `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |
 | `src/ooxml/`                         | 9       | 82.2%         | `zip.ts` 64.7               | 59 to 92 |
-| `src/messages/`                      | 12      | 90.4%         | `markdown.ts` 74.2          | 71 to 90 |
+| `src/messages/`                      | 12      | 89.7%         | `markdown.ts` 67.6          | 71 to 90 |
 | `src/review/`                        | 5       | 40.2%         | `markdown.ts` 6.7           | 0 to 53  |
 | `src/` and `src/webview/` standalone | 22      | 67.8%         | `webview/videoInfo.ts` 11.8 | 6 to 86  |
 
@@ -488,6 +488,8 @@ The weak spots are the review sidecar (`session.ts`, `markdown.ts`, `timecode.ts
 `review` target reaches the YAML parser but little of what reads its output),
 `docx/read/extras.ts`, `webview/parts.ts`, `videoProxy.ts` and `webview/videoInfo.ts`.
 They are listed honestly with a low minimum; raising seeds there is the next step.
+
+The PDF viewer's `savePosition` and `openLink` messages (and the LaTeX preview's `openLink`) are seeded in `fuzz/corpus/messages/` (`pdf-save-position*.json`, `pdf-open-link*.json`: valid, boundary and rejected forms) and the `messages` target checks what the parser accepts for them: `src/messages/pdf.ts` went from 22 of 25 lines (88%, below its minimum of 90) to 25 of 25 (100%). The `messages` folder rows above were remeasured after that: 89.7%, and `markdown.ts` is 67.6 against its minimum of 71, so it is below its threshold (not changed by this work).
 
 The export writers (`ooxml/xhtml.ts`, `docx/build.ts`, `docx/package.ts`,
 `pptx/write/*`, `ooxml/write.ts`, `ooxml/tableLimits.ts`) had no target: they read the
