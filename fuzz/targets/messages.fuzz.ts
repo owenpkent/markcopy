@@ -53,6 +53,9 @@ const TYPES = {
     'revealInOS',
     'openExternal',
     'revealLine',
+    'autoScroll',
+    'revealHidden',
+    'copyCleanSource',
     'toast',
     'updateSetting',
     'openSettings',
@@ -82,6 +85,8 @@ const TYPES = {
     'ready',
     'revealInOS',
     'openExternal',
+    'openLink',
+    'savePosition',
     'saveComments',
     'saveCommentsRejected',
     'updateSetting',
@@ -90,6 +95,7 @@ const TYPES = {
     'ready',
     'revealInOS',
     'openExternal',
+    'openLink',
     'texRecompile',
     'saveComments',
     'saveCommentsRejected',
@@ -199,8 +205,34 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
   }
   switch (msg.type) {
     case 'revealLine':
-      if (typeof msg.line !== 'number' || !Number.isFinite(msg.line)) {
+      if (
+        typeof msg.line !== 'number' ||
+        !Number.isFinite(msg.line) ||
+        typeof msg.docKey !== 'string'
+      ) {
         fail(surface, 'revealLine.line is not a finite number', msg);
+      }
+      break;
+    case 'autoScroll':
+      if (typeof msg.playing !== 'boolean' || typeof msg.docKey !== 'string') {
+        fail(surface, 'autoScroll is not a flag and a document key', msg);
+      }
+      break;
+    case 'copyCleanSource':
+      if (typeof msg.docKey !== 'string') {
+        fail(surface, 'copyCleanSource.docKey is not a string', msg);
+      }
+      break;
+    case 'revealHidden':
+      if (
+        !Number.isSafeInteger(msg.line) ||
+        !Number.isSafeInteger(msg.column) ||
+        (msg.line as number) < 1 ||
+        (msg.column as number) < 1 ||
+        typeof msg.docKey !== 'string' ||
+        !Number.isSafeInteger(msg.docVersion)
+      ) {
+        fail(surface, 'revealHidden fields are not positive integers, a key and a version', msg);
       }
       break;
     case 'toast':
@@ -214,6 +246,21 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
       }
       break;
     case 'openLink': {
+      if (surface === 'pdf' || surface === 'tex') {
+        // The PDF viewer's links carry `url`: an http, https or mailto address
+        // of sane length with no whitespace or control characters.
+        if (
+          typeof msg.url !== 'string' ||
+          msg.url.length === 0 ||
+          msg.url.length > 2048 ||
+          // eslint-disable-next-line no-control-regex
+          /[\u0000- \u007f-\u009f]/.test(msg.url) ||
+          !/^(https?|mailto):/i.test(msg.url)
+        ) {
+          fail(surface, 'openLink.url is not an openable address', msg);
+        }
+        break;
+      }
       if (typeof msg.href !== 'string') {
         fail(surface, 'openLink.href is not a string', msg);
       }
@@ -223,6 +270,19 @@ function checkMessage(surface: keyof typeof TYPES, raw: unknown, msg: Msg): void
       }
       break;
     }
+    case 'savePosition':
+      if (
+        !isInt(msg.page) ||
+        (msg.page as number) < 1 ||
+        typeof msg.y !== 'number' ||
+        !(msg.y >= 0 && msg.y <= 1) ||
+        typeof msg.zoom !== 'number' ||
+        !(msg.zoom >= 0.5 && msg.zoom <= 4) ||
+        typeof msg.fitWidth !== 'boolean'
+      ) {
+        fail(surface, 'savePosition is not a page, a fraction, a zoom and a flag', msg);
+      }
+      break;
     case 'pdfHtml':
     case 'docxXhtml':
     case 'pptxXhtml':
@@ -375,6 +435,11 @@ const FIELDS = [
   'value',
   'key',
   'href',
+  'url',
+  'page',
+  'y',
+  'zoom',
+  'fitWidth',
   'text',
   'data',
   'name',
@@ -387,6 +452,7 @@ const FIELDS = [
   'point',
   'comments',
   'docKey',
+  'playing',
   'startLine',
   'endLine',
   'original',
@@ -409,6 +475,7 @@ const TOKENS = [
   '__proto__',
   'constructor',
   'https://example.com/a?b=c',
+  'http://example.com/page.pdf#page=3',
   'mailto:a@b.c',
   'javascript:alert(1)',
   'file:///etc/passwd',
