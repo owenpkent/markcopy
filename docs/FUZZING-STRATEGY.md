@@ -292,6 +292,29 @@ Unit coverage after the guard tests (v8, whole suite, 3,676 tests): 88.8% of lin
 90.0 to 93.4, `step.ts` 90.8 to 93.4, `audioProbe.ts` 92.7 to 95.2; `isolate.ts` gained
 the worker-start failures.
 
+## Files that are two formats (`polyglot`)
+
+`readPackage` tries a probe table in order, reads the first format that selects the file, then names the other
+formats whose structure it also has and reads the first of those that has a reader. The `pkg` target writes one
+format's magic over every input, so it almost never makes a file that is two. The `polyglot` target
+(`fuzz/targets/polyglot.fuzz.ts`) builds them. Its first input byte picks a mode: a `pkg` shape with an empty zip
+end record appended; the bytes as they are under a name that picks `.apk`, `.jar`, `.exe`, `.pdf` or none; a PE
+image read as the executable preview reads it, with its appended data read through `readAppended`; or the
+structural tests in `src/binary/signatures.ts` on their own.
+
+Beyond the shared page and cost oracle, it asserts that the first reading is the one the same reader gives on its own
+(`bound` of the direct call, so the second step never changes it), that `also` names no format twice and never the
+primary, that it reads the first named format that has a reader, exactly one of a result and an error, with no
+second `also` inside and at most 40 sections, that `findZipEnd` returns a record that ends where the file does with
+its directory before it, that `looksLikePe` and `looksLikePdf` never say yes without the header they rest on, and
+that two readers over the same bytes agree. The shared oracle learned `ul`, `li` and `role` for the notice the page
+now writes. Seeds are polyglots built from the fixtures (an MSI, RPM, ELF, Debian package or PE followed by a zip or
+a PDF, a zip that holds a PDF and a `startxref` comment, a PE with a zip overlay), written by `fuzz/seeds.ts`.
+
+The `polyglot` target is listed for `src/binary/signatures.ts` (82.1% of its lines from the committed seeds, minimum 77) and added to `pkg/index.ts` (92.2%), `pkg/render.ts` (88.9%), `pkg/model.ts`, `pe/read.ts`, `pe/render.ts` and `binary/reader.ts`.
+
+Smoke run, 2026-11-26, Windows, one process: 25 s, 59,033 runs, `cov: 2805`, `ft: 6962`, no findings.
+
 ## Readers added after 2026-11-23, covered 2026-11-26
 
 The binary readers that merged after the first fuzzing pass (Mach-O, Go build
@@ -393,13 +416,13 @@ What the number means, so it is not read as more than it is:
 - Minimums were set from one local run on Windows, 5 points under the measurement (10 for
   files under 40 lines). The first Linux run may differ by a point or two.
 
-Measured, 121 parsers and 9 non-parsers; 15,104 of 19,917 lines (75.8%) overall:
+Measured, 122 parsers and 9 non-parsers; 15,104 of 19,917 lines (75.8%) overall:
 
 | Area                                 | Parsers | Lines covered | Lowest file (measured)      | Minimums |
 | ------------------------------------ | ------- | ------------- | --------------------------- | -------- |
 | `src/pkg/`                           | 29      | 80.4%         | `wheel.ts` 54.8             | 49 to 90 |
 | `src/pe/`                            | 8       | 88.1%         | `signer.ts` 83.1            | 78 to 90 |
-| `src/binary/`                        | 8       | 82.8%         | `goBuildInfo.ts` 71.4       | 66 to 95 |
+| `src/binary/`                        | 9       | 82.8%         | `goBuildInfo.ts` 71.4       | 66 to 95 |
 | `src/xlsx/`                          | 5       | 88.9%         | `render.ts` 87.2            | 82 to 85 |
 | `src/pptx/`                          | 10      | 77.9%         | `read/shape.ts` 59.7        | 54 to 95 |
 | `src/docx/`                          | 14      | 75.8%         | `read/extras.ts` 19.2       | 13 to 95 |

@@ -57,6 +57,7 @@ jobs:
             pkg-alpine,
             pkg-macho,
             pkg-dmg,
+            polyglot,
             cpio,
             dex,
             go-buildinfo,

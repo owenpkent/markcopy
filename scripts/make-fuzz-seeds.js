@@ -1,7 +1,7 @@
 // Rebuilds the seed corpus for the pe and pkg fuzz targets from the unit tests'
 // fixture builders (fuzz/seeds.ts), so no binary of unknown origin is committed.
 // The script owns fuzz/corpus/pe/, pkg/, file-source/ and the focused readers' directories (cpio, dex,
-// go-buildinfo, signer, ooxml-encrypted): it empties them and
+// go-buildinfo, signer, ooxml-encrypted) and polyglot/: it empties them and
 // rewrites them, so a seed it no longer makes does not linger. The output is
 // deterministic; a rerun gives identical bytes.
 //
@@ -37,6 +37,7 @@ async function main() {
       'go-buildinfo',
       'signer',
       'ooxml-encrypted',
+      'polyglot',
     ]) {
       fs.rmSync(path.join(corpus, dir), { recursive: true, force: true });
     }

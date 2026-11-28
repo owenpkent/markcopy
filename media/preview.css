@@ -2867,6 +2867,28 @@ body[data-mc-kind='package'] .markdown-body {
   background: none;
 }
 
+/* A file with the structure of more than one format: seen before anything else. */
+.mc-info-alert {
+  margin: 12px 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--mc-border);
+  border-left: 4px solid var(--mc-accent);
+  border-radius: 6px;
+  background: var(--mc-pre-bg);
+  color: var(--mc-fg);
+}
+
+.mc-info-alert p {
+  margin: 0 0 4px;
+}
+
+.mc-info-alert ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--mc-quote-fg);
+}
+
 .mc-exe-note {
   margin: 6px 2px 0;
   font-size: 12px;
