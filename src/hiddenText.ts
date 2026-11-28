@@ -301,10 +301,11 @@ function settled(cps: number[], around: Around): boolean[] {
 // their base) is not whitespace, not an invisible character and not the edge of
 // the text. It is flagged in a row of invisible characters (those take the
 // other path), at the start or end of the text or a line, or next to whitespace.
-// The decision looks at two code points, so it costs O(1) per operator and
-// allocates nothing per chain. Trade-off: one operator between letters
-// (`say` U+2062 `hello`) is kept, since it cannot be told from `x` U+2062 `y`;
-// a lone operator carries at most 2 bits, and a payload needs a row.
+// Finding the left base walks back over k combining marks, so one decision takes
+// O(k + 1) time and constant extra space; the whole scan stays linear, since each
+// run of marks is walked back over at most once. Trade-off: one operator between
+// letters (`say` U+2062 `hello`) is kept, since it cannot be told from `x` U+2062
+// `y`; the choice of which operator stands there carries 2 bits.
 function isMathOp(cp: number | undefined): cp is number {
   return cp !== undefined && cp >= 0x2061 && cp <= 0x2064;
 }
